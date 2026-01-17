@@ -1,0 +1,12 @@
+rules:
+  config_flow: done
+  diagnostics: done
+  docs_high_level_description: done
+  docs_installation: done
+  docs_configuration: done
+  docs_entities: done
+  docs_troubleshooting: done
+  tests: done
+  reauthentication:
+    status: exempt
+    comment: No authentication is used by this integration.

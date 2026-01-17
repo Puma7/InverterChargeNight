@@ -1,0 +1,14 @@
+{
+  "domain": "inverter_charge_night",
+  "name": "Inverter Charge Night",
+  "version": "1.0.0",
+  "documentation": "https://github.com/yourusername/inverter-charge-night",
+  "issue_tracker": "https://github.com/yourusername/inverter-charge-night/issues",
+  "codeowners": ["@yourusername"],
+  "diagnostics": true,
+  "config_flow": true,
+  "dependencies": [],
+  "requirements": [],
+  "iot_class": "local_polling"
+}
+

@@ -1,0 +1,15 @@
+{
+  "typeCheckingMode": "strict",
+  "include": ["custom_components/inverter_charge_night"],
+  "exclude": [
+    "custom_components/inverter_charge_night/__init__.py",
+    "custom_components/inverter_charge_night/config_flow.py"
+  ],
+  "pythonVersion": "3.12",
+  "reportMissingTypeStubs": false,
+  "reportPrivateUsage": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownParameterType": false
+}
