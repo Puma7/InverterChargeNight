@@ -100,6 +100,14 @@ def test_best_charge_power_sensor():
     assert attrs["best_efficiency_pct"] is None
     assert attrs["tests_completed"] == 0
 
+    coordinator._get_auto_efficiency_data.return_value = {
+        "best_power_w": 6000.5,
+        "best_loss": 0.05,
+        "history": {"6000.5": 0.05},
+    }
+    sensor._handle_coordinator_update()
+    assert sensor.native_value == 6000.5
+
 
 def test_min_soc_override_number_native_value_paths():
     coordinator = MagicMock()

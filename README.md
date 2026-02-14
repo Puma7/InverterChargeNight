@@ -4,9 +4,9 @@ A Home Assistant custom integration that intelligently calculates and sets the o
 
 ## Latest Release
 
-- Current version: `1.0.2`
+- Current version: `1.0.3`
 - Changelog: `CHANGELOG.md`
-- Focus: reliable window start trigger recovery and guaranteed min-SOC enforcement at window start
+- Focus: startup trigger-noise reduction, robust forecast unit parsing, and audit-driven reliability fixes
 
 ## Features
 

@@ -65,6 +65,29 @@ def _state_attributes(state: State) -> Mapping[str, Any]:
     attrs = getattr(state, "attributes", {})
     return cast(Mapping[str, Any], attrs)
 
+
+def _forecast_state_to_kwh(state: State) -> float | None:
+    """Parse forecast state value to kWh using unit metadata when available."""
+    if state.state in ("unknown", "unavailable", None):
+        return None
+
+    try:
+        value = float(state.state)
+    except (ValueError, TypeError):
+        return None
+
+    attrs = _state_attributes(state)
+    unit = str(attrs.get("unit_of_measurement", "")).strip().lower()
+
+    # Prefer explicit unit handling, then keep heuristic fallback for unknown units.
+    if unit in ("wh", "watt hour", "watt hours"):
+        return value / 1000.0
+    if unit in ("kwh", "kilowatt hour", "kilowatt hours"):
+        return value
+
+    # Backward-compatible fallback when entities do not expose units.
+    return value / 1000.0 if value > 1000 else value
+
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.SWITCH,
@@ -213,6 +236,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator):
         self._last_soc_set: float | None = None  # Track last SOC value set to avoid unnecessary updates
         self._last_soc_set_at: float | None = None  # Monotonic timestamp of last SOC set
         self._window_check_task: asyncio.Task[None] | None = None
+        self._time_triggers_bootstrapped = False
         self.override_soc: float | None = None  # Manual override SOC value
         self._original_absolute_charge_power: float | None = None
         self._battery_soc_listener: Callable[[], None] | None = None  # Listener for battery SOC changes
@@ -572,6 +596,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator):
         """Ensure start/end time triggers are present, recreate if missing."""
         expected_triggers = 2  # window start and window end
         current_triggers = len(self._time_triggers)
+        if not self._time_triggers_bootstrapped:
+            _LOGGER.debug(
+                "Skipping trigger self-heal before initial trigger bootstrap (%d/%d).",
+                current_triggers,
+                expected_triggers,
+            )
+            return
         if current_triggers >= expected_triggers:
             return
 
@@ -644,6 +675,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator):
             
             # Check if we're already in the active window
             self._schedule_window_check()
+            self._time_triggers_bootstrapped = True
             
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.error("Failed to set up time triggers: %s", err, exc_info=True)
@@ -896,16 +928,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator):
                 if state:
                     # Check if entity state is available (not unknown/unavailable)
                     if state.state not in ("unknown", "unavailable", None):
-                        forecast_available = True
-                        try:
-                            # Try to parse as float (might be kWh or Wh)
-                            value = float(state.state)
-                            # If value seems like Wh (very large), convert to kWh
-                            if value > 1000:
-                                forecast_energy = value / 1000.0
-                            else:
-                                forecast_energy = value
-                        except (ValueError, TypeError):
+                        parsed_forecast = _forecast_state_to_kwh(state)
+                        if parsed_forecast is not None:
+                            forecast_available = True
+                            forecast_energy = parsed_forecast
+                        else:
                             forecast_available = False
                     else:
                         attrs = _state_attributes(state)
@@ -1196,16 +1223,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator):
             if state:
                 # Check if entity state is available (not unknown/unavailable)
                 if state.state not in ("unknown", "unavailable", None):
-                    forecast_available = True
-                    try:
-                        # Try to parse as float (might be kWh or Wh)
-                        value = float(state.state)
-                        # If value seems like Wh (very large), convert to kWh
-                        if value > 1000:
-                            forecast_energy = value / 1000.0
-                        else:
-                            forecast_energy = value
-                    except (ValueError, TypeError):
+                    parsed_forecast = _forecast_state_to_kwh(state)
+                    if parsed_forecast is not None:
+                        forecast_available = True
+                        forecast_energy = parsed_forecast
+                    else:
                         forecast_available = False
                 else:
                     attrs = _state_attributes(state)
