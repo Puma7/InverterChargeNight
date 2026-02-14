@@ -1,5 +1,23 @@
 # Latest Technical Changes
 
+## 0. Trigger Recovery + Guaranteed Min-SOC Enforcement (1.0.2)
+
+**Issue:**
+In rare runtime/reload situations, users observed that nightly control did not start reliably at the configured window start (for example 23:00), and min-SOC was not always enforced at window start when battery SOC was already above target.
+
+**Solution:**
+Added two reliability hardening measures:
+1. **Trigger self-healing**: The integration now verifies that both start/end time triggers exist and automatically re-registers them if they are missing.
+2. **Guaranteed min-SOC at window start**: At window start, min-SOC is always enforced to target, independent of whether grid charging needs to be enabled.
+
+**Implementation Details:**
+- **New helper**: `_ensure_time_triggers_registered()` validates trigger registration and auto-recovers missing listeners.
+- **Recovery points**: Called during setup, config updates, and each coordinator refresh cycle.
+- **New helper**: `_ensure_min_soc_target(target_soc)` centralizes min-SOC write logic with tolerance/cooldown/error handling.
+- **Window start behavior**: `_on_window_start()` now enforces target min-SOC immediately after target determination.
+
+**File:** `custom_components/inverter_charge_night/__init__.py`
+
 ## 1. Resolved Deprecation of `async_track_state_change`
 
 **Issue:**
@@ -50,3 +68,20 @@ Implemented a two-part fix to eliminate duplicate warnings:
 - **Result**: Only `_verify_and_restore_min_soc()` logs the WARNING message when it actually restores the value, eliminating duplicate warnings.
 
 **File:** `custom_components/inverter_charge_night/__init__.py`
+
+## 4. Extracted Auto Efficient Charge Logic
+
+**Issue:**
+The Auto Efficient Charge Finder was implemented inside the coordinator, making the class monolithic and harder to maintain.
+
+**Solution:**
+Extracted the optimization logic into a dedicated helper class to separate responsibilities and improve readability.
+
+**Implementation Details:**
+- **New module**: `custom_components/inverter_charge_night/auto_efficiency.py`
+- **New class**: `AutoEfficiencyOptimizer`
+- **Coordinator delegates**: Auto-efficiency methods now forward to the helper while preserving behavior.
+
+**Files:**
+- `custom_components/inverter_charge_night/auto_efficiency.py`
+- `custom_components/inverter_charge_night/__init__.py`

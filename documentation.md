@@ -116,6 +116,19 @@ Home Assistant Custom Integration using Coordinator Pattern
 - Forecast is 0 → Returns `user_max_soc` (or clamped)
 - Invalid inputs → Returns `None`
 
+### File: `auto_efficiency.py`
+**Purpose**: Auto Efficient Charge Finder logic (Golden-Section search + persistence)
+
+**Key Class**:
+- `AutoEfficiencyOptimizer`
+
+**Key Methods**:
+- `select_next_test_power_w()`: Select next AC charge setpoint
+- `start_test(power_w)`: Begin a new test cycle
+- `accumulate_energy()`: Integrate sent/received power over time
+- `finalize_test()`: Persist loss result and update best power
+- `handle_auto_charge()`: Orchestrate the auto-charging workflow
+
 ### File: `config_flow.py`
 **Purpose**: Configuration UI and validation
 
@@ -979,6 +992,6 @@ if need_to_set_min_soc and kostal_min_soc_entity:
 ---
 
 **Document Version**: 1.0
-**Last Updated**: 2026-01-16
+**Last Updated**: 2026-01-17
 **Purpose**: AI-optimized technical documentation for code analysis
 

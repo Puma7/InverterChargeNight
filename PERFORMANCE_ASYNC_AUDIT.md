@@ -15,3 +15,17 @@
 ## Manual checks performed
 - Reviewed coordinator update path for blocking calls
 - Verified listeners are async and avoid blocking operations
+
+## Measurements (2026-01-17)
+Commands:
+- `python scripts/perf_snapshot.py > artifacts/perf/snapshot.txt`
+- `python -m cProfile -o artifacts/perf/profile.pstats scripts/perf_snapshot.py`
+- `python -c "import pstats; pstats.Stats('artifacts/perf/profile.pstats').sort_stats('cumtime').print_stats(30)" > artifacts/perf/profile.txt`
+
+Snapshot (see `artifacts/perf/snapshot.txt`):
+- elapsed_s=0.116742
+- mem_current_kib=312.49
+- mem_peak_kib=336.92
+
+Profile summary (see `artifacts/perf/profile.txt`):
+- Dominant cost is module import and HA framework initialization; core integration logic is not a hotspot.

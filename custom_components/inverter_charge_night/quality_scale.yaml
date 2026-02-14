@@ -1,4 +1,5 @@
 rules:
+  # Bronze
   config_flow: done
   diagnostics: done
   docs_high_level_description: done
@@ -6,7 +7,22 @@ rules:
   docs_configuration: done
   docs_entities: done
   docs_troubleshooting: done
+  docs_removal: done
   tests: done
+  runtime_data: done
+  unique_config_entry: done
+  test_before_setup: done
+  brands: done
   reauthentication:
     status: exempt
     comment: No authentication is used by this integration.
+  # Silver
+  parallel_updates: done
+  integration_owner: done
+  # Gold
+  icon_translations: done
+  reconfiguration_flow: done
+  exception_translations: done
+  repair_issues: done
+  # Platinum
+  strict_typing: done

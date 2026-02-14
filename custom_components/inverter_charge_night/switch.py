@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
@@ -12,17 +12,21 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_AUTO_EFFICIENT_CHARGE, DOMAIN
+if TYPE_CHECKING:  # pragma: no cover
+    from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
+
+PARALLEL_UPDATES = 1
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: InverterChargeNightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the switch platform."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     async_add_entities(
         [
             InverterChargeNightSwitch(coordinator, entry),
@@ -31,7 +35,7 @@ async def async_setup_entry(
     )
 
 
-class InverterChargeNightSwitch(CoordinatorEntity, SwitchEntity):
+class InverterChargeNightSwitch(CoordinatorEntity["InverterChargeNightCoordinator"], SwitchEntity):  # pyright: ignore[reportIncompatibleVariableOverride]
     """Switch to enable/disable the integration."""
 
     _attr_translation_key = "enabled"
@@ -39,7 +43,7 @@ class InverterChargeNightSwitch(CoordinatorEntity, SwitchEntity):
     _attr_icon = "mdi:battery-charging-wireless"
     _attr_entity_category = EntityCategory.CONFIG
 
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the switch."""
         super().__init__(coordinator)
         self._entry = entry
@@ -51,10 +55,11 @@ class InverterChargeNightSwitch(CoordinatorEntity, SwitchEntity):
             "model": "Inverter Charge Night",
         }
 
-    @property
-    def is_on(self) -> bool:
-        """Return if the integration is enabled."""
-        return self.coordinator.is_enabled
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self._attr_is_on = self.coordinator.is_enabled
+        self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the integration."""
@@ -88,7 +93,7 @@ class InverterChargeNightSwitch(CoordinatorEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-class AutoEfficientChargeSwitch(CoordinatorEntity, SwitchEntity):
+class AutoEfficientChargeSwitch(CoordinatorEntity["InverterChargeNightCoordinator"], SwitchEntity):  # pyright: ignore[reportIncompatibleVariableOverride]
     """Switch to enable/disable auto efficient charge finder."""
 
     _attr_translation_key = "auto_efficient_charge_finder"
@@ -96,7 +101,7 @@ class AutoEfficientChargeSwitch(CoordinatorEntity, SwitchEntity):
     _attr_icon = "mdi:flash-auto"
     _attr_entity_category = EntityCategory.CONFIG
 
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the auto efficient charge switch."""
         super().__init__(coordinator)
         self._entry = entry
@@ -108,10 +113,11 @@ class AutoEfficientChargeSwitch(CoordinatorEntity, SwitchEntity):
             "model": "Inverter Charge Night",
         }
 
-    @property
-    def is_on(self) -> bool:
-        """Return if auto efficient charge finder is enabled."""
-        return self.coordinator.auto_efficient_charge
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        self._attr_is_on = self.coordinator.auto_efficient_charge
+        self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable auto efficient charge finder."""
