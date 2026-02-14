@@ -1,32 +1,39 @@
 """Binary sensor platform for Inverter Charge Night."""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+if TYPE_CHECKING:  # pragma: no cover
+    from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
+
+PARALLEL_UPDATES = 1
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: InverterChargeNightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the binary sensor platform."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     async_add_entities([ActiveWindowBinarySensor(coordinator, entry)])
 
 
-class ActiveWindowBinarySensor(CoordinatorEntity, BinarySensorEntity):
+class ActiveWindowBinarySensor(CoordinatorEntity["InverterChargeNightCoordinator"], BinarySensorEntity):  # pyright: ignore[reportIncompatibleVariableOverride]
     """Binary sensor indicating if we're in the active window."""
 
     _attr_translation_key = "active"
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock-time-four"
 
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the binary sensor."""
         super().__init__(coordinator)
         self._entry = entry
@@ -38,9 +45,10 @@ class ActiveWindowBinarySensor(CoordinatorEntity, BinarySensorEntity):
             "model": "Inverter Charge Night",
         }
 
-    @property
-    def is_on(self) -> bool:
-        """Return if the active window is currently active."""
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
         data = self.coordinator.data
-        return data.get("is_active", False)
+        self._attr_is_on = bool(data.get("is_active", False))
+        self.async_write_ha_state()
 

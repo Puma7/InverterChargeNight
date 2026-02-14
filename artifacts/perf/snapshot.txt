@@ -1,0 +1,4 @@
+perf_snapshot
+elapsed_s=0.116742
+mem_current_kib=312.49
+mem_peak_kib=336.92

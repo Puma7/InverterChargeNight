@@ -30,7 +30,7 @@ async def test_async_update_data_disabled(mock_hass):
     coordinator = _make_coordinator(mock_hass, {})
     coordinator.is_enabled = False
     coordinator.is_active = True
-    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
+    mock_hass.async_create_background_task = MagicMock(side_effect=lambda coro, name=None: coro.close())
     data = await coordinator._async_update_data()
     assert data["is_active"] is False
     assert data["calculated_soc"] is None
@@ -58,7 +58,7 @@ async def test_async_update_data_outside_date_range_triggers_end(mock_hass):
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=False)
     coordinator._on_window_end = AsyncMock()
-    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
+    mock_hass.async_create_background_task = MagicMock(side_effect=lambda coro, name=None: coro.close())
     data = await coordinator._async_update_data()
     coordinator._on_window_end.assert_awaited()
     assert data["is_active"] is False

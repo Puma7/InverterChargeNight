@@ -11,7 +11,7 @@ Note: Platinum is only achievable for integrations accepted into Home Assistant 
 - [ ] Add screenshots (optional, manual)
 
 ## Phase 2: Test Coverage (100%)
-- [ ] Full unit test coverage for all coordinator paths (in progress, expanded)
+- [x] Full unit test coverage for all coordinator paths (expanded)
 - [x] Config flow input validation tests
 - [x] Options flow tests
 - [x] Diagnostics tests for all fields
@@ -26,7 +26,7 @@ Note: Platinum is only achievable for integrations accepted into Home Assistant 
 ## Phase 4: Async & Performance Audit
 - [x] Verify no blocking I/O
 - [x] Ensure all service calls are async-safe
-- [x] Measure CPU/memory footprint
+- [x] Measure CPU/memory footprint (artifacts/perf)
 - [x] Reduce log noise to safe levels
 
 ## Phase 5: Core Readiness
