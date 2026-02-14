@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.inverter_charge_night import (
     InverterChargeNightCoordinator,
+    _forecast_state_to_kwh,
     async_unload_entry,
     async_update_entry,
 )
@@ -119,6 +120,13 @@ def test_parse_date_optional_invalid(mock_hass: HomeAssistant):
     coordinator = _make_coordinator(mock_hass)
     assert coordinator._parse_date_optional("bad") is None
     assert coordinator._parse_date_optional(date(2025, 1, 1)) == date(2025, 1, 1)
+
+
+def test_forecast_state_to_kwh_unknown_returns_none():
+    state = MagicMock()
+    state.state = "unknown"
+    state.attributes = {}
+    assert _forecast_state_to_kwh(state) is None
 
 
 def test_is_within_date_range_invalid_range(mock_hass: HomeAssistant):
@@ -450,12 +458,14 @@ def test_setup_time_triggers_error_path(mock_hass: HomeAssistant):
 
 def test_ensure_time_triggers_registered_branches(mock_hass: HomeAssistant):
     coordinator = _make_coordinator(mock_hass)
+    coordinator._time_triggers_bootstrapped = True
     coordinator._time_triggers = [lambda: None, lambda: None]
     coordinator.setup_time_triggers = MagicMock()
     coordinator._ensure_time_triggers_registered()
     coordinator.setup_time_triggers.assert_not_called()
 
     coordinator = _make_coordinator(mock_hass)
+    coordinator._time_triggers_bootstrapped = True
     coordinator._time_triggers = []
     def _setup_success():
         coordinator._time_triggers = [lambda: None, lambda: None]
@@ -464,10 +474,18 @@ def test_ensure_time_triggers_registered_branches(mock_hass: HomeAssistant):
     coordinator.setup_time_triggers.assert_called_once()
 
     coordinator = _make_coordinator(mock_hass)
+    coordinator._time_triggers_bootstrapped = True
     coordinator._time_triggers = []
     coordinator.setup_time_triggers = MagicMock()
     coordinator._ensure_time_triggers_registered()
     coordinator.setup_time_triggers.assert_called_once()
+
+    coordinator = _make_coordinator(mock_hass)
+    coordinator._time_triggers_bootstrapped = False
+    coordinator._time_triggers = []
+    coordinator.setup_time_triggers = MagicMock()
+    coordinator._ensure_time_triggers_registered()
+    coordinator.setup_time_triggers.assert_not_called()
 
 
 def test_update_time_triggers_updates_listener(mock_hass: HomeAssistant):

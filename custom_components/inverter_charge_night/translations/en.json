@@ -181,7 +181,7 @@
       "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
       "required_entity": "Entity must be provided when value is set",
       "required_value": "Value must be provided when entity is set",
-      "auto_efficiency_requires_power_entities": "Auto efficient charge requires charge power entity, sent/received power entities, and min/max charge power to be configured in step 3"
+      "auto_efficiency_requires_power_entities": "Auto efficient charge requires charge power entity, grid import, battery charge, home consumption energy entities, and min/max charge power to be configured in step 3"
     },
     "abort": {
       "already_configured": "Integration is already configured"
@@ -323,7 +323,8 @@
       "invalid_power": "Power must be greater than 0",
       "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
       "required_entity": "Entity must be provided when value is set",
-      "required_value": "Value must be provided when entity is set"
+      "required_value": "Value must be provided when entity is set",
+      "auto_efficiency_requires_power_entities": "Auto efficient charge requires charge power entity, grid import, battery charge, home consumption energy entities, and min/max charge power to be configured in step 3"
     }
   }
 }

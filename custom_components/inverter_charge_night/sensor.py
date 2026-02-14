@@ -97,7 +97,7 @@ class BestChargePowerSensor(CoordinatorEntity["InverterChargeNightCoordinator"],
         """Handle updated data from the coordinator."""
         data = self.coordinator._get_auto_efficiency_data()
         best_power = data.get("best_power_w")
-        self._attr_native_value = float(best_power) if isinstance(best_power, int) else None
+        self._attr_native_value = float(best_power) if isinstance(best_power, (int, float)) else None
         best_loss = data.get("best_loss")
         history = data.get("history", {})
         self._attr_extra_state_attributes = {

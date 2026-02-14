@@ -1,5 +1,31 @@
 # Latest Technical Changes
 
+## 0.1 Audit Follow-up Hardening (1.0.3)
+
+**Issue:**
+Audit follow-up identified a few high-value reliability/maintainability gaps:
+- noisy startup warning for trigger self-heal,
+- fragile forecast unit parsing based on value thresholds,
+- strict int-only handling for best charge power sensor,
+- missing translation key for options flow errors.
+
+**Solution:**
+- Added startup-aware trigger bootstrap guard to avoid false-positive warning noise before initial trigger registration.
+- Added `_forecast_state_to_kwh()` with unit-based conversion (`Wh`/`kWh`) and fallback heuristic for unknown units.
+- Updated `BestChargePowerSensor` to accept both `int` and `float`.
+- Added `options.error.auto_efficiency_requires_power_entities` translation key and clarified wording.
+- Added manifest compatibility floor: `"homeassistant": "2024.4.0"`.
+
+**Files:**
+- `custom_components/inverter_charge_night/__init__.py`
+- `custom_components/inverter_charge_night/sensor.py`
+- `custom_components/inverter_charge_night/manifest.json`
+- `custom_components/inverter_charge_night/strings.json`
+- `custom_components/inverter_charge_night/translations/en.json`
+- `tests/test_entities.py`
+- `tests/test_update_data.py`
+- `tests/test_init_full_coverage.py`
+
 ## 0. Trigger Recovery + Guaranteed Min-SOC Enforcement (1.0.2)
 
 **Issue:**
