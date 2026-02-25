@@ -1,7 +1,6 @@
 """Calculation logic for SOC determination."""
 
 import logging
-from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,16 +31,26 @@ def calculate_required_soc(
     Raises:
         ValueError: If input validation fails
     """
-    # Input validation
-    if not isinstance(battery_capacity, (int, float)) or battery_capacity <= 0:
+    try:
+        battery_capacity = float(battery_capacity)
+    except (TypeError, ValueError):
         _LOGGER.error("Battery capacity must be a positive number")
         return None
-        
-    if not isinstance(forecast_energy, (int, float)):
+    if battery_capacity <= 0:
+        _LOGGER.error("Battery capacity must be a positive number")
+        return None
+
+    try:
+        forecast_energy = float(forecast_energy)
+    except (TypeError, ValueError):
         _LOGGER.error("Forecast energy must be a number")
         return None
-        
-    if not all(isinstance(x, (int, float)) for x in [error_margin, user_min_soc, user_max_soc]):
+
+    try:
+        error_margin = float(error_margin)
+        user_min_soc = float(user_min_soc)
+        user_max_soc = float(user_max_soc)
+    except (TypeError, ValueError):
         _LOGGER.error("All numeric parameters must be numbers")
         return None
         

@@ -8,7 +8,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import Event, HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant
 from homeassistant.helpers.event import (
     EventStateChangedData,
     async_track_state_change_event,
@@ -163,7 +163,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-class InverterChargeNightCoordinator(DataUpdateCoordinator):
+class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator for Inverter Charge Night integration."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -184,15 +184,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator):
         self.initial_calculated_soc: float | None = None  # Store SOC calculated at window start
         self.minimum_calculated_soc: float | None = None  # Store minimum SOC value (always <= initial)
         self.target_reached = False
-        self._time_triggers = []
-        self._last_soc_set: float | None = None  # Track last SOC value set to avoid unnecessary updates
-        self.override_soc: float | None = None  # Manual override SOC value
+        self._time_triggers: list[CALLBACK_TYPE] = []
+        self._last_soc_set: float | None = None
+        self.override_soc: float | None = None
         self._original_absolute_charge_power: float | None = None
-        self._battery_soc_listener = None  # Listener for battery SOC changes
-        self._inverter_min_soc_listener = None  # Listener for inverter min SOC changes
-        self._verification_task = None  # Periodic verification task
-        self._verifying_min_soc = False  # Flag to prevent concurrent verification
-        self._backup_mode_listener = None  # Listener for backup mode changes
+        self._battery_soc_listener: CALLBACK_TYPE | None = None
+        self._inverter_min_soc_listener: CALLBACK_TYPE | None = None
+        self._verification_task: asyncio.Task[None] | None = None
+        self._verifying_min_soc = False
+        self._backup_mode_listener: CALLBACK_TYPE | None = None
         self.auto_efficient_charge = entry.data.get(CONF_AUTO_EFFICIENT_CHARGE, False)
         self._auto_test_active = False
         self._auto_test_power_w: int | None = None
@@ -888,13 +888,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator):
                         forecast_data = state.attributes.get("forecast", [])
                         if forecast_data:
                             forecast_available = True
-                            # Sum up today's forecast (assuming Wh units)
                             forecast_energy = sum(
-                                item.get("wh", item.get("pv_power_forecast", 0)) / 1000.0
+                                float(item.get("wh", item.get("pv_power_forecast", 0)) or 0) / 1000.0
                                 for item in forecast_data
                                 if isinstance(item, dict)
                             )
-                    # Also check for common Solcast attribute names
                     elif "today_forecast" in state.attributes:
                         try:
                             forecast_energy = float(state.attributes.get("today_forecast", 0))
@@ -908,8 +906,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator):
                         except (ValueError, TypeError):
                             pass
             
-            # Calculate required SOC
-            calculated_soc = calculate_required_soc(
+            calculated_soc: float | None = calculate_required_soc(
                 forecast_energy,
                 battery_capacity,
                 error_margin,
@@ -1099,13 +1096,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator):
                     forecast_data = state.attributes.get("forecast", [])
                     if forecast_data:
                         forecast_available = True
-                        # Sum up today's forecast (assuming Wh units)
                         forecast_energy = sum(
-                            item.get("wh", item.get("pv_power_forecast", 0)) / 1000.0
+                            float(item.get("wh", item.get("pv_power_forecast", 0)) or 0) / 1000.0
                             for item in forecast_data
                             if isinstance(item, dict)
                         )
-                # Also check for common Solcast attribute names
                 elif "today_forecast" in state.attributes:
                     try:
                         forecast_energy = float(state.attributes.get("today_forecast", 0))
@@ -1120,6 +1115,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator):
                         pass
         
         # Use initial SOC calculated at window start, or recalculate if initial failed
+        calculated_soc: float | None
         if self.initial_calculated_soc is not None:
             calculated_soc = self.initial_calculated_soc
             _LOGGER.debug("Using stored initial SOC: %.1f%%", calculated_soc)

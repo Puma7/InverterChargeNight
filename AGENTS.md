@@ -22,11 +22,12 @@ mypy custom_components/inverter_charge_night/
 pyright
 ```
 
-Both `mypy` and `pyright` are configured in strict mode. The `__init__.py` and `config_flow.py` files are excluded from type checking (see `mypy.ini` / `pyrightconfig.json`). Pre-existing type errors exist in the remaining modules (`switch.py`, `sensor.py`, `number.py`, `binary_sensor.py`) — these are known and not blockers.
+Both `mypy` and `pyright` are configured in strict mode and must pass with **0 errors**. The `__init__.py` and `config_flow.py` files are excluded from type checking (see `mypy.ini` / `pyrightconfig.json`). The `reportIncompatibleVariableOverride` rule is disabled in pyright because HA's `CoordinatorEntity` and entity base classes have a framework-level conflict on the `available` property.
 
 ### Key gotchas
 
 - The `~/.local/bin` directory must be on `PATH` for `pytest`, `mypy`, and `pyright` to be found (they are pip-installed with `--user`).
 - There is no `requirements.txt` or `pyproject.toml`. Dependencies are: `homeassistant`, `pytest`, `pytest-cov`, `pytest-asyncio`, `mypy`, `pyright`.
 - The `.coveragerc` sets `fail_under = 100` but omits `__init__.py` and `config_flow.py`.
+- Entity platform files use `CoordinatorEntity[InverterChargeNightCoordinator]` generic to properly type `self.coordinator`. Importing the coordinator from `.__init__` is safe (no circular imports).
 - This is not a runnable standalone application. To test end-to-end beyond unit tests, you would need a full Home Assistant instance with Kostal and Solcast integrations — not feasible in this environment. Unit tests with full mocking are the primary validation method.
