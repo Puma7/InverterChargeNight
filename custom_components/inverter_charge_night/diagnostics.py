@@ -8,6 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
+from . import InverterChargeNightCoordinator
 from .const import DOMAIN
 
 REDACT_KEYS = {
@@ -27,14 +28,14 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    coordinator: InverterChargeNightCoordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     data: dict[str, Any] = {
         "entry": async_redact_data(dict(entry.data), REDACT_KEYS),
         "options": async_redact_data(dict(entry.options), REDACT_KEYS),
     }
     if coordinator:
         auto_data = coordinator._get_auto_efficiency_data()
-        auto_test_duration_s = None
+        auto_test_duration_s: int | None = None
         if coordinator._auto_test_active and coordinator._auto_test_start:
             auto_test_duration_s = int(
                 (dt_util.now() - coordinator._auto_test_start).total_seconds()

@@ -1,4 +1,7 @@
 """Sensor platform for Inverter Charge Night."""
+from __future__ import annotations
+
+from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import EntityCategory
@@ -7,7 +10,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTR_CALCULATED_SOC, DOMAIN
+from . import InverterChargeNightCoordinator
+from .const import DOMAIN
 
 
 async def async_setup_entry(
@@ -16,7 +20,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor platform."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: InverterChargeNightCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
             CalculatedSOCSensor(coordinator, entry),
@@ -25,7 +29,7 @@ async def async_setup_entry(
     )
 
 
-class CalculatedSOCSensor(CoordinatorEntity, SensorEntity):
+class CalculatedSOCSensor(CoordinatorEntity[InverterChargeNightCoordinator], SensorEntity):
     """Sensor for calculated SOC."""
 
     _attr_translation_key = "calculated_soc"
@@ -35,7 +39,7 @@ class CalculatedSOCSensor(CoordinatorEntity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:battery-charging"
 
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._entry = entry
@@ -50,11 +54,11 @@ class CalculatedSOCSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self) -> float | None:
         """Return the calculated SOC."""
-        data = self.coordinator.data
-        return data.get("calculated_soc")
+        value = self.coordinator.data.get("calculated_soc")
+        return float(value) if value is not None else None
 
     @property
-    def extra_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra state attributes."""
         data = self.coordinator.data
         return {
@@ -64,7 +68,7 @@ class CalculatedSOCSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class BestChargePowerSensor(CoordinatorEntity, SensorEntity):
+class BestChargePowerSensor(CoordinatorEntity[InverterChargeNightCoordinator], SensorEntity):
     """Sensor for best charge power found by auto efficient charge."""
 
     _attr_translation_key = "best_charge_power"
@@ -75,7 +79,7 @@ class BestChargePowerSensor(CoordinatorEntity, SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:flash"
 
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._entry = entry
@@ -95,4 +99,3 @@ class BestChargePowerSensor(CoordinatorEntity, SensorEntity):
         if isinstance(best_power, int):
             return float(best_power)
         return None
-

@@ -1,4 +1,5 @@
 """Binary sensor platform for Inverter Charge Night."""
+from __future__ import annotations
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -6,6 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from . import InverterChargeNightCoordinator
 from .const import DOMAIN
 
 
@@ -15,18 +17,18 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the binary sensor platform."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: InverterChargeNightCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([ActiveWindowBinarySensor(coordinator, entry)])
 
 
-class ActiveWindowBinarySensor(CoordinatorEntity, BinarySensorEntity):
+class ActiveWindowBinarySensor(CoordinatorEntity[InverterChargeNightCoordinator], BinarySensorEntity):
     """Binary sensor indicating if we're in the active window."""
 
     _attr_translation_key = "active"
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock-time-four"
 
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the binary sensor."""
         super().__init__(coordinator)
         self._entry = entry
@@ -41,6 +43,4 @@ class ActiveWindowBinarySensor(CoordinatorEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool:
         """Return if the active window is currently active."""
-        data = self.coordinator.data
-        return data.get("is_active", False)
-
+        return bool(self.coordinator.data.get("is_active", False))

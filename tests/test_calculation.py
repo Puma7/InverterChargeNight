@@ -35,6 +35,16 @@ def test_calculate_required_soc_invalid_capacity():
         )
         is None
     )
+    assert (
+        calculate_required_soc(
+            forecast_energy=2.0,
+            battery_capacity="bad",  # type: ignore[arg-type]
+            error_margin=0.0,
+            user_min_soc=8.0,
+            user_max_soc=100.0,
+        )
+        is None
+    )
 
 
 def test_calculate_required_soc_invalid_forecast():

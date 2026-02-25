@@ -11,5 +11,6 @@
   "reportUnknownMemberType": false,
   "reportUnknownArgumentType": false,
   "reportUnknownVariableType": false,
-  "reportUnknownParameterType": false
+  "reportUnknownParameterType": false,
+  "reportIncompatibleVariableOverride": false
 }
