@@ -2,9 +2,10 @@
 
 import asyncio
 import logging
-import math
+import time as time_module
+from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
-from typing import Any
+from typing import Any, Callable, cast
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -14,6 +15,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_change,
 )
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
 
@@ -29,13 +31,8 @@ from .const import (
     CONF_BACKUP_MODE_ENTITY,
     CONF_ACTIVE_START_DATE,
     CONF_ACTIVE_END_DATE,
-    CONF_MIN_CHARGE_POWER_W,
-    CONF_MAX_CHARGE_POWER_W,
     CONF_CHARGE_POWER_ENTITY,
-    CONF_CHARGE_POWER_SENT_ENTITY,
-    CONF_CHARGE_POWER_RECEIVED_ENTITY,
     CONF_AUTO_EFFICIENT_CHARGE,
-    CONF_AUTO_EFFICIENCY_DATA,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
     CONF_START_TIME,
@@ -59,8 +56,38 @@ from .const import (
     DOMAIN,
 )
 from .calculation import calculate_required_soc
+from .auto_efficiency import AutoEfficiencyOptimizer
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _state_attributes(state: State) -> Mapping[str, Any]:
+    """Return state attributes as a typed mapping."""
+    attrs = getattr(state, "attributes", {})
+    return cast(Mapping[str, Any], attrs)
+
+
+def _forecast_state_to_kwh(state: State) -> float | None:
+    """Parse forecast state value to kWh using unit metadata when available."""
+    if state.state in ("unknown", "unavailable", None):
+        return None
+
+    try:
+        value = float(state.state)
+    except (ValueError, TypeError):
+        return None
+
+    attrs = _state_attributes(state)
+    unit = str(attrs.get("unit_of_measurement", "")).strip().lower()
+
+    # Prefer explicit unit handling, then keep heuristic fallback for unknown units.
+    if unit in ("wh", "watt hour", "watt hours"):
+        return value / 1000.0
+    if unit in ("kwh", "kilowatt hour", "kilowatt hours"):
+        return value
+
+    # Backward-compatible fallback when entities do not expose units.
+    return value / 1000.0 if value > 1000 else value
 
 PLATFORMS: list[Platform] = [
     Platform.SENSOR,
@@ -71,20 +98,40 @@ PLATFORMS: list[Platform] = [
 ]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+type InverterChargeNightConfigEntry = ConfigEntry[InverterChargeNightCoordinator]
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> bool:
     """Set up Inverter Charge Night from a config entry."""
-    hass.data.setdefault(DOMAIN, {})
-    
+    # Test-before-setup: verify critical entities are available
+    for key in (CONF_BATTERY_SOC_ENTITY, CONF_KOSTAL_MIN_SOC_ENTITY, CONF_KOSTAL_GRID_CHARGE_SWITCH):
+        entity_id = entry.data.get(key)
+        if entity_id and hass.states.get(entity_id) is None:
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                f"entity_not_available_{entity_id}",
+                is_fixable=False,
+                issue_domain=DOMAIN,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key="entity_not_available",
+                translation_placeholders={"entity_id": entity_id},
+            )
+            raise ConfigEntryNotReady(
+                f"Required entity {entity_id} is not yet available"
+            )
+
     coordinator = InverterChargeNightCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
     
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
     
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
     # Set up time-based triggers
     coordinator.setup_time_triggers()
+    coordinator._ensure_time_triggers_registered()
     # Set up optional backup mode listener
     coordinator._setup_backup_mode_listener()
     
@@ -96,16 +143,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_update_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> None:
     """Handle config entry update."""
     _LOGGER.info("Configuration updated, updating triggers and coordinator")
     
-    # Safety check: ensure coordinator exists
-    if entry.entry_id not in hass.data.get(DOMAIN, {}):
-        _LOGGER.error("Coordinator not found for entry %s", entry.entry_id)
-        return
-    
-    coordinator: InverterChargeNightCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: InverterChargeNightCoordinator = entry.runtime_data
     
     # Store old window times before update for comparison
     old_start_time = coordinator.config.get(CONF_START_TIME, DEFAULT_START_TIME)
@@ -128,7 +170,7 @@ async def async_update_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     except Exception as e:
         _LOGGER.error("Error updating time triggers: %s", e, exc_info=True)
         # Restore old config if update failed
-        coordinator.config = entry.data  # Still use new data, but log error
+        coordinator.config = dict(entry.data)  # Still use new data, but log error
         return
     
     # Check if window changed and we need to adjust state
@@ -150,11 +192,11 @@ async def async_update_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await coordinator.async_request_refresh()
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        coordinator: InverterChargeNightCoordinator = hass.data[DOMAIN][entry.entry_id]
+        coordinator: InverterChargeNightCoordinator = entry.runtime_data
         # CRITICAL: Reset settings before unloading to prevent leaving inverter in bad state
         if coordinator.is_active:
             _LOGGER.warning("Integration unloading during active window - resetting settings")
@@ -164,6 +206,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.error("Error resetting settings during unload: %s", e, exc_info=True)
                 # Continue with unload even if reset fails - we tried our best
         coordinator.remove_time_triggers()
+        coordinator._stop_window_check_task()
         coordinator._remove_battery_soc_listener()
         coordinator._remove_inverter_min_soc_listener()
         coordinator._stop_periodic_verification()
@@ -180,7 +223,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Initialize the coordinator."""
         self.hass = hass
         self.entry = entry
-        self.config = entry.data
+        self.config: dict[str, Any] = dict(entry.data)
         super().__init__(
             hass,
             _LOGGER,
@@ -214,6 +257,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
         self._auto_missing_entities_logged = False
+        self._auto_test_start_snapshot: dict[str, float] | None = None
+        self._session_active = False
+        self._session_start: datetime | None = None
+        self._session_start_snapshot: dict[str, float] | None = None
+        self._auto_efficiency = AutoEfficiencyOptimizer(self)
 
     @property
     def is_discharge_mode(self) -> bool:
@@ -360,7 +408,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (ValueError, TypeError):
             return None
 
-        unit = str(state.attributes.get("unit_of_measurement", "")).lower()
+        attrs = _state_attributes(state)
+        unit = str(attrs.get("unit_of_measurement", "")).lower()
         if unit in ("kw", "kilowatt", "kilowatts"):
             return value * 1000.0
         if unit in ("w", "watt", "watts"):
@@ -379,7 +428,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         value = float(power_w)
         state = self.hass.states.get(entity_id)
-        unit = str(state.attributes.get("unit_of_measurement", "")).lower() if state else ""
+        attrs: Mapping[str, Any] = _state_attributes(state) if state else cast(Mapping[str, Any], {})
+        unit = str(attrs.get("unit_of_measurement", "")).lower()
         if unit in ("kw", "kilowatt", "kilowatts"):
             value = value / 1000.0
         try:
@@ -419,7 +469,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         value = max_power
         state = self.hass.states.get(entity_id)
-        unit = str(state.attributes.get("unit_of_measurement", "")).lower() if state else ""
+        attrs: Mapping[str, Any] = _state_attributes(state) if state else cast(Mapping[str, Any], {})
+        unit = str(attrs.get("unit_of_measurement", "")).lower()
         if unit in ("kw", "kilowatt", "kilowatts"):
             value = value / 1000.0
         try:
@@ -445,7 +496,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         value = self._original_absolute_charge_power
         state = self.hass.states.get(entity_id)
-        unit = str(state.attributes.get("unit_of_measurement", "")).lower() if state else ""
+        attrs: Mapping[str, Any] = _state_attributes(state) if state else cast(Mapping[str, Any], {})
+        unit = str(attrs.get("unit_of_measurement", "")).lower()
         try:
             await self.hass.services.async_call(
                 domain,
@@ -460,190 +512,47 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _get_auto_efficiency_data(self) -> dict[str, Any]:
         """Load persisted auto efficiency data from entry options."""
-        data = dict(self.entry.options.get(CONF_AUTO_EFFICIENCY_DATA, {}))
-        data.setdefault("history", {})
-        return data
+        return self._auto_efficiency.get_data()
 
     def _save_auto_efficiency_data(self, data: dict[str, Any]) -> None:
         """Persist auto efficiency data to entry options."""
-        options = dict(self.entry.options)
-        options[CONF_AUTO_EFFICIENCY_DATA] = data
-        self.hass.config_entries.async_update_entry(self.entry, options=options)
+        self._auto_efficiency.save_data(data)
 
-    def _round_power_step(self, value_w: float, step_w: int = 100) -> int:
+    def _round_power_step(self, value_w: float, step_w: int = AUTO_EFFICIENCY_STEP_W) -> int:
         """Round power to nearest step."""
-        return int(round(value_w / step_w) * step_w)
+        return self._auto_efficiency.round_power_step(value_w, step_w)
 
     def _select_next_auto_test_power_w(self) -> int | None:
         """Select next power setpoint for auto efficiency testing."""
-        min_w = int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000))
-        max_w = int(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000))
-        if min_w >= max_w:
-            return None
-
-        step_w = 100  # 0.1 kW precision
-        data = self._get_auto_efficiency_data()
-        history = {int(k): v for k, v in data.get("history", {}).items()}
-        range_min = int(data.get("range_min_w", min_w))
-        range_max = int(data.get("range_max_w", max_w))
-        range_min = max(min_w, range_min)
-        range_max = min(max_w, range_max)
-        if range_max - range_min < step_w:
-            return None
-
-        phi = (math.sqrt(5) - 1) / 2  # golden ratio
-        for _ in range(5):
-            c = self._round_power_step(range_max - phi * (range_max - range_min), step_w)
-            d = self._round_power_step(range_min + phi * (range_max - range_min), step_w)
-            c = max(range_min, min(range_max, c))
-            d = max(range_min, min(range_max, d))
-            if c == d:
-                d = min(range_max, c + step_w)
-            if c in history and d in history:
-                if history[c] <= history[d]:
-                    range_max = d
-                else:
-                    range_min = c
-                data["range_min_w"] = range_min
-                data["range_max_w"] = range_max
-                self._save_auto_efficiency_data(data)
-                continue
-            if c not in history:
-                return c
-            if d not in history:
-                return d
-        return None
+        return self._auto_efficiency.select_next_test_power_w()
 
     def _reset_auto_test_state(self) -> None:
         """Reset current auto test state."""
-        self._auto_test_active = False
-        self._auto_test_power_w = None
-        self._auto_test_start = None
-        self._auto_last_sample_time = None
-        self._auto_energy_sent_wh = 0.0
-        self._auto_energy_received_wh = 0.0
+        self._auto_efficiency.reset_test_state()
 
     async def _start_auto_test(self, power_w: int) -> None:
         """Start auto efficiency test at given power."""
-        await self._set_ac_charge_limit_w(power_w)
-        self._auto_test_active = True
-        self._auto_test_power_w = power_w
-        self._auto_test_start = dt_util.now()
-        self._auto_last_sample_time = self._auto_test_start
-        self._auto_energy_sent_wh = 0.0
-        self._auto_energy_received_wh = 0.0
-        _LOGGER.info("Auto efficiency test started at %d W", power_w)
-
-    def _accumulate_auto_energy(self) -> None:
-        """Accumulate sent/received energy for auto test."""
-        if not self._auto_test_active or not self._auto_last_sample_time:
-            return
-        sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
-        received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
-        sent_w = self._get_power_w(sent_entity)
-        received_w = self._get_power_w(received_entity)
-        if sent_w is None or received_w is None:
-            return
-        now = dt_util.now()
-        delta_h = (now - self._auto_last_sample_time).total_seconds() / 3600.0
-        if delta_h <= 0:
-            return
-        self._auto_energy_sent_wh += sent_w * delta_h
-        self._auto_energy_received_wh += received_w * delta_h
-        self._auto_last_sample_time = now
+        await self._auto_efficiency.start_test(power_w)
 
     def _finalize_auto_test(self) -> None:
         """Finalize auto test and persist efficiency result."""
-        if not self._auto_test_active or not self._auto_test_start or self._auto_test_power_w is None:
-            self._reset_auto_test_state()
-            return
+        self._auto_efficiency.finalize_test()
 
-        duration = (dt_util.now() - self._auto_test_start).total_seconds()
-        if duration < 1800 or self._auto_energy_sent_wh <= 0:
-            _LOGGER.info("Auto efficiency test discarded (duration < 30 min)")
-            self._reset_auto_test_state()
-            return
+    def _start_charge_session(self) -> None:
+        """Begin tracking a regular charge session."""
+        self._auto_efficiency.start_charge_session()
 
-        loss = 1.0 - (self._auto_energy_received_wh / self._auto_energy_sent_wh)
-        loss = max(0.0, min(loss, 1.0))
+    def _finalize_charge_session(self) -> None:
+        """Finalize the regular charge session and persist the result."""
+        self._auto_efficiency.finalize_charge_session()
 
-        data = self._get_auto_efficiency_data()
-        history = dict(data.get("history", {}))
-        history[str(self._auto_test_power_w)] = loss
-        data["history"] = history
-
-        best_loss = data.get("best_loss")
-        if best_loss is None or loss < best_loss:
-            data["best_loss"] = loss
-            data["best_power_w"] = self._auto_test_power_w
-            _LOGGER.info(
-                "New best auto efficiency: %.4f loss at %d W",
-                loss,
-                self._auto_test_power_w,
-            )
-        else:
-            _LOGGER.info(
-                "Auto efficiency recorded: %.4f loss at %d W",
-                loss,
-                self._auto_test_power_w,
-            )
-
-        self._save_auto_efficiency_data(data)
-        self._reset_auto_test_state()
+    def _get_session_data(self) -> dict[str, Any]:
+        """Load persisted charge session data."""
+        return self._auto_efficiency.get_session_data()
 
     async def _handle_auto_charge(self) -> None:
         """Handle auto efficient charging logic."""
-        if not self.auto_efficient_charge:
-            if self._auto_test_active:
-                self._finalize_auto_test()
-            return
-        if self._is_backup_active():
-            if self._auto_test_active:
-                self._reset_auto_test_state()
-            return
-
-        charge_entity = self.config.get(CONF_CHARGE_POWER_ENTITY)
-        sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
-        received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
-        if not charge_entity or not sent_entity or not received_entity:
-            if not self._auto_missing_entities_logged:
-                _LOGGER.warning(
-                    "Auto efficient charge enabled but required entities are missing "
-                    "(setpoint, sent, received)."
-                )
-                self._auto_missing_entities_logged = True
-            return
-
-        grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
-        grid_on = False
-        if grid_charge_switch:
-            state = self.hass.states.get(grid_charge_switch)
-            grid_on = state is not None and state.state == "on"
-
-        if not grid_on or self.target_reached:
-            if self._auto_test_active:
-                self._finalize_auto_test()
-            return
-
-        if self._auto_test_active:
-            self._accumulate_auto_energy()
-            return
-
-        candidate = self._select_next_auto_test_power_w()
-        if candidate is None:
-            data = self._get_auto_efficiency_data()
-            best_power = data.get("best_power_w")
-            if isinstance(best_power, int):
-                await self._set_ac_charge_limit_w(best_power)
-                if self.auto_efficient_charge:
-                    self.auto_efficient_charge = False
-                    data = dict(self.entry.data)
-                    data[CONF_AUTO_EFFICIENT_CHARGE] = False
-                    self.hass.config_entries.async_update_entry(self.entry, data=data)
-                    _LOGGER.info("Auto efficient charge finder completed, disabling switch")
-            return
-
-        await self._start_auto_test(candidate)
+        await self._auto_efficiency.handle_auto_charge()
 
     def _is_time_between(
         self, check_time: time, start_time: time, end_time: time
@@ -652,6 +561,129 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if start_time < end_time:
             return start_time <= check_time <= end_time
         return check_time >= start_time or check_time <= end_time
+
+    def _mark_soc_set(self, target_soc: float) -> None:
+        """Record when the inverter min SOC was set."""
+        self._last_soc_set = target_soc
+        self._last_soc_set_at = time_module.monotonic()
+
+    def _is_within_min_soc_cooldown(self) -> bool:
+        """Return True if we're within the min SOC restore cooldown."""
+        if self._last_soc_set_at is None:
+            return False
+        return (time_module.monotonic() - self._last_soc_set_at) < MIN_SOC_RESTORE_COOLDOWN_S
+
+    def _get_window_target_soc(self) -> float | None:
+        """Return effective target SOC for the active window."""
+        if self.minimum_calculated_soc is not None:
+            return float(self.minimum_calculated_soc)
+        if self.override_soc is not None:
+            return float(self.override_soc)
+        if self.initial_calculated_soc is not None:
+            return float(self.initial_calculated_soc)
+        if self.calculated_soc is not None:
+            return float(self.calculated_soc)
+        return None
+
+    async def _ensure_min_soc_target(self, target_soc: float) -> bool:
+        """Ensure inverter min SOC matches target, independent of charge state."""
+        kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
+        if not kostal_min_soc_entity:
+            _LOGGER.warning("No min SOC entity configured - cannot enforce min SOC target")
+            return False
+
+        try:
+            state = self.hass.states.get(kostal_min_soc_entity)
+            current_min_soc: float | None = None
+            if state and state.state not in ("unknown", "unavailable"):
+                try:
+                    current_min_soc = float(state.state)
+                except (ValueError, TypeError):
+                    current_min_soc = None
+
+            if current_min_soc is not None and abs(current_min_soc - target_soc) <= MIN_SOC_TOLERANCE:
+                self._last_soc_set = target_soc
+                _LOGGER.debug("Min SOC already at target %.1f%%", target_soc)
+                return True
+
+            if self._last_soc_set is not None and abs(self._last_soc_set - target_soc) <= MIN_SOC_TOLERANCE:
+                if self._is_within_min_soc_cooldown():
+                    _LOGGER.debug(
+                        "Min SOC target %.1f%% was set recently, skipping duplicate write",
+                        target_soc,
+                    )
+                    return True
+
+            await self.hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": kostal_min_soc_entity, "value": target_soc},
+            )
+            self._mark_soc_set(target_soc)
+            _LOGGER.info(
+                "Enforced min SOC target %.1f%% (was %s)",
+                target_soc,
+                f"{current_min_soc:.1f}%" if current_min_soc is not None else "unknown",
+            )
+            return True
+        except Exception as err:
+            _LOGGER.error("Failed to enforce min SOC target %.1f%%: %s", target_soc, err, exc_info=True)
+            return False
+
+    def _schedule_window_check(self) -> None:
+        """Schedule a window state check task, cancelling any previous one."""
+        self._stop_window_check_task()
+
+        if hasattr(self.hass, "async_create_background_task"):
+            self._window_check_task = self.hass.async_create_background_task(
+                self._check_current_window(),
+                "inverter_charge_night_window_check",
+            )
+        else:
+            self._window_check_task = self.hass.async_create_task(
+                self._check_current_window()
+            )
+
+    def _stop_window_check_task(self) -> None:
+        """Stop any pending window check task."""
+        if self._window_check_task and not self._window_check_task.done():
+            self._window_check_task.cancel()
+        self._window_check_task = None
+
+    def _ensure_time_triggers_registered(self) -> None:
+        """Ensure start/end time triggers are present, recreate if missing."""
+        expected_triggers = 2  # window start and window end
+        current_triggers = len(self._time_triggers)
+        if not self._time_triggers_bootstrapped:
+            _LOGGER.debug(
+                "Skipping trigger self-heal before initial trigger bootstrap (%d/%d).",
+                current_triggers,
+                expected_triggers,
+            )
+            return
+        if current_triggers >= expected_triggers:
+            return
+
+        _LOGGER.warning(
+            "Time triggers missing (%d/%d). Re-registering charge window triggers.",
+            current_triggers,
+            expected_triggers,
+        )
+        self.setup_time_triggers()
+
+        recovered_triggers = len(self._time_triggers)
+        if recovered_triggers >= expected_triggers:
+            _LOGGER.info(
+                "Time trigger self-heal successful (%d/%d).",
+                recovered_triggers,
+                expected_triggers,
+            )
+        else:
+            _LOGGER.error(
+                "Time trigger self-heal failed (%d/%d). Check trigger setup/logs.",
+                recovered_triggers,
+                expected_triggers,
+            )
 
     def setup_time_triggers(self) -> None:
         """Set up time-based triggers for window start/end."""
@@ -700,7 +732,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             
             # Check if we're already in the active window
-            self.hass.async_create_task(self._check_current_window())
+            self._schedule_window_check()
+            self._time_triggers_bootstrapped = True
             
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.error("Failed to set up time triggers: %s", err, exc_info=True)
@@ -708,6 +741,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def remove_time_triggers(self) -> None:
         """Remove time-based triggers."""
+        self._stop_window_check_task()
         for trigger in self._time_triggers:
             trigger()
         self._time_triggers.clear()
@@ -724,11 +758,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         # Note: config reference is updated in async_update_entry before calling this
         # So self.config should already be updated, but ensure it's synced
-        if self.entry.data != self.config:
-            self.config = self.entry.data
+        if dict(self.entry.data) != self.config:
+            self.config = dict(self.entry.data)
         
         # Set up new triggers with updated times
         self.setup_time_triggers()
+        self._ensure_time_triggers_registered()
         
         # If battery SOC entity changed and we're active, update the listener
         new_battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
@@ -741,7 +776,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # - We were active but are no longer in new window (will reset)
         # - We were not active but are now in new window (will start)
         # - We were active and still in new window (will continue)
-        self.hass.async_create_task(self._check_current_window())
+        self._schedule_window_check()
 
     async def _check_current_window(self) -> None:
         """Check if we're currently in the active window and adjust state if needed."""
@@ -827,6 +862,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         # Calculate and store initial SOC for this charging period
         await self._calculate_initial_soc()
+
+        # CRITICAL: Always enforce min SOC at window start, even if no charging starts yet.
+        # This guarantees overnight reserve behavior for cases where current SOC is above target.
+        window_target_soc = self._get_window_target_soc()
+        if window_target_soc is not None:
+            await self._ensure_min_soc_target(window_target_soc)
+        else:
+            _LOGGER.warning(
+                "Window started but no target SOC available yet - cannot enforce min SOC immediately"
+            )
         
         # Set up battery SOC listener for more frequent target checks
         self._setup_battery_soc_listener()
@@ -836,6 +881,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         # Start periodic verification task (every 15 minutes)
         self._start_periodic_verification()
+        
+        # Start tracking charge session for efficiency measurement
+        self._start_charge_session()
         
         await self.async_request_refresh()
 
@@ -858,8 +906,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             
             if kostal_min_soc_entity:
                 # Retry mechanism: Wait for inverter to become available (max 3 minutes)
-                max_retry_time = 180  # 3 minutes in seconds
-                retry_interval = 10  # Check every 10 seconds
+                max_retry_time = INVERTER_AVAILABILITY_RETRY_MAX_S
+                retry_interval = INVERTER_AVAILABILITY_RETRY_INTERVAL_S
                 retry_count = 0
                 max_retries = max_retry_time // retry_interval
                 
@@ -948,16 +996,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if state:
                     # Check if entity state is available (not unknown/unavailable)
                     if state.state not in ("unknown", "unavailable", None):
-                        forecast_available = True
-                        try:
-                            # Try to parse as float (might be kWh or Wh)
-                            value = float(state.state)
-                            # If value seems like Wh (very large), convert to kWh
-                            if value > 1000:
-                                forecast_energy = value / 1000.0
-                            else:
-                                forecast_energy = value
-                        except (ValueError, TypeError):
+                        parsed_forecast = _forecast_state_to_kwh(state)
+                        if parsed_forecast is not None:
+                            forecast_available = True
+                            forecast_energy = parsed_forecast
+                        else:
                             forecast_available = False
                     elif "forecast" in state.attributes:
                         # Solcast might have forecast in attributes
@@ -1037,6 +1080,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         finally:
             # CRITICAL: Always reset state flags, even if reset operation failed
             self._finalize_auto_test()
+            self._finalize_charge_session()
             self.is_active = False
             self.target_reached = False
             self.initial_calculated_soc = None  # Reset initial SOC for next charging period
@@ -1122,6 +1166,82 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.override_soc = None  # Clear override when resetting
         await self._reset_absolute_charge_power()
 
+    async def _apply_control_logic(
+        self,
+        target_soc: float,
+        calculated_soc: float,
+        can_check_soc: bool,
+        battery_soc_entity: str | None,
+    ) -> float | None:
+        """Apply inverter control logic after calculating target SOC."""
+        # CRITICAL: Check if battery SOC already exceeds target before controlling
+        # If so, turn off charging immediately
+        current_soc = None
+        if can_check_soc and battery_soc_entity is not None:
+            battery_state = self.hass.states.get(battery_soc_entity)
+            if battery_state and battery_state.state not in ("unknown", "unavailable"):
+                try:
+                    current_battery_soc = float(battery_state.state)
+                    current_soc = current_battery_soc
+                    if current_battery_soc >= target_soc:
+                        if not self.target_reached:
+                            _LOGGER.info(
+                                "Battery SOC (%.1f%%) already exceeds target (%.1f%%) at startup, turning off charging",
+                                current_battery_soc,
+                                target_soc,
+                            )
+                            await self._stop_grid_charging()
+                            self.target_reached = True
+                        # Don't proceed with control if already at target
+                        return current_soc
+                except (ValueError, TypeError):
+                    pass
+
+        # Control Kostal entities if we have a target SOC and can verify battery SOC
+        # If battery SOC is unavailable, wait for it to become available before charging
+        if not self.target_reached:
+            if can_check_soc:
+                await self._control_kostal(target_soc)
+            else:
+                _LOGGER.warning(
+                    "Battery SOC entity %s is unavailable - skipping Kostal control to prevent "
+                    "unintended charging. Will retry on next update.",
+                    battery_soc_entity,
+                )
+
+        # Auto efficient charge handling (optional)
+        await self._handle_auto_charge()
+
+        # Check if target is reached (use override if set, otherwise calculated)
+        if battery_soc_entity:
+            state = self.hass.states.get(battery_soc_entity)
+            if state and state.state not in ("unknown", "unavailable"):
+                try:
+                    current_soc = float(state.state)
+                    # Use minimum SOC for target check (always the lowest value we want to maintain)
+                    check_target = self.minimum_calculated_soc
+                    if check_target is not None and current_soc >= check_target:
+                        # SAFETY: Log if we significantly exceed target, but still stop once.
+                        if current_soc > check_target + 5.0:
+                            _LOGGER.warning(
+                                "SAFETY: Battery SOC (%.1f%%) significantly exceeds target (%.1f%%), forcing stop",
+                                current_soc,
+                                check_target,
+                            )
+                        if not self.target_reached:
+                            _LOGGER.info(
+                                "Target SOC reached: %.1f%% >= %.1f%% (target: %s)",
+                                current_soc,
+                                check_target,
+                                "override" if self.override_soc is not None else "calculated",
+                            )
+                            await self._stop_grid_charging()
+                            self.target_reached = True
+                except (ValueError, TypeError):
+                    pass
+
+        return current_soc
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from entities and update coordinator."""
         inactive_data: dict[str, Any] = {
@@ -1163,16 +1283,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if state:
                 # Check if entity state is available (not unknown/unavailable)
                 if state.state not in ("unknown", "unavailable", None):
-                    forecast_available = True
-                    try:
-                        # Try to parse as float (might be kWh or Wh)
-                        value = float(state.state)
-                        # If value seems like Wh (very large), convert to kWh
-                        if value > 1000:
-                            forecast_energy = value / 1000.0
-                        else:
-                            forecast_energy = value
-                    except (ValueError, TypeError):
+                    parsed_forecast = _forecast_state_to_kwh(state)
+                    if parsed_forecast is not None:
+                        forecast_available = True
+                        forecast_energy = parsed_forecast
+                    else:
                         forecast_available = False
                 elif "forecast" in state.attributes:
                     # Solcast might have forecast in attributes
@@ -1455,14 +1570,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         pass
                 
                 # Only update if value changed significantly (avoid unnecessary service calls and EEPROM wear)
-                # CRITICAL: Threshold increased to 0.5 to prevent "bricking" inverter memory
-                if min_soc_current_value is None or abs(min_soc_current_value - target_soc) > 0.5:
+                # CRITICAL: Threshold prevents excessive inverter writes
+                if min_soc_current_value is None or abs(min_soc_current_value - target_soc) > MIN_SOC_TOLERANCE:
                     # Also check if we just set this value (prevent rapid updates)
-                    if self._last_soc_set is None or abs(self._last_soc_set - target_soc) > 0.5:
+                    if self._last_soc_set is None or abs(self._last_soc_set - target_soc) > MIN_SOC_TOLERANCE:
                         need_to_set_min_soc = True
-                    else:
+                    elif self._is_within_min_soc_cooldown():
                         _LOGGER.debug("Min SOC already set to %.1f%% recently, skipping update", target_soc)
                         self._last_soc_set = target_soc
+                    else:
+                        need_to_set_min_soc = True
                 else:
                     _LOGGER.debug("Min SOC already at target: %.1f%%", target_soc)
                     self._last_soc_set = target_soc
@@ -1474,16 +1591,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # so the inverter processes them together and only does DC checks once
         if need_to_set_min_soc and kostal_min_soc_entity:
             # Set min SOC first
-            await self.hass.services.async_call(
-                "number",
-                "set_value",
-                {"entity_id": kostal_min_soc_entity, "value": target_soc},
-            )
-            self._last_soc_set = target_soc
-            _LOGGER.info("Set Kostal min SOC to %.1f%% (was %.1f%%)", target_soc, min_soc_current_value or "unknown")
+            min_soc_set_ok = await self._ensure_min_soc_target(target_soc)
             
             # Immediately send grid charge command (configurable delay) so inverter processes both together
-            if kostal_grid_charge_switch and not should_skip_charging:
+            if min_soc_set_ok and kostal_grid_charge_switch and not should_skip_charging:
                 command_delay = float(self.config.get(CONF_COMMAND_DELAY, 0.1))
                 await asyncio.sleep(command_delay)  # Configurable delay
                 
@@ -1796,9 +1907,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 
                 if target_soc is None:
                     return
-                
+                if self._is_within_min_soc_cooldown():
+                    _LOGGER.debug("Min SOC recently set - skipping listener-triggered restore")
+                    return
+
                 # Check if inverter min SOC doesn't match our target (with tolerance)
-                if abs(current_inverter_soc - target_soc) > 0.5:
+                if abs(current_inverter_soc - target_soc) > MIN_SOC_TOLERANCE:
                     _LOGGER.debug(
                         "Inverter min SOC deviation detected via listener (%.1f%% vs %.1f%%), triggering restoration",
                         current_inverter_soc,
@@ -1897,7 +2011,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             current_inverter_soc = float(state.state)
             
             # Check if inverter min SOC doesn't match our target (with tolerance)
-            if abs(current_inverter_soc - target_soc) > 0.5:
+            if abs(current_inverter_soc - target_soc) > MIN_SOC_TOLERANCE:
+                if self._is_within_min_soc_cooldown():
+                    _LOGGER.debug("Min SOC recently set - skipping restore")
+                    return
                 _LOGGER.warning(
                     "Inverter min SOC (%.1f%%) doesn't match our target (%.1f%%), restoring to target",
                     current_inverter_soc,
@@ -1909,7 +2026,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "set_value",
                     {"entity_id": kostal_min_soc_entity, "value": target_soc},
                 )
-                self._last_soc_set = target_soc
+                self._mark_soc_set(target_soc)
                 _LOGGER.info("Restored inverter min SOC to %.1f%%", target_soc)
             
             battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)

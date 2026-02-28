@@ -16,8 +16,9 @@ from custom_components.inverter_charge_night.const import (
     CONF_ACTIVE_START_DATE,
     CONF_BACKUP_MODE_ENTITY,
     CONF_CHARGE_POWER_ENTITY,
-    CONF_CHARGE_POWER_RECEIVED_ENTITY,
-    CONF_CHARGE_POWER_SENT_ENTITY,
+    CONF_GRID_IMPORT_ENERGY_ENTITY,
+    CONF_BATTERY_CHARGE_ENERGY_ENTITY,
+    CONF_HOME_CONSUMPTION_ENERGY_ENTITY,
     CONF_KOSTAL_GRID_CHARGE_SWITCH,
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
@@ -79,47 +80,66 @@ def test_is_backup_active(mock_hass):
     assert coordinator._is_backup_active() is True
 
 
-def test_accumulate_auto_energy_updates_totals(mock_hass):
-    now = datetime(2025, 1, 1, tzinfo=timezone.utc)
+def test_snapshot_based_auto_test_attributes(mock_hass):
     coordinator = _make_coordinator(
         mock_hass,
         {
-            CONF_CHARGE_POWER_SENT_ENTITY: "sensor.sent",
-            CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.received",
+            CONF_GRID_IMPORT_ENERGY_ENTITY: "sensor.grid",
+            CONF_BATTERY_CHARGE_ENERGY_ENTITY: "sensor.battery",
+            CONF_HOME_CONSUMPTION_ENERGY_ENTITY: "sensor.home",
         },
     )
-    coordinator._auto_test_active = True
-    coordinator._auto_last_sample_time = now - timedelta(hours=1)
-    coordinator._auto_energy_sent_wh = 0.0
-    coordinator._auto_energy_received_wh = 0.0
-    coordinator._get_power_w = MagicMock(side_effect=[1000, 900])
-
-    with patch("custom_components.inverter_charge_night.dt_util.now", return_value=now):
-        coordinator._accumulate_auto_energy()
-
-    assert coordinator._auto_energy_sent_wh == 1000.0
-    assert coordinator._auto_energy_received_wh == 900.0
+    # Verify snapshot attributes exist and are None by default
+    assert coordinator._auto_test_start_snapshot is None
+    assert coordinator._session_start_snapshot is None
 
 
 def test_finalize_auto_test_records_best(mock_hass):
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     coordinator = _make_coordinator(mock_hass, {})
+    def _update_entry(entry, data=None, options=None):
+        if options is not None:
+            entry.options = options
+        if data is not None:
+            entry.data = data
+    mock_hass.config_entries.async_update_entry = MagicMock(side_effect=_update_entry)
     coordinator._auto_test_active = True
     coordinator._auto_test_start = now - timedelta(hours=2)
     coordinator._auto_test_power_w = 5000
-    coordinator._auto_energy_sent_wh = 1000.0
-    coordinator._auto_energy_received_wh = 900.0
-    coordinator._get_auto_efficiency_data = MagicMock(return_value={})
-    coordinator._save_auto_efficiency_data = MagicMock()
+    # Set up start snapshot and mock end snapshot for finalize
+    coordinator._auto_test_start_snapshot = {
+        "grid_import_kwh": 100.0,
+        "battery_charge_kwh": 50.0,
+        "home_consumption_kwh": 30.0,
+    }
+    # Mock _snapshot_meters to return end snapshot
+    coordinator._auto_efficiency._snapshot_meters = MagicMock(return_value={
+        "grid_import_kwh": 110.0,
+        "battery_charge_kwh": 59.0,
+        "home_consumption_kwh": 31.0,
+    })
 
     with patch("custom_components.inverter_charge_night.dt_util.now", return_value=now):
         coordinator._finalize_auto_test()
 
-    saved = coordinator._save_auto_efficiency_data.call_args.args[0]
+    saved = coordinator.entry.options["auto_efficiency_data"]
     assert saved["best_power_w"] == 5000
-    assert saved["best_loss"] == pytest.approx(0.1)
-    assert saved["history"]["5000"] == pytest.approx(0.1)
-    assert coordinator._auto_test_active is False
+    # delta: grid=10kWh, battery=9kWh, home=1kWh → loss=0kWh, eff=100%
+    assert saved["best_loss"] == pytest.approx(0.0)
+
+
+def test_min_soc_cooldown_helper(mock_hass):
+    coordinator = _make_coordinator(mock_hass, {})
+    assert coordinator._is_within_min_soc_cooldown() is False
+
+    with patch(
+        "custom_components.inverter_charge_night.time_module.monotonic",
+        return_value=1000.0,
+    ):
+        coordinator._last_soc_set_at = 1000.0
+        assert coordinator._is_within_min_soc_cooldown() is True
+        coordinator._last_soc_set_at = 900.0
+        assert coordinator._is_within_min_soc_cooldown() is False
 
 
 def test_finalize_auto_test_discards_short_duration(mock_hass):
@@ -128,8 +148,11 @@ def test_finalize_auto_test_discards_short_duration(mock_hass):
     coordinator._auto_test_active = True
     coordinator._auto_test_start = now - timedelta(minutes=10)
     coordinator._auto_test_power_w = 5000
-    coordinator._auto_energy_sent_wh = 1000.0
-    coordinator._auto_energy_received_wh = 900.0
+    coordinator._auto_test_start_snapshot = {
+        "grid_import_kwh": 100.0,
+        "battery_charge_kwh": 50.0,
+        "home_consumption_kwh": 30.0,
+    }
     coordinator._save_auto_efficiency_data = MagicMock()
 
     with patch("custom_components.inverter_charge_night.dt_util.now", return_value=now):
@@ -144,47 +167,34 @@ async def test_handle_auto_charge_uses_best_power_and_disables(mock_hass):
     grid_state = MagicMock()
     grid_state.state = "on"
     mock_hass.states.get.return_value = grid_state
-    mock_hass.config_entries.async_update_entry = MagicMock()
+    def _update_entry(entry, data=None, options=None):
+        if options is not None:
+            entry.options = options
+        if data is not None:
+            entry.data = data
+    mock_hass.config_entries.async_update_entry = MagicMock(side_effect=_update_entry)
 
     coordinator = _make_coordinator(
         mock_hass,
         {
             CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_CHARGE_POWER_ENTITY: "number.setpoint",
-            CONF_CHARGE_POWER_SENT_ENTITY: "sensor.sent",
-            CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.received",
+            CONF_GRID_IMPORT_ENERGY_ENTITY: "sensor.grid",
+            CONF_BATTERY_CHARGE_ENERGY_ENTITY: "sensor.battery",
+            CONF_HOME_CONSUMPTION_ENERGY_ENTITY: "sensor.home",
+            CONF_MIN_CHARGE_POWER_W: 2000,
+            CONF_MAX_CHARGE_POWER_W: 2000,
         },
     )
     coordinator.auto_efficient_charge = True
     coordinator.target_reached = False
-    coordinator._select_next_auto_test_power_w = MagicMock(return_value=None)
-    coordinator._get_auto_efficiency_data = MagicMock(return_value={"best_power_w": 6000})
     coordinator._set_ac_charge_limit_w = AsyncMock()
+    coordinator.entry.options = {"auto_efficiency_data": {"best_power_w": 6000}}
 
     await coordinator._handle_auto_charge()
 
     coordinator._set_ac_charge_limit_w.assert_awaited_with(6000)
     assert coordinator.auto_efficient_charge is False
-
-
-def test_get_power_w_returns_none_on_unavailable(mock_hass):
-    state = MagicMock()
-    state.state = "unavailable"
-    state.attributes = {}
-    mock_hass.states.get.return_value = state
-    coordinator = _make_coordinator(
-        mock_hass,
-        {CONF_MIN_CHARGE_POWER_W: 1000, CONF_MAX_CHARGE_POWER_W: 2000},
-    )
-    assert coordinator._get_power_w("sensor.power") is None
-
-
-def test_select_next_auto_test_power_none_when_range_invalid(mock_hass):
-    coordinator = _make_coordinator(
-        mock_hass,
-        {CONF_MIN_CHARGE_POWER_W: 5000, CONF_MAX_CHARGE_POWER_W: 5000},
-    )
-    assert coordinator._select_next_auto_test_power_w() is None
 
 
 @pytest.mark.asyncio
@@ -195,6 +205,11 @@ async def test_handle_auto_charge_missing_entities_no_action(mock_hass):
         {
             CONF_MIN_CHARGE_POWER_W: 5000,
             CONF_MAX_CHARGE_POWER_W: 15000,
+            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_CHARGE_POWER_ENTITY: "number.setpoint",
+            CONF_GRID_IMPORT_ENERGY_ENTITY: "sensor.grid",
+            CONF_BATTERY_CHARGE_ENERGY_ENTITY: "sensor.battery",
+            CONF_HOME_CONSUMPTION_ENERGY_ENTITY: "sensor.home",
         },
     )
     coordinator.auto_efficient_charge = True
@@ -217,8 +232,9 @@ async def test_handle_auto_charge_grid_off_finalizes_test(mock_hass):
             CONF_MAX_CHARGE_POWER_W: 15000,
             CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_CHARGE_POWER_ENTITY: "number.setpoint",
-            CONF_CHARGE_POWER_SENT_ENTITY: "sensor.sent",
-            CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.received",
+            CONF_GRID_IMPORT_ENERGY_ENTITY: "sensor.grid",
+            CONF_BATTERY_CHARGE_ENERGY_ENTITY: "sensor.battery",
+            CONF_HOME_CONSUMPTION_ENERGY_ENTITY: "sensor.home",
         },
     )
     coordinator.auto_efficient_charge = True
@@ -303,3 +319,28 @@ async def test_verify_and_restore_min_soc_sets_value(mock_hass):
     assert args[0] == "number"
     assert args[1] == "set_value"
     assert args[2]["value"] == 70.0
+
+
+@pytest.mark.asyncio
+async def test_verify_and_restore_min_soc_respects_cooldown(mock_hass):
+    min_soc_state = MagicMock()
+    min_soc_state.state = "8"
+    mock_hass.states.get.return_value = min_soc_state
+    mock_hass.services.async_call = AsyncMock()
+
+    coordinator = _make_coordinator(
+        mock_hass,
+        {CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc"},
+    )
+    coordinator.is_active = True
+    coordinator.is_enabled = True
+    coordinator.minimum_calculated_soc = 70.0
+    coordinator._last_soc_set_at = 1000.0
+
+    with patch(
+        "custom_components.inverter_charge_night.time_module.monotonic",
+        return_value=1000.0,
+    ):
+        await coordinator._verify_and_restore_min_soc()
+
+    mock_hass.services.async_call.assert_not_awaited()

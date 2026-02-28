@@ -1,0 +1,48 @@
+{
+  "entity": {
+    "sensor": {
+      "calculated_soc": {
+        "default": "mdi:battery-charging"
+      },
+      "best_charge_power": {
+        "default": "mdi:flash"
+      },
+      "charging_efficiency": {
+        "default": "mdi:lightning-bolt-circle"
+      },
+      "auto_test_status": {
+        "default": "mdi:test-tube"
+      }
+    },
+    "switch": {
+      "enabled": {
+        "default": "mdi:power-plug",
+        "state": {
+          "on": "mdi:power-plug",
+          "off": "mdi:power-plug-off"
+        }
+      },
+      "auto_efficient_charge_finder": {
+        "default": "mdi:auto-fix",
+        "state": {
+          "on": "mdi:auto-fix",
+          "off": "mdi:auto-fix"
+        }
+      }
+    },
+    "binary_sensor": {
+      "active": {
+        "default": "mdi:weather-night",
+        "state": {
+          "on": "mdi:weather-night",
+          "off": "mdi:weather-sunny"
+        }
+      }
+    },
+    "number": {
+      "min_soc_override": {
+        "default": "mdi:battery-arrow-up"
+      }
+    }
+  }
+}

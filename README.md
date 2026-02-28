@@ -2,6 +2,12 @@
 
 A Home Assistant custom integration that intelligently calculates and sets the optimal battery state of charge (SOC) for overnight grid charging based on PV forecast data. The integration automatically controls your Kostal inverter during a configurable time window to ensure you have enough battery capacity to store the next day's solar production.
 
+## Latest Release
+
+- Current version: `1.0.3`
+- Changelog: `CHANGELOG.md`
+- Focus: startup trigger-noise reduction, robust forecast unit parsing, and audit-driven reliability fixes
+
 ## Features
 
 - **Automatic SOC Calculation**: Calculates target SOC based on PV forecast using the formula: `(Battery Capacity - Forecast Energy) / Battery Capacity × 100`
@@ -528,6 +534,13 @@ All critical operations include error handling:
 - Graceful degradation when entities unavailable
 - State flags reset even if operations fail
 - Comprehensive error logging with full exception info
+
+### Developer Checks (CI)
+
+Recommended checks for CI or local validation:
+- `pytest -q -p pytest_asyncio.plugin -p pytest_cov.plugin`
+- `pyright`
+- `mypy custom_components/inverter_charge_night`
 
 ## Changelog
 

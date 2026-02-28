@@ -21,6 +21,14 @@ DEFAULT_ACTIVE_END_DATE = ""  # Optional YYYY-MM-DD
 DEFAULT_MIN_CHARGE_POWER_W = 1000  # Default min charge power (W)
 DEFAULT_MAX_CHARGE_POWER_W = 10000  # Default max charge power (W)
 DEFAULT_ABSOLUTE_MAX_CHARGE_POWER_W = 10000  # Default absolute max charge power (W)
+MIN_SOC_TOLERANCE = 0.5  # SOC change threshold to avoid excessive inverter writes
+MIN_SOC_RESTORE_COOLDOWN_S = 30  # Cool-down to avoid rapid restore loops
+INVERTER_AVAILABILITY_RETRY_MAX_S = 180  # Max wait for inverter entities after restart
+INVERTER_AVAILABILITY_RETRY_INTERVAL_S = 10  # Retry interval for inverter availability
+AUTO_EFFICIENCY_STEP_W = 100  # 0.1 kW precision
+AUTO_EFFICIENCY_MIN_TEST_DURATION_S = 1800  # 30 minutes
+AUTO_EFFICIENCY_CSV_FILENAME = "efficiency_log.csv"
+AUTO_EFFICIENCY_MAX_HISTORY_ENTRIES = 500  # Max entries in persistent history
 
 # Configuration keys
 CONF_OPERATION_MODE = "operation_mode"
@@ -43,8 +51,9 @@ CONF_BACKUP_MODE_ENTITY = "backup_mode_entity"
 CONF_MIN_CHARGE_POWER_W = "min_charge_power_w"
 CONF_MAX_CHARGE_POWER_W = "max_charge_power_w"
 CONF_CHARGE_POWER_ENTITY = "charge_power_entity"
-CONF_CHARGE_POWER_SENT_ENTITY = "charge_power_sent_entity"
-CONF_CHARGE_POWER_RECEIVED_ENTITY = "charge_power_received_entity"
+CONF_GRID_IMPORT_ENERGY_ENTITY = "grid_import_energy_entity"
+CONF_BATTERY_CHARGE_ENERGY_ENTITY = "battery_charge_energy_entity"
+CONF_HOME_CONSUMPTION_ENERGY_ENTITY = "home_consumption_energy_entity"
 CONF_AUTO_EFFICIENT_CHARGE = "auto_efficient_charge"
 CONF_AUTO_EFFICIENCY_DATA = "auto_efficiency_data"
 CONF_ABSOLUTE_MAX_CHARGE_POWER_W = "absolute_max_charge_power_w"
