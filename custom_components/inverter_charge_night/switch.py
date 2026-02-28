@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
@@ -13,13 +13,17 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import InverterChargeNightCoordinator
 from .const import CONF_AUTO_EFFICIENT_CHARGE, DOMAIN
+if TYPE_CHECKING:  # pragma: no cover
+    from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
+
+PARALLEL_UPDATES = 1
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: InverterChargeNightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the switch platform."""

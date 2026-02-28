@@ -119,3 +119,36 @@ async def test_inverter_min_soc_listener_triggers_restore(mock_hass):
     await captured["callback"](event)
 
     coordinator._verify_and_restore_min_soc.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_inverter_min_soc_listener_respects_cooldown(mock_hass):
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc"}
+    )
+    coordinator.is_active = True
+    coordinator.is_enabled = True
+    coordinator.minimum_calculated_soc = 70.0
+    coordinator._verify_and_restore_min_soc = AsyncMock()
+    coordinator._last_soc_set_at = 1000.0
+
+    captured = {}
+
+    def _capture(hass, entity_id, callback):
+        captured["callback"] = callback
+        return MagicMock()
+
+    with patch(
+        "custom_components.inverter_charge_night.async_track_state_change_event",
+        side_effect=_capture,
+    ), patch(
+        "custom_components.inverter_charge_night.time_module.monotonic",
+        return_value=1000.0,
+    ):
+        coordinator._setup_inverter_min_soc_listener()
+
+        event = MagicMock()
+        event.data = {"new_state": MagicMock(state="8")}
+        await captured["callback"](event)
+
+    coordinator._verify_and_restore_min_soc.assert_not_awaited()
