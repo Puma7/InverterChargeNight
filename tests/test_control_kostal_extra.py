@@ -89,41 +89,6 @@ async def test_control_kostal_sets_min_and_grid(mock_hass):
 
 
 @pytest.mark.asyncio
-async def test_control_kostal_skips_min_soc_when_in_cooldown(mock_hass):
-    battery_state = MagicMock()
-    battery_state.state = "10"
-    min_soc_state = MagicMock()
-    min_soc_state.state = "8"
-    mock_hass.states.get.side_effect = lambda entity_id: {
-        "sensor.soc": battery_state,
-        "number.min_soc": min_soc_state,
-    }.get(entity_id)
-    mock_hass.services.async_call = AsyncMock()
-
-    coordinator = _make_coordinator(
-        mock_hass,
-        {
-            CONF_BATTERY_SOC_ENTITY: "sensor.soc",
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-            CONF_DEFAULT_MIN_SOC: 8.0,
-            CONF_USER_MIN_SOC: 8.0,
-            CONF_USER_MAX_SOC: 100.0,
-        },
-    )
-    coordinator._is_backup_active = MagicMock(return_value=False)
-    coordinator._last_soc_set = 50.0
-    coordinator._last_soc_set_at = 1000.0
-
-    with patch(
-        "custom_components.inverter_charge_night.time_module.monotonic",
-        return_value=1000.0,
-    ):
-        await coordinator._control_kostal(50.0)
-
-    assert not mock_hass.services.async_call.called
-
-
-@pytest.mark.asyncio
 async def test_stop_grid_charging_turns_off_and_resets(mock_hass):
     grid_state = MagicMock()
     grid_state.state = "on"

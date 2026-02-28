@@ -30,7 +30,7 @@ async def test_async_update_data_disabled(mock_hass):
     coordinator = _make_coordinator(mock_hass, {})
     coordinator.is_enabled = False
     coordinator.is_active = True
-    mock_hass.async_create_background_task = MagicMock(side_effect=lambda coro, name=None: coro.close())
+    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
     data = await coordinator._async_update_data()
     assert data["is_active"] is False
     assert data["calculated_soc"] is None
@@ -58,7 +58,7 @@ async def test_async_update_data_outside_date_range_triggers_end(mock_hass):
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=False)
     coordinator._on_window_end = AsyncMock()
-    mock_hass.async_create_background_task = MagicMock(side_effect=lambda coro, name=None: coro.close())
+    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
     data = await coordinator._async_update_data()
     coordinator._on_window_end.assert_awaited()
     assert data["is_active"] is False
@@ -168,72 +168,6 @@ async def test_async_update_data_forecast_wh_conversion(mock_hass):
     data = await coordinator._async_update_data()
 
     assert data["calculated_soc"] is not None
-
-
-@pytest.mark.asyncio
-async def test_async_update_data_forecast_unit_based_conversion(mock_hass):
-    pv_wh = MagicMock()
-    pv_wh.state = "2500"
-    pv_wh.attributes = {"unit_of_measurement": "Wh"}
-    battery_state = MagicMock()
-    battery_state.state = "10"
-
-    mock_hass.states.get.side_effect = lambda entity_id: {
-        "sensor.pv": pv_wh,
-        "sensor.soc": battery_state,
-    }.get(entity_id)
-
-    coordinator = _make_coordinator(
-        mock_hass,
-        {
-            CONF_PV_FORECAST_ENTITY: "sensor.pv",
-            CONF_BATTERY_CAPACITY: 10.0,
-            CONF_FORECAST_ERROR_MARGIN: 0.0,
-            CONF_USER_MIN_SOC: 0.0,
-            CONF_USER_MAX_SOC: 100.0,
-            CONF_DEFAULT_MIN_SOC: 0.0,
-            CONF_BATTERY_SOC_ENTITY: "sensor.soc",
-        },
-    )
-    coordinator.is_enabled = True
-    coordinator.is_active = True
-    coordinator._is_backup_active = MagicMock(return_value=False)
-    coordinator._is_within_date_range = MagicMock(return_value=True)
-    coordinator._control_kostal = AsyncMock()
-    coordinator._handle_auto_charge = AsyncMock()
-
-    data = await coordinator._async_update_data()
-    assert data["calculated_soc"] == 75.0
-
-    pv_kwh = MagicMock()
-    pv_kwh.state = "2.5"
-    pv_kwh.attributes = {"unit_of_measurement": "kWh"}
-    mock_hass.states.get.side_effect = lambda entity_id: {
-        "sensor.pv": pv_kwh,
-        "sensor.soc": battery_state,
-    }.get(entity_id)
-
-    coordinator = _make_coordinator(
-        mock_hass,
-        {
-            CONF_PV_FORECAST_ENTITY: "sensor.pv",
-            CONF_BATTERY_CAPACITY: 10.0,
-            CONF_FORECAST_ERROR_MARGIN: 0.0,
-            CONF_USER_MIN_SOC: 0.0,
-            CONF_USER_MAX_SOC: 100.0,
-            CONF_DEFAULT_MIN_SOC: 0.0,
-            CONF_BATTERY_SOC_ENTITY: "sensor.soc",
-        },
-    )
-    coordinator.is_enabled = True
-    coordinator.is_active = True
-    coordinator._is_backup_active = MagicMock(return_value=False)
-    coordinator._is_within_date_range = MagicMock(return_value=True)
-    coordinator._control_kostal = AsyncMock()
-    coordinator._handle_auto_charge = AsyncMock()
-
-    data = await coordinator._async_update_data()
-    assert data["calculated_soc"] == 75.0
 
 
 @pytest.mark.asyncio

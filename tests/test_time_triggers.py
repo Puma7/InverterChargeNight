@@ -90,11 +90,7 @@ def test_setup_and_remove_time_triggers(mock_hass):
         mock_hass, {CONF_START_TIME: "00:00", CONF_END_TIME: "05:59"}
     )
     trigger = MagicMock()
-    task = MagicMock()
-    task.done.return_value = False
-    mock_hass.async_create_background_task = MagicMock(
-        side_effect=lambda coro, name=None: (coro.close(), task)[1]
-    )
+    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
 
     with patch(
         "custom_components.inverter_charge_night.async_track_time_change",
@@ -105,34 +101,6 @@ def test_setup_and_remove_time_triggers(mock_hass):
     assert len(coordinator._time_triggers) == 2
     coordinator.remove_time_triggers()
     trigger.assert_called()
-    task.cancel.assert_called_once()
-
-
-def test_schedule_window_check_fallback_uses_async_create_task(mock_hass):
-    coordinator = _make_coordinator(mock_hass, {})
-    if hasattr(mock_hass, "async_create_background_task"):
-        delattr(mock_hass, "async_create_background_task")
-
-    task = MagicMock()
-    mock_hass.async_create_task = MagicMock(
-        side_effect=lambda coro: (coro.close(), task)[1]
-    )
-
-    coordinator._schedule_window_check()
-
-    mock_hass.async_create_task.assert_called_once()
-
-
-def test_stop_window_check_task_cancels(mock_hass):
-    coordinator = _make_coordinator(mock_hass, {})
-    task = MagicMock()
-    task.done.return_value = False
-    coordinator._window_check_task = task
-
-    coordinator._stop_window_check_task()
-
-    task.cancel.assert_called_once()
-    assert coordinator._window_check_task is None
 
 
 def test_update_time_triggers_updates_listener(mock_hass):
@@ -149,11 +117,7 @@ def test_update_time_triggers_updates_listener(mock_hass):
     coordinator.remove_time_triggers = MagicMock()
     coordinator.setup_time_triggers = MagicMock()
     coordinator._check_current_window = AsyncMock()
-    task = MagicMock()
-    task.done.return_value = True
-    mock_hass.async_create_background_task = MagicMock(
-        side_effect=lambda coro, name=None: (coro.close(), task)[1]
-    )
+    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
 
     coordinator.entry.data = {
         CONF_START_TIME: "01:00",
@@ -164,4 +128,4 @@ def test_update_time_triggers_updates_listener(mock_hass):
     coordinator.update_time_triggers()
 
     coordinator._setup_battery_soc_listener.assert_called_once()
-    mock_hass.async_create_background_task.assert_called_once()
+    mock_hass.async_create_task.assert_called_once()

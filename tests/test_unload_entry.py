@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.inverter_charge_night import async_unload_entry
+from custom_components.inverter_charge_night.const import DOMAIN
 
 
 @pytest.mark.asyncio
@@ -16,7 +17,7 @@ async def test_async_unload_entry_active_resets(mock_hass, mock_config_entry):
     coordinator._remove_inverter_min_soc_listener = MagicMock()
     coordinator._stop_periodic_verification = MagicMock()
 
-    mock_config_entry.runtime_data = coordinator
+    mock_hass.data[DOMAIN] = {mock_config_entry.entry_id: coordinator}
     mock_hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
 
     result = await async_unload_entry(mock_hass, mock_config_entry)
@@ -27,7 +28,7 @@ async def test_async_unload_entry_active_resets(mock_hass, mock_config_entry):
 
 @pytest.mark.asyncio
 async def test_async_unload_entry_no_unload(mock_hass, mock_config_entry):
-    mock_config_entry.runtime_data = MagicMock()
+    mock_hass.data[DOMAIN] = {mock_config_entry.entry_id: MagicMock()}
     mock_hass.config_entries.async_unload_platforms = AsyncMock(return_value=False)
 
     result = await async_unload_entry(mock_hass, mock_config_entry)

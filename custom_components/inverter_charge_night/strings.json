@@ -99,26 +99,6 @@
           "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)"
         },
         "data_description": {
-          "update_interval": "How often the coordinator refreshes data",
-          "command_delay": "Delay between min SOC and grid charge commands",
-          "active_start_date": "Only run after this date. Leave empty to always run.",
-          "active_end_date": "Only run before this date. Leave empty to always run.",
-          "backup_mode_entity": "Entity indicating backup/island mode. If active, charging is paused.",
-          "auto_efficient_charge": "Automatically search for the most efficient charge power between min and max"
-        }
-      },
-      "reconfigure": {
-        "title": "Reconfigure – Entities",
-        "description": "Step 1 of 4: Update core entities and battery capacity.",
-        "data": {
-          "name": "Integration Name",
-          "kostal_min_soc_entity": "Kostal Min SOC Entity",
-          "kostal_grid_charge_switch": "Grid Charge Switch",
-          "pv_forecast_entity": "PV Forecast Entity",
-          "battery_soc_entity": "Battery SOC Sensor",
-          "battery_capacity": "Battery Capacity"
-        },
-        "data_description": {
           "name": "Name for this integration instance",
           "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
           "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC",
@@ -160,8 +140,7 @@
       "invalid_power": "Power must be greater than 0",
       "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
       "required_entity": "Entity must be provided when value is set",
-      "required_value": "Value must be provided when entity is set",
-      "auto_efficiency_requires_power_entities": "Auto efficient charge requires charge power entity, grid import, battery charge, home consumption energy entities, and min/max charge power to be configured in step 3"
+      "required_value": "Value must be provided when entity is set"
     },
     "abort": {
       "already_configured": "Integration is already configured"
@@ -182,12 +161,6 @@
       },
       "best_charge_power": {
         "name": "Best Charge Power"
-      },
-      "charging_efficiency": {
-        "name": "Charging Efficiency"
-      },
-      "auto_test_status": {
-        "name": "Auto Test Status"
       }
     },
     "switch": {
@@ -298,8 +271,7 @@
       "invalid_power": "Power must be greater than 0",
       "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
       "required_entity": "Entity must be provided when value is set",
-      "required_value": "Value must be provided when entity is set",
-      "auto_efficiency_requires_power_entities": "Auto efficient charge requires charge power entity, grid import, battery charge, home consumption energy entities, and min/max charge power to be configured in step 3"
+      "required_value": "Value must be provided when entity is set"
     }
   }
 }

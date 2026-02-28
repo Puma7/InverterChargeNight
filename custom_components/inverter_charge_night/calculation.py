@@ -53,10 +53,6 @@ def calculate_required_soc(
     except (TypeError, ValueError):
         _LOGGER.error("All numeric parameters must be numbers")
         return None
-
-    if battery_capacity <= 0:
-        _LOGGER.error("Battery capacity must be a positive number")
-        return None
         
     if not 0 <= user_min_soc < user_max_soc <= 100:
         _LOGGER.error(
