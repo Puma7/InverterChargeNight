@@ -46,6 +46,8 @@ from .const import (
     CONF_KOSTAL_MIN_SOC_ENTITY,
     CONF_KOSTAL_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
+    CONF_DISCHARGE_FORECAST_ENTITY,
+    CONF_FORCE_DISCHARGE_SWITCH,
     DEFAULT_END_TIME,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SAFE_FALLBACK_SOC,
@@ -243,6 +245,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._skip_next_unsub:
             self._skip_next_unsub()
             self._skip_next_unsub = None
+
+    def _get_active_forecast_entity(self) -> str | None:
+        """Return the forecast entity ID for the current operation mode.
+
+        Night charge uses the next-day forecast (CONF_PV_FORECAST_ENTITY).
+        Morning discharge uses today's forecast (CONF_DISCHARGE_FORECAST_ENTITY),
+        falling back to CONF_PV_FORECAST_ENTITY if not configured.
+        """
+        if self.is_discharge_mode:
+            discharge_entity = self.config.get(CONF_DISCHARGE_FORECAST_ENTITY)
+            if discharge_entity:
+                return str(discharge_entity)
+        return self.config.get(CONF_PV_FORECAST_ENTITY)
 
     def _parse_time(self, time_str: str | None, default: str) -> tuple[int, int]:
         """Parse time string into (hour, minute) tuple with validation."""
@@ -918,7 +933,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Get forecast data
             forecast_energy = 0.0
             forecast_available = False  # Track if forecast entity was actually available
-            pv_forecast_entity = self.config.get(CONF_PV_FORECAST_ENTITY)
+            pv_forecast_entity = self._get_active_forecast_entity()
             if pv_forecast_entity:
                 state = self.hass.states.get(pv_forecast_entity)
                 if state:
@@ -1076,6 +1091,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             _LOGGER.warning("No grid charge switch configured - cannot reset")
         
+        # Turn off force discharge switch if configured (discharge mode cleanup)
+        force_discharge_switch = self.config.get(CONF_FORCE_DISCHARGE_SWITCH)
+        if force_discharge_switch:
+            try:
+                state = self.hass.states.get(force_discharge_switch)
+                if state and state.state == "on":
+                    await self.hass.services.async_call(
+                        "switch",
+                        "turn_off",
+                        {"entity_id": force_discharge_switch},
+                    )
+                    _LOGGER.info("Turned off force discharge switch during reset")
+            except Exception as e:
+                _LOGGER.error("Error turning off force discharge: %s", e, exc_info=True)
+        
         # Reset stored original value and tracking after successful reset
         if reset_success:
             self.original_min_soc = None
@@ -1106,8 +1136,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._on_window_end(dt_util.now())
             return inactive_data
         
-        # Get forecast data
-        pv_forecast_entity = self.config.get(CONF_PV_FORECAST_ENTITY)
+        # Get forecast data (uses today's forecast for discharge, tomorrow's for charge)
+        pv_forecast_entity = self._get_active_forecast_entity()
         try:
             battery_capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
             error_margin = float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0))
@@ -1243,7 +1273,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                 direction,
                                 target_soc,
                             )
-                            if not self.is_discharge_mode:
+                            if self.is_discharge_mode:
+                                await self._stop_force_discharge()
+                            else:
                                 await self._stop_grid_charging()
                             self.target_reached = True
                         return {
@@ -1294,7 +1326,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                 self.operation_mode,
                                 "override" if self.override_soc is not None else "calculated",
                             )
-                            if not self.is_discharge_mode:
+                            if self.is_discharge_mode:
+                                await self._stop_force_discharge()
+                            else:
                                 await self._stop_grid_charging()
                             self.target_reached = True
                 except (ValueError, TypeError):
@@ -1480,8 +1514,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _control_discharge(self, target_soc: float) -> None:
         """Control Kostal entities for morning discharge mode.
 
-        Sets min SOC to the discharge target (floor) and ensures grid charging is off.
-        The battery discharges through house consumption and grid export down to this floor.
+        Sets min SOC to the discharge target (floor), ensures grid charging is off,
+        and activates the force-discharge switch (if configured) to push battery
+        energy into the grid.
         """
         if self._is_backup_active():
             _LOGGER.info("Backup mode active - skipping discharge control")
@@ -1501,6 +1536,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
         kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        force_discharge_switch = self.config.get(CONF_FORCE_DISCHARGE_SWITCH)
 
         battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
         should_skip = False
@@ -1527,6 +1563,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 should_skip = True
 
         if should_skip:
+            # Target already reached — turn OFF force discharge if it was on
+            if force_discharge_switch:
+                try:
+                    state = self.hass.states.get(force_discharge_switch)
+                    if state and state.state == "on":
+                        await self.hass.services.async_call(
+                            "switch", "turn_off",
+                            {"entity_id": force_discharge_switch},
+                        )
+                        _LOGGER.info("Turned off force discharge - target already reached")
+                except Exception as e:
+                    _LOGGER.error("Error turning off force discharge: %s", e, exc_info=True)
             return
 
         need_to_set_min_soc = False
@@ -1579,6 +1627,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._last_soc_set = target_soc
             _LOGGER.info("Set min SOC to %.1f%% for discharge (floor)", target_soc)
 
+        # Ensure grid charging is OFF during discharge
         if kostal_grid_charge_switch:
             try:
                 state = self.hass.states.get(kostal_grid_charge_switch)
@@ -1591,6 +1640,38 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.info("Turned off grid charge for discharge mode")
             except Exception as e:
                 _LOGGER.error("Error turning off grid charge in discharge mode: %s", e, exc_info=True)
+
+        # Activate force-discharge switch to push battery energy to grid
+        if force_discharge_switch:
+            try:
+                state = self.hass.states.get(force_discharge_switch)
+                if state and state.state == "off":
+                    await self.hass.services.async_call(
+                        "switch",
+                        "turn_on",
+                        {"entity_id": force_discharge_switch},
+                    )
+                    _LOGGER.info("Turned on force discharge switch")
+                elif state and state.state == "on":
+                    _LOGGER.debug("Force discharge switch already on")
+            except Exception as e:
+                _LOGGER.error("Error turning on force discharge: %s", e, exc_info=True)
+
+    async def _stop_force_discharge(self) -> None:
+        """Turn off force discharge switch when discharge target is reached."""
+        force_discharge_switch = self.config.get(CONF_FORCE_DISCHARGE_SWITCH)
+        if force_discharge_switch:
+            try:
+                state = self.hass.states.get(force_discharge_switch)
+                if state and state.state == "on":
+                    await self.hass.services.async_call(
+                        "switch",
+                        "turn_off",
+                        {"entity_id": force_discharge_switch},
+                    )
+                    _LOGGER.info("Stopped force discharge - target SOC reached")
+            except Exception as e:
+                _LOGGER.error("Error stopping force discharge: %s", e, exc_info=True)
 
     async def _stop_grid_charging(self) -> None:
         """Stop grid charging when target is reached."""
@@ -1652,7 +1733,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "override" if self.override_soc is not None else "calculated",
                         )
                         try:
-                            if not self.is_discharge_mode:
+                            if self.is_discharge_mode:
+                                await self._stop_force_discharge()
+                            else:
                                 await self._stop_grid_charging()
                             self.target_reached = True
                             await self.async_request_refresh()
@@ -1833,7 +1916,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                 target_soc,
                                 self.operation_mode,
                             )
-                            if not self.is_discharge_mode:
+                            if self.is_discharge_mode:
+                                await self._stop_force_discharge()
+                            else:
                                 await self._stop_grid_charging()
                             self.target_reached = True
                     except (ValueError, TypeError):
