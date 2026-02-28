@@ -21,6 +21,8 @@ REDACT_KEYS = {
     "charge_power_received_entity",
     "absolute_max_charge_power_entity",
     "backup_mode_entity",
+    "discharge_forecast_entity",
+    "force_discharge_switch",
 }
 
 

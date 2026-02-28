@@ -30,14 +30,16 @@
           "charge_power_entity": "Battery Max AC Charge Limit Entity (optional)",
           "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
           "charge_power_received_entity": "Charge Power Received by Battery (optional)",
-          "auto_efficient_charge": "Auto Efficient Charge Finder"
+          "auto_efficient_charge": "Auto Efficient Charge Finder",
+          "discharge_forecast_entity": "Today's PV Forecast Entity (for discharge, optional)",
+          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)"
         },
         "data_description": {
           "name": "Name for this integration instance",
           "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
           "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC",
           "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
-          "pv_forecast_entity": "Select the Solcast entity that provides PV forecast data (in kWh)",
+          "pv_forecast_entity": "Select the Solcast entity that provides PV forecast data (in kWh). For Night Charge this is the NEXT DAY forecast.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)",
           "start_time": "Time when the window should start (format: HH:MM, e.g., 00:00)",
@@ -58,7 +60,9 @@
           "charge_power_entity": "Optional: number entity used to set the max AC charge limit (W or kW). Use this OR the AC+DC max entity.",
           "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
           "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
-          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found."
+          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found.",
+          "discharge_forecast_entity": "Optional: TODAY's PV forecast entity (used in Morning Discharge mode). Falls back to the main forecast entity if not set.",
+          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached."
         }
       },
       "init": {
@@ -90,14 +94,16 @@
           "charge_power_entity": "Battery Max AC Charge Limit Entity (optional)",
           "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
           "charge_power_received_entity": "Charge Power Received by Battery (optional)",
-          "auto_efficient_charge": "Auto Efficient Charge Finder"
+          "auto_efficient_charge": "Auto Efficient Charge Finder",
+          "discharge_forecast_entity": "Today's PV Forecast Entity (for discharge, optional)",
+          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)"
         },
         "data_description": {
           "name": "Name for this integration instance",
           "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
           "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC",
           "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
-          "pv_forecast_entity": "Select the Solcast entity that provides PV forecast data (in kWh)",
+          "pv_forecast_entity": "Select the Solcast entity that provides PV forecast data (in kWh). For Night Charge this is the NEXT DAY forecast.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)",
           "start_time": "Time when the window should start (format: HH:MM, e.g., 00:00)",
@@ -118,7 +124,9 @@
           "charge_power_entity": "Optional: number entity used to set the max AC charge limit (W or kW).",
           "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
           "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
-          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found."
+          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found.",
+          "discharge_forecast_entity": "Optional: TODAY's PV forecast entity (used in Morning Discharge mode). Falls back to the main forecast entity if not set.",
+          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached."
         }
       }
     },
@@ -217,14 +225,16 @@
           "charge_power_entity": "Battery Max AC Charge Limit Entity (optional)",
           "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
           "charge_power_received_entity": "Charge Power Received by Battery (optional)",
-          "auto_efficient_charge": "Auto Efficient Charge Finder"
+          "auto_efficient_charge": "Auto Efficient Charge Finder",
+          "discharge_forecast_entity": "Today's PV Forecast Entity (for discharge, optional)",
+          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)"
         },
         "data_description": {
           "name": "Name for this integration instance",
           "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
           "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC",
           "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
-          "pv_forecast_entity": "Select the Solcast entity that provides PV forecast data (in kWh)",
+          "pv_forecast_entity": "Select the Solcast entity that provides PV forecast data (in kWh). For Night Charge this is the NEXT DAY forecast.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)",
           "start_time": "Time when the window should start (format: HH:MM, e.g., 00:00)",
@@ -245,7 +255,9 @@
           "charge_power_entity": "Optional: number entity used to set the max AC charge limit (W or kW). Use this OR the AC+DC max entity.",
           "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
           "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
-          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max."
+          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max.",
+          "discharge_forecast_entity": "Optional: TODAY's PV forecast entity (used in Morning Discharge mode). Falls back to the main forecast entity if not set.",
+          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached."
         }
       }
     },
