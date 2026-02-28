@@ -2,6 +2,11 @@
 
 DOMAIN = "inverter_charge_night"
 
+# Operation modes
+MODE_NIGHT_CHARGE = "night_charge"
+MODE_MORNING_DISCHARGE = "morning_discharge"
+DEFAULT_OPERATION_MODE = MODE_NIGHT_CHARGE
+
 # Default values
 DEFAULT_MIN_SOC = 8.0
 DEFAULT_MAX_SOC = 100.0
@@ -18,6 +23,7 @@ DEFAULT_MAX_CHARGE_POWER_W = 10000  # Default max charge power (W)
 DEFAULT_ABSOLUTE_MAX_CHARGE_POWER_W = 10000  # Default absolute max charge power (W)
 
 # Configuration keys
+CONF_OPERATION_MODE = "operation_mode"
 CONF_KOSTAL_MIN_SOC_ENTITY = "kostal_min_soc_entity"
 CONF_KOSTAL_GRID_CHARGE_SWITCH = "kostal_grid_charge_switch"
 CONF_PV_FORECAST_ENTITY = "pv_forecast_entity"
@@ -50,4 +56,6 @@ ATTR_ORIGINAL_MIN_SOC = "original_min_soc"
 ATTR_IS_ACTIVE = "is_active"
 ATTR_TARGET_SOC = "target_soc"
 ATTR_CURRENT_SOC = "current_soc"
+ATTR_OPERATION_MODE = "operation_mode"
+ATTR_SKIP_NEXT = "skip_next"
 

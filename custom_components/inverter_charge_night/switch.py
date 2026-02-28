@@ -28,6 +28,7 @@ async def async_setup_entry(
         [
             InverterChargeNightSwitch(coordinator, entry),
             AutoEfficientChargeSwitch(coordinator, entry),
+            SkipNextSwitch(coordinator, entry),
         ]
     )
 
@@ -86,6 +87,59 @@ class InverterChargeNightSwitch(CoordinatorEntity[InverterChargeNightCoordinator
         self.coordinator._remove_inverter_min_soc_listener()
         self.coordinator._stop_periodic_verification()
         self.async_write_ha_state()
+
+
+class SkipNextSwitch(CoordinatorEntity[InverterChargeNightCoordinator], SwitchEntity):
+    """Switch to skip the next window cycle for 24 hours."""
+
+    _attr_translation_key = "skip_next"
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:debug-step-over"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the skip next switch."""
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_skip_next"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title or "Inverter Charge Night",
+            "manufacturer": "Custom Integration",
+            "model": "Inverter Charge Night",
+        }
+
+    @property
+    def is_on(self) -> bool:
+        """Return if skip next is active."""
+        return bool(self.coordinator.skip_next)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Activate skip next (24-hour override)."""
+        if self.coordinator.skip_next:
+            return
+
+        _LOGGER.info("Skip next activated - integration will skip for 24 hours")
+        self.coordinator.skip_next = True
+        self.coordinator._schedule_skip_next_expiry()
+
+        if self.coordinator.is_active:
+            _LOGGER.info("Currently active - ending window due to skip next")
+            from homeassistant.util import dt as dt_util
+            await self.coordinator._on_window_end(dt_util.now())
+
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Deactivate skip next."""
+        if not self.coordinator.skip_next:
+            return
+
+        _LOGGER.info("Skip next deactivated")
+        self.coordinator.skip_next = False
+        self.coordinator._cancel_skip_next_expiry()
+        self.async_write_ha_state()
+        await self.coordinator._check_current_window()
 
 
 class AutoEfficientChargeSwitch(CoordinatorEntity[InverterChargeNightCoordinator], SwitchEntity):
