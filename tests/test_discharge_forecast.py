@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -11,7 +11,6 @@ from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEFAULT_MIN_SOC,
-    CONF_DISCHARGE_FORECAST_ENTITY,
     CONF_END_TIME,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_FORECAST_ERROR_MARGIN,
@@ -19,6 +18,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_KOSTAL_MIN_SOC_ENTITY,
     CONF_OPERATION_MODE,
     CONF_PV_FORECAST_ENTITY,
+    CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_START_TIME,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
@@ -77,26 +77,69 @@ def _make_coordinator(mock_hass, mock_config_entry, mode=MODE_MORNING_DISCHARGE,
     return coord
 
 
-def test_get_active_forecast_entity_night_charge(mock_hass, mock_config_entry):
-    """Night charge mode uses the main PV forecast entity."""
-    coord = _make_coordinator(mock_hass, mock_config_entry, mode=MODE_NIGHT_CHARGE)
-    assert coord._get_active_forecast_entity() == "sensor.pv_forecast"
-
-
-def test_get_active_forecast_entity_discharge_with_dedicated(mock_hass, mock_config_entry):
-    """Discharge mode uses discharge_forecast_entity when configured."""
+def test_get_active_forecast_entity_before_noon_uses_today(mock_hass, mock_config_entry):
+    """Before noon (e.g. 05:00) uses today's forecast entity."""
     coord = _make_coordinator(
         mock_hass, mock_config_entry,
-        mode=MODE_MORNING_DISCHARGE,
-        extra_config={CONF_DISCHARGE_FORECAST_ENTITY: "sensor.solcast_today"},
+        extra_config={CONF_PV_FORECAST_TODAY_ENTITY: "sensor.solcast_today"},
     )
-    assert coord._get_active_forecast_entity() == "sensor.solcast_today"
+    with patch("custom_components.inverter_charge_night.dt_util") as mock_dt:
+        mock_dt.now.return_value = datetime(2025, 6, 15, 5, 0)
+        assert coord._get_active_forecast_entity() == "sensor.solcast_today"
 
 
-def test_get_active_forecast_entity_discharge_fallback(mock_hass, mock_config_entry):
-    """Discharge mode falls back to main forecast when discharge entity not configured."""
-    coord = _make_coordinator(mock_hass, mock_config_entry, mode=MODE_MORNING_DISCHARGE)
-    assert coord._get_active_forecast_entity() == "sensor.pv_forecast"
+def test_get_active_forecast_entity_after_noon_uses_tomorrow(mock_hass, mock_config_entry):
+    """After noon (e.g. 23:00) uses tomorrow's forecast entity."""
+    coord = _make_coordinator(
+        mock_hass, mock_config_entry,
+        extra_config={CONF_PV_FORECAST_TODAY_ENTITY: "sensor.solcast_today"},
+    )
+    with patch("custom_components.inverter_charge_night.dt_util") as mock_dt:
+        mock_dt.now.return_value = datetime(2025, 12, 15, 23, 0)
+        assert coord._get_active_forecast_entity() == "sensor.pv_forecast"
+
+
+def test_get_active_forecast_entity_before_noon_fallback_to_tomorrow(mock_hass, mock_config_entry):
+    """Before noon falls back to tomorrow entity when today is not configured."""
+    coord = _make_coordinator(mock_hass, mock_config_entry)
+    with patch("custom_components.inverter_charge_night.dt_util") as mock_dt:
+        mock_dt.now.return_value = datetime(2025, 6, 15, 3, 0)
+        assert coord._get_active_forecast_entity() == "sensor.pv_forecast"
+
+
+def test_get_active_forecast_entity_after_noon_fallback_to_today(mock_hass, mock_config_entry):
+    """After noon falls back to today entity when tomorrow is not configured."""
+    data = dict(mock_config_entry.data)
+    del data[CONF_PV_FORECAST_ENTITY]
+    data[CONF_PV_FORECAST_TODAY_ENTITY] = "sensor.solcast_today"
+    coord = _make_coordinator(mock_hass, mock_config_entry, extra_config=data)
+    coord.config[CONF_PV_FORECAST_ENTITY] = None
+    coord.config[CONF_PV_FORECAST_TODAY_ENTITY] = "sensor.solcast_today"
+    with patch("custom_components.inverter_charge_night.dt_util") as mock_dt:
+        mock_dt.now.return_value = datetime(2025, 12, 15, 22, 0)
+        assert coord._get_active_forecast_entity() == "sensor.solcast_today"
+
+
+def test_get_active_forecast_entity_midnight_boundary(mock_hass, mock_config_entry):
+    """At exactly 00:01 uses today's forecast."""
+    coord = _make_coordinator(
+        mock_hass, mock_config_entry,
+        extra_config={CONF_PV_FORECAST_TODAY_ENTITY: "sensor.solcast_today"},
+    )
+    with patch("custom_components.inverter_charge_night.dt_util") as mock_dt:
+        mock_dt.now.return_value = datetime(2025, 1, 15, 0, 1)
+        assert coord._get_active_forecast_entity() == "sensor.solcast_today"
+
+
+def test_get_active_forecast_entity_noon_boundary(mock_hass, mock_config_entry):
+    """At exactly 12:00 uses tomorrow's forecast."""
+    coord = _make_coordinator(
+        mock_hass, mock_config_entry,
+        extra_config={CONF_PV_FORECAST_TODAY_ENTITY: "sensor.solcast_today"},
+    )
+    with patch("custom_components.inverter_charge_night.dt_util") as mock_dt:
+        mock_dt.now.return_value = datetime(2025, 6, 15, 12, 0)
+        assert coord._get_active_forecast_entity() == "sensor.pv_forecast"
 
 
 @pytest.mark.asyncio

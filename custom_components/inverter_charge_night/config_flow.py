@@ -17,7 +17,7 @@ from .const import (
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEFAULT_MIN_SOC,
-    CONF_DISCHARGE_FORECAST_ENTITY,
+    CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_OPERATION_MODE,
     CONF_UPDATE_INTERVAL,
@@ -185,7 +185,7 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_CHARGE_POWER_SENT_ENTITY,
                 CONF_CHARGE_POWER_RECEIVED_ENTITY,
                 CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
-                CONF_DISCHARGE_FORECAST_ENTITY,
+                CONF_PV_FORECAST_TODAY_ENTITY,
                 CONF_FORCE_DISCHARGE_SWITCH,
             ]:
                 entity_id = user_input.get(entity_key)
@@ -283,7 +283,7 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Optional(CONF_AUTO_EFFICIENT_CHARGE, default=False): bool,
-            vol.Optional(CONF_DISCHARGE_FORECAST_ENTITY): selector.EntitySelector(
+            vol.Optional(CONF_PV_FORECAST_TODAY_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig()
             ),
             vol.Optional(CONF_FORCE_DISCHARGE_SWITCH): selector.EntitySelector(
@@ -377,7 +377,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_CHARGE_POWER_SENT_ENTITY,
                 CONF_CHARGE_POWER_RECEIVED_ENTITY,
                 CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
-                CONF_DISCHARGE_FORECAST_ENTITY,
+                CONF_PV_FORECAST_TODAY_ENTITY,
                 CONF_FORCE_DISCHARGE_SWITCH,
             ]:
                 entity_id = user_input.get(entity_key)
@@ -519,8 +519,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 default=current_data.get(CONF_AUTO_EFFICIENT_CHARGE, False),
             ): bool,
             vol.Optional(
-                CONF_DISCHARGE_FORECAST_ENTITY,
-                default=current_data.get(CONF_DISCHARGE_FORECAST_ENTITY),
+                CONF_PV_FORECAST_TODAY_ENTITY,
+                default=current_data.get(CONF_PV_FORECAST_TODAY_ENTITY),
             ): selector.EntitySelector(selector.EntitySelectorConfig()),
             vol.Optional(
                 CONF_FORCE_DISCHARGE_SWITCH,

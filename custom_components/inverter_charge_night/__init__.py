@@ -46,7 +46,7 @@ from .const import (
     CONF_KOSTAL_MIN_SOC_ENTITY,
     CONF_KOSTAL_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
-    CONF_DISCHARGE_FORECAST_ENTITY,
+    CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
     DEFAULT_END_TIME,
     DEFAULT_OPERATION_MODE,
@@ -247,17 +247,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._skip_next_unsub = None
 
     def _get_active_forecast_entity(self) -> str | None:
-        """Return the forecast entity ID for the current operation mode.
+        """Return the correct forecast entity based on the time of day.
 
-        Night charge uses the next-day forecast (CONF_PV_FORECAST_ENTITY).
-        Morning discharge uses today's forecast (CONF_DISCHARGE_FORECAST_ENTITY),
-        falling back to CONF_PV_FORECAST_ENTITY if not configured.
+        The solar day we're planning for depends on when the decision is made:
+        - Before noon (00:00-11:59): solar production happens TODAY
+          → use pv_forecast_today_entity (falls back to pv_forecast_entity)
+        - After noon  (12:00-23:59): solar production happens TOMORROW
+          → use pv_forecast_entity (falls back to pv_forecast_today_entity)
+
+        This applies to both operation modes:
+        - Night charge at 23:00 → tomorrow's forecast
+        - Night charge at 00:01 → today's forecast (yesterday's "tomorrow")
+        - Morning discharge at 06:00 → today's forecast
         """
-        if self.is_discharge_mode:
-            discharge_entity = self.config.get(CONF_DISCHARGE_FORECAST_ENTITY)
-            if discharge_entity:
-                return str(discharge_entity)
-        return self.config.get(CONF_PV_FORECAST_ENTITY)
+        today_entity = self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)
+        tomorrow_entity = self.config.get(CONF_PV_FORECAST_ENTITY)
+
+        now = dt_util.now()
+        if now.hour < 12:
+            return str(today_entity) if today_entity else tomorrow_entity
+        return str(tomorrow_entity) if tomorrow_entity else (str(today_entity) if today_entity else None)
 
     def _parse_time(self, time_str: str | None, default: str) -> tuple[int, int]:
         """Parse time string into (hour, minute) tuple with validation."""
