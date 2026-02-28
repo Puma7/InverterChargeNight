@@ -1,21 +1,17 @@
 """Fixtures for Inverter Charge Night tests."""
 from __future__ import annotations
 
-import asyncio
-import sys
 from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Any
+from datetime import time
 
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_registry import EntityRegistry
-
-# Re-apply after homeassistant import (runner.py overrides the policy)
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+from homeassistant.setup import async_setup_component
 
 from custom_components.inverter_charge_night.const import (
+    DOMAIN,
     CONF_KOSTAL_MIN_SOC_ENTITY,
     CONF_KOSTAL_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
@@ -62,8 +58,6 @@ def mock_hass() -> HomeAssistant:
     hass.services = MagicMock()
     hass.async_create_task = MagicMock()
     hass.config_entries = MagicMock()
-    hass.config = MagicMock()
-    hass.config.path = MagicMock(return_value="/tmp/ha_test")
     return hass
 
 
@@ -101,20 +95,19 @@ def mock_coordinator(mock_hass: HomeAssistant, mock_config_entry: ConfigEntry):
 @pytest.fixture
 async def setup_integration(hass: HomeAssistant, mock_config_entry: ConfigEntry):
     """Set up the integration."""
+    hass.data[DOMAIN] = {}
     with patch(
         "custom_components.inverter_charge_night.InverterChargeNightCoordinator"
     ) as mock_coordinator_class:
         coordinator = mock_coordinator_class.return_value
         coordinator.async_config_entry_first_refresh = AsyncMock()
         coordinator.setup_time_triggers = MagicMock()
-        mock_config_entry.runtime_data = coordinator
+        hass.data[DOMAIN][mock_config_entry.entry_id] = coordinator
         
         yield coordinator
 
 
-def create_mock_state(
-    entity_id: str, state: str, attributes: dict[str, Any] | None = None
-) -> MagicMock:
+def create_mock_state(entity_id: str, state: str, attributes: dict | None = None):
     """Create a mock state object."""
     mock_state = MagicMock()
     mock_state.entity_id = entity_id
@@ -123,3 +116,10 @@ def create_mock_state(
     return mock_state
 
 
+def create_mock_service_call(domain: str, service: str, **kwargs):
+    """Create a mock service call."""
+    call = MagicMock()
+    call.domain = domain
+    call.service = service
+    call.data = kwargs
+    return call

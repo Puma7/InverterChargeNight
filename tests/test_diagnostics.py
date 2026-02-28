@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from custom_components.inverter_charge_night.const import DOMAIN
 from custom_components.inverter_charge_night.diagnostics import (
     async_get_config_entry_diagnostics,
 )
@@ -29,7 +30,7 @@ async def test_diagnostics_redacts_entities(mock_hass, mock_config_entry):
         return_value={"best_power_w": 6000, "best_loss": 0.05, "history": {"6000": 0.05}}
     )
 
-    mock_config_entry.runtime_data = coordinator
+    mock_hass.data[DOMAIN] = {mock_config_entry.entry_id: coordinator}
 
     diagnostics = await async_get_config_entry_diagnostics(
         mock_hass, mock_config_entry

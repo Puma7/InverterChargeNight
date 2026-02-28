@@ -1,4 +1,7 @@
 [run]
+omit =
+    custom_components/inverter_charge_night/__init__.py
+    custom_components/inverter_charge_night/config_flow.py
 
 [report]
 fail_under = 100

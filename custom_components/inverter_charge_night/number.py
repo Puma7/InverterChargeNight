@@ -7,7 +7,7 @@ from homeassistant.const import EntityCategory
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -17,15 +17,13 @@ from .const import (
     CONF_USER_MAX_SOC,
     DOMAIN,
 )
-if TYPE_CHECKING:  # pragma: no cover
-    from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: InverterChargeNightConfigEntry,
+    entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the number platform."""
@@ -59,9 +57,9 @@ class MinSOCOverrideNumber(CoordinatorEntity[InverterChargeNightCoordinator], Nu
         }
         self._override_value: float | None = None
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
+    @property
+    def native_value(self) -> float | None:
+        """Return the override value or calculated SOC."""
         if self.coordinator.override_soc is None:
             if self._override_value is not None:
                 self._override_value = None

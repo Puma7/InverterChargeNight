@@ -6,7 +6,7 @@ from typing import Any
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import EntityCategory
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -16,7 +16,7 @@ from .const import DOMAIN
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: InverterChargeNightConfigEntry,
+    entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor platform."""
@@ -25,8 +25,6 @@ async def async_setup_entry(
         [
             CalculatedSOCSensor(coordinator, entry),
             BestChargePowerSensor(coordinator, entry),
-            ChargingEfficiencySensor(coordinator, entry),
-            AutoTestStatusSensor(coordinator, entry),
         ]
     )
 
@@ -46,7 +44,12 @@ class CalculatedSOCSensor(CoordinatorEntity[InverterChargeNightCoordinator], Sen
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_calculated_soc"
-        self._attr_device_info = _device_info(entry)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title or "Inverter Charge Night",
+            "manufacturer": "Custom Integration",
+            "model": "Inverter Charge Night",
+        }
 
     @property
     def native_value(self) -> float | None:
@@ -65,7 +68,6 @@ class CalculatedSOCSensor(CoordinatorEntity[InverterChargeNightCoordinator], Sen
             "operation_mode": data.get("operation_mode"),
             "skip_next": data.get("skip_next", False),
         }
-        self.async_write_ha_state()
 
 
 class BestChargePowerSensor(CoordinatorEntity[InverterChargeNightCoordinator], SensorEntity):
@@ -84,11 +86,16 @@ class BestChargePowerSensor(CoordinatorEntity[InverterChargeNightCoordinator], S
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_best_charge_power"
-        self._attr_device_info = _device_info(entry)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry.entry_id)},
+            "name": entry.title or "Inverter Charge Night",
+            "manufacturer": "Custom Integration",
+            "model": "Inverter Charge Night",
+        }
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
+    @property
+    def native_value(self) -> float | None:
+        """Return the best charge power if available."""
         data = self.coordinator._get_auto_efficiency_data()
         best_power = data.get("best_power_w")
         if isinstance(best_power, int):
