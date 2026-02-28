@@ -43,6 +43,8 @@ async def async_get_config_entry_diagnostics(
         data["state"] = {
             "is_active": coordinator.is_active,
             "is_enabled": coordinator.is_enabled,
+            "operation_mode": coordinator.operation_mode,
+            "skip_next": coordinator.skip_next,
             "target_reached": coordinator.target_reached,
             "calculated_soc": coordinator.calculated_soc,
             "initial_calculated_soc": coordinator.initial_calculated_soc,

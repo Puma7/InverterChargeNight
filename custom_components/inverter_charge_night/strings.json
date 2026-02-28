@@ -3,9 +3,10 @@
     "step": {
       "user": {
         "title": "Inverter Charge Night Configuration",
-        "description": "Configure the integration to automatically charge your battery overnight based on PV forecast.\n\nThe integration will:\n- Calculate target SOC based on forecast: (battery_capacity - forecast) / battery_capacity\n- Set Kostal min SOC and enable grid charging during the time window\n- Stop charging when target SOC is reached\n- Reset min SOC to default value at end time",
+        "description": "Configure the integration to automatically charge your battery overnight based on PV forecast, or discharge it before sunrise.\n\nNight Charge: charges battery from grid during the time window.\nMorning Discharge: discharges battery to make room for solar production.",
         "data": {
           "name": "Integration Name",
+          "operation_mode": "Operation Mode",
           "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
           "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
           "pv_forecast_entity": "PV Forecast Entity (Solcast)",
@@ -33,15 +34,16 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
+          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
           "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC",
           "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
           "pv_forecast_entity": "Select the Solcast entity that provides PV forecast data (in kWh)",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)",
-          "start_time": "Time when night charging should start (format: HH:MM, e.g., 00:00)",
-          "end_time": "Time when night charging should end and reset (format: HH:MM, e.g., 05:59)",
-          "user_min_soc": "Minimum allowed SOC percentage (0-100). Calculated SOC will not go below this.",
-          "user_max_soc": "Maximum allowed SOC percentage (0-100). Calculated SOC will not go above this.",
+          "start_time": "Time when the window should start (format: HH:MM, e.g., 00:00)",
+          "end_time": "Time when the window should end and reset (format: HH:MM, e.g., 05:59)",
+          "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
+          "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
           "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -61,9 +63,10 @@
       },
       "init": {
         "title": "Inverter Charge Night Settings",
-        "description": "Update the integration settings.\n\nThe integration will:\n- Calculate target SOC based on forecast: (battery_capacity - forecast) / battery_capacity\n- Set Kostal min SOC and enable grid charging during the time window\n- Stop charging when target SOC is reached\n- Reset min SOC to default value at end time",
+        "description": "Update the integration settings.\n\nNight Charge: charges battery from grid during the time window.\nMorning Discharge: discharges battery to make room for solar production.",
         "data": {
           "name": "Integration Name",
+          "operation_mode": "Operation Mode",
           "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
           "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
           "pv_forecast_entity": "PV Forecast Entity (Solcast)",
@@ -91,15 +94,16 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
+          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
           "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC",
           "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
           "pv_forecast_entity": "Select the Solcast entity that provides PV forecast data (in kWh)",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)",
-          "start_time": "Time when night charging should start (format: HH:MM, e.g., 00:00)",
-          "end_time": "Time when night charging should end and reset (format: HH:MM, e.g., 05:59)",
-          "user_min_soc": "Minimum allowed SOC percentage (0-100). Calculated SOC will not go below this.",
-          "user_max_soc": "Maximum allowed SOC percentage (0-100). Calculated SOC will not go above this.",
+          "start_time": "Time when the window should start (format: HH:MM, e.g., 00:00)",
+          "end_time": "Time when the window should end and reset (format: HH:MM, e.g., 05:59)",
+          "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
+          "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
           "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -134,6 +138,14 @@
       "already_configured": "Integration is already configured"
     }
   },
+  "selector": {
+    "operation_mode": {
+      "options": {
+        "night_charge": "Night Charge",
+        "morning_discharge": "Morning Discharge"
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "calculated_soc": {
@@ -149,6 +161,18 @@
       },
       "auto_efficient_charge_finder": {
         "name": "Auto Efficient Charge Finder"
+      },
+      "skip_next": {
+        "name": "Skip Next (24h Override)"
+      }
+    },
+    "select": {
+      "operation_mode": {
+        "name": "Operation Mode",
+        "state": {
+          "night_charge": "Night Charge",
+          "morning_discharge": "Morning Discharge"
+        }
       }
     },
     "binary_sensor": {
@@ -166,9 +190,10 @@
     "step": {
       "init": {
         "title": "Inverter Charge Night Settings",
-        "description": "Update the integration settings.\n\nThe integration will:\n- Calculate target SOC based on forecast: (battery_capacity - forecast) / battery_capacity\n- Set Kostal min SOC and enable grid charging during the time window\n- Stop charging when target SOC is reached\n- Reset min SOC to default value at end time",
+        "description": "Update the integration settings.\n\nNight Charge: charges battery from grid during the time window.\nMorning Discharge: discharges battery to make room for solar production.",
         "data": {
           "name": "Integration Name",
+          "operation_mode": "Operation Mode",
           "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
           "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
           "pv_forecast_entity": "PV Forecast Entity (Solcast)",
@@ -196,15 +221,16 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
+          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
           "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC",
           "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
           "pv_forecast_entity": "Select the Solcast entity that provides PV forecast data (in kWh)",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)",
-          "start_time": "Time when night charging should start (format: HH:MM, e.g., 00:00)",
-          "end_time": "Time when night charging should end and reset (format: HH:MM, e.g., 05:59)",
-          "user_min_soc": "Minimum allowed SOC percentage (0-100). Calculated SOC will not go below this.",
-          "user_max_soc": "Maximum allowed SOC percentage (0-100). Calculated SOC will not go above this.",
+          "start_time": "Time when the window should start (format: HH:MM, e.g., 00:00)",
+          "end_time": "Time when the window should end and reset (format: HH:MM, e.g., 05:59)",
+          "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
+          "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
           "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",

@@ -65,6 +65,8 @@ class CalculatedSOCSensor(CoordinatorEntity[InverterChargeNightCoordinator], Sen
             "is_active": data.get("is_active", False),
             "target_reached": data.get("target_reached", False),
             "current_soc": data.get("current_soc"),
+            "operation_mode": data.get("operation_mode"),
+            "skip_next": data.get("skip_next", False),
         }
 
 

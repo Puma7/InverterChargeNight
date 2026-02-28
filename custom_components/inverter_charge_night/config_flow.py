@@ -17,6 +17,7 @@ from .const import (
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEFAULT_MIN_SOC,
+    CONF_OPERATION_MODE,
     CONF_UPDATE_INTERVAL,
     CONF_COMMAND_DELAY,
     CONF_ACTIVE_START_DATE,
@@ -42,6 +43,7 @@ from .const import (
     DEFAULT_FORECAST_ERROR_MARGIN,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_SOC,
+    DEFAULT_OPERATION_MODE,
     DEFAULT_START_TIME,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_COMMAND_DELAY,
@@ -50,6 +52,8 @@ from .const import (
     DEFAULT_MIN_CHARGE_POWER_W,
     DEFAULT_MAX_CHARGE_POWER_W,
     DEFAULT_ABSOLUTE_MAX_CHARGE_POWER_W,
+    MODE_MORNING_DISCHARGE,
+    MODE_NIGHT_CHARGE,
     DOMAIN,
 )
 
@@ -205,6 +209,14 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Labels come from strings.json
         schema = {
             vol.Required(CONF_NAME, default="Inverter Charge Night"): str,
+            vol.Required(
+                CONF_OPERATION_MODE, default=DEFAULT_OPERATION_MODE
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[MODE_NIGHT_CHARGE, MODE_MORNING_DISCHARGE],
+                    translation_key="operation_mode",
+                )
+            ),
             vol.Required(CONF_KOSTAL_MIN_SOC_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="number")
             ),
@@ -385,6 +397,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         current_data = self._config_entry.data
         schema = {
             vol.Required(CONF_NAME, default=current_data.get(CONF_NAME, "Inverter Charge Night")): str,
+            vol.Required(
+                CONF_OPERATION_MODE,
+                default=current_data.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[MODE_NIGHT_CHARGE, MODE_MORNING_DISCHARGE],
+                    translation_key="operation_mode",
+                )
+            ),
             vol.Required(
                 CONF_KOSTAL_MIN_SOC_ENTITY,
                 default=current_data.get(CONF_KOSTAL_MIN_SOC_ENTITY),

@@ -17,10 +17,13 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
 
+from homeassistant.helpers.event import async_call_later
+
 from .const import (
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEFAULT_MIN_SOC,
+    CONF_OPERATION_MODE,
     CONF_UPDATE_INTERVAL,
     CONF_COMMAND_DELAY,
     CONF_BACKUP_MODE_ENTITY,
@@ -44,11 +47,13 @@ from .const import (
     CONF_KOSTAL_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
     DEFAULT_END_TIME,
+    DEFAULT_OPERATION_MODE,
     DEFAULT_SAFE_FALLBACK_SOC,
     DEFAULT_START_TIME,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_ACTIVE_START_DATE,
     DEFAULT_ACTIVE_END_DATE,
+    MODE_MORNING_DISCHARGE,
     DOMAIN,
 )
 from .calculation import calculate_required_soc
@@ -60,6 +65,7 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
     Platform.BINARY_SENSOR,
     Platform.NUMBER,
+    Platform.SELECT,
 ]
 
 
@@ -105,6 +111,7 @@ async def async_update_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     
     # Update coordinator config reference
     coordinator.config = entry.data
+    coordinator.operation_mode = entry.data.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE)
     coordinator.auto_efficient_charge = entry.data.get(CONF_AUTO_EFFICIENT_CHARGE, False)
     coordinator._auto_missing_entities_logged = False
     
@@ -158,6 +165,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator._remove_battery_soc_listener()
         coordinator._remove_inverter_min_soc_listener()
         coordinator._stop_periodic_verification()
+        coordinator._cancel_skip_next_expiry()
         hass.data[DOMAIN].pop(entry.entry_id)
     
     return unload_ok
@@ -180,6 +188,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.original_min_soc: float | None = None
         self.is_active = False
         self.is_enabled = True  # Integration enabled/disabled via switch
+        self.operation_mode: str = entry.data.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE)
+        self.skip_next = False
+        self._skip_next_unsub: CALLBACK_TYPE | None = None
         self.calculated_soc: float | None = None
         self.initial_calculated_soc: float | None = None  # Store SOC calculated at window start
         self.minimum_calculated_soc: float | None = None  # Store minimum SOC value (always <= initial)
@@ -201,6 +212,37 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
         self._auto_missing_entities_logged = False
+
+    @property
+    def is_discharge_mode(self) -> bool:
+        """Return True if currently in morning discharge mode."""
+        return self.operation_mode == MODE_MORNING_DISCHARGE
+
+    def _is_target_reached(self, current_soc: float, target_soc: float) -> bool:
+        """Check if target SOC is reached, respecting operation mode direction."""
+        if self.is_discharge_mode:
+            return current_soc <= target_soc
+        return current_soc >= target_soc
+
+    def _schedule_skip_next_expiry(self) -> None:
+        """Schedule skip_next to auto-expire after 24 hours."""
+        self._cancel_skip_next_expiry()
+
+        async def _expire_skip_next(_now: datetime) -> None:
+            _LOGGER.info("Skip next expired after 24 hours")
+            self.skip_next = False
+            self._skip_next_unsub = None
+            await self._check_current_window()
+
+        self._skip_next_unsub = async_call_later(
+            self.hass, 24 * 3600, _expire_skip_next
+        )
+
+    def _cancel_skip_next_expiry(self) -> None:
+        """Cancel the skip_next expiry timer."""
+        if self._skip_next_unsub:
+            self._skip_next_unsub()
+            self._skip_next_unsub = None
 
     def _parse_time(self, time_str: str | None, default: str) -> tuple[int, int]:
         """Parse time string into (hour, minute) tuple with validation."""
@@ -680,6 +722,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _check_current_window(self) -> None:
         """Check if we're currently in the active window and adjust state if needed."""
         try:
+            if self.skip_next:
+                if self.is_active:
+                    _LOGGER.info("Skip next active - stopping window")
+                    await self._on_window_end(dt_util.now())
+                return
+
             if self._is_backup_active():
                 if self.is_active:
                     _LOGGER.info("Backup mode active - stopping window and resetting settings")
@@ -739,13 +787,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.is_enabled:
             _LOGGER.debug("Window started but integration is disabled")
             return
+        if self.skip_next:
+            _LOGGER.info("Window start ignored - skip next is active")
+            return
         if self._is_backup_active():
             _LOGGER.info("Window start ignored - backup mode active")
             return
         if not self._is_within_date_range():
             _LOGGER.info("Window start ignored - outside active date range")
             return
-        _LOGGER.info("Night charge window started")
+        mode_label = "Morning discharge" if self.is_discharge_mode else "Night charge"
+        _LOGGER.info("%s window started", mode_label)
         self.is_active = True
         self.target_reached = False
         
@@ -951,7 +1003,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _on_window_end(self, now: datetime) -> None:
         """Handle window end."""
-        _LOGGER.info("Night charge window ended, resetting settings")
+        mode_label = "Morning discharge" if self.is_discharge_mode else "Night charge"
+        _LOGGER.info("%s window ended, resetting settings", mode_label)
         try:
             await self._reset_settings()
         except Exception as e:
@@ -1032,31 +1085,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from entities and update coordinator."""
+        inactive_data: dict[str, Any] = {
+            "calculated_soc": None,
+            "is_active": False,
+            "target_reached": False,
+            "operation_mode": self.operation_mode,
+            "skip_next": self.skip_next,
+        }
         if not self.is_enabled or not self.is_active:
-            return {
-                "calculated_soc": None,
-                "is_active": False,
-                "target_reached": False,
-            }
+            return inactive_data
         if self._is_backup_active():
             if self.is_active:
                 _LOGGER.info("Backup mode active - stopping window and resetting settings")
                 await self._on_window_end(dt_util.now())
             else:
                 _LOGGER.info("Backup mode active - skipping inverter control")
-            return {
-                "calculated_soc": None,
-                "is_active": False,
-                "target_reached": False,
-            }
+            return inactive_data
         if not self._is_within_date_range():
             _LOGGER.info("Outside active date range during update - resetting settings")
             await self._on_window_end(dt_util.now())
-            return {
-                "calculated_soc": None,
-                "is_active": False,
-                "target_reached": False,
-            }
+            return inactive_data
         
         # Get forecast data
         pv_forecast_entity = self.config.get(CONF_PV_FORECAST_ENTITY)
@@ -1067,11 +1115,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, 100.0))
         except (ValueError, TypeError) as e:
             _LOGGER.error("Error parsing configuration values: %s", e)
-            return {
-                "calculated_soc": None,
-                "is_active": False,
-                "target_reached": False,
-            }
+            return inactive_data
         
         forecast_energy = 0.0
         forecast_available = False  # Track if forecast entity was actually available
@@ -1184,48 +1228,54 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if state and state.state not in ("unknown", "unavailable"):
                 can_check_soc = True
         
-        # CRITICAL: Check if battery SOC already exceeds target before controlling
-        # If so, turn off charging immediately
+        # CRITICAL: Check if target is already reached before controlling
         if can_check_soc and battery_soc_entity is not None:
             battery_state = self.hass.states.get(battery_soc_entity)
             if battery_state and battery_state.state not in ("unknown", "unavailable"):
                 try:
                     current_battery_soc = float(battery_state.state)
-                    if current_battery_soc >= target_soc:
+                    if self._is_target_reached(current_battery_soc, target_soc):
                         if not self.target_reached:
+                            direction = "below" if self.is_discharge_mode else "above"
                             _LOGGER.info(
-                                "Battery SOC (%.1f%%) already exceeds target (%.1f%%) at startup, turning off charging",
+                                "Battery SOC (%.1f%%) already at or %s target (%.1f%%) at startup",
                                 current_battery_soc,
-                                target_soc
+                                direction,
+                                target_soc,
                             )
-                            await self._stop_grid_charging()
+                            if not self.is_discharge_mode:
+                                await self._stop_grid_charging()
                             self.target_reached = True
-                        # Don't proceed with control if already at target
                         return {
                             "calculated_soc": calculated_soc,
                             "is_active": self.is_active,
                             "target_reached": self.target_reached,
                             "current_soc": current_battery_soc,
+                            "operation_mode": self.operation_mode,
+                            "skip_next": self.skip_next,
                         }
                 except (ValueError, TypeError):
                     pass
         
-        # Control Kostal entities if we have a target SOC and can verify battery SOC
-        # If battery SOC is unavailable, wait for it to become available before charging
+        # Control Kostal entities based on operation mode
         if not self.target_reached:
             if can_check_soc:
-                await self._control_kostal(target_soc)
+                if self.is_discharge_mode:
+                    await self._control_discharge(target_soc)
+                else:
+                    await self._control_kostal(target_soc)
             else:
                 _LOGGER.warning(
-                    "Battery SOC entity %s is unavailable - skipping Kostal control to prevent "
-                    "unintended charging. Will retry on next update.",
-                    battery_soc_entity
+                    "Battery SOC entity %s is unavailable - skipping control to prevent "
+                    "unintended operation. Will retry on next update.",
+                    battery_soc_entity,
                 )
 
-        # Auto efficient charge handling (optional)
-        await self._handle_auto_charge()
+        # Auto efficient charge handling (only in night charge mode)
+        if not self.is_discharge_mode:
+            await self._handle_auto_charge()
         
-        # Check if target is reached (use override if set, otherwise calculated)
+        # Check if target is reached
         battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
         current_soc = None
         if battery_soc_entity:
@@ -1233,27 +1283,20 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if state and state.state not in ("unknown", "unavailable"):
                 try:
                     current_soc = float(state.state)
-                    # Use minimum SOC for target check (always the lowest value we want to maintain)
                     check_target = self.minimum_calculated_soc
-                    if current_soc >= check_target:
+                    if self._is_target_reached(current_soc, check_target):
                         if not self.target_reached:
                             _LOGGER.info(
-                                "Target SOC reached: %.1f%% >= %.1f%% (target: %s)",
+                                "Target SOC reached: %.1f%% %s %.1f%% (mode: %s, target: %s)",
                                 current_soc,
+                                "<=" if self.is_discharge_mode else ">=",
                                 check_target,
+                                self.operation_mode,
                                 "override" if self.override_soc is not None else "calculated",
                             )
-                            await self._stop_grid_charging()
+                            if not self.is_discharge_mode:
+                                await self._stop_grid_charging()
                             self.target_reached = True
-                    # SAFETY: Additional check - if we significantly exceed target, force stop
-                    elif current_soc > check_target + 5.0:
-                        _LOGGER.warning(
-                            "SAFETY: Battery SOC (%.1f%%) significantly exceeds target (%.1f%%), forcing stop",
-                            current_soc,
-                            check_target,
-                        )
-                        await self._stop_grid_charging()
-                        self.target_reached = True
                 except (ValueError, TypeError):
                     pass
         
@@ -1262,6 +1305,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "is_active": self.is_active,
             "target_reached": self.target_reached,
             "current_soc": current_soc,
+            "operation_mode": self.operation_mode,
+            "skip_next": self.skip_next,
         }
 
     async def _control_kostal(self, target_soc: float) -> None:
@@ -1432,6 +1477,121 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if kostal_grid_charge_switch and not should_skip_charging:
             await self._apply_absolute_charge_power_limit()
 
+    async def _control_discharge(self, target_soc: float) -> None:
+        """Control Kostal entities for morning discharge mode.
+
+        Sets min SOC to the discharge target (floor) and ensures grid charging is off.
+        The battery discharges through house consumption and grid export down to this floor.
+        """
+        if self._is_backup_active():
+            _LOGGER.info("Backup mode active - skipping discharge control")
+            return
+
+        user_min_soc = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
+        user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, 100.0))
+
+        if not (user_min_soc <= target_soc <= user_max_soc):
+            _LOGGER.error(
+                "Target SOC %.1f%% is outside allowed range [%.1f%%, %.1f%%] - not applying",
+                target_soc,
+                user_min_soc,
+                user_max_soc,
+            )
+            return
+
+        kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
+        kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+
+        battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
+        should_skip = False
+
+        if battery_soc_entity:
+            state = self.hass.states.get(battery_soc_entity)
+            if state and state.state not in ("unknown", "unavailable"):
+                try:
+                    current_soc = float(state.state)
+                    if current_soc <= target_soc:
+                        _LOGGER.info(
+                            "Skip discharge: current SOC (%.1f%%) <= target (%.1f%%)",
+                            current_soc,
+                            target_soc,
+                        )
+                        should_skip = True
+                except (ValueError, TypeError):
+                    pass
+            else:
+                _LOGGER.warning(
+                    "Battery SOC entity %s is unavailable - skipping discharge control",
+                    battery_soc_entity,
+                )
+                should_skip = True
+
+        if should_skip:
+            return
+
+        need_to_set_min_soc = False
+
+        if kostal_min_soc_entity:
+            try:
+                if self.original_min_soc is None:
+                    state = self.hass.states.get(kostal_min_soc_entity)
+                    if state and state.state not in ("unknown", "unavailable"):
+                        try:
+                            self.original_min_soc = float(state.state)
+                            _LOGGER.info("Stored original min SOC: %.1f%%", self.original_min_soc)
+                        except (ValueError, TypeError):
+                            self.original_min_soc = float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
+                            _LOGGER.warning(
+                                "Could not read original min SOC, using configured default: %.1f%%",
+                                self.original_min_soc,
+                            )
+                    else:
+                        self.original_min_soc = float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
+                        _LOGGER.warning(
+                            "Min SOC entity unavailable, using configured default: %.1f%%",
+                            self.original_min_soc,
+                        )
+
+                state = self.hass.states.get(kostal_min_soc_entity)
+                min_soc_current_value: float | None = None
+                if state and state.state not in ("unknown", "unavailable"):
+                    try:
+                        min_soc_current_value = float(state.state)
+                    except (ValueError, TypeError):
+                        pass
+
+                if min_soc_current_value is None or abs(min_soc_current_value - target_soc) > 0.5:
+                    if self._last_soc_set is None or abs(self._last_soc_set - target_soc) > 0.5:
+                        need_to_set_min_soc = True
+                    else:
+                        self._last_soc_set = target_soc
+                else:
+                    self._last_soc_set = target_soc
+            except Exception as e:
+                _LOGGER.error("Error preparing min SOC for discharge: %s", e, exc_info=True)
+
+        if need_to_set_min_soc and kostal_min_soc_entity:
+            await self.hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": kostal_min_soc_entity, "value": target_soc},
+            )
+            self._last_soc_set = target_soc
+            _LOGGER.info("Set min SOC to %.1f%% for discharge (floor)", target_soc)
+
+        if kostal_grid_charge_switch:
+            try:
+                state = self.hass.states.get(kostal_grid_charge_switch)
+                if state and state.state == "on":
+                    await self.hass.services.async_call(
+                        "switch",
+                        "turn_off",
+                        {"entity_id": kostal_grid_charge_switch},
+                    )
+                    _LOGGER.info("Turned off grid charge for discharge mode")
+            except Exception as e:
+                _LOGGER.error("Error turning off grid charge in discharge mode: %s", e, exc_info=True)
+
     async def _stop_grid_charging(self) -> None:
         """Stop grid charging when target is reached."""
         kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
@@ -1481,39 +1641,24 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if target_soc is None:
                     return
                 
-                # Check if target is reached
-                if current_soc >= target_soc:
+                if self._is_target_reached(current_soc, target_soc):
                     if not self.target_reached:
                         _LOGGER.info(
-                            "Target SOC reached via listener: %.1f%% >= %.1f%% (target: %s)",
+                            "Target SOC reached via listener: %.1f%% %s %.1f%% (mode: %s, target: %s)",
                             current_soc,
+                            "<=" if self.is_discharge_mode else ">=",
                             target_soc,
+                            self.operation_mode,
                             "override" if self.override_soc is not None else "calculated",
                         )
                         try:
-                            await self._stop_grid_charging()
+                            if not self.is_discharge_mode:
+                                await self._stop_grid_charging()
                             self.target_reached = True
-                            # Request refresh to update coordinator data
                             await self.async_request_refresh()
                         except Exception as e:
-                            _LOGGER.error("Error stopping grid charge in listener: %s", e, exc_info=True)
-                            # Still set target_reached to prevent repeated attempts
+                            _LOGGER.error("Error stopping control in listener: %s", e, exc_info=True)
                             self.target_reached = True
-                # SAFETY: Additional check - if we significantly exceed target, force stop
-                elif current_soc > target_soc + 5.0:
-                    _LOGGER.warning(
-                        "SAFETY: Battery SOC (%.1f%%) significantly exceeds target (%.1f%%) via listener, forcing stop",
-                        current_soc,
-                        target_soc,
-                    )
-                    try:
-                        await self._stop_grid_charging()
-                        self.target_reached = True
-                        await self.async_request_refresh()
-                    except Exception as e:
-                        _LOGGER.error("Error in safety stop in listener: %s", e, exc_info=True)
-                        # Still set target_reached to prevent repeated attempts
-                        self.target_reached = True
             except (ValueError, TypeError) as e:
                 _LOGGER.debug("Error parsing SOC in listener: %s", e)
             except Exception as e:
@@ -1675,20 +1820,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._last_soc_set = target_soc
                 _LOGGER.info("Restored inverter min SOC to %.1f%%", target_soc)
             
-            # Also check if battery SOC already exceeds target - turn off charging if so
             battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
             if battery_soc_entity:
                 battery_state = self.hass.states.get(battery_soc_entity)
                 if battery_state and battery_state.state not in ("unknown", "unavailable"):
                     try:
                         current_battery_soc = float(battery_state.state)
-                        if current_battery_soc >= target_soc and not self.target_reached:
+                        if self._is_target_reached(current_battery_soc, target_soc) and not self.target_reached:
                             _LOGGER.info(
-                                "Battery SOC (%.1f%%) already exceeds target (%.1f%%), turning off charging",
+                                "Battery SOC (%.1f%%) already at target (%.1f%%, mode: %s)",
                                 current_battery_soc,
-                                target_soc
+                                target_soc,
+                                self.operation_mode,
                             )
-                            await self._stop_grid_charging()
+                            if not self.is_discharge_mode:
+                                await self._stop_grid_charging()
                             self.target_reached = True
                     except (ValueError, TypeError):
                         pass
