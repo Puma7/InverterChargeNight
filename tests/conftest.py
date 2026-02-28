@@ -31,6 +31,7 @@ def mock_config_entry() -> ConfigEntry:
     """Create a mock config entry."""
     entry = MagicMock(spec=ConfigEntry)
     entry.entry_id = "test_entry_id"
+    entry.title = "Inverter Charge Night"
     entry.data = {
         CONF_KOSTAL_MIN_SOC_ENTITY: "number.kostal_min_soc",
         CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.kostal_grid_charge",
