@@ -49,7 +49,7 @@ CONF_AUTO_EFFICIENT_CHARGE = "auto_efficient_charge"
 CONF_AUTO_EFFICIENCY_DATA = "auto_efficiency_data"
 CONF_ABSOLUTE_MAX_CHARGE_POWER_W = "absolute_max_charge_power_w"
 CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY = "absolute_max_charge_power_entity"
-CONF_DISCHARGE_FORECAST_ENTITY = "discharge_forecast_entity"
+CONF_PV_FORECAST_TODAY_ENTITY = "pv_forecast_today_entity"
 CONF_FORCE_DISCHARGE_SWITCH = "force_discharge_switch"
 
 # Attributes
