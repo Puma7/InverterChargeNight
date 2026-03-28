@@ -7,6 +7,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, Sen
 from homeassistant.const import EntityCategory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -44,12 +45,12 @@ class CalculatedSOCSensor(CoordinatorEntity[InverterChargeNightCoordinator], Sen
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_calculated_soc"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title or "Inverter Charge Night",
-            "manufacturer": "Custom Integration",
-            "model": "Inverter Charge Night",
-        }
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title or "Inverter Charge Night",
+            manufacturer="Custom Integration",
+            model="Inverter Charge Night",
+        )
 
     @property
     def native_value(self) -> float | None:
@@ -86,17 +87,17 @@ class BestChargePowerSensor(CoordinatorEntity[InverterChargeNightCoordinator], S
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_best_charge_power"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title or "Inverter Charge Night",
-            "manufacturer": "Custom Integration",
-            "model": "Inverter Charge Night",
-        }
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title or "Inverter Charge Night",
+            manufacturer="Custom Integration",
+            model="Inverter Charge Night",
+        )
 
     @property
     def native_value(self) -> float | None:
         """Return the best charge power if available."""
-        data = self.coordinator._get_auto_efficiency_data()
+        data = self.coordinator.auto_efficiency_data
         best_power = data.get("best_power_w")
         if isinstance(best_power, int):
             return float(best_power)

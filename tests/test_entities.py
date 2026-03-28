@@ -63,11 +63,11 @@ def test_calculated_soc_sensor_values():
 
 def test_best_charge_power_sensor():
     coordinator = MagicMock()
-    coordinator._get_auto_efficiency_data.return_value = {"best_power_w": 6000}
+    coordinator.auto_efficiency_data = {"best_power_w": 6000}
     entry = _make_entry()
     sensor = BestChargePowerSensor(coordinator, entry)
     assert sensor.native_value == 6000.0
-    coordinator._get_auto_efficiency_data.return_value = {"best_power_w": "n/a"}
+    coordinator.auto_efficiency_data = {"best_power_w": "n/a"}
     assert sensor.native_value is None
 
 
