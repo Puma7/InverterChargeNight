@@ -270,6 +270,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _parse_forecast_energy(self, entity_id: str | None) -> tuple[float, bool]:
         """Parse forecast energy from an entity, handling multiple Solcast formats.
 
+        Mirrors the original inline parsing logic with these improvements:
+        - Per-item exception handling for Solcast forecast lists
+        - unit_of_measurement check before falling back to value-based heuristic
+
         Returns:
             Tuple of (forecast_energy_kwh, forecast_available).
             forecast_energy_kwh is always >= 0.
@@ -281,27 +285,32 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not state:
             return 0.0, False
 
-        # Primary: parse entity state value directly
+        # Primary: parse entity state value directly (only when state is available)
         if state.state not in ("unknown", "unavailable", None):
             try:
                 value = float(state.state)
-                # Use unit_of_measurement to decide Wh vs kWh;
-                # fall back to heuristic only when unit is missing/ambiguous
+                # Use unit_of_measurement to decide Wh vs kWh when available;
+                # fall back to original heuristic (threshold 1000) when unit is absent
                 unit = str(state.attributes.get("unit_of_measurement", "")).lower()
                 if unit in ("wh", "watthour", "watthours"):
                     energy = value / 1000.0
                 elif unit in ("kwh", "kilowatthour", "kilowatthours"):
                     energy = value
-                elif value > 200:
-                    # Heuristic: values above 200 are likely Wh
+                elif value > 1000:
+                    # Original heuristic preserved: values above 1000 assumed to be Wh
                     energy = value / 1000.0
                 else:
                     energy = value
                 return max(0.0, energy), True
             except (ValueError, TypeError):
-                pass  # Fall through to attribute-based parsing
+                # State was not parseable as float — mark as unavailable so
+                # callers apply the safe fallback (matching old elif-chain
+                # behaviour where a non-numeric state meant forecast_available=False)
+                return 0.0, False
 
-        # Fallback: Solcast-style forecast in attributes
+        # Attribute-based fallbacks (only reached when state IS unavailable/unknown)
+        # This preserves the old elif-chain semantics: attributes are NEVER checked
+        # when state.state is a valid (but non-numeric) string.
         if "forecast" in state.attributes:
             forecast_data = state.attributes.get("forecast", [])
             if forecast_data:
@@ -314,14 +323,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     except (ValueError, TypeError):
                         continue  # Skip malformed items instead of crashing
                 return max(0.0, total), True
-
-        for attr_name in ("today_forecast", "forecast_today"):
-            if attr_name in state.attributes:
-                try:
-                    energy = float(state.attributes.get(attr_name, 0))
-                    return max(0.0, energy), True
-                except (ValueError, TypeError):
-                    continue
+        elif "today_forecast" in state.attributes:
+            try:
+                energy = float(state.attributes.get("today_forecast", 0))
+                return max(0.0, energy), True
+            except (ValueError, TypeError):
+                pass
+        elif "forecast_today" in state.attributes:
+            try:
+                energy = float(state.attributes.get("forecast_today", 0))
+                return max(0.0, energy), True
+            except (ValueError, TypeError):
+                pass
 
         return 0.0, False
 

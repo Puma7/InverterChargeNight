@@ -134,10 +134,14 @@ def _validate_user_input(
     """Validate user input and return error dict (shared by initial and options flow)."""
     errors: dict[str, str] = {}
 
-    if not validate_time_format(user_input.get(CONF_START_TIME, "")):
+    start_time = user_input.get(CONF_START_TIME, "")
+    end_time = user_input.get(CONF_END_TIME, "")
+    if not validate_time_format(start_time):
         errors[CONF_START_TIME] = "invalid_time"
-    if not validate_time_format(user_input.get(CONF_END_TIME, "")):
+    if not validate_time_format(end_time):
         errors[CONF_END_TIME] = "invalid_time"
+    if start_time and end_time and start_time == end_time:
+        errors[CONF_END_TIME] = "start_end_time_must_differ"
 
     user_min_soc = user_input.get(CONF_USER_MIN_SOC, 0)
     user_max_soc = user_input.get(CONF_USER_MAX_SOC, 0)
