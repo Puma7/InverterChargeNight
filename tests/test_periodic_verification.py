@@ -60,14 +60,19 @@ def test_stop_periodic_verification_cancels_task(mock_hass):
     task.cancel.assert_called_once()
 
 
-def test_start_periodic_verification_fallback_task(mock_hass):
+def test_start_periodic_verification_passes_task_name(mock_hass):
     coordinator = _make_coordinator(mock_hass, {})
     coordinator.is_active = True
     coordinator.is_enabled = True
-    if hasattr(mock_hass, "async_create_background_task"):
-        delattr(mock_hass, "async_create_background_task")
-    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
+    captured_name = {}
+
+    def _capture(coro, name=None):
+        captured_name["name"] = name
+        coro.close()
+        return MagicMock()
+
+    mock_hass.async_create_background_task = MagicMock(side_effect=_capture)
 
     coordinator._start_periodic_verification()
 
-    mock_hass.async_create_task.assert_called_once()
+    assert captured_name["name"] == "inverter_charge_night_periodic_verification"

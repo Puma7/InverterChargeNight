@@ -8,6 +8,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -49,12 +50,12 @@ class MinSOCOverrideNumber(CoordinatorEntity[InverterChargeNightCoordinator], Nu
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_min_soc_override"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": entry.title or "Inverter Charge Night",
-            "manufacturer": "Custom Integration",
-            "model": "Inverter Charge Night",
-        }
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title or "Inverter Charge Night",
+            manufacturer="Custom Integration",
+            model="Inverter Charge Night",
+        )
         self._override_value: float | None = None
 
     @property

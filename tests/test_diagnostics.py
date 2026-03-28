@@ -26,9 +26,7 @@ async def test_diagnostics_redacts_entities(mock_hass, mock_config_entry):
     coordinator._auto_test_start = datetime.now(timezone.utc)
     coordinator._auto_energy_sent_wh = 1000.0
     coordinator._auto_energy_received_wh = 950.0
-    coordinator._get_auto_efficiency_data = MagicMock(
-        return_value={"best_power_w": 6000, "best_loss": 0.05, "history": {"6000": 0.05}}
-    )
+    coordinator.auto_efficiency_data = {"best_power_w": 6000, "best_loss": 0.05, "history": {"6000": 0.05}}
 
     mock_hass.data[DOMAIN] = {mock_config_entry.entry_id: coordinator}
 
