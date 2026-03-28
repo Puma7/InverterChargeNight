@@ -11,13 +11,12 @@ from homeassistant.const import Platform
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant
 from homeassistant.helpers.event import (
     EventStateChangedData,
+    async_call_later,
     async_track_state_change_event,
     async_track_time_change,
 )
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
-
-from homeassistant.helpers.event import async_call_later
 
 from .const import (
     CONF_BATTERY_CAPACITY,
@@ -268,6 +267,77 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return str(today_entity) if today_entity else tomorrow_entity
         return str(tomorrow_entity) if tomorrow_entity else (str(today_entity) if today_entity else None)
 
+    def _parse_forecast_energy(self, entity_id: str | None) -> tuple[float, bool]:
+        """Parse forecast energy from an entity, handling multiple Solcast formats.
+
+        Mirrors the original inline parsing logic with these improvements:
+        - Per-item exception handling for Solcast forecast lists
+        - unit_of_measurement check before falling back to value-based heuristic
+
+        Returns:
+            Tuple of (forecast_energy_kwh, forecast_available).
+            forecast_energy_kwh is always >= 0.
+        """
+        if not entity_id:
+            return 0.0, False
+
+        state = self.hass.states.get(entity_id)
+        if not state:
+            return 0.0, False
+
+        # Primary: parse entity state value directly (only when state is available)
+        if state.state not in ("unknown", "unavailable", None):
+            try:
+                value = float(state.state)
+                # Use unit_of_measurement to decide Wh vs kWh when available;
+                # fall back to original heuristic (threshold 1000) when unit is absent
+                unit = str(state.attributes.get("unit_of_measurement", "")).lower()
+                if unit in ("wh", "watthour", "watthours"):
+                    energy = value / 1000.0
+                elif unit in ("kwh", "kilowatthour", "kilowatthours"):
+                    energy = value
+                elif value > 1000:
+                    # Original heuristic preserved: values above 1000 assumed to be Wh
+                    energy = value / 1000.0
+                else:
+                    energy = value
+                return max(0.0, energy), True
+            except (ValueError, TypeError):
+                # State was not parseable as float — mark as unavailable so
+                # callers apply the safe fallback (matching old elif-chain
+                # behaviour where a non-numeric state meant forecast_available=False)
+                return 0.0, False
+
+        # Attribute-based fallbacks (only reached when state IS unavailable/unknown)
+        # This preserves the old elif-chain semantics: attributes are NEVER checked
+        # when state.state is a valid (but non-numeric) string.
+        if "forecast" in state.attributes:
+            forecast_data = state.attributes.get("forecast", [])
+            if forecast_data:
+                total = 0.0
+                for item in forecast_data:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        total += float(item.get("wh", item.get("pv_power_forecast", 0)) or 0) / 1000.0
+                    except (ValueError, TypeError):
+                        continue  # Skip malformed items instead of crashing
+                return max(0.0, total), True
+        elif "today_forecast" in state.attributes:
+            try:
+                energy = float(state.attributes.get("today_forecast", 0))
+                return max(0.0, energy), True
+            except (ValueError, TypeError):
+                pass
+        elif "forecast_today" in state.attributes:
+            try:
+                energy = float(state.attributes.get("forecast_today", 0))
+                return max(0.0, energy), True
+            except (ValueError, TypeError):
+                pass
+
+        return 0.0, False
+
     def _parse_time(self, time_str: str | None, default: str) -> tuple[int, int]:
         """Parse time string into (hour, minute) tuple with validation."""
         try:
@@ -457,6 +527,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Error resetting absolute charge power: %s", e, exc_info=True)
         finally:
             self._original_absolute_charge_power = None
+
+    @property
+    def auto_efficiency_data(self) -> dict[str, Any]:
+        """Return persisted auto efficiency data (public access for sensors)."""
+        return self._get_auto_efficiency_data()
 
     def _get_auto_efficiency_data(self) -> dict[str, Any]:
         """Load persisted auto efficiency data from entry options."""
@@ -649,6 +724,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self, check_time: time, start_time: time, end_time: time
     ) -> bool:
         """Check if a time is between two other times, handling overnight ranges."""
+        if start_time == end_time:
+            # Identical start/end means zero-length window, never active
+            return False
         if start_time < end_time:
             return start_time <= check_time <= end_time
         return check_time >= start_time or check_time <= end_time
@@ -700,7 +778,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             
             # Check if we're already in the active window
-            self.hass.async_create_task(self._check_current_window())
+            self.hass.async_create_task(
+                self._check_current_window(),
+                name="inverter_charge_night_check_window_setup",
+            )
             
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.error("Failed to set up time triggers: %s", err, exc_info=True)
@@ -741,7 +822,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # - We were active but are no longer in new window (will reset)
         # - We were not active but are now in new window (will start)
         # - We were active and still in new window (will continue)
-        self.hass.async_create_task(self._check_current_window())
+        self.hass.async_create_task(
+            self._check_current_window(),
+            name="inverter_charge_night_check_window_update",
+        )
 
     async def _check_current_window(self) -> None:
         """Check if we're currently in the active window and adjust state if needed."""
@@ -939,48 +1023,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return
             
             # Otherwise, calculate normally from forecast
-            # Get forecast data
-            forecast_energy = 0.0
-            forecast_available = False  # Track if forecast entity was actually available
             pv_forecast_entity = self._get_active_forecast_entity()
-            if pv_forecast_entity:
-                state = self.hass.states.get(pv_forecast_entity)
-                if state:
-                    # Check if entity state is available (not unknown/unavailable)
-                    if state.state not in ("unknown", "unavailable", None):
-                        forecast_available = True
-                        try:
-                            # Try to parse as float (might be kWh or Wh)
-                            value = float(state.state)
-                            # If value seems like Wh (very large), convert to kWh
-                            if value > 1000:
-                                forecast_energy = value / 1000.0
-                            else:
-                                forecast_energy = value
-                        except (ValueError, TypeError):
-                            forecast_available = False
-                    elif "forecast" in state.attributes:
-                        # Solcast might have forecast in attributes
-                        forecast_data = state.attributes.get("forecast", [])
-                        if forecast_data:
-                            forecast_available = True
-                            forecast_energy = sum(
-                                float(item.get("wh", item.get("pv_power_forecast", 0)) or 0) / 1000.0
-                                for item in forecast_data
-                                if isinstance(item, dict)
-                            )
-                    elif "today_forecast" in state.attributes:
-                        try:
-                            forecast_energy = float(state.attributes.get("today_forecast", 0))
-                            forecast_available = True
-                        except (ValueError, TypeError):
-                            pass
-                    elif "forecast_today" in state.attributes:
-                        try:
-                            forecast_energy = float(state.attributes.get("forecast_today", 0))
-                            forecast_available = True
-                        except (ValueError, TypeError):
-                            pass
+            forecast_energy, forecast_available = self._parse_forecast_energy(pv_forecast_entity)
             
             calculated_soc: float | None = calculate_required_soc(
                 forecast_energy,
@@ -1156,47 +1200,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Error parsing configuration values: %s", e)
             return inactive_data
         
-        forecast_energy = 0.0
-        forecast_available = False  # Track if forecast entity was actually available
-        if pv_forecast_entity:
-            state = self.hass.states.get(pv_forecast_entity)
-            if state:
-                # Check if entity state is available (not unknown/unavailable)
-                if state.state not in ("unknown", "unavailable", None):
-                    forecast_available = True
-                    try:
-                        # Try to parse as float (might be kWh or Wh)
-                        value = float(state.state)
-                        # If value seems like Wh (very large), convert to kWh
-                        if value > 1000:
-                            forecast_energy = value / 1000.0
-                        else:
-                            forecast_energy = value
-                    except (ValueError, TypeError):
-                        forecast_available = False
-                elif "forecast" in state.attributes:
-                    # Solcast might have forecast in attributes
-                    forecast_data = state.attributes.get("forecast", [])
-                    if forecast_data:
-                        forecast_available = True
-                        forecast_energy = sum(
-                            float(item.get("wh", item.get("pv_power_forecast", 0)) or 0) / 1000.0
-                            for item in forecast_data
-                            if isinstance(item, dict)
-                        )
-                elif "today_forecast" in state.attributes:
-                    try:
-                        forecast_energy = float(state.attributes.get("today_forecast", 0))
-                        forecast_available = True
-                    except (ValueError, TypeError):
-                        pass
-                elif "forecast_today" in state.attributes:
-                    try:
-                        forecast_energy = float(state.attributes.get("forecast_today", 0))
-                        forecast_available = True
-                    except (ValueError, TypeError):
-                        pass
-        
+        forecast_energy, forecast_available = self._parse_forecast_energy(pv_forecast_entity)
+
         # Use initial SOC calculated at window start, or recalculate if initial failed
         calculated_soc: float | None
         if self.initial_calculated_soc is not None:
@@ -1316,15 +1321,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.is_discharge_mode:
             await self._handle_auto_charge()
         
-        # Check if target is reached
-        battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
+        # Check if target is reached (reuse battery_soc_entity from above)
         current_soc = None
         if battery_soc_entity:
             state = self.hass.states.get(battery_soc_entity)
             if state and state.state not in ("unknown", "unavailable"):
                 try:
                     current_soc = float(state.state)
-                    check_target = self.minimum_calculated_soc
+                    check_target = self.minimum_calculated_soc if self.minimum_calculated_soc is not None else target_soc
                     if self._is_target_reached(current_soc, check_target):
                         if not self.target_reached:
                             _LOGGER.info(
@@ -1480,7 +1484,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 {"entity_id": kostal_min_soc_entity, "value": target_soc},
             )
             self._last_soc_set = target_soc
-            _LOGGER.info("Set Kostal min SOC to %.1f%% (was %.1f%%)", target_soc, min_soc_current_value or "unknown")
+            _LOGGER.info(
+                "Set Kostal min SOC to %.1f%% (was %s)",
+                target_soc,
+                f"{min_soc_current_value:.1f}%" if min_soc_current_value is not None else "unknown",
+            )
             
             # Immediately send grid charge command (configurable delay) so inverter processes both together
             if kostal_grid_charge_switch and not should_skip_charging:
@@ -1842,18 +1850,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 except Exception as e:
                     _LOGGER.error("Error in periodic verification: %s", e, exc_info=True)
         
-        # Use async_create_background_task to avoid blocking startup/shutdown phases
-        # Fallback to async_create_task if async_create_background_task doesn't exist (older HA versions)
-        if hasattr(self.hass, 'async_create_background_task'):
-            self._verification_task = self.hass.async_create_background_task(
-                _periodic_verification_loop(),
-                "inverter_charge_night_periodic_verification"
-            )
-        else:
-            # Fallback for older Home Assistant versions
-            self._verification_task = self.hass.async_create_task(
-                _periodic_verification_loop()
-            )
+        self._verification_task = self.hass.async_create_background_task(
+            _periodic_verification_loop(),
+            "inverter_charge_night_periodic_verification",
+        )
         _LOGGER.debug("Started periodic verification task (interval: %d seconds)", 
                      self.config.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
     

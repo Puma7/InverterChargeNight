@@ -36,7 +36,7 @@ async def async_get_config_entry_diagnostics(
         "options": async_redact_data(dict(entry.options), REDACT_KEYS),
     }
     if coordinator:
-        auto_data = coordinator._get_auto_efficiency_data()
+        auto_data = coordinator.auto_efficiency_data
         auto_test_duration_s: int | None = None
         if coordinator._auto_test_active and coordinator._auto_test_start:
             auto_test_duration_s = int(
