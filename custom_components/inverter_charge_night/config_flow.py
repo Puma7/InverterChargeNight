@@ -7,10 +7,9 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigEntry, OptionsFlow
+from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import entity_registry as er, selector
 
 from .const import (
@@ -114,6 +113,93 @@ def _default_date_value(value: str | date | None) -> date | None:
         return None
 
 
+_ENTITY_KEYS_TO_VALIDATE = [
+    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_PV_FORECAST_ENTITY,
+    CONF_BATTERY_SOC_ENTITY,
+    CONF_BACKUP_MODE_ENTITY,
+    CONF_CHARGE_POWER_ENTITY,
+    CONF_CHARGE_POWER_SENT_ENTITY,
+    CONF_CHARGE_POWER_RECEIVED_ENTITY,
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
+    CONF_PV_FORECAST_TODAY_ENTITY,
+    CONF_FORCE_DISCHARGE_SWITCH,
+]
+
+
+def _validate_user_input(
+    user_input: dict[str, Any], hass: HomeAssistant
+) -> dict[str, str]:
+    """Validate user input and return error dict (shared by initial and options flow)."""
+    errors: dict[str, str] = {}
+
+    start_time = user_input.get(CONF_START_TIME, "")
+    end_time = user_input.get(CONF_END_TIME, "")
+    if not validate_time_format(start_time):
+        errors[CONF_START_TIME] = "invalid_time"
+    if not validate_time_format(end_time):
+        errors[CONF_END_TIME] = "invalid_time"
+    if start_time and end_time and start_time == end_time:
+        errors[CONF_END_TIME] = "start_end_time_must_differ"
+
+    user_min_soc = user_input.get(CONF_USER_MIN_SOC, 0)
+    user_max_soc = user_input.get(CONF_USER_MAX_SOC, 0)
+    if not validate_soc(user_min_soc):
+        errors[CONF_USER_MIN_SOC] = "invalid_soc"
+    if not validate_soc(user_max_soc):
+        errors[CONF_USER_MAX_SOC] = "invalid_soc"
+    if user_min_soc >= user_max_soc:
+        errors[CONF_USER_MAX_SOC] = "max_soc_must_be_greater_than_min"
+    if user_input.get(CONF_BATTERY_CAPACITY, 0) <= 0:
+        errors[CONF_BATTERY_CAPACITY] = "invalid_capacity"
+    if not validate_soc(user_input.get(CONF_DEFAULT_MIN_SOC, 0)):
+        errors[CONF_DEFAULT_MIN_SOC] = "invalid_soc"
+    if not validate_date_optional(user_input.get(CONF_ACTIVE_START_DATE)):
+        errors[CONF_ACTIVE_START_DATE] = "invalid_date"
+    if not validate_date_optional(user_input.get(CONF_ACTIVE_END_DATE)):
+        errors[CONF_ACTIVE_END_DATE] = "invalid_date"
+
+    min_power = user_input.get(CONF_MIN_CHARGE_POWER_W, 0)
+    max_power = user_input.get(CONF_MAX_CHARGE_POWER_W, 0)
+    if min_power <= 0:
+        errors[CONF_MIN_CHARGE_POWER_W] = "invalid_power"
+    if max_power <= 0:
+        errors[CONF_MAX_CHARGE_POWER_W] = "invalid_power"
+    if min_power >= max_power:
+        errors[CONF_MAX_CHARGE_POWER_W] = "max_power_must_be_greater_than_min"
+
+    abs_max_power = user_input.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_W)
+    abs_max_entity = user_input.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY)
+    if abs_max_power is not None:
+        if abs_max_power <= 0:
+            errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_W] = "invalid_power"
+        if not abs_max_entity:
+            errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY] = "required_entity"
+    elif abs_max_entity:
+        errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_W] = "required_value"
+
+    if user_input.get(CONF_AUTO_EFFICIENT_CHARGE):
+        if not user_input.get(CONF_CHARGE_POWER_ENTITY):
+            errors[CONF_CHARGE_POWER_ENTITY] = "required_entity"
+        if not user_input.get(CONF_CHARGE_POWER_SENT_ENTITY):
+            errors[CONF_CHARGE_POWER_SENT_ENTITY] = "required_entity"
+        if not user_input.get(CONF_CHARGE_POWER_RECEIVED_ENTITY):
+            errors[CONF_CHARGE_POWER_RECEIVED_ENTITY] = "required_entity"
+
+    # Validate entities exist
+    entity_registry = er.async_get(hass)
+    for entity_key in _ENTITY_KEYS_TO_VALIDATE:
+        entity_id = user_input.get(entity_key)
+        if entity_id:
+            entity = entity_registry.async_get(entity_id)
+            if not entity:
+                if not hass.states.get(entity_id):
+                    errors[entity_key] = "invalid_entity"
+
+    return errors
+
+
 class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Inverter Charge Night."""
 
@@ -121,80 +207,12 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Validate inputs
-            if not validate_time_format(user_input.get(CONF_START_TIME, "")):
-                errors[CONF_START_TIME] = "invalid_time"
-            if not validate_time_format(user_input.get(CONF_END_TIME, "")):
-                errors[CONF_END_TIME] = "invalid_time"
-            user_min_soc = user_input.get(CONF_USER_MIN_SOC, 0)
-            user_max_soc = user_input.get(CONF_USER_MAX_SOC, 0)
-            
-            if not validate_soc(user_min_soc):
-                errors[CONF_USER_MIN_SOC] = "invalid_soc"
-            if not validate_soc(user_max_soc):
-                errors[CONF_USER_MAX_SOC] = "invalid_soc"
-            if user_min_soc >= user_max_soc:
-                errors[CONF_USER_MAX_SOC] = "max_soc_must_be_greater_than_min"
-            if user_input.get(CONF_BATTERY_CAPACITY, 0) <= 0:
-                errors[CONF_BATTERY_CAPACITY] = "invalid_capacity"
-            if not validate_soc(user_input.get(CONF_DEFAULT_MIN_SOC, 0)):
-                errors[CONF_DEFAULT_MIN_SOC] = "invalid_soc"
-            if not validate_date_optional(user_input.get(CONF_ACTIVE_START_DATE)):
-                errors[CONF_ACTIVE_START_DATE] = "invalid_date"
-            if not validate_date_optional(user_input.get(CONF_ACTIVE_END_DATE)):
-                errors[CONF_ACTIVE_END_DATE] = "invalid_date"
-            min_power = user_input.get(CONF_MIN_CHARGE_POWER_W, 0)
-            max_power = user_input.get(CONF_MAX_CHARGE_POWER_W, 0)
-            if min_power <= 0:
-                errors[CONF_MIN_CHARGE_POWER_W] = "invalid_power"
-            if max_power <= 0:
-                errors[CONF_MAX_CHARGE_POWER_W] = "invalid_power"
-            if min_power >= max_power:
-                errors[CONF_MAX_CHARGE_POWER_W] = "max_power_must_be_greater_than_min"
-            abs_max_power = user_input.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_W)
-            abs_max_entity = user_input.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY)
-            if abs_max_power is not None:
-                if abs_max_power <= 0:
-                    errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_W] = "invalid_power"
-                if not abs_max_entity:
-                    errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY] = "required_entity"
-            elif abs_max_entity:
-                errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_W] = "required_value"
-            if user_input.get(CONF_AUTO_EFFICIENT_CHARGE):
-                if not user_input.get(CONF_CHARGE_POWER_ENTITY):
-                    errors[CONF_CHARGE_POWER_ENTITY] = "required_entity"
-                if not user_input.get(CONF_CHARGE_POWER_SENT_ENTITY):
-                    errors[CONF_CHARGE_POWER_SENT_ENTITY] = "required_entity"
-                if not user_input.get(CONF_CHARGE_POWER_RECEIVED_ENTITY):
-                    errors[CONF_CHARGE_POWER_RECEIVED_ENTITY] = "required_entity"
-
-            # Validate entities exist
-            entity_registry = er.async_get(self.hass)
-            for entity_key in [
-                CONF_KOSTAL_MIN_SOC_ENTITY,
-                CONF_KOSTAL_GRID_CHARGE_SWITCH,
-                CONF_PV_FORECAST_ENTITY,
-                CONF_BATTERY_SOC_ENTITY,
-                CONF_BACKUP_MODE_ENTITY,
-                CONF_CHARGE_POWER_ENTITY,
-                CONF_CHARGE_POWER_SENT_ENTITY,
-                CONF_CHARGE_POWER_RECEIVED_ENTITY,
-                CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
-                CONF_PV_FORECAST_TODAY_ENTITY,
-                CONF_FORCE_DISCHARGE_SWITCH,
-            ]:
-                entity_id = user_input.get(entity_key)
-                if entity_id:
-                    entity = entity_registry.async_get(entity_id)
-                    if not entity:
-                        # Check if state exists
-                        if not self.hass.states.get(entity_id):
-                            errors[entity_key] = "invalid_entity"
+            errors = _validate_user_input(user_input, self.hass)
 
             if not errors:
                 user_input = dict(user_input)
@@ -299,7 +317,7 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+    def async_get_options_flow(config_entry: ConfigEntry) -> config_entries.OptionsFlow:
         """Get the options flow for this handler."""
         return OptionsFlowHandler(config_entry)
 
@@ -313,80 +331,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Manage the options."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Validate inputs
-            if not validate_time_format(user_input.get(CONF_START_TIME, "")):
-                errors[CONF_START_TIME] = "invalid_time"
-            if not validate_time_format(user_input.get(CONF_END_TIME, "")):
-                errors[CONF_END_TIME] = "invalid_time"
-            user_min_soc = user_input.get(CONF_USER_MIN_SOC, 0)
-            user_max_soc = user_input.get(CONF_USER_MAX_SOC, 0)
-            
-            if not validate_soc(user_min_soc):
-                errors[CONF_USER_MIN_SOC] = "invalid_soc"
-            if not validate_soc(user_max_soc):
-                errors[CONF_USER_MAX_SOC] = "invalid_soc"
-            if user_min_soc >= user_max_soc:
-                errors[CONF_USER_MAX_SOC] = "max_soc_must_be_greater_than_min"
-            if user_input.get(CONF_BATTERY_CAPACITY, 0) <= 0:
-                errors[CONF_BATTERY_CAPACITY] = "invalid_capacity"
-            if not validate_soc(user_input.get(CONF_DEFAULT_MIN_SOC, 0)):
-                errors[CONF_DEFAULT_MIN_SOC] = "invalid_soc"
-            if not validate_date_optional(user_input.get(CONF_ACTIVE_START_DATE)):
-                errors[CONF_ACTIVE_START_DATE] = "invalid_date"
-            if not validate_date_optional(user_input.get(CONF_ACTIVE_END_DATE)):
-                errors[CONF_ACTIVE_END_DATE] = "invalid_date"
-            min_power = user_input.get(CONF_MIN_CHARGE_POWER_W, 0)
-            max_power = user_input.get(CONF_MAX_CHARGE_POWER_W, 0)
-            if min_power <= 0:
-                errors[CONF_MIN_CHARGE_POWER_W] = "invalid_power"
-            if max_power <= 0:
-                errors[CONF_MAX_CHARGE_POWER_W] = "invalid_power"
-            if min_power >= max_power:
-                errors[CONF_MAX_CHARGE_POWER_W] = "max_power_must_be_greater_than_min"
-            abs_max_power = user_input.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_W)
-            abs_max_entity = user_input.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY)
-            if abs_max_power is not None:
-                if abs_max_power <= 0:
-                    errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_W] = "invalid_power"
-                if not abs_max_entity:
-                    errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY] = "required_entity"
-            elif abs_max_entity:
-                errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_W] = "required_value"
-            if user_input.get(CONF_AUTO_EFFICIENT_CHARGE):
-                if not user_input.get(CONF_CHARGE_POWER_ENTITY):
-                    errors[CONF_CHARGE_POWER_ENTITY] = "required_entity"
-                if not user_input.get(CONF_CHARGE_POWER_SENT_ENTITY):
-                    errors[CONF_CHARGE_POWER_SENT_ENTITY] = "required_entity"
-                if not user_input.get(CONF_CHARGE_POWER_RECEIVED_ENTITY):
-                    errors[CONF_CHARGE_POWER_RECEIVED_ENTITY] = "required_entity"
-
-            # Validate entities exist
-            entity_registry = er.async_get(self.hass)
-            for entity_key in [
-                CONF_KOSTAL_MIN_SOC_ENTITY,
-                CONF_KOSTAL_GRID_CHARGE_SWITCH,
-                CONF_PV_FORECAST_ENTITY,
-                CONF_BATTERY_SOC_ENTITY,
-                CONF_BACKUP_MODE_ENTITY,
-                CONF_CHARGE_POWER_ENTITY,
-                CONF_CHARGE_POWER_SENT_ENTITY,
-                CONF_CHARGE_POWER_RECEIVED_ENTITY,
-                CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
-                CONF_PV_FORECAST_TODAY_ENTITY,
-                CONF_FORCE_DISCHARGE_SWITCH,
-            ]:
-                entity_id = user_input.get(entity_key)
-                if entity_id:
-                    entity = entity_registry.async_get(entity_id)
-                    if not entity:
-                        # Check if state exists
-                        if not self.hass.states.get(entity_id):
-                            errors[entity_key] = "invalid_entity"
+            errors = _validate_user_input(user_input, self.hass)
 
             if not errors:
                 user_input = dict(user_input)

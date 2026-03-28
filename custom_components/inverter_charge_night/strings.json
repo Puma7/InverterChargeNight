@@ -140,7 +140,8 @@
       "invalid_power": "Power must be greater than 0",
       "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
       "required_entity": "Entity must be provided when value is set",
-      "required_value": "Value must be provided when entity is set"
+      "required_value": "Value must be provided when entity is set",
+      "start_end_time_must_differ": "Start time and end time must be different"
     },
     "abort": {
       "already_configured": "Integration is already configured"
@@ -271,7 +272,8 @@
       "invalid_power": "Power must be greater than 0",
       "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
       "required_entity": "Entity must be provided when value is set",
-      "required_value": "Value must be provided when entity is set"
+      "required_value": "Value must be provided when entity is set",
+      "start_end_time_must_differ": "Start time and end time must be different"
     }
   }
 }
