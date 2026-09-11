@@ -1,6 +1,7 @@
 """Fixtures for Inverter Charge Night tests."""
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import time
 
@@ -67,13 +68,33 @@ def mock_config_entry() -> ConfigEntry:
 
 @pytest.fixture
 def mock_hass() -> HomeAssistant:
-    """Create a mock Home Assistant instance."""
+    """Create a strict mock Home Assistant instance.
+
+    ``hass.states.get`` returns ``None`` for every entity that a test has not
+    registered via ``hass.states.async_set(entity_id, state, attributes)``.
+    A plain ``MagicMock`` state would let ``float(state.state)`` raise a
+    ``TypeError`` that product code swallows, making a broken test look green.
+    Tests may still override ``hass.states.get.side_effect`` for special cases.
+    """
     hass = MagicMock(spec=HomeAssistant)
     hass.data = {}
+    states: dict[str, Any] = {}
     hass.states = MagicMock()
+    hass.states.get = MagicMock(side_effect=states.get)
+    hass.states.async_set = MagicMock(
+        side_effect=lambda eid, st, attributes=None: states.__setitem__(
+            eid, create_mock_state(eid, str(st), attributes)
+        )
+    )
     hass.services = MagicMock()
+    hass.services.async_call = AsyncMock()
     hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
     hass.config_entries = MagicMock()
+    # ``bus`` and ``loop`` are instance attributes of HomeAssistant, so the spec
+    # does not provide them. HA's event helpers (async_track_state_change_event,
+    # async_track_time_change) need both and then return real unsubscribe callables.
+    hass.bus = MagicMock()
+    hass.loop = MagicMock()
     return hass
 
 

@@ -1,11 +1,11 @@
 {
   "typeCheckingMode": "strict",
   "include": ["custom_components/inverter_charge_night"],
+  // config_flow.py is being rewritten by plan 001; its exclusion is removed by plan 001.
   "exclude": [
-    "custom_components/inverter_charge_night/__init__.py",
     "custom_components/inverter_charge_night/config_flow.py"
   ],
-  "pythonVersion": "3.12",
+  "pythonVersion": "3.13",
   "reportMissingTypeStubs": false,
   "reportPrivateUsage": false,
   "reportUnknownMemberType": false,
