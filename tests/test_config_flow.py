@@ -22,6 +22,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_ACTIVE_END_DATE,
     CONF_ACTIVE_START_DATE,
     CONF_AUTO_EFFICIENCY_DATA,
+    CONF_RUNTIME_STATE,
     CONF_AUTO_EFFICIENT_CHARGE,
     CONF_BACKUP_MODE_ENTITY,
     CONF_BATTERY_CAPACITY,
@@ -436,7 +437,8 @@ def test_every_step_labels_exactly_its_fields():
 
 def test_every_config_key_is_collected_by_exactly_one_step():
     conf_keys = {value for name, value in vars(const).items() if name.startswith("CONF_")}
-    conf_keys -= {CONF_AUTO_EFFICIENCY_DATA}  # history in entry.options, not a setting
+    # entry.options keys, not settings: auto-efficiency history and persisted runtime state
+    conf_keys -= {CONF_AUTO_EFFICIENCY_DATA, CONF_RUNTIME_STATE}
     conf_keys.add(CONF_NAME)
     steps = ("user", "time_soc", "power", "advanced")
     data = _load("strings.json")["config"]["step"]

@@ -14,10 +14,11 @@ verification task run for real (against ``hass.bus`` / ``hass.loop`` mocks and
 a real asyncio task respectively), so the listener handles asserted here are
 genuine unsubscribe callables.
 
-These tests document today's behaviour. Plan 005 changes parts of it and is
-expected to adapt the affected tests. Plan 004 made ``current_target_soc()``
-the single target (finding F2) and added a clock-based window check to the
-polling update, so ``dt_util.now`` is pinned inside the window for every test.
+Plan 004 made ``current_target_soc()`` the single target (finding F2) and added
+a clock-based window check to the polling update, so ``dt_util.now`` is pinned
+inside the window for every test. Plan 005 persists the window state in
+``entry.options`` (findings F4/F5) and awaits the verification task before the
+reset (finding F11); section 5 and 8 cover that.
 """
 from __future__ import annotations
 
@@ -42,7 +43,9 @@ from custom_components.inverter_charge_night.const import (
     CONF_KOSTAL_MIN_SOC_ENTITY,
     CONF_OPERATION_MODE,
     CONF_PV_FORECAST_ENTITY,
+    CONF_RUNTIME_STATE,
     CONF_START_TIME,
+    CONF_UPDATE_INTERVAL,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
     MODE_MORNING_DISCHARGE,
@@ -96,12 +99,12 @@ def _inside_window():
         yield
 
 
-def _make_coordinator(hass, config=CONFIG) -> InverterChargeNightCoordinator:
+def _make_coordinator(hass, config=CONFIG, options=None) -> InverterChargeNightCoordinator:
     entry = MagicMock()
     entry.entry_id = "entry_1"
     entry.title = "Test"
     entry.data = config
-    entry.options = {}
+    entry.options = options or {}
     coordinator = InverterChargeNightCoordinator(hass, entry)
     coordinator.async_request_refresh = AsyncMock()
     return coordinator
@@ -124,8 +127,7 @@ async def coordinator(mock_hass):
     coordinator = _make_coordinator(mock_hass)
     yield coordinator
     # Do not leave the periodic verification task pending after the test
-    coordinator._stop_periodic_verification()
-    await asyncio.sleep(0)
+    await coordinator._stop_periodic_verification()
 
 
 async def _start_and_apply(mock_hass, coordinator) -> float:
@@ -249,69 +251,86 @@ async def test_window_end_restores_original_min_soc_and_clears_state(
 # 5. Restart inside the window -----------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_restart_in_window_adopts_inverter_min_soc_as_target(
-    mock_hass, coordinator
-):
-    """Documents today's restart recovery; plan 005 changes it (finding F4).
+def _persisted_window(target: float) -> dict:
+    """The options a previous run persisted while its window was active."""
+    return {
+        CONF_RUNTIME_STATE: {
+            "is_enabled": True,
+            "skip_next_until": None,
+            "override_soc": None,
+            "original_min_soc": DEFAULT_MIN,
+            "initial_calculated_soc": target,
+            "original_ac_charge_power": None,
+            "pending_reset": False,
+        }
+    }
 
-    A previous run left our night target (65 %) on the inverter, then HA
-    restarted. The fresh coordinator treats the inverter value as the target
-    instead of recalculating from the forecast (which would give 45 %).
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("night_target", "battery"),
+    [
+        (65.0, "40"),  # target above the forecast plan (45 %)
+        (12.0, "10"),  # low target: before plan 005 it became the "original" (finding F4)
+    ],
+)
+async def test_restart_in_window_continues_persisted_target_and_restores_original(
+    mock_hass, night_target, battery
+):
+    """Finding F4 (plan 005): after a restart the persisted target and original are used.
+
+    A previous run persisted original 8 % and its night target, then HA
+    restarted with that target still on the inverter. The fresh coordinator
+    neither adopts the live value as "original" nor recalculates the target
+    from the forecast; at window end the inverter goes back to 8 %.
     """
+    mock_hass.async_create_background_task = MagicMock(
+        side_effect=lambda coro, name=None, **kwargs: asyncio.ensure_future(coro)
+    )
+    _register_inverter(mock_hass, min_soc=str(night_target), battery=battery)
+    coordinator = _make_coordinator(mock_hass, options=_persisted_window(night_target))
+    assert coordinator.original_min_soc == DEFAULT_MIN
+    assert coordinator.initial_calculated_soc == night_target
+    try:
+        await coordinator._on_window_start(WINDOW_START)
+
+        assert coordinator.initial_calculated_soc == night_target
+        assert coordinator.minimum_calculated_soc == night_target
+        assert coordinator.calculated_soc == night_target
+
+        await coordinator._async_update_data()
+
+        # The inverter is already at the target, so only charging is switched on
+        mock_hass.services.async_call.assert_awaited_once_with(
+            "switch", "turn_on", {"entity_id": GRID}
+        )
+        assert coordinator.original_min_soc == DEFAULT_MIN
+
+        mock_hass.states.async_set(GRID, "on")
+        mock_hass.services.async_call.reset_mock()
+        await coordinator._on_window_end(WINDOW_END)
+
+        assert mock_hass.services.async_call.await_args_list == [
+            call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
+            call("switch", "turn_off", {"entity_id": GRID}),
+        ]
+        assert coordinator._pending_reset is False
+    finally:
+        await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_restart_in_window_without_persisted_state_recalculates(mock_hass, coordinator):
+    """Without persisted state the live value is neither adopted nor waited for."""
     mock_hass.states.async_set(MIN_SOC, "65")
 
     await coordinator._on_window_start(WINDOW_START)
 
-    assert coordinator.initial_calculated_soc == 65.0
-    assert coordinator.minimum_calculated_soc == 65.0
-    assert coordinator.calculated_soc == 65.0
-
+    assert coordinator.initial_calculated_soc == EXPECTED_TARGET
     await coordinator._async_update_data()
-
-    # The inverter is already at the adopted target, so only charging is switched on
-    mock_hass.services.async_call.assert_awaited_once_with(
-        "switch", "turn_on", {"entity_id": GRID}
-    )
-    # 65 % is more than 10 points above the default, so the default is kept as
-    # the "original" value to restore at window end
-    assert coordinator.original_min_soc == DEFAULT_MIN
-
-
-@pytest.mark.asyncio
-async def test_restart_in_window_with_low_target_stores_it_as_original(
-    mock_hass, coordinator
-):
-    """Documents finding F4 (plan 005): a low night target survives as "original".
-
-    Restart recovery adopts any inverter value more than 1 point away from the
-    default, but the sanity check in ``_control_kostal`` only rejects values more
-    than 10 points above it. With the battery below that target, a 12 % night
-    target therefore becomes both the target and the value restored at window
-    end. (If the battery were already above 12 %, the update would return early
-    as "target reached" and never capture an original value at all.)
-    """
-    mock_hass.states.async_set(MIN_SOC, "12")
-    mock_hass.states.async_set(BATTERY, "10")
-
-    await coordinator._on_window_start(WINDOW_START)
-    assert coordinator.initial_calculated_soc == 12.0
-
-    await coordinator._async_update_data()
-    assert coordinator.original_min_soc == 12.0
-    # The inverter already shows the adopted target, so only charging is switched on
-    mock_hass.services.async_call.assert_awaited_once_with(
-        "switch", "turn_on", {"entity_id": GRID}
-    )
-
-    mock_hass.states.async_set(GRID, "on")
-    mock_hass.services.async_call.reset_mock()
-    await coordinator._on_window_end(WINDOW_END)
-
-    # The "original" restored at window end is the leftover night target, not 8 %
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": 12.0}),
-        call("switch", "turn_off", {"entity_id": GRID}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": EXPECTED_TARGET}),
+        call("switch", "turn_on", {"entity_id": GRID}),
     ]
 
 
@@ -413,5 +432,51 @@ async def test_override_in_discharge_mode_uses_discharge_path(mock_hass):
         assert data["target_reached"] is False
         assert data["is_active"] is True
     finally:
-        coordinator._stop_periodic_verification()
-        await asyncio.sleep(0)
+        await coordinator._stop_periodic_verification()
+
+
+# 8. Verification and window end (finding F11) -------------------------------
+
+
+@pytest.mark.asyncio
+async def test_window_end_waits_for_running_verification_before_reset(mock_hass):
+    """A verification run in flight is cancelled and awaited before the reset writes."""
+    mock_hass.async_create_background_task = MagicMock(
+        side_effect=lambda coro, name=None, **kwargs: asyncio.ensure_future(coro)
+    )
+    _register_inverter(mock_hass, grid="on")
+    # Interval 0: the loop calls the verification right after the window start
+    coordinator = _make_coordinator(mock_hass, {**CONFIG, CONF_UPDATE_INTERVAL: 0})
+    events: list[object] = []
+    entered = asyncio.Event()
+
+    async def _slow_verify() -> None:
+        entered.set()
+        try:
+            await asyncio.Event().wait()  # blocks until cancelled
+        except asyncio.CancelledError:
+            events.append("verification cancelled")
+            raise
+
+    coordinator._verify_and_restore_min_soc = _slow_verify
+
+    async def _record(domain: str, service: str, data: dict) -> None:
+        events.append((service, data.get("value", data["entity_id"])))
+
+    mock_hass.services.async_call = AsyncMock(side_effect=_record)
+
+    await coordinator._on_window_start(WINDOW_START)
+    await asyncio.wait_for(entered.wait(), 1)
+    task = coordinator._verification_task
+    assert task is not None and not task.done()
+
+    await coordinator._on_window_end(WINDOW_END)
+
+    assert task.done()
+    assert coordinator._verification_task is None
+    # The run was gone before the first reset command went out
+    assert events == [
+        "verification cancelled",
+        ("set_value", DEFAULT_MIN),
+        ("turn_off", GRID),
+    ]

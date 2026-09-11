@@ -166,7 +166,7 @@ async def test_inverter_charge_night_switch_on_off():
     coordinator._reset_settings = AsyncMock()
     coordinator._remove_battery_soc_listener = MagicMock()
     coordinator._remove_inverter_min_soc_listener = MagicMock()
-    coordinator._stop_periodic_verification = MagicMock()
+    coordinator._stop_periodic_verification = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
     entry = _make_entry()
     switch = InverterChargeNightSwitch(coordinator, entry)
@@ -181,7 +181,7 @@ async def test_inverter_charge_night_switch_on_off():
     coordinator._reset_settings.assert_awaited()
     coordinator._remove_battery_soc_listener.assert_called_once()
     coordinator._remove_inverter_min_soc_listener.assert_called_once()
-    coordinator._stop_periodic_verification.assert_called_once()
+    coordinator._stop_periodic_verification.assert_awaited_once()
 
     await switch.async_turn_on()
     await switch.async_turn_on()
@@ -209,7 +209,7 @@ async def test_inverter_charge_night_switch_reset_error_handled():
     coordinator._reset_settings = AsyncMock(side_effect=Exception("boom"))
     coordinator._remove_battery_soc_listener = MagicMock()
     coordinator._remove_inverter_min_soc_listener = MagicMock()
-    coordinator._stop_periodic_verification = MagicMock()
+    coordinator._stop_periodic_verification = AsyncMock()
     entry = _make_entry()
     switch = InverterChargeNightSwitch(coordinator, entry)
     switch.hass = MagicMock()
@@ -225,6 +225,7 @@ async def test_auto_efficient_charge_switch_already_on_off(mock_hass):
     coordinator = MagicMock()
     coordinator.auto_efficient_charge = True
     coordinator._reset_auto_test_state = MagicMock()
+    coordinator._reset_ac_charge_limit = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
     entry = _make_entry()
     entry.data = {"auto_efficient_charge": True}
@@ -241,6 +242,7 @@ async def test_auto_efficient_charge_switch_on_off(mock_hass):
     coordinator = MagicMock()
     coordinator.auto_efficient_charge = False
     coordinator._reset_auto_test_state = MagicMock()
+    coordinator._reset_ac_charge_limit = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
     entry = _make_entry()
     entry.data = {"auto_efficient_charge": False}

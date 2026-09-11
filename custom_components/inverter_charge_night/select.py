@@ -71,7 +71,8 @@ class OperationModeSelect(InverterChargeNightEntity, SelectEntity):
             self.coordinator.override_soc = None
             self.coordinator._remove_battery_soc_listener()
             self.coordinator._remove_inverter_min_soc_listener()
-            self.coordinator._stop_periodic_verification()
+            await self.coordinator._stop_periodic_verification()
+            self.coordinator._persist_state()
 
         self.coordinator.operation_mode = option
         data = dict(self._entry.data)

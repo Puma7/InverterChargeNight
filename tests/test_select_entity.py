@@ -50,7 +50,7 @@ async def test_operation_mode_select_option_change(mock_config_entry, mock_coord
     mock_coordinator.override_soc = 50.0
     mock_coordinator._remove_battery_soc_listener = MagicMock()
     mock_coordinator._remove_inverter_min_soc_listener = MagicMock()
-    mock_coordinator._stop_periodic_verification = MagicMock()
+    mock_coordinator._stop_periodic_verification = AsyncMock()
     mock_coordinator._check_current_window = AsyncMock()
 
     select = OperationModeSelect(mock_coordinator, mock_config_entry)
@@ -106,7 +106,7 @@ async def test_operation_mode_select_reset_error_handled(mock_config_entry, mock
     mock_coordinator._reset_settings = AsyncMock(side_effect=Exception("reset failed"))
     mock_coordinator._remove_battery_soc_listener = MagicMock()
     mock_coordinator._remove_inverter_min_soc_listener = MagicMock()
-    mock_coordinator._stop_periodic_verification = MagicMock()
+    mock_coordinator._stop_periodic_verification = AsyncMock()
     mock_coordinator._check_current_window = AsyncMock()
 
     select = OperationModeSelect(mock_coordinator, mock_config_entry)

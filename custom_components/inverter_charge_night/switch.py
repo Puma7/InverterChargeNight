@@ -58,6 +58,7 @@ class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):
 
         _LOGGER.info("Enabling Inverter Charge Night")
         self.coordinator.is_enabled = True
+        self.coordinator._persist_state()
         self.async_write_ha_state()
         await self.coordinator.async_request_refresh()
 
@@ -75,10 +76,12 @@ class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):
             _LOGGER.error("Error resetting settings while disabling: %s", e, exc_info=True)
         self.coordinator.is_active = False
         self.coordinator.override_soc = None
+        self.coordinator.initial_calculated_soc = None
         self.coordinator.minimum_calculated_soc = None
         self.coordinator._remove_battery_soc_listener()
         self.coordinator._remove_inverter_min_soc_listener()
-        self.coordinator._stop_periodic_verification()
+        await self.coordinator._stop_periodic_verification()
+        self.coordinator._persist_state()
         self.async_write_ha_state()
 
 
@@ -106,6 +109,7 @@ class SkipNextSwitch(InverterChargeNightEntity, SwitchEntity):
         _LOGGER.info("Skip next activated - integration will skip for 24 hours")
         self.coordinator.skip_next = True
         self.coordinator._schedule_skip_next_expiry()
+        self.coordinator._persist_state()
 
         if self.coordinator.is_active:
             _LOGGER.info("Currently active - ending window due to skip next")
@@ -122,6 +126,7 @@ class SkipNextSwitch(InverterChargeNightEntity, SwitchEntity):
         _LOGGER.info("Skip next deactivated")
         self.coordinator.skip_next = False
         self.coordinator._cancel_skip_next_expiry()
+        self.coordinator._persist_state()
         self.async_write_ha_state()
         await self.coordinator._check_current_window()
 
@@ -160,6 +165,8 @@ class AutoEfficientChargeSwitch(InverterChargeNightEntity, SwitchEntity):
             return
         self.coordinator.auto_efficient_charge = False
         self.coordinator._reset_auto_test_state()
+        # Aborting the finder must not leave its test value on the inverter
+        await self.coordinator._reset_ac_charge_limit()
         data = dict(self._entry.data)
         data[CONF_AUTO_EFFICIENT_CHARGE] = False
         self.hass.config_entries.async_update_entry(self._entry, data=data)
