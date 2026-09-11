@@ -15,7 +15,7 @@ from custom_components.inverter_charge_night.switch import (
     AutoEfficientChargeSwitch,
     InverterChargeNightSwitch,
 )
-from custom_components.inverter_charge_night.const import CONF_USER_MAX_SOC, CONF_USER_MIN_SOC
+from custom_components.inverter_charge_night.const import CONF_USER_MAX_SOC, CONF_USER_MIN_SOC, DOMAIN
 
 
 def _make_entry():
@@ -63,11 +63,11 @@ def test_calculated_soc_sensor_values():
 
 def test_best_charge_power_sensor():
     coordinator = MagicMock()
-    coordinator.auto_efficiency_data = {"best_power_w": 6000}
+    coordinator.get_auto_efficiency_data.return_value = {"best_power_w": 6000}
     entry = _make_entry()
     sensor = BestChargePowerSensor(coordinator, entry)
     assert sensor.native_value == 6000.0
-    coordinator.auto_efficiency_data = {"best_power_w": "n/a"}
+    coordinator.get_auto_efficiency_data.return_value = {"best_power_w": "n/a"}
     assert sensor.native_value is None
 
 
@@ -219,3 +219,20 @@ def test_auto_efficient_charge_switch_is_on():
     entry = _make_entry()
     switch = AutoEfficientChargeSwitch(coordinator, entry)
     assert switch.is_on is True
+
+
+def test_entities_share_device_info_and_unique_id():
+    coordinator = MagicMock()
+    coordinator.data = {}
+    entry = _make_entry()
+
+    sensor = ActiveWindowBinarySensor(coordinator, entry)
+    assert sensor.unique_id == "entry_1_active"
+    assert sensor.device_info["identifiers"] == {(DOMAIN, "entry_1")}
+    assert sensor.device_info["name"] == "Test Entry"
+    assert sensor.has_entity_name is True
+
+    entry.title = ""
+    power_sensor = BestChargePowerSensor(coordinator, entry)
+    assert power_sensor.unique_id == "entry_1_best_charge_power"
+    assert power_sensor.device_info == sensor.device_info | {"name": "Inverter Charge Night"}

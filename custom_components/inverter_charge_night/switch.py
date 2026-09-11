@@ -8,11 +8,10 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.const import EntityCategory
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import InverterChargeNightCoordinator
+from .entity import InverterChargeNightEntity
 from .const import CONF_AUTO_EFFICIENT_CHARGE, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,25 +33,16 @@ async def async_setup_entry(
     )
 
 
-class InverterChargeNightSwitch(CoordinatorEntity[InverterChargeNightCoordinator], SwitchEntity):
+class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):
     """Switch to enable/disable the integration."""
 
     _attr_translation_key = "enabled"
-    _attr_has_entity_name = True
     _attr_icon = "mdi:battery-charging-wireless"
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the switch."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_enabled"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title or "Inverter Charge Night",
-            manufacturer="Custom Integration",
-            model="Inverter Charge Night",
-        )
+        super().__init__(coordinator, entry, "enabled")
 
     @property
     def is_on(self) -> bool:
@@ -90,25 +80,16 @@ class InverterChargeNightSwitch(CoordinatorEntity[InverterChargeNightCoordinator
         self.async_write_ha_state()
 
 
-class SkipNextSwitch(CoordinatorEntity[InverterChargeNightCoordinator], SwitchEntity):
+class SkipNextSwitch(InverterChargeNightEntity, SwitchEntity):
     """Switch to skip the next window cycle for 24 hours."""
 
     _attr_translation_key = "skip_next"
-    _attr_has_entity_name = True
     _attr_icon = "mdi:debug-step-over"
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the skip next switch."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_skip_next"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title or "Inverter Charge Night",
-            manufacturer="Custom Integration",
-            model="Inverter Charge Night",
-        )
+        super().__init__(coordinator, entry, "skip_next")
 
     @property
     def is_on(self) -> bool:
@@ -143,25 +124,16 @@ class SkipNextSwitch(CoordinatorEntity[InverterChargeNightCoordinator], SwitchEn
         await self.coordinator._check_current_window()
 
 
-class AutoEfficientChargeSwitch(CoordinatorEntity[InverterChargeNightCoordinator], SwitchEntity):
+class AutoEfficientChargeSwitch(InverterChargeNightEntity, SwitchEntity):
     """Switch to enable/disable auto efficient charge finder."""
 
     _attr_translation_key = "auto_efficient_charge_finder"
-    _attr_has_entity_name = True
     _attr_icon = "mdi:flash-auto"
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the auto efficient charge switch."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_auto_efficient_charge"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title or "Inverter Charge Night",
-            manufacturer="Custom Integration",
-            model="Inverter Charge Night",
-        )
+        super().__init__(coordinator, entry, "auto_efficient_charge")
 
     @property
     def is_on(self) -> bool:

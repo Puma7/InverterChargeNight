@@ -30,7 +30,7 @@ async def test_async_update_data_disabled(mock_hass):
     coordinator = _make_coordinator(mock_hass, {})
     coordinator.is_enabled = False
     coordinator.is_active = True
-    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
+    mock_hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
     data = await coordinator._async_update_data()
     assert data["is_active"] is False
     assert data["calculated_soc"] is None
@@ -58,7 +58,7 @@ async def test_async_update_data_outside_date_range_triggers_end(mock_hass):
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=False)
     coordinator._on_window_end = AsyncMock()
-    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
+    mock_hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
     data = await coordinator._async_update_data()
     coordinator._on_window_end.assert_awaited()
     assert data["is_active"] is False
@@ -277,3 +277,96 @@ async def test_async_update_data_stops_when_already_at_target(mock_hass):
 
     coordinator._stop_grid_charging.assert_awaited()
     assert data["target_reached"] is True
+
+
+def _forecast_state(state, attributes):
+    pv_state = MagicMock()
+    pv_state.state = state
+    pv_state.attributes = attributes
+    return pv_state
+
+
+@pytest.mark.parametrize(
+    "state,unit,expected_kwh",
+    [
+        ("2000", "Wh", 2.0),
+        ("5", "kWh", 5.0),
+        ("0.012", "MWh", 12.0),
+        ("2000", None, 2.0),  # no unit: values above 1000 are assumed to be Wh
+        ("5", None, 5.0),
+    ],
+)
+def test_parse_forecast_energy_units(mock_hass, state, unit, expected_kwh):
+    attributes = {"unit_of_measurement": unit} if unit else {}
+    mock_hass.states.get.return_value = _forecast_state(state, attributes)
+    coordinator = _make_coordinator(mock_hass, {})
+
+    energy, available = coordinator._parse_forecast_energy("sensor.pv")
+
+    assert energy == pytest.approx(expected_kwh)
+    assert available is True
+
+
+def test_parse_forecast_energy_unsupported_unit_is_unavailable(mock_hass, caplog):
+    mock_hass.states.get.return_value = _forecast_state("3500", {"unit_of_measurement": "W"})
+    coordinator = _make_coordinator(mock_hass, {})
+
+    assert coordinator._parse_forecast_energy("sensor.pv") == (0.0, False)
+    assert "unsupported unit_of_measurement" in caplog.text
+
+
+def test_parse_forecast_energy_all_malformed_list_is_unavailable(mock_hass):
+    mock_hass.states.get.return_value = _forecast_state(
+        "unavailable", {"forecast": [{"wh": "n/a"}, "junk"]}
+    )
+    coordinator = _make_coordinator(mock_hass, {})
+
+    assert coordinator._parse_forecast_energy("sensor.pv") == (0.0, False)
+
+
+def test_parse_forecast_energy_partially_malformed_list(mock_hass, caplog):
+    mock_hass.states.get.return_value = _forecast_state(
+        "unavailable", {"forecast": [{"wh": 1000}, {"wh": "n/a"}]}
+    )
+    coordinator = _make_coordinator(mock_hass, {})
+
+    energy, available = coordinator._parse_forecast_energy("sensor.pv")
+
+    assert energy == pytest.approx(1.0)
+    assert available is True
+    assert "Skipped 1 malformed item(s)" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_skips_forecast_when_initial_soc_known(mock_hass):
+    battery_state = MagicMock()
+    battery_state.state = "30"
+    mock_hass.states.get.side_effect = lambda entity_id: {
+        "sensor.soc": battery_state,
+    }.get(entity_id)
+
+    coordinator = _make_coordinator(
+        mock_hass,
+        {
+            CONF_PV_FORECAST_ENTITY: "sensor.pv",
+            CONF_BATTERY_CAPACITY: 10.0,
+            CONF_FORECAST_ERROR_MARGIN: 10.0,
+            CONF_USER_MIN_SOC: 8.0,
+            CONF_USER_MAX_SOC: 100.0,
+            CONF_DEFAULT_MIN_SOC: 8.0,
+            CONF_BATTERY_SOC_ENTITY: "sensor.soc",
+        },
+    )
+    coordinator.is_enabled = True
+    coordinator.is_active = True
+    coordinator.initial_calculated_soc = 40.0
+    coordinator._is_backup_active = MagicMock(return_value=False)
+    coordinator._is_within_date_range = MagicMock(return_value=True)
+    coordinator._control_kostal = AsyncMock()
+    coordinator._handle_auto_charge = AsyncMock()
+    coordinator._parse_forecast_energy = MagicMock()
+
+    data = await coordinator._async_update_data()
+
+    assert data["calculated_soc"] == 40.0
+    coordinator._parse_forecast_energy.assert_not_called()

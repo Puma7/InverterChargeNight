@@ -61,13 +61,20 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def validate_time_format(time_str: str) -> bool:
-    """Validate time format HH:MM."""
+def parse_time_str(time_str: Any) -> tuple[int, int] | None:
+    """Parse an HH:MM string into (hour, minute), or None if it is invalid."""
     try:
         hour, minute = map(int, time_str.split(":"))
-        return 0 <= hour <= 23 and 0 <= minute <= 59
     except (ValueError, AttributeError):
-        return False
+        return None
+    if 0 <= hour <= 23 and 0 <= minute <= 59:
+        return hour, minute
+    return None
+
+
+def validate_time_format(time_str: str) -> bool:
+    """Validate time format HH:MM."""
+    return parse_time_str(time_str) is not None
 
 
 def validate_soc(value: float) -> bool:
@@ -134,13 +141,14 @@ def _validate_user_input(
     """Validate user input and return error dict (shared by initial and options flow)."""
     errors: dict[str, str] = {}
 
-    start_time = user_input.get(CONF_START_TIME, "")
-    end_time = user_input.get(CONF_END_TIME, "")
-    if not validate_time_format(start_time):
+    start_time = parse_time_str(user_input.get(CONF_START_TIME, ""))
+    end_time = parse_time_str(user_input.get(CONF_END_TIME, ""))
+    if start_time is None:
         errors[CONF_START_TIME] = "invalid_time"
-    if not validate_time_format(end_time):
+    if end_time is None:
         errors[CONF_END_TIME] = "invalid_time"
-    if start_time and end_time and start_time == end_time:
+    elif start_time == end_time:
+        # Compare parsed values so that e.g. "2:00" and "02:00" count as equal
         errors[CONF_END_TIME] = "start_end_time_must_differ"
 
     user_min_soc = user_input.get(CONF_USER_MIN_SOC, 0)

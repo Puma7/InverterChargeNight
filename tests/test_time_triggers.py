@@ -90,7 +90,7 @@ def test_setup_and_remove_time_triggers(mock_hass):
         mock_hass, {CONF_START_TIME: "00:00", CONF_END_TIME: "05:59"}
     )
     trigger = MagicMock()
-    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
+    mock_hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
 
     with patch(
         "custom_components.inverter_charge_night.async_track_time_change",
@@ -117,7 +117,7 @@ def test_update_time_triggers_updates_listener(mock_hass):
     coordinator.remove_time_triggers = MagicMock()
     coordinator.setup_time_triggers = MagicMock()
     coordinator._check_current_window = AsyncMock()
-    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
+    mock_hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
 
     coordinator.entry.data = {
         CONF_START_TIME: "01:00",
@@ -129,3 +129,63 @@ def test_update_time_triggers_updates_listener(mock_hass):
 
     coordinator._setup_battery_soc_listener.assert_called_once()
     mock_hass.async_create_task.assert_called_once()
+
+
+def test_is_time_between_equal_times_never_active(mock_hass):
+    coordinator = _make_coordinator(mock_hass, {})
+    assert coordinator._is_time_between(time(22, 0), time(22, 0), time(22, 0)) is False
+    assert coordinator._is_time_between(time(3, 0), time(22, 0), time(22, 0)) is False
+
+
+def test_setup_time_triggers_equal_times_registers_no_triggers(mock_hass, caplog):
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_START_TIME: "22:00", CONF_END_TIME: "22:00"}
+    )
+    mock_hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
+
+    with patch(
+        "custom_components.inverter_charge_night.async_track_time_change"
+    ) as track_time_change:
+        coordinator.setup_time_triggers()
+
+    track_time_change.assert_not_called()
+    assert coordinator._time_triggers == []
+    assert "will never activate" in caplog.text
+    # The window check still runs so an active window gets ended
+    mock_hass.async_create_task.assert_called_once()
+
+
+def test_setup_time_triggers_can_skip_window_check(mock_hass):
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_START_TIME: "00:00", CONF_END_TIME: "05:59"}
+    )
+    mock_hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
+
+    with patch(
+        "custom_components.inverter_charge_night.async_track_time_change",
+        return_value=MagicMock(),
+    ):
+        coordinator.setup_time_triggers(check_window=False)
+
+    assert len(coordinator._time_triggers) == 2
+    mock_hass.async_create_task.assert_not_called()
+
+
+def test_update_time_triggers_schedules_single_window_check(mock_hass):
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_START_TIME: "00:00", CONF_END_TIME: "05:59"}
+    )
+    mock_hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
+
+    with patch(
+        "custom_components.inverter_charge_night.async_track_time_change",
+        return_value=MagicMock(),
+    ):
+        coordinator.update_time_triggers()
+
+    assert len(coordinator._time_triggers) == 2
+    mock_hass.async_create_task.assert_called_once()
+    assert (
+        mock_hass.async_create_task.call_args.kwargs["name"]
+        == "inverter_charge_night_check_window_update"
+    )

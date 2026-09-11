@@ -109,7 +109,7 @@ def test_finalize_auto_test_records_best(mock_hass):
     coordinator._auto_test_power_w = 5000
     coordinator._auto_energy_sent_wh = 1000.0
     coordinator._auto_energy_received_wh = 900.0
-    coordinator._get_auto_efficiency_data = MagicMock(return_value={})
+    coordinator.get_auto_efficiency_data = MagicMock(return_value={})
     coordinator._save_auto_efficiency_data = MagicMock()
 
     with patch("custom_components.inverter_charge_night.dt_util.now", return_value=now):
@@ -158,7 +158,7 @@ async def test_handle_auto_charge_uses_best_power_and_disables(mock_hass):
     coordinator.auto_efficient_charge = True
     coordinator.target_reached = False
     coordinator._select_next_auto_test_power_w = MagicMock(return_value=None)
-    coordinator._get_auto_efficiency_data = MagicMock(return_value={"best_power_w": 6000})
+    coordinator.get_auto_efficiency_data = MagicMock(return_value={"best_power_w": 6000})
     coordinator._set_ac_charge_limit_w = AsyncMock()
 
     await coordinator._handle_auto_charge()

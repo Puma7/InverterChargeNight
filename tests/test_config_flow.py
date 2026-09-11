@@ -119,3 +119,55 @@ async def test_options_flow_requires_auto_entities(mock_hass, mock_config_entry)
 
     assert result["type"] == FlowResultType.FORM
     assert result["errors"][CONF_CHARGE_POWER_ENTITY] == "required_entity"
+
+
+def test_parse_time_str():
+    assert config_flow.parse_time_str("2:00") == (2, 0)
+    assert config_flow.parse_time_str("23:59") == (23, 59)
+    assert config_flow.parse_time_str("24:00") is None
+    assert config_flow.parse_time_str("ab:cd") is None
+    assert config_flow.parse_time_str(None) is None
+
+
+def _time_only_input(start: str, end: str) -> dict:
+    return {
+        CONF_START_TIME: start,
+        CONF_END_TIME: end,
+        CONF_USER_MIN_SOC: 8.0,
+        CONF_USER_MAX_SOC: 100.0,
+        CONF_BATTERY_CAPACITY: 10.0,
+        CONF_DEFAULT_MIN_SOC: 8.0,
+        CONF_MIN_CHARGE_POWER_W: 5000,
+        CONF_MAX_CHARGE_POWER_W: 15000,
+    }
+
+
+@pytest.mark.parametrize(
+    "start,end",
+    [("22:00", "22:00"), ("2:00", "02:00"), ("22:0", "22:00"), (" 6:00", "06:00")],
+)
+def test_validate_user_input_rejects_equal_times(mock_hass, start, end):
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(er, "async_get", lambda hass: MagicMock())
+        errors = config_flow._validate_user_input(_time_only_input(start, end), mock_hass)
+
+    assert errors[CONF_END_TIME] == "start_end_time_must_differ"
+    assert CONF_START_TIME not in errors
+
+
+def test_validate_user_input_reports_invalid_time_over_equality(mock_hass):
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(er, "async_get", lambda hass: MagicMock())
+        errors = config_flow._validate_user_input(_time_only_input("ab:cd", "ab:cd"), mock_hass)
+
+    assert errors[CONF_START_TIME] == "invalid_time"
+    assert errors[CONF_END_TIME] == "invalid_time"
+
+
+def test_validate_user_input_accepts_different_times(mock_hass):
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(er, "async_get", lambda hass: MagicMock())
+        errors = config_flow._validate_user_input(_time_only_input("00:00", "05:59"), mock_hass)
+
+    assert CONF_START_TIME not in errors
+    assert CONF_END_TIME not in errors
