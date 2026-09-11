@@ -37,6 +37,7 @@ from .const import (
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
     CONF_AUTO_EFFICIENT_CHARGE,
     CONF_AUTO_EFFICIENCY_DATA,
+    CONF_RUNTIME_STATE,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
     CONF_START_TIME,
@@ -74,6 +75,12 @@ PLATFORMS: list[Platform] = [
 
 
 type InverterChargeNightConfigEntry = ConfigEntry[InverterChargeNightCoordinator]
+
+# A failed reset at window end is retried after these delays (seconds), then
+# every RESET_RETRY_INTERVAL until it succeeds.
+RESET_RETRY_DELAYS: tuple[int, ...] = (60, 120, 240)
+RESET_RETRY_INTERVAL = 900
+SKIP_NEXT_DURATION = timedelta(hours=24)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> bool:
@@ -126,14 +133,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
 
 async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> None:
     """Handle config entry update."""
-    _LOGGER.info("Configuration updated, updating triggers and coordinator")
-    
     # Safety check: ensure coordinator exists
     coordinator: InverterChargeNightCoordinator | None = getattr(entry, "runtime_data", None)
     if coordinator is None:
         _LOGGER.error("Coordinator not found for entry %s", entry.entry_id)
         return
-    
+
+    if coordinator.config == entry.data:
+        # Only entry.options changed: the coordinator persists its runtime state
+        # there (see _persist_state), which must not re-register triggers or
+        # listeners. Configuration lives in entry.data.
+        _LOGGER.debug("Entry options updated without configuration change; nothing to reconfigure")
+        return
+
+    _LOGGER.info("Configuration updated, updating triggers and coordinator")
+
     # Store old window times before update for comparison
     old_start_time = coordinator.config.get(CONF_START_TIME, DEFAULT_START_TIME)
     old_end_time = coordinator.config.get(CONF_END_TIME, DEFAULT_END_TIME)
@@ -195,10 +209,22 @@ async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConf
         coordinator._remove_battery_soc_listener()
         coordinator._remove_inverter_min_soc_listener()
         coordinator._remove_backup_mode_listener()
-        coordinator._stop_periodic_verification()
+        await coordinator._stop_periodic_verification()
         coordinator._cancel_skip_next_expiry()
-    
+        # A pending reset stays persisted and is retried after the next setup
+        coordinator._cancel_reset_retry()
+
     return unload_ok
+
+
+def _as_float(value: Any) -> float | None:
+    """Return ``value`` as float, or None when it is missing or not numeric."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
 
 
 def _unit_of(state: Any) -> str:
@@ -226,6 +252,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.is_enabled = True  # Integration enabled/disabled via switch
         self.operation_mode: str = entry.data.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE)
         self.skip_next = False
+        self._skip_next_until: datetime | None = None
         self._skip_next_unsub: CALLBACK_TYPE | None = None
         self.calculated_soc: float | None = None
         self.initial_calculated_soc: float | None = None  # Store SOC calculated at window start
@@ -235,6 +262,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_soc_set: float | None = None
         self.override_soc: float | None = None
         self._original_absolute_charge_power: float | None = None
+        self._original_ac_charge_power: float | None = None  # W, captured before the finder's first write
+        self._pending_reset = False  # window ended but the inverter is not back at its original settings
+        self._reset_retry_unsub: CALLBACK_TYPE | None = None
+        self._reset_retry_count = 0
         self._battery_soc_listener: CALLBACK_TYPE | None = None
         self._inverter_min_soc_listener: CALLBACK_TYPE | None = None
         self._verification_task: asyncio.Task[None] | None = None
@@ -248,6 +279,60 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
         self._auto_missing_entities_logged = False
+        self._restore_state()
+
+    # Persistence ------------------------------------------------------------
+    #
+    # entry.options["runtime_state"] (CONF_RUNTIME_STATE) is the single place
+    # for flags that must survive a Home Assistant restart. It lives next to
+    # the auto-efficiency history under its own key; neither overwrites the other.
+
+    def _persist_state(self) -> None:
+        """Store the flags that must survive a restart in entry.options["runtime_state"]."""
+        options = dict(self.entry.options)
+        options[CONF_RUNTIME_STATE] = {
+            "is_enabled": self.is_enabled,
+            "skip_next_until": self._skip_next_until.isoformat() if self._skip_next_until else None,
+            "override_soc": self.override_soc,
+            "original_min_soc": self.original_min_soc,
+            # The window target only matters while a window is active; a stale
+            # value must never be taken for a restart during a window.
+            "initial_calculated_soc": self.initial_calculated_soc if self.is_active else None,
+            "original_ac_charge_power": self._original_ac_charge_power,
+            "pending_reset": self._pending_reset,
+        }
+        self.hass.config_entries.async_update_entry(self.entry, options=options)
+
+    def _restore_state(self) -> None:
+        """Restore the persisted flags; missing or malformed values keep their defaults."""
+        raw = self.entry.options.get(CONF_RUNTIME_STATE)
+        if not isinstance(raw, dict):
+            return
+        state: dict[str, Any] = raw
+        if isinstance(state.get("is_enabled"), bool):
+            self.is_enabled = state["is_enabled"]
+        self.override_soc = _as_float(state.get("override_soc"))
+        self.original_min_soc = _as_float(state.get("original_min_soc"))
+        self.initial_calculated_soc = _as_float(state.get("initial_calculated_soc"))
+        self._original_ac_charge_power = _as_float(state.get("original_ac_charge_power"))
+        self._pending_reset = state.get("pending_reset") is True
+
+        until_raw = state.get("skip_next_until")
+        if isinstance(until_raw, str):
+            try:
+                until = datetime.fromisoformat(until_raw)
+                if until > dt_util.now():
+                    self.skip_next = True
+                    self._schedule_skip_next_expiry(until)
+                else:
+                    _LOGGER.info("Persisted skip next expired during downtime")
+            except (ValueError, TypeError):
+                _LOGGER.warning("Ignoring invalid persisted skip_next_until %r", until_raw)
+
+        if self._pending_reset:
+            _LOGGER.warning("Inverter settings were not reset before the last shutdown - retrying")
+            self._schedule_reset_retry()
+        _LOGGER.debug("Restored runtime state: %s", state)
 
     def current_target_soc(self) -> float | None:
         """The SOC the inverter should hold right now: manual override, else the plan."""
@@ -266,22 +351,32 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return current_soc <= target_soc
         return current_soc >= target_soc
 
-    def _schedule_skip_next_expiry(self) -> None:
-        """Schedule skip_next to auto-expire after 24 hours."""
+    def _schedule_skip_next_expiry(self, until: datetime | None = None) -> None:
+        """Schedule skip_next to expire at ``until`` (default: 24 hours from now).
+
+        The absolute deadline is persisted, so after a restart the timer is
+        re-armed for the remaining time only.
+        """
         self._cancel_skip_next_expiry()
+        now = dt_util.now()
+        if until is None:
+            until = now + SKIP_NEXT_DURATION
+        self._skip_next_until = until
 
         async def _expire_skip_next(_now: datetime) -> None:
-            _LOGGER.info("Skip next expired after 24 hours")
+            _LOGGER.info("Skip next expired")
             self.skip_next = False
+            self._skip_next_until = None
             self._skip_next_unsub = None
+            self._persist_state()
             await self._check_current_window()
 
-        self._skip_next_unsub = async_call_later(
-            self.hass, 24 * 3600, _expire_skip_next
-        )
+        remaining = max(0.0, (until - now).total_seconds())
+        self._skip_next_unsub = async_call_later(self.hass, remaining, _expire_skip_next)
 
     def _cancel_skip_next_expiry(self) -> None:
         """Cancel the skip_next expiry timer."""
+        self._skip_next_until = None
         if self._skip_next_unsub:
             self._skip_next_unsub()
             self._skip_next_unsub = None
@@ -493,16 +588,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return value
         return value
 
-    async def _set_ac_charge_limit_w(self, power_w: int) -> None:
-        """Set max AC charge limit if entity is configured."""
+    def _ac_charge_limit_target(self) -> tuple[str, str] | None:
+        """Return (entity_id, domain) of the AC charge limit entity, or None if unusable."""
         entity_id = self.config.get(CONF_CHARGE_POWER_ENTITY)
         if not entity_id:
-            return
-        domain = entity_id.split(".")[0]
-        service = "set_value"
+            return None
+        domain = str(entity_id).split(".")[0]
         if domain not in ("number", "input_number"):
             _LOGGER.warning("Charge power entity %s has unsupported domain %s", entity_id, domain)
-            return
+            return None
+        return str(entity_id), domain
+
+    async def _write_ac_charge_limit(self, entity_id: str, domain: str, power_w: float, what: str) -> bool:
+        """Write ``power_w`` to the AC charge limit entity in its own unit; report success."""
         value = float(power_w)
         state = self.hass.states.get(entity_id)
         unit = _unit_of(state)
@@ -511,12 +609,64 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             await self.hass.services.async_call(
                 domain,
-                service,
+                "set_value",
                 {"entity_id": entity_id, "value": value},
             )
-            _LOGGER.info("Set AC charge limit to %.3f (%s)", value, unit or "unitless")
         except Exception as e:
-            _LOGGER.error("Error setting charge power: %s", e, exc_info=True)
+            _LOGGER.error("Error writing AC charge limit (%s): %s", what, e, exc_info=True)
+            return False
+        _LOGGER.info("%s to %.3f (%s)", what, value, unit or "unitless")
+        return True
+
+    async def _set_ac_charge_limit_w(self, power_w: int) -> None:
+        """Set max AC charge limit if entity is configured.
+
+        The value found on the entity before the first write is remembered so
+        that ``_reset_ac_charge_limit`` can restore it; without a readable value
+        nothing is written, because a test value must never be left behind.
+        """
+        target = self._ac_charge_limit_target()
+        if target is None:
+            return
+        entity_id, domain = target
+        if self._original_ac_charge_power is None:
+            current_w = self._get_power_w(entity_id)
+            if current_w is None:
+                _LOGGER.warning(
+                    "Cannot read the current AC charge limit from %s - not writing a "
+                    "test value that could not be restored",
+                    entity_id,
+                )
+                return
+            self._original_ac_charge_power = current_w
+            _LOGGER.info("Stored original AC charge limit: %.0f W", current_w)
+            self._persist_state()
+        await self._write_ac_charge_limit(entity_id, domain, power_w, "Set AC charge limit")
+
+    async def _reset_ac_charge_limit(self) -> bool:
+        """Restore the AC charge limit captured before the finder's first write.
+
+        Returns True when nothing is left to restore; on failure the original
+        value is kept for a retry.
+        """
+        if self._original_ac_charge_power is None:
+            return True
+        target = self._ac_charge_limit_target()
+        if target is None:
+            # Entity no longer configured or unusable: nothing we can restore
+            self._original_ac_charge_power = None
+            return True
+        entity_id, domain = target
+        state = self.hass.states.get(entity_id)
+        if not state or state.state in ("unknown", "unavailable"):
+            _LOGGER.error("Cannot reset AC charge limit - entity %s unavailable", entity_id)
+            return False
+        if not await self._write_ac_charge_limit(
+            entity_id, domain, self._original_ac_charge_power, "Reset AC charge limit"
+        ):
+            return False
+        self._original_ac_charge_power = None
+        return True
 
     async def _apply_absolute_charge_power_limit(self) -> None:
         """Apply absolute max charge power (AC+DC) during AC charging."""
@@ -721,9 +871,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Handle auto efficient charging logic."""
         if not self.auto_efficient_charge:
             if self._auto_test_active:
+                # Finder switched off during a test: record it and take the
+                # test value off the inverter
                 self._finalize_auto_test()
+                await self._reset_ac_charge_limit()
             return
         if self._is_backup_active():
+            # No inverter writes in backup mode; the window end restores the limit
             if self._auto_test_active:
                 self._reset_auto_test_state()
             return
@@ -761,6 +915,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             best_power = data.get("best_power_w")
             if isinstance(best_power, int):
                 await self._set_ac_charge_limit_w(best_power)
+                # The best value is the finder's result and is meant to stay on
+                # the inverter, so it is not restored at window end.
+                self._original_ac_charge_power = None
+                self._persist_state()
                 if self.auto_efficient_charge:
                     self.auto_efficient_charge = False
                     data = dict(self.entry.data)
@@ -904,7 +1062,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if not self._inverter_min_soc_listener:
                     self._setup_inverter_min_soc_listener()
                 if not self._verification_task or self._verification_task.done():
-                    self._start_periodic_verification()
+                    await self._start_periodic_verification()
                 # Also verify immediately that inverter min SOC matches our target
                 await self._verify_and_restore_min_soc()
             # If (not in_window and not is_active) - state is correct
@@ -930,19 +1088,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.info("%s window started", mode_label)
         self.is_active = True
         self.target_reached = False
-        
+        # This window owns the inverter now: a reset still pending from the
+        # previous window is superseded by this window's end. The original
+        # value it kept is not captured again (original_min_soc stays set).
+        self._cancel_reset_retry()
+        self._pending_reset = False
+
+        # Arm the listeners and the verification first. The target calculation
+        # no longer waits for the inverter; if the min SOC entity is not
+        # available yet, _control_kostal skips the write and the verification
+        # applies the target as soon as the entity reports a value.
+        self._setup_battery_soc_listener()
+        self._setup_inverter_min_soc_listener()
+        await self._start_periodic_verification()
+
         # Calculate and store initial SOC for this charging period
         await self._calculate_initial_soc()
-        
-        # Set up battery SOC listener for more frequent target checks
-        self._setup_battery_soc_listener()
-        
-        # Set up inverter min SOC listener to detect external changes
-        self._setup_inverter_min_soc_listener()
-        
-        # Start periodic verification task (every 15 minutes)
-        self._start_periodic_verification()
-        
+
         await self.async_request_refresh()
 
     async def _calculate_initial_soc(self) -> None:
@@ -953,97 +1115,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             error_margin = float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0))
             user_min_soc = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
             user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, 100.0))
-            default_min_soc = float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
-            
-            # CRITICAL: Check if we're recovering from a restart during active window
-            # If min SOC on inverter is already set to a value different from default,
-            # use that value to preserve the target that was active before restart
-            # IMPORTANT: Inverter may take 1-2 minutes to load after HA restart, so we retry
-            kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-            preserved_soc = None
-            
-            if kostal_min_soc_entity:
-                # Retry mechanism: Wait for inverter to become available (max 3 minutes)
-                max_retry_time = 180  # 3 minutes in seconds
-                retry_interval = 10  # Check every 10 seconds
-                retry_count = 0
-                max_retries = max_retry_time // retry_interval
-                
-                while retry_count < max_retries:
-                    try:
-                        state = self.hass.states.get(kostal_min_soc_entity)
-                        if state and state.state not in ("unknown", "unavailable"):
-                            # Entity is available - check if we can preserve the value
-                            try:
-                                current_min_soc = float(state.state)
-                                # If current value is significantly different from default and within user bounds,
-                                # it's likely the target we set before restart - preserve it
-                                if (abs(current_min_soc - default_min_soc) > 1.0 and 
-                                    user_min_soc <= current_min_soc <= user_max_soc):
-                                    preserved_soc = current_min_soc
-                                    _LOGGER.info(
-                                        "Detected restart during active window - preserving existing min SOC %.1f%% "
-                                        "(was set before restart, default is %.1f%%, waited %d seconds)",
-                                        preserved_soc,
-                                        default_min_soc,
-                                        retry_count * retry_interval
-                                    )
-                                    break  # Found preserved SOC, exit retry loop
-                                else:
-                                    # Entity is available but value doesn't match criteria (e.g., at default)
-                                    # No need to keep retrying - entity is ready, just not preserving this value
-                                    if retry_count > 0:
-                                        _LOGGER.debug(
-                                            "Inverter entity available but min SOC (%.1f%%) doesn't match preservation criteria "
-                                            "(default: %.1f%%), will recalculate from forecast",
-                                            current_min_soc,
-                                            default_min_soc
-                                        )
-                                    break  # Entity available, exit retry loop (even if not preserving)
-                            except (ValueError, TypeError):
-                                # Entity available but value invalid - exit retry loop
-                                break
-                        
-                        # If entity is still unavailable and we haven't exceeded max retries, wait and retry
-                        if preserved_soc is None and retry_count < max_retries - 1:
-                            if retry_count == 0:
-                                _LOGGER.info(
-                                    "Inverter entity %s not yet available after restart, waiting up to %d seconds...",
-                                    kostal_min_soc_entity,
-                                    max_retry_time
-                                )
-                            await asyncio.sleep(retry_interval)
-                            retry_count += 1
-                        else:
-                            break  # Either found SOC or exhausted retries
-                    except Exception as e:
-                        _LOGGER.debug("Error checking current min SOC for restart recovery (attempt %d): %s", retry_count + 1, e)
-                        if retry_count < max_retries - 1:
-                            await asyncio.sleep(retry_interval)
-                            retry_count += 1
-                        else:
-                            break
-                
-                # Log if we couldn't recover the preserved SOC
-                if preserved_soc is None and retry_count > 0:
-                    _LOGGER.warning(
-                        "Inverter entity %s did not become available within %d seconds after restart. "
-                        "Will recalculate from forecast instead of preserving previous target.",
-                        kostal_min_soc_entity,
-                        retry_count * retry_interval
-                    )
-            
-            # If we found a preserved SOC value, use it instead of recalculating
-            if preserved_soc is not None:
-                self.initial_calculated_soc = preserved_soc
-                self.minimum_calculated_soc = preserved_soc  # Initialize minimum with preserved value
+
+            # Restart during an active window: the previous run persisted its
+            # original min SOC and its target (restored in _restore_state).
+            # Continue with that target instead of guessing it from the
+            # inverter's live value - which is our own night target, not the
+            # original - or recalculating it from a forecast that has moved on.
+            if (
+                self._pending_reset or self.original_min_soc is not None
+            ) and self.initial_calculated_soc is not None:
+                preserved_soc = self.initial_calculated_soc
+                self.minimum_calculated_soc = preserved_soc
                 self.calculated_soc = preserved_soc
                 _LOGGER.info(
-                    "Using preserved SOC from inverter: %.1f%% (restart recovery)",
-                    preserved_soc
+                    "Restart during active window - continuing with persisted target %.1f%% "
+                    "(original min SOC: %s)",
+                    preserved_soc,
+                    f"{self.original_min_soc:.1f}%" if self.original_min_soc is not None else "not captured",
                 )
                 return
-            
+
             # Otherwise, calculate normally from forecast
             pv_forecast_entity = self._get_active_forecast_entity()
             forecast_energy, forecast_available = self._parse_forecast_energy(pv_forecast_entity)
@@ -1086,7 +1177,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 calculated_soc,
                 forecast_energy
             )
-                
+            # Persist the target so a restart inside the window continues with it
+            self._persist_state()
+
         except (ValueError, TypeError) as e:
             _LOGGER.error("Error calculating initial SOC: %s", e)
             self.initial_calculated_soc = None
@@ -1095,8 +1188,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Handle window end."""
         mode_label = "Morning discharge" if self.is_discharge_mode else "Night charge"
         _LOGGER.info("%s window ended, resetting settings", mode_label)
+        # Stop everything that could write the night target back to the inverter
+        # before the reset. The verification task is awaited, so a run that has
+        # already passed its is_active check cannot finish after the reset.
+        self._remove_battery_soc_listener()
+        self._remove_inverter_min_soc_listener()
+        await self._stop_periodic_verification()
+        ok = False
         try:
-            await self._reset_settings()
+            ok = await self._reset_settings()
         except Exception as e:
             _LOGGER.error("Error resetting settings at window end: %s", e, exc_info=True)
             # Continue to reset state flags even if reset fails
@@ -1108,25 +1208,85 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.initial_calculated_soc = None  # Reset initial SOC for next charging period
             self.minimum_calculated_soc = None  # Reset minimum SOC for next charging period
             self.override_soc = None  # Clear override when window ends
-            self._remove_battery_soc_listener()  # Remove SOC listener
-            self._remove_inverter_min_soc_listener()  # Remove inverter min SOC listener
-            self._stop_periodic_verification()  # Stop periodic verification
+            # A failed reset is retried until the inverter is back at its
+            # original settings; original_min_soc is kept for that (F3).
+            self._pending_reset = not ok
+            if not ok:
+                self._reset_retry_count = 0
+                self._schedule_reset_retry()
+            self._persist_state()
             await self.async_request_refresh()
 
-    async def _reset_settings(self) -> None:
-        """Reset Kostal settings to original values."""
+    def _schedule_reset_retry(self) -> None:
+        """Retry the failed reset after 60 s, 120 s, 240 s, then every 15 minutes."""
+        self._cancel_reset_retry()
+        if self._reset_retry_count < len(RESET_RETRY_DELAYS):
+            delay = RESET_RETRY_DELAYS[self._reset_retry_count]
+        else:
+            delay = RESET_RETRY_INTERVAL
+        self._reset_retry_count += 1
+
+        async def _run_reset_retry(_now: datetime) -> None:
+            self._reset_retry_unsub = None
+            await self._retry_reset()
+
+        self._reset_retry_unsub = async_call_later(self.hass, delay, _run_reset_retry)
+        _LOGGER.warning(
+            "Inverter settings are not reset yet - retrying in %d seconds (attempt %d)",
+            delay,
+            self._reset_retry_count,
+        )
+
+    def _cancel_reset_retry(self) -> None:
+        """Cancel a scheduled reset retry."""
+        if self._reset_retry_unsub:
+            self._reset_retry_unsub()
+            self._reset_retry_unsub = None
+
+    async def _retry_reset(self) -> None:
+        """Run a deferred reset; keep rescheduling while it fails."""
+        if not self._pending_reset:
+            return
+        if self.is_active:
+            # A new window owns the inverter; its end performs the reset
+            return
+        if self._is_backup_active():
+            # Never override backup mode: try again later
+            _LOGGER.info("Backup mode active - deferring the reset retry")
+            self._schedule_reset_retry()
+            return
+        ok = False
+        try:
+            ok = await self._reset_settings()
+        except Exception as e:
+            _LOGGER.error("Error retrying reset: %s", e, exc_info=True)
+        self._pending_reset = not ok
+        if ok:
+            self._reset_retry_count = 0
+            _LOGGER.info("Deferred reset of the inverter settings succeeded")
+        else:
+            self._schedule_reset_retry()
+        self._persist_state()
+
+    async def _reset_settings(self) -> bool:
+        """Reset the inverter to its original settings.
+
+        Returns True when every target was reached: min SOC restored, grid
+        charging (and force discharge) off and the AC charge limit restored.
+        On False the values needed for a retry are kept.
+        """
         # CRITICAL: Use stored original value if available, otherwise use configured default
         reset_min_soc = self.original_min_soc if self.original_min_soc is not None else float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
         kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
         kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
-        
-        reset_success = False
-        
+
+        ok = True
+
         # Reset min SOC
         if kostal_min_soc_entity:
             try:
                 state = self.hass.states.get(kostal_min_soc_entity)
-                if state:
+                if state and state.state not in ("unknown", "unavailable"):
                     await self.hass.services.async_call(
                         "number",
                         "set_value",
@@ -1137,19 +1297,20 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         reset_min_soc,
                         "stored" if self.original_min_soc is not None else "configured default",
                     )
-                    reset_success = True
                 else:
                     _LOGGER.error("Cannot reset min SOC - entity state unavailable")
+                    ok = False
             except Exception as e:
                 _LOGGER.error("Error resetting min SOC: %s", e, exc_info=True)
+                ok = False
         else:
             _LOGGER.warning("No min SOC entity configured - cannot reset")
-        
+
         # Turn off grid charge
         if kostal_grid_charge_switch:
             try:
                 state = self.hass.states.get(kostal_grid_charge_switch)
-                if state:
+                if state and state.state not in ("unknown", "unavailable"):
                     if state.state == "on":
                         await self.hass.services.async_call(
                             "switch",
@@ -1161,17 +1322,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         _LOGGER.debug("Grid charge switch already off")
                 else:
                     _LOGGER.error("Cannot reset grid charge - entity state unavailable")
+                    ok = False
             except Exception as e:
                 _LOGGER.error("Error turning off grid charge: %s", e, exc_info=True)
+                ok = False
         else:
             _LOGGER.warning("No grid charge switch configured - cannot reset")
-        
+
         # Turn off force discharge switch if configured (discharge mode cleanup)
         force_discharge_switch = self.config.get(CONF_FORCE_DISCHARGE_SWITCH)
         if force_discharge_switch:
             try:
                 state = self.hass.states.get(force_discharge_switch)
-                if state and state.state == "on":
+                if not state or state.state in ("unknown", "unavailable"):
+                    _LOGGER.error("Cannot reset force discharge - entity state unavailable")
+                    ok = False
+                elif state.state == "on":
                     await self.hass.services.async_call(
                         "switch",
                         "turn_off",
@@ -1180,15 +1346,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.info("Turned off force discharge switch during reset")
             except Exception as e:
                 _LOGGER.error("Error turning off force discharge: %s", e, exc_info=True)
-        
+                ok = False
+
         # _last_soc_set is log information only; always forget it so the next
         # window starts from what the inverter actually reports.
         self._last_soc_set = None
-        # Reset stored original value and override after successful reset
-        if reset_success:
+        if not await self._reset_ac_charge_limit():
+            ok = False
+        await self._reset_absolute_charge_power()
+        # Forget the original values only once everything is back in place;
+        # a retry needs them otherwise.
+        if ok:
             self.original_min_soc = None
             self.override_soc = None  # Clear override when resetting
-        await self._reset_absolute_charge_power()
+            self._pending_reset = False
+            self._cancel_reset_retry()
+            self._persist_state()
+        return ok
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from entities and update coordinator."""
@@ -1390,6 +1564,27 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "skip_next": self.skip_next,
         }
 
+    def _capture_original_min_soc(self, current: float | None) -> None:
+        """Remember the inverter's min SOC before the first write of a window.
+
+        A value that is already set - captured earlier this window or restored
+        from the persisted state after a restart - is never replaced: after a
+        restart the live value is our own night target, not the original
+        (finding F4). ``current`` is the live value, or None if it is not numeric.
+        """
+        if self.original_min_soc is not None:
+            return
+        if current is not None:
+            self.original_min_soc = current
+            _LOGGER.info("Stored original min SOC: %.1f%%", current)
+        else:
+            self.original_min_soc = float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
+            _LOGGER.warning(
+                "Could not read original min SOC, using configured default: %.1f%%",
+                self.original_min_soc,
+            )
+        self._persist_state()
+
     async def _control_kostal(self, target_soc: float) -> None:
         """Control Kostal entities based on calculated SOC."""
         if self._is_backup_active():
@@ -1444,62 +1639,37 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Track if we need to set min SOC
         need_to_set_min_soc = False
         min_soc_current_value = None
-        
+
         # Prepare min SOC setting (check if needed, store original value)
         if kostal_min_soc_entity:
             try:
-                # Store original value if not stored yet
-                if self.original_min_soc is None:
-                    state = self.hass.states.get(kostal_min_soc_entity)
-                    if state and state.state not in ("unknown", "unavailable"):
-                        try:
-                            self.original_min_soc = float(state.state)
-                            
-                            # SAFETY: Sanity check the captured value
-                            # If we capture a value much higher than default, we might be reading our own
-                            # previously set value after a restart. For safety, prefer the default.
-                            default_min = float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
-                            if self.original_min_soc > default_min + 10.0:
-                                _LOGGER.warning(
-                                    "Captured original SOC (%.1f%%) is significantly higher than default (%.1f%%). "
-                                    "Assuming restart during active window - using default as safe original value.",
-                                    self.original_min_soc,
-                                    default_min,
-                                )
-                                self.original_min_soc = default_min
-                            else:
-                                _LOGGER.info("Stored original min SOC: %.1f%%", self.original_min_soc)
-                        except (ValueError, TypeError):
-                            # Use configured default if we can't read current value
-                            self.original_min_soc = float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
-                            _LOGGER.warning(
-                                "Could not read original min SOC, using configured default: %.1f%%",
-                                self.original_min_soc,
-                            )
-                    else:
-                        # Use configured default if entity unavailable
-                        self.original_min_soc = float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
-                        _LOGGER.warning(
-                            "Min SOC entity unavailable, using configured default: %.1f%%",
-                            self.original_min_soc,
-                        )
-                
-                # Check if we need to set min SOC
                 state = self.hass.states.get(kostal_min_soc_entity)
-                if state and state.state not in ("unknown", "unavailable"):
+                if not state or state.state in ("unknown", "unavailable"):
+                    # Without the entity the floor cannot be set, so charging must
+                    # not start either. Nothing has been written yet, so no original
+                    # is captured; the periodic verification applies the target as
+                    # soon as the entity reports a value (finding F6).
+                    _LOGGER.warning(
+                        "Min SOC entity %s is unavailable - deferring min SOC and grid "
+                        "charge until it reports a value",
+                        kostal_min_soc_entity,
+                    )
+                    should_skip_charging = True
+                else:
                     try:
                         min_soc_current_value = float(state.state)
                     except (ValueError, TypeError):
                         pass
-                
-                # Only update if value changed significantly (avoid unnecessary service calls and EEPROM wear)
-                # CRITICAL: Threshold increased to 0.5 to prevent "bricking" inverter memory
-                # The inverter's reported value is authoritative; _last_soc_set is log information only
-                if min_soc_current_value is None or abs(min_soc_current_value - target_soc) > 0.5:
-                    need_to_set_min_soc = True
-                else:
-                    _LOGGER.debug("Min SOC already at target: %.1f%%", target_soc)
-                    self._last_soc_set = target_soc
+                    self._capture_original_min_soc(min_soc_current_value)
+
+                    # Only update if value changed significantly (avoid unnecessary service calls and EEPROM wear)
+                    # CRITICAL: Threshold increased to 0.5 to prevent "bricking" inverter memory
+                    # The inverter's reported value is authoritative; _last_soc_set is log information only
+                    if min_soc_current_value is None or abs(min_soc_current_value - target_soc) > 0.5:
+                        need_to_set_min_soc = True
+                    else:
+                        _LOGGER.debug("Min SOC already at target: %.1f%%", target_soc)
+                        self._last_soc_set = target_soc
             except Exception as e:
                 _LOGGER.error("Error preparing min SOC: %s", e, exc_info=True)
         
@@ -1632,40 +1802,32 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         need_to_set_min_soc = False
+        # Force discharge needs the floor in place; without the entity it waits
+        # for the periodic verification to apply the target (finding F6).
+        min_soc_available = True
 
         if kostal_min_soc_entity:
             try:
-                if self.original_min_soc is None:
-                    state = self.hass.states.get(kostal_min_soc_entity)
-                    if state and state.state not in ("unknown", "unavailable"):
-                        try:
-                            self.original_min_soc = float(state.state)
-                            _LOGGER.info("Stored original min SOC: %.1f%%", self.original_min_soc)
-                        except (ValueError, TypeError):
-                            self.original_min_soc = float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
-                            _LOGGER.warning(
-                                "Could not read original min SOC, using configured default: %.1f%%",
-                                self.original_min_soc,
-                            )
-                    else:
-                        self.original_min_soc = float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
-                        _LOGGER.warning(
-                            "Min SOC entity unavailable, using configured default: %.1f%%",
-                            self.original_min_soc,
-                        )
-
                 state = self.hass.states.get(kostal_min_soc_entity)
-                min_soc_current_value: float | None = None
-                if state and state.state not in ("unknown", "unavailable"):
+                if not state or state.state in ("unknown", "unavailable"):
+                    _LOGGER.warning(
+                        "Min SOC entity %s is unavailable - deferring discharge floor and "
+                        "force discharge until it reports a value",
+                        kostal_min_soc_entity,
+                    )
+                    min_soc_available = False
+                else:
+                    min_soc_current_value: float | None = None
                     try:
                         min_soc_current_value = float(state.state)
                     except (ValueError, TypeError):
                         pass
+                    self._capture_original_min_soc(min_soc_current_value)
 
-                if min_soc_current_value is None or abs(min_soc_current_value - target_soc) > 0.5:
-                    need_to_set_min_soc = True
-                else:
-                    self._last_soc_set = target_soc
+                    if min_soc_current_value is None or abs(min_soc_current_value - target_soc) > 0.5:
+                        need_to_set_min_soc = True
+                    else:
+                        self._last_soc_set = target_soc
             except Exception as e:
                 _LOGGER.error("Error preparing min SOC for discharge: %s", e, exc_info=True)
 
@@ -1693,7 +1855,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.error("Error turning off grid charge in discharge mode: %s", e, exc_info=True)
 
         # Activate force-discharge switch to push battery energy to grid
-        if force_discharge_switch:
+        if force_discharge_switch and min_soc_available:
             try:
                 state = self.hass.states.get(force_discharge_switch)
                 if state and state.state == "off":
@@ -1745,6 +1907,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.error("Error stopping grid charge: %s", e, exc_info=True)
         await self._reset_absolute_charge_power()
         self._finalize_auto_test()
+        # Charging is over for this window: take a running test's value off the inverter
+        await self._reset_ac_charge_limit()
     
     def _setup_battery_soc_listener(self) -> None:
         """Set up a listener for battery SOC changes to check target more frequently."""
@@ -1863,9 +2027,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._inverter_min_soc_listener = None
             _LOGGER.debug("Removed inverter min SOC listener")
     
-    def _start_periodic_verification(self) -> None:
+    async def _start_periodic_verification(self) -> None:
         """Start periodic verification task to check inverter min SOC matches our target."""
-        self._stop_periodic_verification()  # Stop any existing task
+        await self._stop_periodic_verification()  # Stop any existing task
         
         async def _periodic_verification_loop() -> None:
             """Periodic verification loop."""
@@ -1887,12 +2051,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("Started periodic verification task (interval: %d seconds)", 
                      self.config.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
     
-    def _stop_periodic_verification(self) -> None:
-        """Stop the periodic verification task."""
-        if self._verification_task and not self._verification_task.done():
-            self._verification_task.cancel()
-            self._verification_task = None
-            _LOGGER.debug("Stopped periodic verification task")
+    async def _stop_periodic_verification(self) -> None:
+        """Stop the periodic verification task and wait until it has finished.
+
+        Waiting matters: a verification run that already passed its
+        ``is_active`` check could otherwise write the night target back to
+        the inverter after the window-end reset (finding F11).
+        """
+        task = self._verification_task
+        self._verification_task = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        if task is asyncio.current_task():
+            return  # cancelling ourselves; the loop exits on its own
+        await asyncio.gather(task, return_exceptions=True)
+        _LOGGER.debug("Stopped periodic verification task")
     
     async def _verify_and_restore_min_soc(self) -> None:
         """Verify inverter min SOC matches our target and restore if needed."""
@@ -1932,6 +2106,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     current_inverter_soc,
                     target_soc
                 )
+                # The window may have ended while this run was waiting
+                if not self.is_active:
+                    return
+                # First write of the window (entity was unavailable at window
+                # start): remember what to restore before overwriting it
+                self._capture_original_min_soc(current_inverter_soc)
                 # Restore to our target value
                 await self.hass.services.async_call(
                     "number",

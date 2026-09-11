@@ -97,19 +97,25 @@ async def test_control_kostal_min_soc_already_set(mock_hass):
     # coordinator records the value as set and captures the original min SOC.
     mock_hass.services.async_call.assert_not_awaited()
     assert coordinator._last_soc_set == 50.0
-    # 50 % is more than 10 points above the 8 % default, so the default is stored
-    assert coordinator.original_min_soc == 8.0
+    # The live value is the original: since plan 005 a restart inside the window
+    # restores the original from the persisted state instead of guessing it.
+    assert coordinator.original_min_soc == 50.0
 
 
 @pytest.mark.asyncio
-async def test_control_kostal_stores_default_when_min_soc_unavailable(mock_hass):
+async def test_control_kostal_defers_when_min_soc_unavailable(mock_hass, caplog):
+    """Plan 005 (finding F6): no floor, no charging - and no original captured yet."""
     mock_hass.states.async_set("number.min_soc", "unavailable")
+    mock_hass.states.async_set("switch.grid", "off")
+    mock_hass.states.async_set("sensor.soc", "10")
     mock_hass.services.async_call = AsyncMock()
 
     coordinator = _make_coordinator(
         mock_hass,
         {
             CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_BATTERY_SOC_ENTITY: "sensor.soc",
             CONF_DEFAULT_MIN_SOC: 8.0,
             CONF_USER_MIN_SOC: 0.0,
             CONF_USER_MAX_SOC: 100.0,
@@ -119,11 +125,21 @@ async def test_control_kostal_stores_default_when_min_soc_unavailable(mock_hass)
 
     await coordinator._control_kostal(50.0)
 
-    assert coordinator.original_min_soc == 8.0
+    # Neither the min SOC nor grid charging is written; the periodic
+    # verification applies the target once the entity reports a value
+    mock_hass.services.async_call.assert_not_awaited()
+    assert coordinator.original_min_soc is None
+    assert "number.min_soc is unavailable - deferring" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_control_kostal_original_min_soc_high_resets_to_default(mock_hass):
+async def test_control_kostal_keeps_high_live_value_as_original(mock_hass):
+    """Plan 005 removed the "more than 10 points above default" heuristic (finding F4).
+
+    An original of 50 % is stored as 50 %. A restart inside the window no
+    longer reaches this code with the night target as live value, because the
+    persisted original is restored first (see test_window_lifecycle).
+    """
     min_soc_state = MagicMock()
     min_soc_state.state = "50"
     battery_state = MagicMock()
@@ -148,7 +164,10 @@ async def test_control_kostal_original_min_soc_high_resets_to_default(mock_hass)
 
     await coordinator._control_kostal(30.0)
 
-    assert coordinator.original_min_soc == 8.0
+    assert coordinator.original_min_soc == 50.0
+    mock_hass.services.async_call.assert_awaited_with(
+        "number", "set_value", {"entity_id": "number.min_soc", "value": 30.0}
+    )
 
 
 @pytest.mark.asyncio
