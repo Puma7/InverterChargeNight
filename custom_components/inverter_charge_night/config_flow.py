@@ -57,24 +57,9 @@ from .const import (
     MODE_NIGHT_CHARGE,
     DOMAIN,
 )
+from .util import parse_time_str
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def parse_time_str(time_str: Any) -> tuple[int, int] | None:
-    """Parse an HH:MM string into (hour, minute), or None if it is invalid."""
-    try:
-        hour, minute = map(int, time_str.split(":"))
-    except (ValueError, AttributeError):
-        return None
-    if 0 <= hour <= 23 and 0 <= minute <= 59:
-        return hour, minute
-    return None
-
-
-def validate_time_format(time_str: str) -> bool:
-    """Validate time format HH:MM."""
-    return parse_time_str(time_str) is not None
 
 
 def validate_soc(value: float) -> bool:
