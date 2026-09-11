@@ -134,15 +134,17 @@ vorliegt; bis dahin bleibt der Kostal-Pfad, aber ohne Markennamen in Keys und La
 
 | Plan | Titel | Priorität | Aufwand | Hängt ab von | Status |
 |------|-------|-----------|---------|--------------|--------|
-| 001 | Konfigurationsassistent, Reconfigure-Flow und Übersetzungen aus 1.0.3 zurückholen | P1 | M | — | TODO |
-| 002 | Startprüfung, Repair-Issues, runtime_data, PARALLEL_UPDATES zurückholen; quality_scale ehrlich machen | P1 | S | 001 | TODO |
-| 003 | Verifikations-Baseline: Abhängigkeiten, CI, Coverage-Ratchet für den Coordinator, strenger Test-Hass | P1 | M | — | TODO |
-| 004 | Steuerlogik-Fehler mit kleinem Umfang: ein Ziel, Override-Pfad, Backup-Listener, Veto, Fensterprüfung | P1 | M | 003 | TODO |
-| 005 | Rücksetz-Robustheit und Persistenz über Neustarts | P1 | L | 003, 004 | TODO |
-| 006 | Planer v2 (Design und Prototyp): Überbrückung, Sonnenaufgang, Verbrauch, Entladesperre, Ladeleistung | P2 | L | 001–005 | TODO |
-| 007 | Schnee-Override: Zahl-Entität "Schnee-Nächte", lädt die nächsten N Nächte auf das Maximum und zählt herunter | P2 | S | 004, 005 | TODO |
+| 001 | Konfigurationsassistent, Reconfigure-Flow und Übersetzungen aus 1.0.3 zurückholen | P1 | M | — | DONE |
+| 002 | Startprüfung, Repair-Issues, runtime_data, PARALLEL_UPDATES zurückholen; quality_scale ehrlich machen | P1 | S | 001 | DONE |
+| 003 | Verifikations-Baseline: Abhängigkeiten, CI, Coverage-Ratchet für den Coordinator, strenger Test-Hass | P1 | M | — | DONE |
+| 004 | Steuerlogik-Fehler mit kleinem Umfang: ein Ziel, Override-Pfad, Backup-Listener, Veto, Fensterprüfung | P1 | M | 003 | DONE |
+| 005 | Rücksetz-Robustheit und Persistenz über Neustarts | P1 | L | 003, 004 | DONE |
+| 006 | Planer v2 (Design und Prototyp): Überbrückung, Sonnenaufgang, Verbrauch, Entladesperre, Ladeleistung | P2 | L | 001–005 | DONE |
+| 007 | Schnee-Override: Zahl-Entität "Schnee-Nächte", lädt die nächsten N Nächte auf das Maximum und zählt herunter | P2 | S | 004, 005 | DONE |
 
 Status-Werte: TODO | IN PROGRESS | DONE | BLOCKED (mit Grund) | REJECTED (mit Begründung)
+
+Umsetzung 001–007 am 2026-09-11 auf dem Branch `fix/code-review-followups` (PR #2). Offene Entscheidungen für den Planer v2 stehen in `plans/006-DECISIONS.md`; der Standardmodus bleibt `headroom`, bis der Eigentümer auf `bridge` umschaltet.
 
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 
