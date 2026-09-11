@@ -9,7 +9,7 @@ This is a **Home Assistant custom integration** (`custom_components/inverter_cha
 ### Running tests
 
 ```bash
-pytest -v            # all 113 tests, includes coverage (100% required, excluding __init__.py and config_flow.py)
+pytest -v            # full suite, includes coverage (100% required, excluding __init__.py and config_flow.py)
 pytest --no-cov      # skip coverage check for faster iteration
 ```
 
