@@ -4,7 +4,7 @@ Unlike ``tests/test_setup.py`` the coordinator is not patched. The strict
 ``mock_hass`` fixture provides ``bus``/``loop`` mocks so Home Assistant's own
 ``async_track_time_change`` / ``async_track_state_change_event`` run for real.
 """
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState, current_entry
@@ -16,7 +16,9 @@ from custom_components.inverter_charge_night import (
 )
 from custom_components.inverter_charge_night.const import (
     CONF_BACKUP_MODE_ENTITY,
-    DOMAIN,
+    CONF_BATTERY_SOC_ENTITY,
+    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_KOSTAL_MIN_SOC_ENTITY,
 )
 
 
@@ -32,14 +34,18 @@ def _prepare_entry(mock_config_entry, extra: dict | None = None):
 
 async def _setup(mock_hass, entry) -> InverterChargeNightCoordinator:
     mock_hass.config_entries.async_forward_entry_setups = AsyncMock()
+    # The startup check needs the required entities to be known to hass
+    for key in (CONF_BATTERY_SOC_ENTITY, CONF_KOSTAL_MIN_SOC_ENTITY, CONF_KOSTAL_GRID_CHARGE_SWITCH):
+        mock_hass.states.async_set(entry.data[key], "50")
     # HA sets this context variable while an entry is being set up; the
     # coordinator picks its config entry up from it.
     token = current_entry.set(entry)
     try:
-        assert await async_setup_entry(mock_hass, entry) is True
+        with patch("custom_components.inverter_charge_night.ir.async_delete_issue"):
+            assert await async_setup_entry(mock_hass, entry) is True
     finally:
         current_entry.reset(token)
-    coordinator = mock_hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     assert isinstance(coordinator, InverterChargeNightCoordinator)
     return coordinator
 

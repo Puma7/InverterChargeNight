@@ -22,7 +22,9 @@ rules:
   # Gold
   icon_translations: done
   reconfiguration_flow: done
-  exception_translations: done
+  exception_translations:
+    status: todo
+    comment: No translated HomeAssistantError is raised yet; ConfigEntryNotReady uses a plain message.
   repair_issues: done
   # Platinum
-  strict_typing: done
+  strict_typing: done  # mypy strict and pyright strict cover the whole package (mypy.ini, pyrightconfig.json)
