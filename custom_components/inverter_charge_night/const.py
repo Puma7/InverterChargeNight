@@ -53,6 +53,31 @@ CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY = "absolute_max_charge_power_entity"
 CONF_PV_FORECAST_TODAY_ENTITY = "pv_forecast_today_entity"
 CONF_FORCE_DISCHARGE_SWITCH = "force_discharge_switch"
 
+# Planner v2 (plan 006). The target formula is selected by planner_mode:
+# "headroom" is the original formula (room for tomorrow's forecast only),
+# "bridge" also covers the house load from window end until the PV output
+# exceeds it. The remaining keys feed the bridge planner and the discharge block.
+PLANNER_MODE_HEADROOM = "headroom"
+PLANNER_MODE_BRIDGE = "bridge"
+CONF_PLANNER_MODE = "planner_mode"  # "headroom" (today) | "bridge" (new)
+CONF_HOUSE_LOAD_ENTITY = "house_load_entity"  # cumulative kWh meter of the house load (optional)
+CONF_AVG_HOUSE_LOAD_KW = "avg_house_load_kw"  # fallback without a meter: average load in kW
+CONF_PV_CROSSOVER_DELAY_MIN = "pv_crossover_delay_min"  # minutes after sunrise until PV > load
+CONF_BRIDGE_RESERVE_KWH = "bridge_reserve_kwh"  # safety reserve added to the bridge energy
+CONF_CHARGE_EFFICIENCY = "charge_efficiency"  # 0.80-1.0, default 0.90
+CONF_DISCHARGE_LIMIT_ENTITY = "discharge_limit_entity"  # number: discharge power limit (W), optional
+CONF_FEED_IN_PRICE_CT = "feed_in_price_ct"  # optional
+CONF_NIGHT_PRICE_CT = "night_price_ct"  # optional
+CONF_DAY_PRICE_CT = "day_price_ct"  # optional
+DEFAULT_PLANNER_MODE = PLANNER_MODE_HEADROOM
+DEFAULT_AVG_HOUSE_LOAD_KW = 0.5
+DEFAULT_PV_CROSSOVER_DELAY_MIN = 90
+DEFAULT_BRIDGE_RESERVE_KWH = 0.5
+DEFAULT_CHARGE_EFFICIENCY = 0.90
+HOUSE_LOAD_PROFILE_DAYS = 14  # history used to learn the hourly load profile
+HOUSE_LOAD_PROFILE_CACHE_S = 900  # 15 minutes
+PLANNED_POWER_WRITE_THRESHOLD_W = 100  # write the charge setpoint only when it moves more than this
+
 # Attributes
 ATTR_CALCULATED_SOC = "calculated_soc"
 ATTR_ORIGINAL_MIN_SOC = "original_min_soc"
