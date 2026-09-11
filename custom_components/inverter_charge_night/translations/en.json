@@ -34,7 +34,8 @@
           "user_min_soc": "Minimum SOC",
           "user_max_soc": "Maximum SOC",
           "default_min_soc": "Default Min SOC to restore at end time",
-          "forecast_error_margin": "Forecast Error Margin"
+          "forecast_error_margin": "Forecast Error Margin",
+          "planner_mode": "Planner Mode"
         },
         "data_description": {
           "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
@@ -42,7 +43,8 @@
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
-          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation."
+          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
+          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
         }
       },
       "power": {
@@ -57,7 +59,8 @@
           "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
           "charge_power_received_entity": "Charge Power Received by Battery (optional)",
           "auto_efficient_charge": "Auto Efficient Charge Finder",
-          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)"
+          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)",
+          "discharge_limit_entity": "Discharge Power Limit Entity (optional)"
         },
         "data_description": {
           "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
@@ -68,7 +71,8 @@
           "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
           "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
           "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found. Requires the AC charge limit entity and both charge power sensors.",
-          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached."
+          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached.",
+          "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end."
         }
       },
       "advanced": {
@@ -79,14 +83,30 @@
           "command_delay": "Command Delay",
           "active_start_date": "Active Start Date (optional)",
           "active_end_date": "Active End Date (optional)",
-          "backup_mode_entity": "Backup Mode Entity (optional)"
+          "backup_mode_entity": "Backup Mode Entity (optional)",
+          "house_load_entity": "House Consumption Energy Meter (optional)",
+          "avg_house_load_kw": "Average House Load",
+          "pv_crossover_delay_min": "PV Crossover Delay",
+          "bridge_reserve_kwh": "Bridge Reserve",
+          "charge_efficiency": "Charge Efficiency",
+          "night_price_ct": "Night Price (optional)",
+          "day_price_ct": "Day Price (optional)",
+          "feed_in_price_ct": "Feed-in Price (optional)"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
           "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
           "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
           "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
-          "backup_mode_entity": "Optional: entity that indicates backup/island mode. If active, integration will not change min SOC or grid charge."
+          "backup_mode_entity": "Optional: entity that indicates backup/island mode. If active, integration will not change min SOC or grid charge.",
+          "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
+          "avg_house_load_kw": "Average house load in kW, used by the Bridge planner when no consumption meter is configured or no statistics are available yet (default 0.5).",
+          "pv_crossover_delay_min": "Minutes after sunrise until the PV output exceeds the house load (default 90). The Bridge planner charges enough to bridge the window end until then.",
+          "bridge_reserve_kwh": "Safety reserve in kWh added to the bridge energy (default 0.5).",
+          "charge_efficiency": "Grid-to-battery charge efficiency (0.5-1.0, default 0.9), used to plan the charge power for the remaining window time.",
+          "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom.",
+          "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the other two prices).",
+          "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices)."
         }
       },
       "reconfigure": {
@@ -122,7 +142,8 @@
           "user_min_soc": "Minimum SOC",
           "user_max_soc": "Maximum SOC",
           "default_min_soc": "Default Min SOC to restore at end time",
-          "forecast_error_margin": "Forecast Error Margin"
+          "forecast_error_margin": "Forecast Error Margin",
+          "planner_mode": "Planner Mode"
         },
         "data_description": {
           "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
@@ -130,7 +151,8 @@
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
-          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation."
+          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
+          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
         }
       },
       "reconfigure_power": {
@@ -145,7 +167,8 @@
           "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
           "charge_power_received_entity": "Charge Power Received by Battery (optional)",
           "auto_efficient_charge": "Auto Efficient Charge Finder",
-          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)"
+          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)",
+          "discharge_limit_entity": "Discharge Power Limit Entity (optional)"
         },
         "data_description": {
           "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
@@ -156,7 +179,8 @@
           "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
           "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
           "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found. Requires the AC charge limit entity and both charge power sensors.",
-          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached."
+          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached.",
+          "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end."
         }
       },
       "reconfigure_advanced": {
@@ -167,14 +191,30 @@
           "command_delay": "Command Delay",
           "active_start_date": "Active Start Date (optional)",
           "active_end_date": "Active End Date (optional)",
-          "backup_mode_entity": "Backup Mode Entity (optional)"
+          "backup_mode_entity": "Backup Mode Entity (optional)",
+          "house_load_entity": "House Consumption Energy Meter (optional)",
+          "avg_house_load_kw": "Average House Load",
+          "pv_crossover_delay_min": "PV Crossover Delay",
+          "bridge_reserve_kwh": "Bridge Reserve",
+          "charge_efficiency": "Charge Efficiency",
+          "night_price_ct": "Night Price (optional)",
+          "day_price_ct": "Day Price (optional)",
+          "feed_in_price_ct": "Feed-in Price (optional)"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
           "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
           "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
           "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
-          "backup_mode_entity": "Optional: entity that indicates backup/island mode. If active, integration will not change min SOC or grid charge."
+          "backup_mode_entity": "Optional: entity that indicates backup/island mode. If active, integration will not change min SOC or grid charge.",
+          "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
+          "avg_house_load_kw": "Average house load in kW, used by the Bridge planner when no consumption meter is configured or no statistics are available yet (default 0.5).",
+          "pv_crossover_delay_min": "Minutes after sunrise until the PV output exceeds the house load (default 90). The Bridge planner charges enough to bridge the window end until then.",
+          "bridge_reserve_kwh": "Safety reserve in kWh added to the bridge energy (default 0.5).",
+          "charge_efficiency": "Grid-to-battery charge efficiency (0.5-1.0, default 0.9), used to plan the charge power for the remaining window time.",
+          "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom.",
+          "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the other two prices).",
+          "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices)."
         }
       }
     },
@@ -189,7 +229,9 @@
       "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
       "required_entity": "Entity must be provided when value is set",
       "required_value": "Value must be provided when entity is set",
-      "start_end_time_must_differ": "Start time and end time must be different"
+      "start_end_time_must_differ": "Start time and end time must be different",
+      "invalid_efficiency": "Charge efficiency must be between 0 and 1",
+      "all_prices_required": "Set all three prices (night, day, feed-in) or none"
     },
     "abort": {
       "already_configured": "Integration is already configured",
@@ -232,7 +274,8 @@
           "user_min_soc": "Minimum SOC",
           "user_max_soc": "Maximum SOC",
           "default_min_soc": "Default Min SOC to restore at end time",
-          "forecast_error_margin": "Forecast Error Margin"
+          "forecast_error_margin": "Forecast Error Margin",
+          "planner_mode": "Planner Mode"
         },
         "data_description": {
           "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
@@ -240,7 +283,8 @@
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
-          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation."
+          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
+          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
         }
       },
       "power": {
@@ -255,7 +299,8 @@
           "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
           "charge_power_received_entity": "Charge Power Received by Battery (optional)",
           "auto_efficient_charge": "Auto Efficient Charge Finder",
-          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)"
+          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)",
+          "discharge_limit_entity": "Discharge Power Limit Entity (optional)"
         },
         "data_description": {
           "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
@@ -266,7 +311,8 @@
           "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
           "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
           "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found. Requires the AC charge limit entity and both charge power sensors.",
-          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached."
+          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached.",
+          "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end."
         }
       },
       "advanced": {
@@ -277,14 +323,30 @@
           "command_delay": "Command Delay",
           "active_start_date": "Active Start Date (optional)",
           "active_end_date": "Active End Date (optional)",
-          "backup_mode_entity": "Backup Mode Entity (optional)"
+          "backup_mode_entity": "Backup Mode Entity (optional)",
+          "house_load_entity": "House Consumption Energy Meter (optional)",
+          "avg_house_load_kw": "Average House Load",
+          "pv_crossover_delay_min": "PV Crossover Delay",
+          "bridge_reserve_kwh": "Bridge Reserve",
+          "charge_efficiency": "Charge Efficiency",
+          "night_price_ct": "Night Price (optional)",
+          "day_price_ct": "Day Price (optional)",
+          "feed_in_price_ct": "Feed-in Price (optional)"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
           "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
           "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
           "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
-          "backup_mode_entity": "Optional: entity that indicates backup/island mode. If active, integration will not change min SOC or grid charge."
+          "backup_mode_entity": "Optional: entity that indicates backup/island mode. If active, integration will not change min SOC or grid charge.",
+          "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
+          "avg_house_load_kw": "Average house load in kW, used by the Bridge planner when no consumption meter is configured or no statistics are available yet (default 0.5).",
+          "pv_crossover_delay_min": "Minutes after sunrise until the PV output exceeds the house load (default 90). The Bridge planner charges enough to bridge the window end until then.",
+          "bridge_reserve_kwh": "Safety reserve in kWh added to the bridge energy (default 0.5).",
+          "charge_efficiency": "Grid-to-battery charge efficiency (0.5-1.0, default 0.9), used to plan the charge power for the remaining window time.",
+          "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom.",
+          "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the other two prices).",
+          "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices)."
         }
       }
     },
@@ -299,7 +361,9 @@
       "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
       "required_entity": "Entity must be provided when value is set",
       "required_value": "Value must be provided when entity is set",
-      "start_end_time_must_differ": "Start time and end time must be different"
+      "start_end_time_must_differ": "Start time and end time must be different",
+      "invalid_efficiency": "Charge efficiency must be between 0 and 1",
+      "all_prices_required": "Set all three prices (night, day, feed-in) or none"
     }
   },
   "selector": {
@@ -307,6 +371,12 @@
       "options": {
         "night_charge": "Night Charge",
         "morning_discharge": "Morning Discharge"
+      }
+    },
+    "planner_mode": {
+      "options": {
+        "headroom": "Headroom (forecast only)",
+        "bridge": "Bridge (load until PV crossover)"
       }
     }
   },
@@ -317,6 +387,9 @@
       },
       "best_charge_power": {
         "name": "Best Charge Power"
+      },
+      "planned_charge_power": {
+        "name": "Planned Charge Power"
       }
     },
     "switch": {

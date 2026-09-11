@@ -285,3 +285,43 @@ def test_entities_share_device_info_and_unique_id():
     power_sensor = BestChargePowerSensor(coordinator, entry)
     assert power_sensor.unique_id == "entry_1_best_charge_power"
     assert power_sensor.device_info == sensor.device_info | {"name": "Inverter Charge Night"}
+
+
+# --- Plan 006: planned charge power sensor and plan attributes --------------
+
+
+def test_planned_charge_power_sensor():
+    from custom_components.inverter_charge_night.sensor import PlannedChargePowerSensor
+
+    coordinator = MagicMock()
+    coordinator.planned_charge_power_w = 556.0
+    entry = _make_entry()
+    sensor = PlannedChargePowerSensor(coordinator, entry)
+    assert sensor.native_value == 556.0
+    assert sensor.unique_id == "entry_1_planned_charge_power"
+    coordinator.planned_charge_power_w = None
+    assert sensor.native_value is None
+
+
+def test_calculated_soc_sensor_exposes_plan_attributes():
+    coordinator = MagicMock()
+    coordinator.data = {
+        "calculated_soc": 28.1,
+        "is_active": True,
+        "plan_reason": "bridge",
+        "bridge_kwh": 2.01,
+        "surplus_kwh": 1.5,
+        "lower_bound_soc": 28.1,
+        "upper_bound_soc": 100.0,
+        "pv_crossover": "2026-01-15T09:00:00",
+    }
+    entry = _make_entry()
+    attrs = CalculatedSOCSensor(coordinator, entry).extra_state_attributes
+    assert attrs["plan_reason"] == "bridge"
+    assert attrs["bridge_kwh"] == 2.01
+    assert attrs["pv_crossover"] == "2026-01-15T09:00:00"
+    # Headroom mode: the keys exist but are empty
+    coordinator.data = {"calculated_soc": 45.0}
+    attrs = CalculatedSOCSensor(coordinator, entry).extra_state_attributes
+    assert attrs["plan_reason"] is None
+    assert attrs["bridge_kwh"] is None

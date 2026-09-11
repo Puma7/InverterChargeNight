@@ -17,6 +17,7 @@ from homeassistant.helpers.event import (
     async_track_time_change,
 )
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.recorder import DATA_INSTANCE, get_instance
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
 
@@ -50,6 +51,25 @@ from .const import (
     CONF_PV_FORECAST_ENTITY,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
+    CONF_PLANNER_MODE,
+    CONF_HOUSE_LOAD_ENTITY,
+    CONF_AVG_HOUSE_LOAD_KW,
+    CONF_PV_CROSSOVER_DELAY_MIN,
+    CONF_BRIDGE_RESERVE_KWH,
+    CONF_CHARGE_EFFICIENCY,
+    CONF_DISCHARGE_LIMIT_ENTITY,
+    CONF_FEED_IN_PRICE_CT,
+    CONF_NIGHT_PRICE_CT,
+    CONF_DAY_PRICE_CT,
+    DEFAULT_PLANNER_MODE,
+    DEFAULT_AVG_HOUSE_LOAD_KW,
+    DEFAULT_PV_CROSSOVER_DELAY_MIN,
+    DEFAULT_BRIDGE_RESERVE_KWH,
+    DEFAULT_CHARGE_EFFICIENCY,
+    HOUSE_LOAD_PROFILE_DAYS,
+    HOUSE_LOAD_PROFILE_CACHE_S,
+    PLANNED_POWER_WRITE_THRESHOLD_W,
+    PLANNER_MODE_BRIDGE,
     DEFAULT_END_TIME,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SAFE_FALLBACK_SOC,
@@ -61,6 +81,13 @@ from .const import (
     DOMAIN,
 )
 from .calculation import calculate_required_soc
+from .planner import (
+    REASON_FALLBACK,
+    PlanInput,
+    PlanResult,
+    plan_target_soc,
+    required_charge_power_w,
+)
 from .util import parse_time_str
 
 _LOGGER = logging.getLogger(__name__)
@@ -81,6 +108,8 @@ type InverterChargeNightConfigEntry = ConfigEntry[InverterChargeNightCoordinator
 RESET_RETRY_DELAYS: tuple[int, ...] = (60, 120, 240)
 RESET_RETRY_INTERVAL = 900
 SKIP_NEXT_DURATION = timedelta(hours=24)
+# Home Assistant's built-in sun entity; next_rising / next_setting feed the planner
+SUN_ENTITY_ID = "sun.sun"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> bool:
@@ -157,6 +186,7 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     coordinator.operation_mode = entry.data.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE)
     coordinator.auto_efficient_charge = entry.data.get(CONF_AUTO_EFFICIENT_CHARGE, False)
     coordinator._auto_missing_entities_logged = False
+    coordinator._house_load_cache = None  # the meter or the average may have changed
     
     # Update coordinator polling interval
     coordinator.update_interval = timedelta(
@@ -236,6 +266,10 @@ def _unit_of(state: Any) -> str:
 class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator for Inverter Charge Night integration."""
 
+    # Class-level default: _persist_state reads it and may run on an instance
+    # whose constructor did not (test doubles built with __new__).
+    _original_discharge_limit: float | None = None
+
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the coordinator."""
         self.hass = hass
@@ -279,6 +313,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
         self._auto_missing_entities_logged = False
+        # Planner v2 (plan 006)
+        self.last_plan: PlanResult | None = None  # result of the last bridge plan this window
+        self.planned_charge_power_w: float | None = None  # setpoint for the remaining window
+        self._pv_crossover: datetime | None = None
+        self._original_discharge_limit: float | None = None  # raw value in the entity's unit
+        self._planned_setpoint_written_w: float | None = None
+        self._house_load_cache: tuple[datetime, list[float]] | None = None
+        self._sun_fallback_logged = False
         self._restore_state()
 
     # Persistence ------------------------------------------------------------
@@ -299,6 +341,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # value must never be taken for a restart during a window.
             "initial_calculated_soc": self.initial_calculated_soc if self.is_active else None,
             "original_ac_charge_power": self._original_ac_charge_power,
+            "original_discharge_limit": self._original_discharge_limit,
             "pending_reset": self._pending_reset,
         }
         self.hass.config_entries.async_update_entry(self.entry, options=options)
@@ -315,6 +358,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.original_min_soc = _as_float(state.get("original_min_soc"))
         self.initial_calculated_soc = _as_float(state.get("initial_calculated_soc"))
         self._original_ac_charge_power = _as_float(state.get("original_ac_charge_power"))
+        self._original_discharge_limit = _as_float(state.get("original_discharge_limit"))
         self._pending_reset = state.get("pending_reset") is True
 
         until_raw = state.get("skip_next_until")
@@ -381,25 +425,35 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._skip_next_unsub()
             self._skip_next_unsub = None
 
+    def _window_end_datetime(self, now: datetime) -> datetime:
+        """Return the end of the window that is running or comes next, at minute resolution.
+
+        The end minute itself still belongs to the window (``_is_time_between``
+        is inclusive), so an end time equal to the current minute is today's.
+        """
+        _, end = self._window_times()
+        end_dt = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
+        if (end.hour, end.minute) < (now.hour, now.minute):
+            end_dt += timedelta(days=1)
+        return end_dt
+
     def _get_active_forecast_entity(self) -> str | None:
-        """Return the correct forecast entity based on the time of day.
+        """Return the forecast entity for the solar day the plan is made for.
 
-        The solar day we're planning for depends on when the decision is made:
-        - Before noon (00:00-11:59): solar production happens TODAY
-          → use pv_forecast_today_entity (falls back to pv_forecast_entity)
-        - After noon  (12:00-23:59): solar production happens TOMORROW
-          → use pv_forecast_entity (falls back to pv_forecast_today_entity)
+        The solar day is the calendar day of the window end (plan 006), not the
+        time of day the decision is made:
+        - Window 00:00-05:59, decision at 23:00 or 02:00 → the window ends
+          tomorrow / today → tomorrow's / today's entity
+        - Window 22:00-23:30 (not over midnight), decision at 22:30 → the
+          window ends today → today's entity, even though it is after noon
+        - Morning discharge 06:00-08:00 at 06:00 → today's entity
 
-        This applies to both operation modes:
-        - Night charge at 23:00 → tomorrow's forecast
-        - Night charge at 00:01 → today's forecast (yesterday's "tomorrow")
-        - Morning discharge at 06:00 → today's forecast
+        Each entity falls back to the other one when it is not configured.
         """
         today_entity = self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)
         tomorrow_entity = self.config.get(CONF_PV_FORECAST_ENTITY)
-
         now = dt_util.now()
-        if now.hour < 12:
+        if self._window_end_datetime(now).date() == now.date():
             return str(today_entity) if today_entity else tomorrow_entity
         return str(tomorrow_entity) if tomorrow_entity else (str(today_entity) if today_entity else None)
 
@@ -494,6 +548,381 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 pass
 
         return 0.0, False
+
+    # Planner v2 (plan 006) -------------------------------------------------
+    #
+    # planner_mode "bridge" replaces the headroom formula with the two-bound
+    # plan from planner.py. All Home Assistant reads happen here; the planner
+    # itself is pure arithmetic.
+
+    @property
+    def _planner_mode_is_bridge(self) -> bool:
+        return str(self.config.get(CONF_PLANNER_MODE, DEFAULT_PLANNER_MODE)) == PLANNER_MODE_BRIDGE
+
+    def _current_battery_soc(self) -> float | None:
+        """Return the battery SOC in %, or None when the entity has no numeric value."""
+        entity_id = self.config.get(CONF_BATTERY_SOC_ENTITY)
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if not state or state.state in ("unknown", "unavailable"):
+            return None
+        return _as_float(state.state)
+
+    @staticmethod
+    def _align_tz(value: datetime, like: datetime) -> datetime:
+        """Return ``value`` with the same tz-awareness as ``like`` (local time)."""
+        if like.tzinfo is None:
+            return dt_util.as_local(value).replace(tzinfo=None) if value.tzinfo else value
+        return dt_util.as_local(value) if value.tzinfo else value.replace(tzinfo=like.tzinfo)
+
+    def _sun_times(self, now: datetime, window_end: datetime) -> tuple[datetime, datetime]:
+        """Return (next sunrise, next sunset) from ``sun.sun``.
+
+        Without a usable sun entity the sunrise is assumed two hours after the
+        window end and the sunset ten hours after that; this is logged as a
+        warning once per window.
+        """
+        state = self.hass.states.get(SUN_ENTITY_ID)
+        sunrise: datetime | None = None
+        sunset: datetime | None = None
+        if state is not None:
+            rising = dt_util.parse_datetime(str(state.attributes.get("next_rising", "")))
+            setting = dt_util.parse_datetime(str(state.attributes.get("next_setting", "")))
+            sunrise = self._align_tz(rising, now) if rising else None
+            sunset = self._align_tz(setting, now) if setting else None
+        if sunrise is None or sunset is None:
+            if sunrise is None:
+                sunrise = window_end + timedelta(hours=2)
+            if sunset is None:
+                sunset = sunrise + timedelta(hours=10)
+            if not self._sun_fallback_logged:
+                _LOGGER.warning(
+                    "%s has no usable next_rising/next_setting; assuming sunrise %s and sunset %s",
+                    SUN_ENTITY_ID,
+                    sunrise,
+                    sunset,
+                )
+                self._sun_fallback_logged = True
+        return sunrise, sunset
+
+    def _prices_ct(self) -> tuple[float, float, float] | None:
+        """Return (night, day, feed-in) prices when all three are configured."""
+        night = _as_float(self.config.get(CONF_NIGHT_PRICE_CT))
+        day = _as_float(self.config.get(CONF_DAY_PRICE_CT))
+        feed_in = _as_float(self.config.get(CONF_FEED_IN_PRICE_CT))
+        if night is None or day is None or feed_in is None:
+            return None
+        return night, day, feed_in
+
+    async def _house_load_profile(self) -> list[float]:
+        """Return 24 hourly house load values in kW.
+
+        With a consumption meter configured the profile is learned from the
+        recorder's hourly statistics of the last 14 days and cached for 15
+        minutes; otherwise, or when no statistics are usable, every hour is
+        the configured average load.
+        """
+        avg_kw = float(self.config.get(CONF_AVG_HOUSE_LOAD_KW, DEFAULT_AVG_HOUSE_LOAD_KW))
+        flat = [avg_kw] * 24
+        entity_id = self.config.get(CONF_HOUSE_LOAD_ENTITY)
+        if not entity_id:
+            return flat
+        now = dt_util.utcnow()
+        if self._house_load_cache is not None:
+            cached_at, cached = self._house_load_cache
+            if (now - cached_at).total_seconds() < HOUSE_LOAD_PROFILE_CACHE_S:
+                return cached
+        profile = await self._learn_house_load_profile(str(entity_id), avg_kw)
+        if profile is None:
+            _LOGGER.debug(
+                "No usable consumption statistics for %s; using the flat %.2f kW profile",
+                entity_id,
+                avg_kw,
+            )
+            profile = flat
+        self._house_load_cache = (now, profile)
+        return profile
+
+    async def _learn_house_load_profile(self, entity_id: str, avg_kw: float) -> list[float] | None:
+        """Average the meter's hourly energy change per hour of the day, or None."""
+        if DATA_INSTANCE not in self.hass.data:
+            _LOGGER.debug("Recorder is not loaded; cannot learn the house load profile")
+            return None
+        # Imported here so the integration never depends on the recorder being present
+        from homeassistant.components.recorder.statistics import statistics_during_period
+
+        start = (dt_util.utcnow() - timedelta(days=HOUSE_LOAD_PROFILE_DAYS)).replace(
+            minute=0, second=0, microsecond=0
+        )
+        try:
+            rows = await get_instance(self.hass).async_add_executor_job(
+                lambda: statistics_during_period(
+                    self.hass, start, None, {entity_id}, "hour", None, {"change"}
+                )
+            )
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Reading consumption statistics for %s failed: %s", entity_id, err)
+            return None
+        unit = _unit_of(self.hass.states.get(entity_id))
+        if unit in ("wh", "watthour", "watthours"):
+            factor = 0.001
+        elif unit in ("mwh", "megawatthour", "megawatthours"):
+            factor = 1000.0
+        else:
+            factor = 1.0  # kWh, or no unit: assume kWh
+        sums = [0.0] * 24
+        counts = [0] * 24
+        for row in rows.get(entity_id, []):
+            start_ts = row.get("start")
+            change = row.get("change")
+            if not isinstance(start_ts, (int, float)) or not isinstance(change, (int, float)):
+                continue
+            if change < 0:
+                continue  # meter reset
+            hour = dt_util.as_local(dt_util.utc_from_timestamp(start_ts)).hour
+            sums[hour] += float(change) * factor
+            counts[hour] += 1
+        if not any(counts):
+            return None
+        return [sums[hour] / counts[hour] if counts[hour] else avg_kw for hour in range(24)]
+
+    async def _plan_target(self, forecast_kwh: float, forecast_available: bool) -> PlanResult | None:
+        """Run the bridge planner on the current inputs; None when it cannot plan.
+
+        The result is kept in ``last_plan`` for the sensor attributes. A failure
+        (invalid configuration) is logged and the caller uses the headroom formula.
+        """
+        try:
+            capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
+            now = dt_util.now()
+            window_end = self._window_end_datetime(now)
+            sunrise, sunset = self._sun_times(now, window_end)
+            delay_min = int(float(self.config.get(CONF_PV_CROSSOVER_DELAY_MIN, DEFAULT_PV_CROSSOVER_DELAY_MIN)))
+            pv_crossover = sunrise + timedelta(minutes=delay_min)
+            current_soc = self._current_battery_soc()
+            plan = plan_target_soc(
+                PlanInput(
+                    capacity_kwh=capacity,
+                    current_soc=current_soc if current_soc is not None else 0.0,
+                    user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
+                    user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
+                    forecast_kwh_next_day=forecast_kwh,
+                    forecast_available=forecast_available,
+                    error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
+                    window_end=window_end,
+                    pv_crossover=pv_crossover,
+                    sunset=sunset,
+                    house_load_kw_profile=await self._house_load_profile(),
+                    reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
+                    charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
+                    prices_ct=self._prices_ct(),
+                )
+            )
+        except (ValueError, TypeError) as err:
+            _LOGGER.error("Bridge planner failed, using the headroom formula instead: %s", err)
+            return None
+        self.last_plan = plan
+        self._pv_crossover = pv_crossover
+        _LOGGER.info(
+            "Bridge plan: target %.1f%% (%s), bridge %.2f kWh until %s, surplus %.2f kWh, "
+            "bounds %.1f-%.1f%%",
+            plan.target_soc,
+            plan.reason,
+            plan.bridge_kwh,
+            pv_crossover.strftime("%H:%M"),
+            plan.surplus_kwh,
+            plan.lower_bound_soc,
+            plan.upper_bound_soc,
+        )
+        return plan
+
+    async def _replan_in_window(self, previous_target: float) -> float:
+        """Re-run the bridge planner on a poll; the target may only rise.
+
+        Lowering it below what is already charged would give energy away, so
+        ``max(previous, plan)`` is kept. A fallback plan (forecast unavailable)
+        never moves an existing target.
+        """
+        forecast_kwh, forecast_available = self._parse_forecast_energy(self._get_active_forecast_entity())
+        plan = await self._plan_target(forecast_kwh, forecast_available)
+        if plan is None or plan.reason == REASON_FALLBACK or plan.target_soc <= previous_target:
+            return previous_target
+        _LOGGER.info(
+            "Bridge plan raised the window target from %.1f%% to %.1f%% (%s)",
+            previous_target,
+            plan.target_soc,
+            plan.reason,
+        )
+        self.initial_calculated_soc = plan.target_soc
+        # The higher target may not be reached yet; the update re-evaluates it
+        self.target_reached = False
+        self._persist_state()
+        return plan.target_soc
+
+    def _plan_attributes(self) -> dict[str, Any]:
+        """Sensor attributes of the last bridge plan; empty in headroom mode."""
+        plan = self.last_plan
+        if plan is None:
+            return {}
+        return {
+            "plan_reason": plan.reason,
+            "bridge_kwh": round(plan.bridge_kwh, 2),
+            "surplus_kwh": round(plan.surplus_kwh, 2),
+            "lower_bound_soc": plan.lower_bound_soc,
+            "upper_bound_soc": plan.upper_bound_soc,
+            "pv_crossover": self._pv_crossover.isoformat() if self._pv_crossover else None,
+            "planned_charge_power_w": self.planned_charge_power_w,
+        }
+
+    async def _plan_charge_power(self, target_soc: float) -> None:
+        """Plan the AC charge power for the remaining window (plan 006, step 6).
+
+        ``required`` is the constant power that reaches the target in time. The
+        setpoint stays within [min, max] charge power and, when the efficiency
+        finder has an optimum and ``required`` is below it, does not exceed the
+        optimum. The value is always computed for the ``planned_charge_power``
+        sensor; it is written to the AC charge limit only in bridge mode, not
+        while the finder owns the limit, and only when it moves by more than
+        PLANNED_POWER_WRITE_THRESHOLD_W.
+        """
+        self.planned_charge_power_w = None
+        if self.target_reached:
+            self.planned_charge_power_w = 0.0
+            return
+        current_soc = self._current_battery_soc()
+        if current_soc is None:
+            return
+        now = dt_util.now()
+        hours_remaining = max(0.0, (self._window_end_datetime(now) - now).total_seconds() / 3600.0)
+        try:
+            required = required_charge_power_w(
+                target_soc,
+                current_soc,
+                float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)),
+                hours_remaining,
+                float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
+            )
+        except ValueError as err:
+            _LOGGER.error("Cannot plan the charge power: %s", err)
+            return
+        min_w = float(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000))
+        max_w = float(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000))
+        ceiling = max_w
+        best = self.get_auto_efficiency_data().get("best_power_w")
+        if isinstance(best, int) and required <= best:
+            ceiling = max(min_w, min(max_w, float(best)))
+        setpoint = float(round(max(min_w, min(required, ceiling))))
+        self.planned_charge_power_w = setpoint
+        if not self._planner_mode_is_bridge or self.auto_efficient_charge or self._auto_test_active:
+            return
+        if self._ac_charge_limit_target() is None:
+            return
+        written = self._planned_setpoint_written_w
+        if written is not None and abs(setpoint - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
+            return
+        _LOGGER.info(
+            "Planned charge power %.0f W (%.2f kWh missing in %.2f h, required %.0f W)",
+            setpoint,
+            max(0.0, (target_soc - current_soc) / 100.0 * float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))),
+            hours_remaining,
+            required,
+        )
+        await self._set_ac_charge_limit_w(int(setpoint))
+        self._planned_setpoint_written_w = setpoint
+
+    # Discharge block (plan 006, step 5) --------------------------------------
+
+    def _discharge_limit_target(self) -> tuple[str, str] | None:
+        """Return (entity_id, domain) of the discharge limit entity, or None if unusable."""
+        entity_id = self.config.get(CONF_DISCHARGE_LIMIT_ENTITY)
+        if not entity_id:
+            return None
+        domain = str(entity_id).split(".")[0]
+        if domain not in ("number", "input_number"):
+            _LOGGER.warning("Discharge limit entity %s has unsupported domain %s", entity_id, domain)
+            return None
+        return str(entity_id), domain
+
+    async def _write_number(self, entity_id: str, domain: str, value: float, what: str) -> bool:
+        """Write a raw value to a number entity; report success."""
+        try:
+            await self.hass.services.async_call(
+                domain,
+                "set_value",
+                {"entity_id": entity_id, "value": value},
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            _LOGGER.error("Error writing %s: %s", what, e, exc_info=True)
+            return False
+        _LOGGER.info("%s to %.3f", what, value)
+        return True
+
+    async def _apply_discharge_block(self, announce: bool = False) -> None:
+        """Set the discharge power limit to 0 so the house runs from the grid.
+
+        The value found before the first write is remembered (and persisted) so
+        the window end can restore it. Never applied in discharge mode or in
+        backup mode. ``announce`` logs once that no entity is configured.
+        """
+        if not self.config.get(CONF_DISCHARGE_LIMIT_ENTITY):
+            if announce:
+                _LOGGER.info(
+                    "No discharge limit entity configured - the battery may discharge into the "
+                    "house during the window"
+                )
+            return
+        if self.is_discharge_mode or self._is_backup_active():
+            return
+        target = self._discharge_limit_target()
+        if target is None:
+            return
+        entity_id, domain = target
+        state = self.hass.states.get(entity_id)
+        if not state or state.state in ("unknown", "unavailable"):
+            _LOGGER.warning("Discharge limit entity %s is unavailable - block deferred", entity_id)
+            return
+        current = _as_float(state.state)
+        if self._original_discharge_limit is None:
+            if current is None:
+                _LOGGER.warning(
+                    "Cannot read the current discharge limit from %s - not writing a value "
+                    "that could not be restored",
+                    entity_id,
+                )
+                return
+            self._original_discharge_limit = current
+            _LOGGER.info("Stored original discharge limit: %.3f", current)
+            self._persist_state()
+        if current == 0:
+            _LOGGER.debug("Discharge already blocked (%s is 0)", entity_id)
+            return
+        await self._write_number(entity_id, domain, 0.0, "Set discharge limit (block)")
+
+    async def _reset_discharge_limit(self) -> bool:
+        """Restore the discharge limit captured at the window start.
+
+        Returns True when nothing is left to restore; on failure the original
+        value is kept for a retry.
+        """
+        if self._original_discharge_limit is None:
+            return True
+        target = self._discharge_limit_target()
+        if target is None:
+            # Entity no longer configured or unusable: nothing we can restore
+            self._original_discharge_limit = None
+            return True
+        entity_id, domain = target
+        state = self.hass.states.get(entity_id)
+        if not state or state.state in ("unknown", "unavailable"):
+            _LOGGER.error("Cannot reset discharge limit - entity %s unavailable", entity_id)
+            return False
+        if not await self._write_number(
+            entity_id, domain, self._original_discharge_limit, "Reset discharge limit"
+        ):
+            return False
+        self._original_discharge_limit = None
+        return True
 
     def _parse_time(self, time_str: str | None, default: str) -> tuple[int, int]:
         """Parse an HH:MM string, falling back to ``default`` (then 00:00) when invalid."""
@@ -666,6 +1095,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ):
             return False
         self._original_ac_charge_power = None
+        self._planned_setpoint_written_w = None
         return True
 
     async def _apply_absolute_charge_power_limit(self) -> None:
@@ -1105,6 +1535,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Calculate and store initial SOC for this charging period
         await self._calculate_initial_soc()
 
+        # Night charge: keep stored PV in the battery while grid energy is cheap
+        if not self.is_discharge_mode:
+            await self._apply_discharge_block(announce=True)
+
         await self.async_request_refresh()
 
     async def _calculate_initial_soc(self) -> None:
@@ -1138,14 +1572,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Otherwise, calculate normally from forecast
             pv_forecast_entity = self._get_active_forecast_entity()
             forecast_energy, forecast_available = self._parse_forecast_energy(pv_forecast_entity)
-            
-            calculated_soc: float | None = calculate_required_soc(
-                forecast_energy,
-                battery_capacity,
-                error_margin,
-                user_min_soc,
-                user_max_soc,
+
+            calculated_soc: float | None
+            plan = (
+                await self._plan_target(forecast_energy, forecast_available)
+                if self._planner_mode_is_bridge
+                else None
             )
+            if plan is not None:
+                calculated_soc = plan.target_soc
+            else:
+                calculated_soc = calculate_required_soc(
+                    forecast_energy,
+                    battery_capacity,
+                    error_margin,
+                    user_min_soc,
+                    user_max_soc,
+                )
             
             # SAFETY: Only use safe fallback if forecast entity was UNAVAILABLE (not if legitimately 0 kWh)
             # This prevents charging to 100% when forecast data is missing, but allows normal calculation
@@ -1208,6 +1651,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.initial_calculated_soc = None  # Reset initial SOC for next charging period
             self.minimum_calculated_soc = None  # Reset minimum SOC for next charging period
             self.override_soc = None  # Clear override when window ends
+            self.last_plan = None
+            self.planned_charge_power_w = None
+            self._pv_crossover = None
+            self._sun_fallback_logged = False
             # A failed reset is retried until the inverter is back at its
             # original settings; original_min_soc is kept for that (F3).
             self._pending_reset = not ok
@@ -1353,6 +1800,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_soc_set = None
         if not await self._reset_ac_charge_limit():
             ok = False
+        if not await self._reset_discharge_limit():
+            ok = False
         await self._reset_absolute_charge_power()
         # Forget the original values only once everything is back in place;
         # a retry needs them otherwise.
@@ -1414,6 +1863,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.initial_calculated_soc is not None:
             calculated_soc = self.initial_calculated_soc
             _LOGGER.debug("Using stored initial SOC: %.1f%%", calculated_soc)
+            if self._planner_mode_is_bridge and not self.is_discharge_mode:
+                # Solcast updates overnight: replan on every poll, target only rises
+                calculated_soc = await self._replan_in_window(calculated_soc)
         else:
             # Fallback: recalculate if initial calculation failed. The forecast is
             # only read here so the normal path does not parse it on every poll.
@@ -1421,13 +1873,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Uses today's forecast for discharge, tomorrow's for charge
             pv_forecast_entity = self._get_active_forecast_entity()
             forecast_energy, forecast_available = self._parse_forecast_energy(pv_forecast_entity)
-            calculated_soc = calculate_required_soc(
-                forecast_energy,
-                battery_capacity,
-                error_margin,
-                user_min_soc,
-                user_max_soc,
+            plan = (
+                await self._plan_target(forecast_energy, forecast_available)
+                if self._planner_mode_is_bridge
+                else None
             )
+            if plan is not None:
+                calculated_soc = plan.target_soc
+            else:
+                calculated_soc = calculate_required_soc(
+                    forecast_energy,
+                    battery_capacity,
+                    error_margin,
+                    user_min_soc,
+                    user_max_soc,
+                )
             
             # SAFETY: Only use safe fallback if forecast entity was UNAVAILABLE (not if legitimately 0 kWh)
             # This prevents charging to 100% when forecast data is missing, but allows normal calculation
@@ -1500,6 +1960,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             else:
                                 await self._stop_grid_charging()
                             self.target_reached = True
+                        self.planned_charge_power_w = 0.0
                         return {
                             "calculated_soc": calculated_soc,
                             "is_active": self.is_active,
@@ -1507,6 +1968,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "current_soc": current_battery_soc,
                             "operation_mode": self.operation_mode,
                             "skip_next": self.skip_next,
+                            **self._plan_attributes(),
                         }
                 except (ValueError, TypeError):
                     pass
@@ -1528,6 +1990,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Auto efficient charge handling (only in night charge mode)
         if not self.is_discharge_mode:
             await self._handle_auto_charge()
+            # Charge power for the remaining window (written in bridge mode only)
+            await self._plan_charge_power(target_soc)
         
         # Check if target is reached (reuse battery_soc_entity from above)
         current_soc = None
@@ -1562,6 +2026,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "current_soc": current_soc,
             "operation_mode": self.operation_mode,
             "skip_next": self.skip_next,
+            **self._plan_attributes(),
         }
 
     def _capture_original_min_soc(self, current: float | None) -> None:
@@ -2083,8 +2548,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         self._verifying_min_soc = True
         try:
+            # The discharge block belongs to the window state like the min SOC
+            await self._apply_discharge_block()
+
             target_soc = self.current_target_soc()
-            
+
             if target_soc is None:
                 return
             
