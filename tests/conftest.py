@@ -6,6 +6,7 @@ from datetime import time
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import frame
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_registry import EntityRegistry
 from homeassistant.setup import async_setup_component
@@ -24,6 +25,21 @@ from custom_components.inverter_charge_night.const import (
     CONF_FORECAST_ERROR_MARGIN,
     CONF_DEFAULT_MIN_SOC,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_frame_report():
+    """Silence HA's frame helper, which the MagicMock hass never sets up.
+
+    Recent Home Assistant versions call ``frame.report_usage`` from the
+    DataUpdateCoordinator constructor and raise if the helper is missing.
+    Older versions do not have the function, so only patch it when present.
+    """
+    if hasattr(frame, "report_usage"):
+        with patch.object(frame, "report_usage", lambda *args, **kwargs: None):
+            yield
+    else:
+        yield
 
 
 @pytest.fixture
