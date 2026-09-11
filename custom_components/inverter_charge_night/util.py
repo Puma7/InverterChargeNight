@@ -5,11 +5,14 @@ from typing import Any
 
 
 def parse_time_str(time_str: Any) -> tuple[int, int] | None:
-    """Parse an HH:MM string into (hour, minute), or None if it is invalid."""
+    """Parse "HH:MM" or "HH:MM:SS" into (hour, minute), or None if invalid."""
     try:
-        hour, minute = map(int, time_str.split(":"))
+        parts = [int(part) for part in time_str.split(":")]
     except (ValueError, AttributeError):
         return None
+    if len(parts) not in (2, 3):
+        return None
+    hour, minute = parts[0], parts[1]
     if 0 <= hour <= 23 and 0 <= minute <= 59:
         return hour, minute
     return None

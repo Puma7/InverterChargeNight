@@ -3,176 +3,184 @@
     "step": {
       "user": {
         "title": "Inverter Charge Night – Entities",
-        "description": "Step 1 of 4: Select the core entities and set your battery capacity.",
+        "description": "Step 1 of 4: Choose the operation mode and the inverter, forecast and battery entities. Night Charge charges the battery from the grid during the time window; Morning Discharge discharges it before sunrise to make room for solar production.",
         "data": {
-          "name": "Integration Name",
-          "kostal_min_soc_entity": "Kostal Min SOC Entity",
-          "kostal_grid_charge_switch": "Grid Charge Switch",
-          "pv_forecast_entity": "PV Forecast Entity",
+          "name": "Name",
+          "operation_mode": "Operation Mode",
+          "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
+          "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
+          "pv_forecast_entity": "PV Forecast Entity (tomorrow)",
+          "pv_forecast_today_entity": "PV Forecast Today Entity (optional)",
           "battery_soc_entity": "Battery SOC Sensor",
           "battery_capacity": "Battery Capacity"
         },
         "data_description": {
           "name": "Name for this integration instance",
-          "kostal_min_soc_entity": "Number entity that controls the inverter minimum SOC",
-          "kostal_grid_charge_switch": "Switch entity that enables/disables grid charging",
-          "pv_forecast_entity": "Solcast or other entity providing tomorrow's PV forecast (kWh)",
-          "battery_soc_entity": "Sensor showing current battery state of charge (%)",
-          "battery_capacity": "Total usable battery capacity"
+          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
+          "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC. It also identifies this integration instance, so each inverter can only be configured once.",
+          "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
+          "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
+          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
+          "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
+          "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)"
         }
       },
       "time_soc": {
         "title": "Inverter Charge Night – Time & SOC",
-        "description": "Step 2 of 4: Configure the charging time window and SOC limits.",
+        "description": "Step 2 of 4: Set the time window in which the integration is active and the SOC limits. The calculated target SOC is always kept between the minimum and the maximum.",
         "data": {
-          "start_time": "Charge Start Time",
-          "end_time": "Charge End Time",
+          "start_time": "Start Time",
+          "end_time": "End Time",
           "user_min_soc": "Minimum SOC",
           "user_max_soc": "Maximum SOC",
-          "forecast_error_margin": "Forecast Error Margin",
-          "default_min_soc": "Default Min SOC (restore at end)"
+          "default_min_soc": "Default Min SOC to restore at end time",
+          "forecast_error_margin": "Forecast Error Margin"
         },
         "data_description": {
-          "start_time": "Time when night charging begins",
-          "end_time": "Time when night charging ends and settings are reset",
-          "user_min_soc": "Calculated SOC will never go below this value",
-          "user_max_soc": "Calculated SOC will never exceed this value",
-          "forecast_error_margin": "Safety margin added to forecast before calculation",
-          "default_min_soc": "Min SOC value restored when the charging window ends"
+          "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
+          "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
+          "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
+          "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
+          "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
+          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation."
         }
       },
       "power": {
         "title": "Inverter Charge Night – Charge Power",
-        "description": "Step 3 of 4: Configure charge power limits and optional power entities.",
+        "description": "Step 3 of 4: Set the charge power limits and the optional entities used to control and measure charging. Leave the optional entities empty if your inverter does not expose them.",
         "data": {
           "min_charge_power_w": "Min Charge Power",
           "max_charge_power_w": "Max Charge Power",
-          "absolute_max_charge_power_w": "Absolute Max Power (AC+DC)",
-          "absolute_max_charge_power_entity": "Absolute Max Power Entity",
-          "charge_power_entity": "AC Charge Limit Entity",
-          "grid_import_energy_entity": "Grid Import Energy (Total, kWh)",
-          "battery_charge_energy_entity": "Battery Charge Energy (Total, kWh)",
-          "home_consumption_energy_entity": "Home Consumption Energy (Total, kWh)"
+          "absolute_max_charge_power_w": "Battery Charge Max (AC+DC) (optional)",
+          "absolute_max_charge_power_entity": "Battery Charge Max Entity (AC+DC) (optional)",
+          "charge_power_entity": "Battery Max AC Charge Limit Entity (optional)",
+          "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
+          "charge_power_received_entity": "Charge Power Received by Battery (optional)",
+          "auto_efficient_charge": "Auto Efficient Charge Finder",
+          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)"
         },
         "data_description": {
-          "min_charge_power_w": "Minimum charge power for auto-efficient mode",
-          "max_charge_power_w": "Maximum charge power for auto-efficient mode",
-          "absolute_max_charge_power_w": "Hard limit for total charge power (AC+DC combined). Leave empty if not needed.",
-          "absolute_max_charge_power_entity": "Number entity to set the absolute max charge power",
-          "charge_power_entity": "Number entity to control the max AC charge limit",
-          "grid_import_energy_entity": "Cumulative energy sensor for total grid import (kWh). Use a 'Total' counter, not daily.",
-          "battery_charge_energy_entity": "Cumulative energy sensor for battery charge from grid (kWh). Use a 'Total' counter, not daily.",
-          "home_consumption_energy_entity": "Cumulative energy sensor for home consumption from grid (kWh). Use a 'Total' counter, not daily."
+          "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
+          "max_charge_power_w": "Maximum charge power allowed for AUTO mode (W).",
+          "absolute_max_charge_power_w": "Absolute max charge power (AC+DC). Applied during AC charging and reset afterward. Optional if you use the AC limit entity; requires the entity below when set.",
+          "absolute_max_charge_power_entity": "Optional: number entity to set absolute max charge power (AC+DC). Requires the value above when set.",
+          "charge_power_entity": "Optional: number entity used to set the max AC charge limit (W or kW). Use this OR the AC+DC max entity.",
+          "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
+          "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
+          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found. Requires the AC charge limit entity and both charge power sensors.",
+          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached."
         }
       },
       "advanced": {
         "title": "Inverter Charge Night – Advanced",
-        "description": "Step 4 of 4: Fine-tune update intervals, active dates and optional features.",
+        "description": "Step 4 of 4: Fine-tune the update interval and command delay, restrict the active date range and select a backup mode entity. The defaults are fine for most installations.",
         "data": {
           "update_interval": "Update Interval",
           "command_delay": "Command Delay",
-          "active_start_date": "Active Start Date",
-          "active_end_date": "Active End Date",
-          "backup_mode_entity": "Backup Mode Entity",
-          "auto_efficient_charge": "Auto Efficient Charge Finder"
+          "active_start_date": "Active Start Date (optional)",
+          "active_end_date": "Active End Date (optional)",
+          "backup_mode_entity": "Backup Mode Entity (optional)"
         },
         "data_description": {
-          "update_interval": "How often the coordinator refreshes data",
-          "command_delay": "Delay between min SOC and grid charge commands",
-          "active_start_date": "Only run after this date. Leave empty to always run.",
-          "active_end_date": "Only run before this date. Leave empty to always run.",
-          "backup_mode_entity": "Entity indicating backup/island mode. If active, charging is paused.",
-          "auto_efficient_charge": "Automatically search for the most efficient charge power between min and max"
+          "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
+          "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
+          "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
+          "backup_mode_entity": "Optional: entity that indicates backup/island mode. If active, integration will not change min SOC or grid charge."
         }
       },
       "reconfigure": {
         "title": "Reconfigure – Entities",
-        "description": "Step 1 of 4: Update core entities and battery capacity.",
+        "description": "Step 1 of 4: Update the operation mode and the inverter, forecast and battery entities. Night Charge charges the battery from the grid during the time window; Morning Discharge discharges it before sunrise to make room for solar production.",
         "data": {
-          "name": "Integration Name",
-          "kostal_min_soc_entity": "Kostal Min SOC Entity",
-          "kostal_grid_charge_switch": "Grid Charge Switch",
-          "pv_forecast_entity": "PV Forecast Entity",
+          "name": "Name",
+          "operation_mode": "Operation Mode",
+          "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
+          "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
+          "pv_forecast_entity": "PV Forecast Entity (tomorrow)",
+          "pv_forecast_today_entity": "PV Forecast Today Entity (optional)",
           "battery_soc_entity": "Battery SOC Sensor",
           "battery_capacity": "Battery Capacity"
         },
         "data_description": {
           "name": "Name for this integration instance",
-          "kostal_min_soc_entity": "Number entity that controls the inverter minimum SOC",
-          "kostal_grid_charge_switch": "Switch entity that enables/disables grid charging",
-          "pv_forecast_entity": "Solcast or other entity providing tomorrow's PV forecast (kWh)",
-          "battery_soc_entity": "Sensor showing current battery state of charge (%)",
-          "battery_capacity": "Total usable battery capacity"
+          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
+          "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC. It also identifies this integration instance, so each inverter can only be configured once.",
+          "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
+          "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
+          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
+          "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
+          "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)"
         }
       },
       "reconfigure_time_soc": {
         "title": "Reconfigure – Time & SOC",
-        "description": "Step 2 of 4: Update time window and SOC limits.",
+        "description": "Step 2 of 4: Update the time window and the SOC limits. The calculated target SOC is always kept between the minimum and the maximum.",
         "data": {
-          "start_time": "Charge Start Time",
-          "end_time": "Charge End Time",
+          "start_time": "Start Time",
+          "end_time": "End Time",
           "user_min_soc": "Minimum SOC",
           "user_max_soc": "Maximum SOC",
-          "forecast_error_margin": "Forecast Error Margin",
-          "default_min_soc": "Default Min SOC (restore at end)"
+          "default_min_soc": "Default Min SOC to restore at end time",
+          "forecast_error_margin": "Forecast Error Margin"
         },
         "data_description": {
-          "start_time": "Time when night charging begins",
-          "end_time": "Time when night charging ends and settings are reset",
-          "user_min_soc": "Calculated SOC will never go below this value",
-          "user_max_soc": "Calculated SOC will never exceed this value",
-          "forecast_error_margin": "Safety margin added to forecast before calculation",
-          "default_min_soc": "Min SOC value restored when the charging window ends"
+          "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
+          "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
+          "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
+          "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
+          "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
+          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation."
         }
       },
       "reconfigure_power": {
         "title": "Reconfigure – Charge Power",
-        "description": "Step 3 of 4: Update charge power limits.",
+        "description": "Step 3 of 4: Update the charge power limits and the optional power entities. Clear an optional entity to stop using it.",
         "data": {
           "min_charge_power_w": "Min Charge Power",
           "max_charge_power_w": "Max Charge Power",
-          "absolute_max_charge_power_w": "Absolute Max Power (AC+DC)",
-          "absolute_max_charge_power_entity": "Absolute Max Power Entity",
-          "charge_power_entity": "AC Charge Limit Entity",
-          "grid_import_energy_entity": "Grid Import Energy (Total, kWh)",
-          "battery_charge_energy_entity": "Battery Charge Energy (Total, kWh)",
-          "home_consumption_energy_entity": "Home Consumption Energy (Total, kWh)"
+          "absolute_max_charge_power_w": "Battery Charge Max (AC+DC) (optional)",
+          "absolute_max_charge_power_entity": "Battery Charge Max Entity (AC+DC) (optional)",
+          "charge_power_entity": "Battery Max AC Charge Limit Entity (optional)",
+          "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
+          "charge_power_received_entity": "Charge Power Received by Battery (optional)",
+          "auto_efficient_charge": "Auto Efficient Charge Finder",
+          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)"
         },
         "data_description": {
-          "min_charge_power_w": "Minimum charge power for auto-efficient mode",
-          "max_charge_power_w": "Maximum charge power for auto-efficient mode",
-          "absolute_max_charge_power_w": "Hard limit for total charge power (AC+DC combined). Leave empty if not needed.",
-          "absolute_max_charge_power_entity": "Number entity to set the absolute max charge power",
-          "charge_power_entity": "Number entity to control the max AC charge limit",
-          "grid_import_energy_entity": "Cumulative energy sensor for total grid import (kWh). Use a 'Total' counter, not daily.",
-          "battery_charge_energy_entity": "Cumulative energy sensor for battery charge from grid (kWh). Use a 'Total' counter, not daily.",
-          "home_consumption_energy_entity": "Cumulative energy sensor for home consumption from grid (kWh). Use a 'Total' counter, not daily."
+          "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
+          "max_charge_power_w": "Maximum charge power allowed for AUTO mode (W).",
+          "absolute_max_charge_power_w": "Absolute max charge power (AC+DC). Applied during AC charging and reset afterward. Optional if you use the AC limit entity; requires the entity below when set.",
+          "absolute_max_charge_power_entity": "Optional: number entity to set absolute max charge power (AC+DC). Requires the value above when set.",
+          "charge_power_entity": "Optional: number entity used to set the max AC charge limit (W or kW). Use this OR the AC+DC max entity.",
+          "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
+          "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
+          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found. Requires the AC charge limit entity and both charge power sensors.",
+          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached."
         }
       },
       "reconfigure_advanced": {
         "title": "Reconfigure – Advanced",
-        "description": "Step 4 of 4: Update advanced settings.",
+        "description": "Step 4 of 4: Update the update interval, command delay, active date range and backup mode entity. The integration is reloaded when you finish.",
         "data": {
           "update_interval": "Update Interval",
           "command_delay": "Command Delay",
-          "active_start_date": "Active Start Date",
-          "active_end_date": "Active End Date",
-          "backup_mode_entity": "Backup Mode Entity",
-          "auto_efficient_charge": "Auto Efficient Charge Finder"
+          "active_start_date": "Active Start Date (optional)",
+          "active_end_date": "Active End Date (optional)",
+          "backup_mode_entity": "Backup Mode Entity (optional)"
         },
         "data_description": {
-          "update_interval": "How often the coordinator refreshes data",
-          "command_delay": "Delay between min SOC and grid charge commands",
-          "active_start_date": "Only run after this date. Leave empty to always run.",
-          "active_end_date": "Only run before this date. Leave empty to always run.",
-          "backup_mode_entity": "Entity indicating backup/island mode. If active, charging is paused.",
-          "auto_efficient_charge": "Automatically search for the most efficient charge power between min and max"
+          "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
+          "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
+          "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
+          "backup_mode_entity": "Optional: entity that indicates backup/island mode. If active, integration will not change min SOC or grid charge."
         }
       }
     },
     "error": {
       "invalid_entity": "Invalid entity selected",
-      "invalid_time": "Invalid time format (use HH:MM)",
+      "invalid_time": "Invalid time (use HH:MM)",
       "invalid_soc": "SOC value must be between 0 and 100",
       "invalid_capacity": "Battery capacity must be greater than 0",
       "max_soc_must_be_greater_than_min": "Maximum SOC must be greater than minimum SOC",
@@ -181,16 +189,125 @@
       "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
       "required_entity": "Entity must be provided when value is set",
       "required_value": "Value must be provided when entity is set",
-      "auto_efficiency_requires_power_entities": "Auto efficient charge requires charge power entity, grid import, battery charge, home consumption energy entities, and min/max charge power to be configured in step 3",
       "start_end_time_must_differ": "Start time and end time must be different"
     },
     "abort": {
-      "already_configured": "Integration is already configured"
+      "already_configured": "Integration is already configured",
+      "already_in_progress": "Configuration flow is already in progress",
+      "reconfigure_successful": "Configuration updated"
     }
   },
-  "exceptions": {
-    "entity_not_available": {
-      "message": "Required entity {entity_id} is not yet available"
+  "options": {
+    "step": {
+      "init": {
+        "title": "Settings – Entities",
+        "description": "Step 1 of 4: Update the operation mode and the inverter, forecast and battery entities. Night Charge charges the battery from the grid during the time window; Morning Discharge discharges it before sunrise to make room for solar production.",
+        "data": {
+          "name": "Name",
+          "operation_mode": "Operation Mode",
+          "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
+          "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
+          "pv_forecast_entity": "PV Forecast Entity (tomorrow)",
+          "pv_forecast_today_entity": "PV Forecast Today Entity (optional)",
+          "battery_soc_entity": "Battery SOC Sensor",
+          "battery_capacity": "Battery Capacity"
+        },
+        "data_description": {
+          "name": "Name for this integration instance",
+          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
+          "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC. It also identifies this integration instance, so each inverter can only be configured once.",
+          "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
+          "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
+          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
+          "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
+          "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)"
+        }
+      },
+      "time_soc": {
+        "title": "Settings – Time & SOC",
+        "description": "Step 2 of 4: Update the time window and the SOC limits. The calculated target SOC is always kept between the minimum and the maximum.",
+        "data": {
+          "start_time": "Start Time",
+          "end_time": "End Time",
+          "user_min_soc": "Minimum SOC",
+          "user_max_soc": "Maximum SOC",
+          "default_min_soc": "Default Min SOC to restore at end time",
+          "forecast_error_margin": "Forecast Error Margin"
+        },
+        "data_description": {
+          "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
+          "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
+          "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
+          "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
+          "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
+          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation."
+        }
+      },
+      "power": {
+        "title": "Settings – Charge Power",
+        "description": "Step 3 of 4: Update the charge power limits and the optional power entities. Clear an optional entity to stop using it.",
+        "data": {
+          "min_charge_power_w": "Min Charge Power",
+          "max_charge_power_w": "Max Charge Power",
+          "absolute_max_charge_power_w": "Battery Charge Max (AC+DC) (optional)",
+          "absolute_max_charge_power_entity": "Battery Charge Max Entity (AC+DC) (optional)",
+          "charge_power_entity": "Battery Max AC Charge Limit Entity (optional)",
+          "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
+          "charge_power_received_entity": "Charge Power Received by Battery (optional)",
+          "auto_efficient_charge": "Auto Efficient Charge Finder",
+          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)"
+        },
+        "data_description": {
+          "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
+          "max_charge_power_w": "Maximum charge power allowed for AUTO mode (W).",
+          "absolute_max_charge_power_w": "Absolute max charge power (AC+DC). Applied during AC charging and reset afterward. Optional if you use the AC limit entity; requires the entity below when set.",
+          "absolute_max_charge_power_entity": "Optional: number entity to set absolute max charge power (AC+DC). Requires the value above when set.",
+          "charge_power_entity": "Optional: number entity used to set the max AC charge limit (W or kW). Use this OR the AC+DC max entity.",
+          "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
+          "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
+          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found. Requires the AC charge limit entity and both charge power sensors.",
+          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached."
+        }
+      },
+      "advanced": {
+        "title": "Settings – Advanced",
+        "description": "Step 4 of 4: Update the update interval, command delay, active date range and backup mode entity. The integration is reloaded when you finish.",
+        "data": {
+          "update_interval": "Update Interval",
+          "command_delay": "Command Delay",
+          "active_start_date": "Active Start Date (optional)",
+          "active_end_date": "Active End Date (optional)",
+          "backup_mode_entity": "Backup Mode Entity (optional)"
+        },
+        "data_description": {
+          "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
+          "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
+          "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
+          "backup_mode_entity": "Optional: entity that indicates backup/island mode. If active, integration will not change min SOC or grid charge."
+        }
+      }
+    },
+    "error": {
+      "invalid_entity": "Invalid entity selected",
+      "invalid_time": "Invalid time (use HH:MM)",
+      "invalid_soc": "SOC value must be between 0 and 100",
+      "invalid_capacity": "Battery capacity must be greater than 0",
+      "max_soc_must_be_greater_than_min": "Maximum SOC must be greater than minimum SOC",
+      "invalid_date": "Invalid date format (use YYYY-MM-DD)",
+      "invalid_power": "Power must be greater than 0",
+      "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
+      "required_entity": "Entity must be provided when value is set",
+      "required_value": "Value must be provided when entity is set",
+      "start_end_time_must_differ": "Start time and end time must be different"
+    }
+  },
+  "selector": {
+    "operation_mode": {
+      "options": {
+        "night_charge": "Night Charge",
+        "morning_discharge": "Morning Discharge"
+      }
     }
   },
   "entity": {
@@ -200,12 +317,6 @@
       },
       "best_charge_power": {
         "name": "Best Charge Power"
-      },
-      "charging_efficiency": {
-        "name": "Charging Efficiency"
-      },
-      "auto_test_status": {
-        "name": "Auto Test Status"
       }
     },
     "switch": {
@@ -214,6 +325,18 @@
       },
       "auto_efficient_charge_finder": {
         "name": "Auto Efficient Charge Finder"
+      },
+      "skip_next": {
+        "name": "Skip Next (24h Override)"
+      }
+    },
+    "select": {
+      "operation_mode": {
+        "name": "Operation Mode",
+        "state": {
+          "night_charge": "Night Charge",
+          "morning_discharge": "Morning Discharge"
+        }
       }
     },
     "binary_sensor": {
@@ -227,107 +350,9 @@
       }
     }
   },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Settings – Entities",
-        "description": "Step 1 of 4: Update core entities and battery capacity.",
-        "data": {
-          "name": "Integration Name",
-          "kostal_min_soc_entity": "Kostal Min SOC Entity",
-          "kostal_grid_charge_switch": "Grid Charge Switch",
-          "pv_forecast_entity": "PV Forecast Entity",
-          "battery_soc_entity": "Battery SOC Sensor",
-          "battery_capacity": "Battery Capacity"
-        },
-        "data_description": {
-          "name": "Name for this integration instance",
-          "kostal_min_soc_entity": "Number entity that controls the inverter minimum SOC",
-          "kostal_grid_charge_switch": "Switch entity that enables/disables grid charging",
-          "pv_forecast_entity": "Solcast or other entity providing tomorrow's PV forecast (kWh)",
-          "battery_soc_entity": "Sensor showing current battery state of charge (%)",
-          "battery_capacity": "Total usable battery capacity"
-        }
-      },
-      "time_soc": {
-        "title": "Settings – Time & SOC",
-        "description": "Step 2 of 4: Update time window and SOC limits.",
-        "data": {
-          "start_time": "Charge Start Time",
-          "end_time": "Charge End Time",
-          "user_min_soc": "Minimum SOC",
-          "user_max_soc": "Maximum SOC",
-          "forecast_error_margin": "Forecast Error Margin",
-          "default_min_soc": "Default Min SOC (restore at end)"
-        },
-        "data_description": {
-          "start_time": "Time when night charging begins",
-          "end_time": "Time when night charging ends and settings are reset",
-          "user_min_soc": "Calculated SOC will never go below this value",
-          "user_max_soc": "Calculated SOC will never exceed this value",
-          "forecast_error_margin": "Safety margin added to forecast before calculation",
-          "default_min_soc": "Min SOC value restored when the charging window ends"
-        }
-      },
-      "power": {
-        "title": "Settings – Charge Power",
-        "description": "Step 3 of 4: Update charge power limits.",
-        "data": {
-          "min_charge_power_w": "Min Charge Power",
-          "max_charge_power_w": "Max Charge Power",
-          "absolute_max_charge_power_w": "Absolute Max Power (AC+DC)",
-          "absolute_max_charge_power_entity": "Absolute Max Power Entity",
-          "charge_power_entity": "AC Charge Limit Entity",
-          "grid_import_energy_entity": "Grid Import Energy (Total, kWh)",
-          "battery_charge_energy_entity": "Battery Charge Energy (Total, kWh)",
-          "home_consumption_energy_entity": "Home Consumption Energy (Total, kWh)"
-        },
-        "data_description": {
-          "min_charge_power_w": "Minimum charge power for auto-efficient mode",
-          "max_charge_power_w": "Maximum charge power for auto-efficient mode",
-          "absolute_max_charge_power_w": "Hard limit for total charge power (AC+DC combined). Leave empty if not needed.",
-          "absolute_max_charge_power_entity": "Number entity to set the absolute max charge power",
-          "charge_power_entity": "Number entity to control the max AC charge limit",
-          "grid_import_energy_entity": "Cumulative energy sensor for total grid import (kWh). Use a 'Total' counter, not daily.",
-          "battery_charge_energy_entity": "Cumulative energy sensor for battery charge from grid (kWh). Use a 'Total' counter, not daily.",
-          "home_consumption_energy_entity": "Cumulative energy sensor for home consumption from grid (kWh). Use a 'Total' counter, not daily."
-        }
-      },
-      "advanced": {
-        "title": "Settings – Advanced",
-        "description": "Step 4 of 4: Update advanced settings.",
-        "data": {
-          "update_interval": "Update Interval",
-          "command_delay": "Command Delay",
-          "active_start_date": "Active Start Date",
-          "active_end_date": "Active End Date",
-          "backup_mode_entity": "Backup Mode Entity",
-          "auto_efficient_charge": "Auto Efficient Charge Finder"
-        },
-        "data_description": {
-          "update_interval": "How often the coordinator refreshes data",
-          "command_delay": "Delay between min SOC and grid charge commands",
-          "active_start_date": "Only run after this date. Leave empty to always run.",
-          "active_end_date": "Only run before this date. Leave empty to always run.",
-          "backup_mode_entity": "Entity indicating backup/island mode. If active, charging is paused.",
-          "auto_efficient_charge": "Automatically search for the most efficient charge power between min and max"
-        }
-      }
-    },
-    "error": {
-      "invalid_entity": "Invalid entity selected",
-      "invalid_time": "Invalid time format (use HH:MM)",
-      "invalid_soc": "SOC value must be between 0 and 100",
-      "invalid_capacity": "Battery capacity must be greater than 0",
-      "max_soc_must_be_greater_than_min": "Maximum SOC must be greater than minimum SOC",
-      "invalid_date": "Invalid date format (use YYYY-MM-DD)",
-      "invalid_power": "Power must be greater than 0",
-      "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
-      "required_entity": "Entity must be provided when value is set",
-      "required_value": "Value must be provided when entity is set",
-      "auto_efficiency_requires_power_entities": "Auto efficient charge requires charge power entity, grid import, battery charge, home consumption energy entities, and min/max charge power to be configured in step 3",
-      "start_end_time_must_differ": "Start time and end time must be different"
+  "exceptions": {
+    "entity_not_available": {
+      "message": "Required entity {entity_id} is not yet available"
     }
   }
 }
-
