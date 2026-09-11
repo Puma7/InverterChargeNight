@@ -42,6 +42,9 @@
     "number": {
       "min_soc_override": {
         "default": "mdi:battery-arrow-up"
+      },
+      "snow_nights": {
+        "default": "mdi:snowflake"
       }
     }
   }
