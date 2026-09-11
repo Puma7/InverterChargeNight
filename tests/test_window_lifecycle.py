@@ -480,3 +480,91 @@ async def test_window_end_waits_for_running_verification_before_reset(mock_hass)
         ("set_value", DEFAULT_MIN),
         ("turn_off", GRID),
     ]
+
+
+# 9. Snow mode (plan 007) ------------------------------------------------------
+
+
+def _persisted_snow_nights(mock_hass) -> int:
+    """The snow counter as last written to entry.options["runtime_state"]."""
+    options = mock_hass.config_entries.async_update_entry.call_args.kwargs["options"]
+    return options[CONF_RUNTIME_STATE]["snow_nights"]
+
+
+def _entities_read(mock_hass) -> list[str]:
+    return [c.args[0] for c in mock_hass.states.get.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_snow_nights_charge_to_max_without_forecast_and_count_down(
+    mock_hass, coordinator
+):
+    coordinator.snow_nights = 2
+    mock_hass.states.get.reset_mock()
+
+    # Night 1: the target is the user maximum and the forecast is never read
+    await coordinator._on_window_start(WINDOW_START)
+    await coordinator._async_update_data()
+    assert coordinator.initial_calculated_soc == USER_MAX
+    assert coordinator.current_target_soc() == USER_MAX
+    assert PV not in _entities_read(mock_hass)
+    assert (
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": USER_MAX})
+        in mock_hass.services.async_call.await_args_list
+    )
+    assert _persisted_snow_nights(mock_hass) == 2
+
+    await coordinator._on_window_end(WINDOW_END)
+    assert coordinator.snow_nights == 1
+    assert _persisted_snow_nights(mock_hass) == 1
+    assert coordinator.is_active is False
+
+    # Night 2: still the maximum, then the counter reaches zero
+    await coordinator._on_window_start(WINDOW_START)
+    assert coordinator.initial_calculated_soc == USER_MAX
+    assert PV not in _entities_read(mock_hass)
+    await coordinator._on_window_end(WINDOW_END)
+    assert coordinator.snow_nights == 0
+    assert _persisted_snow_nights(mock_hass) == 0
+
+    # Night 3: back to the forecast plan
+    mock_hass.states.get.reset_mock()
+    await coordinator._on_window_start(WINDOW_START)
+    assert coordinator.initial_calculated_soc == EXPECTED_TARGET
+    assert PV in _entities_read(mock_hass)
+    await coordinator._on_window_end(WINDOW_END)
+    assert coordinator.snow_nights == 0
+
+
+@pytest.mark.asyncio
+async def test_snow_mode_beats_manual_override(mock_hass, coordinator):
+    """Snow -> override -> plan: an override below the maximum during snow is ignored."""
+    coordinator.snow_nights = 1
+    await coordinator._on_window_start(WINDOW_START)
+
+    number = MinSOCOverrideNumber(coordinator, coordinator.entry)
+    number.async_write_ha_state = MagicMock()
+    await number.async_set_native_value(30.0)
+
+    assert coordinator.override_soc == 30.0
+    assert coordinator.current_target_soc() == USER_MAX
+
+    # Once the snow nights are used up the override is cleared with the window
+    await coordinator._on_window_end(WINDOW_END)
+    assert coordinator.snow_nights == 0
+    assert coordinator.override_soc is None
+    # The next window is planned from the forecast again
+    await coordinator._on_window_start(WINDOW_START)
+    assert coordinator.current_target_soc() == EXPECTED_TARGET
+
+
+@pytest.mark.asyncio
+async def test_restart_restores_snow_nights_and_ignores_malformed_values(mock_hass):
+    _register_inverter(mock_hass)
+    options = _persisted_window(EXPECTED_TARGET)
+    options[CONF_RUNTIME_STATE]["snow_nights"] = 2
+    assert _make_coordinator(mock_hass, options=options).snow_nights == 2
+
+    for bad in (True, -1, "2", None):
+        options[CONF_RUNTIME_STATE]["snow_nights"] = bad
+        assert _make_coordinator(mock_hass, options=options).snow_nights == 0, bad

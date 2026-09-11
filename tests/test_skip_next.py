@@ -48,6 +48,7 @@ def _make_coordinator(mock_hass, mock_config_entry):
         coord._original_absolute_charge_power = None
         coord._original_ac_charge_power = None
         coord._pending_reset = False
+        coord.snow_nights = 0
         coord._reset_retry_unsub = None
         coord._reset_retry_count = 0
         coord._battery_soc_listener = None

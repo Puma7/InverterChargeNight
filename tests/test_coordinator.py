@@ -382,6 +382,7 @@ def test_persist_state_round_trip_next_to_auto_efficiency_data(mock_hass):
     first.initial_calculated_soc = 65.0
     first._original_ac_charge_power = 6000.0
     first._pending_reset = True
+    first.snow_nights = 3
 
     first._persist_state()
 
@@ -395,6 +396,7 @@ def test_persist_state_round_trip_next_to_auto_efficiency_data(mock_hass):
         "initial_calculated_soc": 65.0,
         "original_ac_charge_power": 6000.0,
         "pending_reset": True,
+        "snow_nights": 3,
     }
 
     # "Restart": a new coordinator on the same entry gets everything back
@@ -406,6 +408,7 @@ def test_persist_state_round_trip_next_to_auto_efficiency_data(mock_hass):
     assert second.initial_calculated_soc == 65.0
     assert second._original_ac_charge_power == 6000.0
     assert second._pending_reset is True
+    assert second.snow_nights == 3
 
     # Saving the auto-efficiency history keeps the runtime state, and vice versa
     second._save_auto_efficiency_data({"history": {"5000": 0.1, "6000": 0.2}})

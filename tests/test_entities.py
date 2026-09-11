@@ -6,7 +6,7 @@ import pytest
 from custom_components.inverter_charge_night.binary_sensor import (
     ActiveWindowBinarySensor,
 )
-from custom_components.inverter_charge_night.number import MinSOCOverrideNumber
+from custom_components.inverter_charge_night.number import MinSOCOverrideNumber, SnowNightsNumber
 from custom_components.inverter_charge_night.sensor import (
     BestChargePowerSensor,
     CalculatedSOCSensor,
@@ -52,6 +52,7 @@ def test_calculated_soc_sensor_values():
         "target_reached": False,
         "current_soc": 50.0,
     }
+    coordinator.snow_nights = 2
     entry = _make_entry()
     sensor = CalculatedSOCSensor(coordinator, entry)
     assert sensor.native_value == 55.5
@@ -59,6 +60,7 @@ def test_calculated_soc_sensor_values():
     assert attrs["is_active"] is True
     assert attrs["target_reached"] is False
     assert attrs["current_soc"] == 50.0
+    assert attrs["snow_nights"] == 2
 
 
 def test_best_charge_power_sensor():
@@ -157,6 +159,74 @@ async def test_min_soc_override_number_inactive_window_only_stores_value():
 
     assert coordinator.override_soc == 60.0
     coordinator.async_request_refresh.assert_not_awaited()
+
+
+def _snow_coordinator(*, is_active: bool) -> MagicMock:
+    coordinator = MagicMock()
+    coordinator.snow_nights = 0
+    coordinator.is_active = is_active
+    coordinator.is_enabled = True
+    coordinator.target_reached = True
+    coordinator.async_request_refresh = AsyncMock()
+    return coordinator
+
+
+def test_snow_nights_number_static_attributes_and_value():
+    coordinator = _snow_coordinator(is_active=False)
+    coordinator.snow_nights = 4
+    number = SnowNightsNumber(coordinator, _make_entry())
+    assert number.native_value == 4
+    assert number.unique_id == "entry_1_snow_nights"
+    assert number.translation_key == "snow_nights"
+    assert (number.native_min_value, number.native_max_value, number.native_step) == (0, 14, 1)
+    assert number.icon == "mdi:snowflake"
+
+
+@pytest.mark.asyncio
+async def test_snow_nights_number_set_in_active_window_persists_and_refreshes():
+    coordinator = _snow_coordinator(is_active=True)
+    number = SnowNightsNumber(coordinator, _make_entry())
+    number.async_write_ha_state = MagicMock()
+
+    await number.async_set_native_value(3.0)
+
+    assert coordinator.snow_nights == 3
+    assert number.native_value == 3
+    # A raised target must not stay "reached" from before
+    assert coordinator.target_reached is False
+    coordinator._persist_state.assert_called_once()
+    number.async_write_ha_state.assert_called_once()
+    # The running window switches to the maximum through the refresh
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_snow_nights_number_outside_window_only_stores_value():
+    coordinator = _snow_coordinator(is_active=False)
+    number = SnowNightsNumber(coordinator, _make_entry())
+    number.async_write_ha_state = MagicMock()
+
+    await number.async_set_native_value(2.0)
+
+    assert coordinator.snow_nights == 2
+    coordinator._persist_state.assert_called_once()
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_snow_nights_number_zero_clears_snow_mode_and_clamps_negative():
+    coordinator = _snow_coordinator(is_active=True)
+    coordinator.snow_nights = 5
+    number = SnowNightsNumber(coordinator, _make_entry())
+    number.async_write_ha_state = MagicMock()
+
+    await number.async_set_native_value(-1.0)
+
+    assert coordinator.snow_nights == 0
+    # Clearing snow mode does not restart charging on its own
+    assert coordinator.target_reached is True
+    coordinator._persist_state.assert_called_once()
+    coordinator.async_request_refresh.assert_awaited_once()
 
 
 @pytest.mark.asyncio
