@@ -93,14 +93,14 @@ async def test_check_current_window_active_sets_listeners(mock_hass):
     coordinator._is_time_between = MagicMock(return_value=True)
     coordinator._setup_battery_soc_listener = MagicMock()
     coordinator._setup_inverter_min_soc_listener = MagicMock()
-    coordinator._start_periodic_verification = MagicMock()
+    coordinator._start_periodic_verification = AsyncMock()
     coordinator._verify_and_restore_min_soc = AsyncMock()
 
     await coordinator._check_current_window()
 
     coordinator._setup_battery_soc_listener.assert_called_once()
     coordinator._setup_inverter_min_soc_listener.assert_called_once()
-    coordinator._start_periodic_verification.assert_called_once()
+    coordinator._start_periodic_verification.assert_awaited_once()
     coordinator._verify_and_restore_min_soc.assert_awaited()
 
 
@@ -118,7 +118,7 @@ async def test_on_window_end_resets_state(mock_hass):
     coordinator._reset_settings = AsyncMock()
     coordinator._remove_battery_soc_listener = MagicMock()
     coordinator._remove_inverter_min_soc_listener = MagicMock()
-    coordinator._stop_periodic_verification = MagicMock()
+    coordinator._stop_periodic_verification = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
 
     await coordinator._on_window_end(None)
@@ -132,5 +132,5 @@ async def test_on_window_end_resets_state(mock_hass):
     coordinator._reset_settings.assert_awaited()
     coordinator._remove_battery_soc_listener.assert_called_once()
     coordinator._remove_inverter_min_soc_listener.assert_called_once()
-    coordinator._stop_periodic_verification.assert_called_once()
+    coordinator._stop_periodic_verification.assert_awaited_once()
     coordinator.async_request_refresh.assert_awaited()

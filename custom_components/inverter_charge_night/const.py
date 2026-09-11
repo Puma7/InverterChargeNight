@@ -47,6 +47,7 @@ CONF_CHARGE_POWER_SENT_ENTITY = "charge_power_sent_entity"
 CONF_CHARGE_POWER_RECEIVED_ENTITY = "charge_power_received_entity"
 CONF_AUTO_EFFICIENT_CHARGE = "auto_efficient_charge"
 CONF_AUTO_EFFICIENCY_DATA = "auto_efficiency_data"
+CONF_RUNTIME_STATE = "runtime_state"  # entry.options key: flags that survive a restart
 CONF_ABSOLUTE_MAX_CHARGE_POWER_W = "absolute_max_charge_power_w"
 CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY = "absolute_max_charge_power_entity"
 CONF_PV_FORECAST_TODAY_ENTITY = "pv_forecast_today_entity"
