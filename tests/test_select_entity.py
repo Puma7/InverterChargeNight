@@ -20,7 +20,7 @@ from custom_components.inverter_charge_night.const import (
 @pytest.mark.asyncio
 async def test_select_async_setup_entry(mock_hass, mock_config_entry, mock_coordinator):
     """Test select platform setup creates OperationModeSelect."""
-    mock_hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+    mock_config_entry.runtime_data = mock_coordinator
     mock_coordinator.operation_mode = MODE_NIGHT_CHARGE
     added = []
     await async_setup_entry(mock_hass, mock_config_entry, lambda entities: added.extend(entities))

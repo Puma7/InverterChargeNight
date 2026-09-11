@@ -6,18 +6,19 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import InverterChargeNightCoordinator
+from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 from .entity import InverterChargeNightEntity
-from .const import DOMAIN
+
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: InverterChargeNightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the binary sensor platform."""
-    coordinator: InverterChargeNightCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     async_add_entities([ActiveWindowBinarySensor(coordinator, entry)])
 
 

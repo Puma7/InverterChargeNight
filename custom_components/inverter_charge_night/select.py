@@ -9,25 +9,26 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import InverterChargeNightCoordinator
+from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 from .entity import InverterChargeNightEntity
 from .const import (
     CONF_OPERATION_MODE,
-    DOMAIN,
     MODE_MORNING_DISCHARGE,
     MODE_NIGHT_CHARGE,
 )
+
+PARALLEL_UPDATES = 0
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: InverterChargeNightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the select platform."""
-    coordinator: InverterChargeNightCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     async_add_entities([OperationModeSelect(coordinator, entry)])
 
 
