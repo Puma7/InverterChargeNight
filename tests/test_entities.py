@@ -108,8 +108,55 @@ async def test_min_soc_override_number_set_value():
     await number.async_set_native_value(95.0)
 
     assert coordinator.override_soc == 90.0
-    coordinator._control_kostal.assert_awaited_with(90.0)
+    assert coordinator.target_reached is False
+    # The override is applied by the refresh through the mode-correct control
+    # path; the entity never calls the charge path directly
+    coordinator._control_kostal.assert_not_awaited()
     coordinator.async_request_refresh.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_min_soc_override_number_set_value_in_discharge_mode():
+    coordinator = MagicMock()
+    coordinator.config = {CONF_USER_MIN_SOC: 10.0, CONF_USER_MAX_SOC: 90.0}
+    coordinator.data = {"calculated_soc": 50.0}
+    coordinator.is_active = True
+    coordinator.is_enabled = True
+    coordinator.is_discharge_mode = True
+    coordinator.minimum_calculated_soc = None
+    coordinator._control_kostal = AsyncMock()
+    coordinator._control_discharge = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+    entry = _make_entry()
+    number = MinSOCOverrideNumber(coordinator, entry)
+    number.async_write_ha_state = MagicMock()
+
+    await number.async_set_native_value(30.0)
+
+    assert coordinator.override_soc == 30.0
+    assert coordinator.target_reached is False
+    coordinator._control_kostal.assert_not_awaited()
+    coordinator._control_discharge.assert_not_awaited()
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_min_soc_override_number_inactive_window_only_stores_value():
+    coordinator = MagicMock()
+    coordinator.config = {CONF_USER_MIN_SOC: 10.0, CONF_USER_MAX_SOC: 90.0}
+    coordinator.data = {"calculated_soc": 50.0}
+    coordinator.is_active = False
+    coordinator.is_enabled = True
+    coordinator.minimum_calculated_soc = None
+    coordinator.async_request_refresh = AsyncMock()
+    entry = _make_entry()
+    number = MinSOCOverrideNumber(coordinator, entry)
+    number.async_write_ha_state = MagicMock()
+
+    await number.async_set_native_value(60.0)
+
+    assert coordinator.override_soc == 60.0
+    coordinator.async_request_refresh.assert_not_awaited()
 
 
 @pytest.mark.asyncio

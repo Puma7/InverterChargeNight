@@ -14,15 +14,16 @@ verification task run for real (against ``hass.bus`` / ``hass.loop`` mocks and
 a real asyncio task respectively), so the listener handles asserted here are
 genuine unsubscribe callables.
 
-These tests document today's behaviour. Plans 004 and 005 change parts of it
-and are expected to adapt the affected tests; the ``xfail(strict=True)`` test
-documents finding F2 and must be turned into a passing test by plan 004.
+These tests document today's behaviour. Plan 005 changes parts of it and is
+expected to adapt the affected tests. Plan 004 made ``current_target_soc()``
+the single target (finding F2) and added a clock-based window check to the
+polling update, so ``dt_util.now`` is pinned inside the window for every test.
 """
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 import pytest_asyncio
@@ -35,13 +36,16 @@ from custom_components.inverter_charge_night.const import (
     CONF_COMMAND_DELAY,
     CONF_DEFAULT_MIN_SOC,
     CONF_END_TIME,
+    CONF_FORCE_DISCHARGE_SWITCH,
     CONF_FORECAST_ERROR_MARGIN,
     CONF_KOSTAL_GRID_CHARGE_SWITCH,
     CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_OPERATION_MODE,
     CONF_PV_FORECAST_ENTITY,
     CONF_START_TIME,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
+    MODE_MORNING_DISCHARGE,
 )
 from custom_components.inverter_charge_night.number import MinSOCOverrideNumber
 
@@ -49,6 +53,7 @@ MIN_SOC = "number.min_soc"
 GRID = "switch.grid"
 BATTERY = "sensor.soc"
 PV = "sensor.pv"
+FORCE = "switch.force_discharge"
 
 CAPACITY_KWH = 10.0
 MARGIN_PCT = 10.0
@@ -74,6 +79,7 @@ CONFIG = {
 
 WINDOW_START = datetime(2026, 1, 15, 0, 0)
 WINDOW_END = datetime(2026, 1, 15, 5, 59)
+INSIDE_WINDOW = datetime(2026, 1, 15, 2, 0)
 
 # 5 kWh forecast + 10 % margin = 5.5 kWh of space needed in a 10 kWh battery -> 45 %
 EXPECTED_TARGET = calculate_required_soc(
@@ -81,11 +87,20 @@ EXPECTED_TARGET = calculate_required_soc(
 )
 
 
-def _make_coordinator(hass) -> InverterChargeNightCoordinator:
+@pytest.fixture(autouse=True)
+def _inside_window():
+    """Pin the clock inside the window: the polling update ends a window it finds itself outside of."""
+    with patch(
+        "custom_components.inverter_charge_night.dt_util.now", return_value=INSIDE_WINDOW
+    ):
+        yield
+
+
+def _make_coordinator(hass, config=CONFIG) -> InverterChargeNightCoordinator:
     entry = MagicMock()
     entry.entry_id = "entry_1"
     entry.title = "Test"
-    entry.data = CONFIG
+    entry.data = config
     entry.options = {}
     coordinator = InverterChargeNightCoordinator(hass, entry)
     coordinator.async_request_refresh = AsyncMock()
@@ -303,15 +318,13 @@ async def test_restart_in_window_with_low_target_stores_it_as_original(
 # 6. Override upwards (finding F2) -------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="plans/004")
 @pytest.mark.asyncio
 async def test_override_above_target_keeps_grid_charging(mock_hass, coordinator):
     """Raising the override from 45 % to 70 % with the battery at 50 % must keep charging.
 
-    Today ``minimum_calculated_soc`` is only ever lowered, but it is what the
-    "target reached" check compares against. The override is written to the
-    inverter, and the very next update sees 50 % >= 45 % and turns grid
-    charging off again (finding F2). Plan 004 fixes this and un-xfails the test.
+    ``current_target_soc()`` is the only target (finding F2): the next update
+    writes the override to the inverter and, because 50 % is below 70 %, leaves
+    grid charging on. ``minimum_calculated_soc`` stays a diagnostic value.
     """
     target = await _start_and_apply(mock_hass, coordinator)
     assert target == 45.0
@@ -322,18 +335,83 @@ async def test_override_above_target_keeps_grid_charging(mock_hass, coordinator)
     await number.async_set_native_value(70.0)
 
     assert coordinator.override_soc == 70.0
-    # The new target reaches the inverter immediately ...
-    mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": MIN_SOC, "value": 70.0}
-    )
-    mock_hass.states.async_set(MIN_SOC, "70")
+    assert coordinator.current_target_soc() == 70.0
+    # The entity only requests a refresh; the update applies the override
+    coordinator.async_request_refresh.assert_awaited()
+    mock_hass.services.async_call.assert_not_awaited()
 
     data = await coordinator._async_update_data()
 
-    # ... and the next update must not stop charging: 50 % is below the 70 % override
-    assert (
-        call("switch", "turn_off", {"entity_id": GRID})
-        not in mock_hass.services.async_call.await_args_list
+    # The new target reaches the inverter and charging is not stopped: 50 % < 70 %
+    mock_hass.services.async_call.assert_awaited_once_with(
+        "number", "set_value", {"entity_id": MIN_SOC, "value": 70.0}
     )
     assert coordinator.target_reached is False
     assert data["target_reached"] is False
+    assert coordinator.minimum_calculated_soc == 45.0
+
+
+@pytest.mark.asyncio
+async def test_verification_restores_override_not_lowest_target(mock_hass, coordinator):
+    """After an override to 70 %, an external reset to 45 % is corrected back to 70 %."""
+    await _start_and_apply(mock_hass, coordinator)
+    mock_hass.states.async_set(BATTERY, "50")
+    number = MinSOCOverrideNumber(coordinator, coordinator.entry)
+    number.async_write_ha_state = MagicMock()
+    await number.async_set_native_value(70.0)
+    await coordinator._async_update_data()
+    mock_hass.states.async_set(MIN_SOC, "70")
+    mock_hass.services.async_call.reset_mock()
+
+    # Something outside writes the old plan value back to the inverter
+    mock_hass.states.async_set(MIN_SOC, "45")
+    await coordinator._verify_and_restore_min_soc()
+
+    mock_hass.services.async_call.assert_awaited_once_with(
+        "number", "set_value", {"entity_id": MIN_SOC, "value": 70.0}
+    )
+    assert coordinator._last_soc_set == 70.0
+    assert coordinator.target_reached is False
+
+
+# 7. Override in discharge mode (finding F10) --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_override_in_discharge_mode_uses_discharge_path(mock_hass):
+    """An override during a discharge window must never switch grid charging on."""
+    mock_hass.async_create_background_task = MagicMock(
+        side_effect=lambda coro, name=None, **kwargs: asyncio.ensure_future(coro)
+    )
+    _register_inverter(mock_hass)
+    mock_hass.states.async_set(FORCE, "off")
+    config = {
+        **CONFIG,
+        CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE,
+        CONF_FORCE_DISCHARGE_SWITCH: FORCE,
+    }
+    coordinator = _make_coordinator(mock_hass, config)
+    assert coordinator.is_discharge_mode is True
+    try:
+        await coordinator._on_window_start(WINDOW_START)
+        mock_hass.services.async_call.reset_mock()
+
+        number = MinSOCOverrideNumber(coordinator, coordinator.entry)
+        number.async_write_ha_state = MagicMock()
+        await number.async_set_native_value(30.0)
+        assert coordinator.override_soc == 30.0
+        mock_hass.services.async_call.assert_not_awaited()
+
+        data = await coordinator._async_update_data()
+
+        calls = mock_hass.services.async_call.await_args_list
+        # Discharge floor is written and force discharge is switched on ...
+        assert call("number", "set_value", {"entity_id": MIN_SOC, "value": 30.0}) in calls
+        assert call("switch", "turn_on", {"entity_id": FORCE}) in calls
+        # ... but the charge path is never taken
+        assert call("switch", "turn_on", {"entity_id": GRID}) not in calls
+        assert data["target_reached"] is False
+        assert data["is_active"] is True
+    finally:
+        coordinator._stop_periodic_verification()
+        await asyncio.sleep(0)

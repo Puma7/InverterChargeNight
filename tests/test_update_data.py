@@ -1,4 +1,5 @@
 """Tests for _async_update_data behavior."""
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,13 +9,32 @@ from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEFAULT_MIN_SOC,
+    CONF_END_TIME,
     CONF_FORECAST_ERROR_MARGIN,
     CONF_PV_FORECAST_ENTITY,
+    CONF_START_TIME,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
     DEFAULT_SAFE_FALLBACK_SOC,
 )
 from tests.conftest import create_mock_state
+
+
+INSIDE_DEFAULT_WINDOW = datetime(2026, 1, 15, 2, 0)
+
+
+@pytest.fixture(autouse=True)
+def _inside_window():
+    """Pin the clock inside the default 00:00-05:59 window.
+
+    The polling update ends a window it finds itself outside of, so tests that
+    exercise the update body must not depend on the wall clock.
+    """
+    with patch(
+        "custom_components.inverter_charge_night.dt_util.now",
+        return_value=INSIDE_DEFAULT_WINDOW,
+    ):
+        yield
 
 
 def _make_coordinator(hass, data):
@@ -61,6 +81,54 @@ async def test_async_update_data_outside_date_range_triggers_end(mock_hass):
     data = await coordinator._async_update_data()
     coordinator._on_window_end.assert_awaited()
     assert data["is_active"] is False
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_ends_window_when_end_trigger_was_missed(mock_hass, caplog):
+    """A poll outside the window ends it even though no end trigger fired (finding F9)."""
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_START_TIME: "23:00", CONF_END_TIME: "05:00"}
+    )
+    coordinator.is_enabled = True
+    coordinator.is_active = True
+    coordinator._is_backup_active = MagicMock(return_value=False)
+    coordinator._is_within_date_range = MagicMock(return_value=True)
+    coordinator._on_window_end = AsyncMock()
+
+    with patch(
+        "custom_components.inverter_charge_night.dt_util.now",
+        return_value=datetime(2026, 1, 15, 7, 0),
+    ):
+        data = await coordinator._async_update_data()
+
+    coordinator._on_window_end.assert_awaited_once()
+    assert data["is_active"] is False
+    assert "Window end was missed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_keeps_overnight_window_when_inside(mock_hass):
+    """A poll inside an overnight window (after midnight) does not end it."""
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_START_TIME: "23:00", CONF_END_TIME: "05:00"}
+    )
+    coordinator.is_enabled = True
+    coordinator.is_active = True
+    coordinator.initial_calculated_soc = 40.0
+    coordinator._is_backup_active = MagicMock(return_value=False)
+    coordinator._is_within_date_range = MagicMock(return_value=True)
+    coordinator._on_window_end = AsyncMock()
+    coordinator._handle_auto_charge = AsyncMock()
+
+    with patch(
+        "custom_components.inverter_charge_night.dt_util.now",
+        return_value=datetime(2026, 1, 15, 1, 0),
+    ):
+        data = await coordinator._async_update_data()
+
+    coordinator._on_window_end.assert_not_awaited()
+    assert data["is_active"] is True
+    assert data["calculated_soc"] == 40.0
 
 
 @pytest.mark.asyncio
