@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 from .entity import InverterChargeNightEntity
+from .const import ATTR_SNOW_NIGHTS
 
 PARALLEL_UPDATES = 0
 
@@ -59,6 +60,7 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
             "current_soc": data.get("current_soc"),
             "operation_mode": data.get("operation_mode"),
             "skip_next": data.get("skip_next", False),
+            ATTR_SNOW_NIGHTS: self.coordinator.snow_nights,
         }
 
 

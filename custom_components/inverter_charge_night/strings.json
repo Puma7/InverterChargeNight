@@ -347,6 +347,9 @@
     "number": {
       "min_soc_override": {
         "name": "Min SOC Override"
+      },
+      "snow_nights": {
+        "name": "Snow nights (charge to max)"
       }
     }
   },

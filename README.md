@@ -198,6 +198,11 @@ After configuration, you should see new entities:
   - Step: 1
   - When set: Overrides automatic calculation while active
 
+- **`number.inverter_charge_night_snow_nights`** - Snow on the modules: charge the next N nights to the maximum
+  - Range: 0 - 14, Step: 1
+  - Bei Schnee auf den Modulen: Anzahl der nächsten Nächte, in denen bis zum Maximum geladen wird; zählt automatisch herunter.
+  - Overrides the forecast and the manual override; counts down at every window end
+
 - **`switch.inverter_charge_night_auto_efficient_charge_finder`** - Auto efficient charge finder
   - Finds the most efficient AC charge limit and turns itself off when done
 
@@ -262,6 +267,7 @@ entities:
   - binary_sensor.inverter_charge_night_active
   - sensor.inverter_charge_night_calculated_soc
   - number.inverter_charge_night_min_soc_override
+  - number.inverter_charge_night_snow_nights
 ```
 
 **Auto Finder card**
@@ -286,6 +292,9 @@ entities:
 
 - **`number.inverter_charge_night_min_soc_override`**  
   Manual override for target SOC (integer %). Overrides automatic calculation.
+
+- **`number.inverter_charge_night_snow_nights`**  
+  Bei Schnee auf den Modulen: Anzahl der nächsten Nächte, in denen bis zum Maximum geladen wird; zählt automatisch herunter.
 
 - **`switch.inverter_charge_night_auto_efficient_charge_finder`**  
   Starts the efficiency search for best AC charge limit, auto-disables when done.
