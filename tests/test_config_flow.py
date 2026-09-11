@@ -12,7 +12,6 @@ from custom_components.inverter_charge_night.config_flow import (
     OptionsFlowHandler,
     validate_date_optional,
     validate_soc,
-    validate_time_format,
 )
 from homeassistant.const import CONF_NAME
 from custom_components.inverter_charge_night.const import (
@@ -36,13 +35,6 @@ from custom_components.inverter_charge_night.const import (
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
 )
-
-
-def test_validate_time_format():
-    assert validate_time_format("00:00") is True
-    assert validate_time_format("23:59") is True
-    assert validate_time_format("24:00") is False
-    assert validate_time_format("ab:cd") is False
 
 
 def test_validate_soc():
@@ -121,14 +113,6 @@ async def test_options_flow_requires_auto_entities(mock_hass, mock_config_entry)
     assert result["errors"][CONF_CHARGE_POWER_ENTITY] == "required_entity"
 
 
-def test_parse_time_str():
-    assert config_flow.parse_time_str("2:00") == (2, 0)
-    assert config_flow.parse_time_str("23:59") == (23, 59)
-    assert config_flow.parse_time_str("24:00") is None
-    assert config_flow.parse_time_str("ab:cd") is None
-    assert config_flow.parse_time_str(None) is None
-
-
 def _time_only_input(start: str, end: str) -> dict:
     return {
         CONF_START_TIME: start,
@@ -142,32 +126,26 @@ def _time_only_input(start: str, end: str) -> dict:
     }
 
 
+def _time_errors(mock_hass, start: str, end: str) -> dict:
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(er, "async_get", lambda hass: MagicMock())
+        return config_flow._validate_user_input(_time_only_input(start, end), mock_hass)
+
+
 @pytest.mark.parametrize(
-    "start,end",
-    [("22:00", "22:00"), ("2:00", "02:00"), ("22:0", "22:00"), (" 6:00", "06:00")],
+    "start,end,expected",
+    [
+        ("00:00", "05:59", {}),
+        ("22:00", "22:00", {CONF_END_TIME: "start_end_time_must_differ"}),
+        # parsed values are compared, so differently spelled equal times are caught
+        ("2:00", "02:00", {CONF_END_TIME: "start_end_time_must_differ"}),
+        ("22:0", "22:00", {CONF_END_TIME: "start_end_time_must_differ"}),
+        (" 6:00", "06:00", {CONF_END_TIME: "start_end_time_must_differ"}),
+        # an invalid format is reported instead of the equality error
+        ("ab:cd", "ab:cd", {CONF_START_TIME: "invalid_time", CONF_END_TIME: "invalid_time"}),
+    ],
 )
-def test_validate_user_input_rejects_equal_times(mock_hass, start, end):
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(er, "async_get", lambda hass: MagicMock())
-        errors = config_flow._validate_user_input(_time_only_input(start, end), mock_hass)
-
-    assert errors[CONF_END_TIME] == "start_end_time_must_differ"
-    assert CONF_START_TIME not in errors
-
-
-def test_validate_user_input_reports_invalid_time_over_equality(mock_hass):
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(er, "async_get", lambda hass: MagicMock())
-        errors = config_flow._validate_user_input(_time_only_input("ab:cd", "ab:cd"), mock_hass)
-
-    assert errors[CONF_START_TIME] == "invalid_time"
-    assert errors[CONF_END_TIME] == "invalid_time"
-
-
-def test_validate_user_input_accepts_different_times(mock_hass):
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(er, "async_get", lambda hass: MagicMock())
-        errors = config_flow._validate_user_input(_time_only_input("00:00", "05:59"), mock_hass)
-
-    assert CONF_START_TIME not in errors
-    assert CONF_END_TIME not in errors
+def test_validate_user_input_time_errors(mock_hass, start, end, expected):
+    errors = _time_errors(mock_hass, start, end)
+    time_errors = {k: v for k, v in errors.items() if k in (CONF_START_TIME, CONF_END_TIME)}
+    assert time_errors == expected

@@ -56,7 +56,7 @@ def mock_hass() -> HomeAssistant:
     hass.data = {}
     hass.states = MagicMock()
     hass.services = MagicMock()
-    hass.async_create_task = MagicMock()
+    hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
     hass.config_entries = MagicMock()
     return hass
 

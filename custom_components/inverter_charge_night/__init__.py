@@ -58,6 +58,7 @@ from .const import (
     DOMAIN,
 )
 from .calculation import calculate_required_soc
+from .util import parse_time_str
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -170,6 +171,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
     
     return unload_ok
+
+
+def _unit_of(state: Any) -> str:
+    """Return a state's unit_of_measurement lowercased and stripped, or "" if absent."""
+    unit = state.attributes.get("unit_of_measurement") if state else None
+    return unit.strip().lower() if isinstance(unit, str) else ""
 
 
 class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -291,10 +298,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if state.state not in ("unknown", "unavailable", None):
             try:
                 value = float(state.state)
-                # Use unit_of_measurement to decide Wh vs kWh when available;
-                # fall back to original heuristic (threshold 1000) when unit is absent
-                unit_attr = state.attributes.get("unit_of_measurement")
-                unit = unit_attr.strip().lower() if isinstance(unit_attr, str) else ""
+                unit = _unit_of(state)  # unit rules are described in the docstring
                 if unit in ("wh", "watthour", "watthours"):
                     energy = value / 1000.0
                 elif unit in ("kwh", "kilowatthour", "kilowatthours"):
@@ -308,7 +312,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "Forecast entity %s reports unsupported unit_of_measurement '%s'; "
                         "treating forecast as unavailable",
                         entity_id,
-                        unit_attr,
+                        unit,
                     )
                     return 0.0, False
                 elif value > 1000:
@@ -330,24 +334,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             forecast_data = state.attributes.get("forecast", [])
             if forecast_data:
                 total = 0.0
-                parsed_items = 0
                 skipped_items = 0
                 for item in forecast_data:
-                    if not isinstance(item, dict):
-                        skipped_items += 1
-                        continue
                     try:
                         total += float(item.get("wh", item.get("pv_power_forecast", 0)) or 0) / 1000.0
-                        parsed_items += 1
-                    except (ValueError, TypeError):
-                        skipped_items += 1  # Skip malformed items instead of crashing
+                    except (ValueError, TypeError, AttributeError):
+                        skipped_items += 1  # Skip malformed or non-dict items instead of crashing
                 if skipped_items:
                     _LOGGER.warning(
                         "Skipped %d malformed item(s) in forecast attribute of %s",
                         skipped_items,
                         entity_id,
                     )
-                if parsed_items == 0:
+                if skipped_items == len(forecast_data):
                     # Nothing usable: report unavailable so the safe fallback applies
                     # instead of treating the forecast as a legitimate 0 kWh
                     return 0.0, False
@@ -368,32 +367,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return 0.0, False
 
     def _parse_time(self, time_str: str | None, default: str) -> tuple[int, int]:
-        """Parse time string into (hour, minute) tuple with validation."""
-        try:
-            if not isinstance(time_str, str) or ":" not in time_str:
-                raise ValueError(f"Invalid time format: {time_str}")
-                
-            hour_str, minute_str = time_str.split(":")
-            hour = int(hour_str)
-            minute = int(minute_str)
-            
-            if not (0 <= hour <= 23 and 0 <= minute <= 59):
-                raise ValueError(f"Time out of range: {time_str}")
-                
-            return hour, minute
-            
-        except (ValueError, AttributeError) as err:
-            _LOGGER.warning(
-                "Invalid time format '%s', using default '%s': %s",
-                time_str,
-                default,
-                err,
-            )
-            # Prevent infinite recursion - if default is also invalid, use hardcoded fallback
-            if time_str == default:
-                _LOGGER.error("Default time '%s' is also invalid, using 00:00", default)
-                return 0, 0
-            return self._parse_time(default, "00:00")
+        """Parse an HH:MM string, falling back to ``default`` (then 00:00) when invalid."""
+        parsed = parse_time_str(time_str)
+        if parsed is not None:
+            return parsed
+        _LOGGER.warning("Invalid time format '%s', using default '%s'", time_str, default)
+        fallback = parse_time_str(default)
+        if fallback is None:
+            _LOGGER.error("Default time '%s' is also invalid, using 00:00", default)
+            return 0, 0
+        return fallback
+
+    def _window_times(self) -> tuple[time, time]:
+        """Return the configured (start, end) window times, using defaults when invalid."""
+        start_hour, start_minute = self._parse_time(
+            str(self.config.get(CONF_START_TIME, DEFAULT_START_TIME)), DEFAULT_START_TIME
+        )
+        end_hour, end_minute = self._parse_time(
+            str(self.config.get(CONF_END_TIME, DEFAULT_END_TIME)), DEFAULT_END_TIME
+        )
+        return time(start_hour, start_minute), time(end_hour, end_minute)
 
     def _parse_date_optional(self, date_value: str | date | None) -> date | None:
         """Parse optional date value in YYYY-MM-DD format."""
@@ -459,7 +452,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (ValueError, TypeError):
             return None
 
-        unit = str(state.attributes.get("unit_of_measurement", "")).lower()
+        unit = _unit_of(state)
         if unit in ("kw", "kilowatt", "kilowatts"):
             return value * 1000.0
         if unit in ("w", "watt", "watts"):
@@ -478,7 +471,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         value = float(power_w)
         state = self.hass.states.get(entity_id)
-        unit = str(state.attributes.get("unit_of_measurement", "")).lower() if state else ""
+        unit = _unit_of(state)
         if unit in ("kw", "kilowatt", "kilowatts"):
             value = value / 1000.0
         try:
@@ -518,7 +511,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         value = max_power
         state = self.hass.states.get(entity_id)
-        unit = str(state.attributes.get("unit_of_measurement", "")).lower() if state else ""
+        unit = _unit_of(state)
         if unit in ("kw", "kilowatt", "kilowatts"):
             value = value / 1000.0
         try:
@@ -544,7 +537,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         value = self._original_absolute_charge_power
         state = self.hass.states.get(entity_id)
-        unit = str(state.attributes.get("unit_of_measurement", "")).lower() if state else ""
+        unit = _unit_of(state)
         try:
             await self.hass.services.async_call(
                 domain,
@@ -755,73 +748,49 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return start_time <= check_time <= end_time
         return check_time >= start_time or check_time <= end_time
 
-    def setup_time_triggers(self, *, check_window: bool = True) -> None:
-        """Set up time-based triggers for window start/end.
-
-        When ``check_window`` is True (the default) a task is scheduled that
-        evaluates whether the window is currently active. Callers that schedule
-        that check themselves pass False so it does not run twice.
-        """
+    def setup_time_triggers(self) -> None:
+        """Register window start/end triggers and schedule a check of the current window."""
         # Clear any existing triggers
         self.remove_time_triggers()
 
-        # Get and validate times
-        start_time_str = str(self.config.get(CONF_START_TIME, DEFAULT_START_TIME))
-        end_time_str = str(self.config.get(CONF_END_TIME, DEFAULT_END_TIME))
-
         try:
-            # Parse and validate times
-            start_hour, start_minute = self._parse_time(start_time_str, DEFAULT_START_TIME)
-            end_hour, end_minute = self._parse_time(end_time_str, DEFAULT_END_TIME)
+            start, end = self._window_times()
 
-            if (start_hour, start_minute) == (end_hour, end_minute):
+            if start == end:
                 # The config flow rejects equal times, but entries created before
                 # that validation existed (or an invalid time falling back to its
                 # default) can still produce them. Registering triggers would start
                 # and end the window in the same minute, so skip them and say why.
                 _LOGGER.warning(
-                    "Start time and end time are both %02d:%02d; the charge window will "
+                    "Start time and end time are both %s; the charge window will "
                     "never activate. Set different times in the integration options.",
-                    start_hour,
-                    start_minute,
+                    start.strftime("%H:%M"),
                 )
             else:
                 _LOGGER.info(
-                    "Setting up charge window: %02d:%02d - %02d:%02d",
-                    start_hour,
-                    start_minute,
-                    end_hour,
-                    end_minute,
+                    "Setting up charge window: %s - %s",
+                    start.strftime("%H:%M"),
+                    end.strftime("%H:%M"),
                 )
-
-                # Trigger at start time
-                self._time_triggers.append(
-                    async_track_time_change(
-                        self.hass,
-                        self._on_window_start,
-                        hour=start_hour,
-                        minute=start_minute,
-                        second=0,
+                for handler, trigger_time in (
+                    (self._on_window_start, start),
+                    (self._on_window_end, end),
+                ):
+                    self._time_triggers.append(
+                        async_track_time_change(
+                            self.hass,
+                            handler,
+                            hour=trigger_time.hour,
+                            minute=trigger_time.minute,
+                            second=0,
+                        )
                     )
-                )
 
-                # Trigger at end time
-                self._time_triggers.append(
-                    async_track_time_change(
-                        self.hass,
-                        self._on_window_end,
-                        hour=end_hour,
-                        minute=end_minute,
-                        second=0,
-                    )
-                )
-
-            if check_window:
-                # Check if we're already in the active window
-                self.hass.async_create_task(
-                    self._check_current_window(),
-                    name="inverter_charge_night_check_window_setup",
-                )
+            # Check if we're already in the active window
+            self.hass.async_create_task(
+                self._check_current_window(),
+                name="inverter_charge_night_check_window",
+            )
 
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.error("Failed to set up time triggers: %s", err, exc_info=True)
@@ -836,37 +805,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def update_time_triggers(self) -> None:
         """Update time triggers when configuration changes."""
         _LOGGER.info("Updating time triggers with new configuration")
-        
+
         # Store old battery SOC entity to check if it changed
         old_battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
-        
-        # Remove old triggers first
-        self.remove_time_triggers()
-        
+
         # Note: config reference is updated in async_update_entry before calling this
         # So self.config should already be updated, but ensure it's synced
         if self.entry.data != self.config:
             self.config = self.entry.data
-        
-        # Set up new triggers with updated times. The window check is scheduled
-        # below, so tell setup_time_triggers not to schedule its own.
-        self.setup_time_triggers(check_window=False)
-        
+
+        # Re-register triggers for the new times. This also schedules a window
+        # check, which starts or ends the window if the new times changed whether
+        # we are currently inside it.
+        self.setup_time_triggers()
+
         # If battery SOC entity changed and we're active, update the listener
         new_battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
         if self.is_active and old_battery_soc_entity != new_battery_soc_entity:
             _LOGGER.info("Battery SOC entity changed from %s to %s, updating listener", old_battery_soc_entity, new_battery_soc_entity)
             self._setup_battery_soc_listener()
-        
-        # Check if we need to adjust current state based on new window
-        # This will handle cases where:
-        # - We were active but are no longer in new window (will reset)
-        # - We were not active but are now in new window (will start)
-        # - We were active and still in new window (will continue)
-        self.hass.async_create_task(
-            self._check_current_window(),
-            name="inverter_charge_night_check_window_update",
-        )
 
     async def _check_current_window(self) -> None:
         """Check if we're currently in the active window and adjust state if needed."""
@@ -894,18 +851,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return
 
             now_dt = dt_util.now()
-            now = now_dt.time()
-            start_time_str = str(self.config.get(CONF_START_TIME, DEFAULT_START_TIME))
-            end_time_str = str(self.config.get(CONF_END_TIME, DEFAULT_END_TIME))
-            
-            # Parse times with validation
-            start_hour, start_minute = self._parse_time(start_time_str, DEFAULT_START_TIME)
-            end_hour, end_minute = self._parse_time(end_time_str, DEFAULT_END_TIME)
-            
-            start_time_obj = time(start_hour, start_minute)
-            end_time_obj = time(end_hour, end_minute)
-            
-            in_window = self._is_time_between(now, start_time_obj, end_time_obj)
+            start_time_obj, end_time_obj = self._window_times()
+            in_window = self._is_time_between(now_dt.time(), start_time_obj, end_time_obj)
             
             # Handle state transitions
             if in_window and not self.is_active:
