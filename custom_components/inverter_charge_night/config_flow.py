@@ -27,28 +27,41 @@ from .const import (
     CONF_ACTIVE_END_DATE,
     CONF_ACTIVE_START_DATE,
     CONF_AUTO_EFFICIENT_CHARGE,
+    CONF_AVG_HOUSE_LOAD_KW,
     CONF_BACKUP_MODE_ENTITY,
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
+    CONF_BRIDGE_RESERVE_KWH,
+    CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
     CONF_COMMAND_DELAY,
+    CONF_DAY_PRICE_CT,
     CONF_DEFAULT_MIN_SOC,
+    CONF_DISCHARGE_LIMIT_ENTITY,
     CONF_END_TIME,
+    CONF_FEED_IN_PRICE_CT,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_FORECAST_ERROR_MARGIN,
+    CONF_HOUSE_LOAD_ENTITY,
     CONF_KOSTAL_GRID_CHARGE_SWITCH,
     CONF_KOSTAL_MIN_SOC_ENTITY,
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
+    CONF_NIGHT_PRICE_CT,
     CONF_OPERATION_MODE,
+    CONF_PLANNER_MODE,
+    CONF_PV_CROSSOVER_DELAY_MIN,
     CONF_PV_FORECAST_ENTITY,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_START_TIME,
     CONF_UPDATE_INTERVAL,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
+    DEFAULT_AVG_HOUSE_LOAD_KW,
+    DEFAULT_BRIDGE_RESERVE_KWH,
+    DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_COMMAND_DELAY,
     DEFAULT_END_TIME,
     DEFAULT_FORECAST_ERROR_MARGIN,
@@ -57,11 +70,15 @@ from .const import (
     DEFAULT_MIN_CHARGE_POWER_W,
     DEFAULT_MIN_SOC,
     DEFAULT_OPERATION_MODE,
+    DEFAULT_PLANNER_MODE,
+    DEFAULT_PV_CROSSOVER_DELAY_MIN,
     DEFAULT_START_TIME,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     MODE_MORNING_DISCHARGE,
     MODE_NIGHT_CHARGE,
+    PLANNER_MODE_BRIDGE,
+    PLANNER_MODE_HEADROOM,
 )
 from .util import parse_time_str
 
@@ -89,6 +106,7 @@ STEP_TIME_SOC_KEYS: tuple[str, ...] = (
     CONF_USER_MAX_SOC,
     CONF_DEFAULT_MIN_SOC,
     CONF_FORECAST_ERROR_MARGIN,
+    CONF_PLANNER_MODE,
 )
 STEP_POWER_KEYS: tuple[str, ...] = (
     CONF_MIN_CHARGE_POWER_W,
@@ -100,6 +118,7 @@ STEP_POWER_KEYS: tuple[str, ...] = (
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
     CONF_AUTO_EFFICIENT_CHARGE,
     CONF_FORCE_DISCHARGE_SWITCH,
+    CONF_DISCHARGE_LIMIT_ENTITY,
 )
 STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_UPDATE_INTERVAL,
@@ -107,7 +126,17 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_ACTIVE_START_DATE,
     CONF_ACTIVE_END_DATE,
     CONF_BACKUP_MODE_ENTITY,
+    CONF_HOUSE_LOAD_ENTITY,
+    CONF_AVG_HOUSE_LOAD_KW,
+    CONF_PV_CROSSOVER_DELAY_MIN,
+    CONF_BRIDGE_RESERVE_KWH,
+    CONF_CHARGE_EFFICIENCY,
+    CONF_NIGHT_PRICE_CT,
+    CONF_DAY_PRICE_CT,
+    CONF_FEED_IN_PRICE_CT,
 )
+# The three tariffs are only meaningful together: the planner compares them.
+_PRICE_KEYS: tuple[str, ...] = (CONF_NIGHT_PRICE_CT, CONF_DAY_PRICE_CT, CONF_FEED_IN_PRICE_CT)
 
 # Number selectors return floats; these keys were always stored as integers.
 _INT_KEYS: tuple[str, ...] = (
@@ -115,6 +144,7 @@ _INT_KEYS: tuple[str, ...] = (
     CONF_MIN_CHARGE_POWER_W,
     CONF_MAX_CHARGE_POWER_W,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
+    CONF_PV_CROSSOVER_DELAY_MIN,
 )
 
 SchemaBuilder = Callable[[Mapping[str, Any]], vol.Schema]
@@ -164,6 +194,8 @@ _ENTITY_KEYS_TO_VALIDATE = [
     CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
+    CONF_DISCHARGE_LIMIT_ENTITY,
+    CONF_HOUSE_LOAD_ENTITY,
 ]
 
 
@@ -226,6 +258,19 @@ def _validate_user_input(
             errors[CONF_CHARGE_POWER_SENT_ENTITY] = "required_entity"
         if not user_input.get(CONF_CHARGE_POWER_RECEIVED_ENTITY):
             errors[CONF_CHARGE_POWER_RECEIVED_ENTITY] = "required_entity"
+
+    # Planner v2 inputs (plan 006); all optional in the sense that defaults exist
+    avg_load = user_input.get(CONF_AVG_HOUSE_LOAD_KW)
+    if avg_load is not None and avg_load <= 0:
+        errors[CONF_AVG_HOUSE_LOAD_KW] = "invalid_power"
+    efficiency = user_input.get(CONF_CHARGE_EFFICIENCY)
+    if efficiency is not None and not 0 < efficiency <= 1:
+        errors[CONF_CHARGE_EFFICIENCY] = "invalid_efficiency"
+    prices_set = [key for key in _PRICE_KEYS if user_input.get(key) is not None]
+    if prices_set and len(prices_set) != len(_PRICE_KEYS):
+        for key in _PRICE_KEYS:
+            if key not in prices_set:
+                errors[key] = "all_prices_required"
 
     # Validate entities exist
     entity_registry = er.async_get(hass)
@@ -338,6 +383,18 @@ def _mode_selector() -> Any:
     )
 
 
+def _planner_mode_selector() -> Any:
+    return cast(
+        Any,
+        selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[PLANNER_MODE_HEADROOM, PLANNER_MODE_BRIDGE],
+                translation_key="planner_mode",
+            )
+        ),
+    )
+
+
 def _required(key: str, defaults: Mapping[str, Any], fallback: Any = None) -> vol.Required:
     """Required field, prefilled from stored data or a constant fallback."""
     value = defaults.get(key)
@@ -402,6 +459,7 @@ def _schema_time_soc(defaults: Mapping[str, Any]) -> vol.Schema:
             _required(
                 CONF_FORECAST_ERROR_MARGIN, defaults, DEFAULT_FORECAST_ERROR_MARGIN
             ): _number_selector(**_PERCENT),
+            _required(CONF_PLANNER_MODE, defaults, DEFAULT_PLANNER_MODE): _planner_mode_selector(),
         }
     )
 
@@ -439,6 +497,9 @@ def _schema_power(defaults: Mapping[str, Any]) -> vol.Schema:
             _optional(
                 CONF_FORCE_DISCHARGE_SWITCH, defaults.get(CONF_FORCE_DISCHARGE_SWITCH)
             ): _entity_selector("switch"),
+            _optional(
+                CONF_DISCHARGE_LIMIT_ENTITY, defaults.get(CONF_DISCHARGE_LIMIT_ENTITY)
+            ): _entity_selector(_CONTROL_DOMAINS),
         }
     )
 
@@ -462,6 +523,30 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
             _optional(
                 CONF_BACKUP_MODE_ENTITY, defaults.get(CONF_BACKUP_MODE_ENTITY)
             ): _entity_selector(["binary_sensor", "switch", "sensor"]),
+            _optional(
+                CONF_HOUSE_LOAD_ENTITY, defaults.get(CONF_HOUSE_LOAD_ENTITY)
+            ): _entity_selector("sensor", "energy"),
+            _required(
+                CONF_AVG_HOUSE_LOAD_KW, defaults, DEFAULT_AVG_HOUSE_LOAD_KW
+            ): _number_selector(0.05, 20, 0.05, "kW"),
+            _required(
+                CONF_PV_CROSSOVER_DELAY_MIN, defaults, DEFAULT_PV_CROSSOVER_DELAY_MIN
+            ): _number_selector(0, 360, 5, "min"),
+            _required(
+                CONF_BRIDGE_RESERVE_KWH, defaults, DEFAULT_BRIDGE_RESERVE_KWH
+            ): _number_selector(0, 50, 0.1, "kWh"),
+            _required(
+                CONF_CHARGE_EFFICIENCY, defaults, DEFAULT_CHARGE_EFFICIENCY
+            ): _number_selector(0.5, 1.0, 0.01),
+            _optional(CONF_NIGHT_PRICE_CT, defaults.get(CONF_NIGHT_PRICE_CT)): _number_selector(
+                0, 200, 0.1, "ct/kWh"
+            ),
+            _optional(CONF_DAY_PRICE_CT, defaults.get(CONF_DAY_PRICE_CT)): _number_selector(
+                0, 200, 0.1, "ct/kWh"
+            ),
+            _optional(
+                CONF_FEED_IN_PRICE_CT, defaults.get(CONF_FEED_IN_PRICE_CT)
+            ): _number_selector(0, 200, 0.1, "ct/kWh"),
         }
     )
 
