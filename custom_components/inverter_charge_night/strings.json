@@ -354,5 +354,11 @@
     "entity_not_available": {
       "message": "Required entity {entity_id} is not yet available"
     }
+  },
+  "issues": {
+    "entity_not_available": {
+      "title": "Required entity {entity_id} is missing",
+      "description": "Inverter Charge Night needs the entity {entity_id}, but Home Assistant does not know it. Check the entity ID in the integration's settings (Reconfigure) or restore the entity in its own integration."
+    }
   }
 }
