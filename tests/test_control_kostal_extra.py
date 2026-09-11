@@ -1,7 +1,9 @@
 """Additional tests for Kostal control paths."""
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.inverter_charge_night import InverterChargeNightCoordinator
 from custom_components.inverter_charge_night.const import (
@@ -109,3 +111,65 @@ async def test_stop_grid_charging_turns_off_and_resets(mock_hass):
     )
     coordinator._reset_absolute_charge_power.assert_awaited()
     coordinator._finalize_auto_test.assert_called_once()
+
+
+_CONTROL_CONFIG = {
+    CONF_BATTERY_SOC_ENTITY: "sensor.soc",
+    CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
+    CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+    CONF_DEFAULT_MIN_SOC: 8.0,
+    CONF_USER_MIN_SOC: 8.0,
+    CONF_USER_MAX_SOC: 100.0,
+    CONF_COMMAND_DELAY: 0.0,
+}
+
+
+@pytest.mark.asyncio
+async def test_control_kostal_min_soc_service_error_keeps_grid_charge_off(mock_hass, caplog):
+    """A failed min SOC write must not switch grid charging on (finding F10)."""
+    mock_hass.states.async_set("sensor.soc", "10")
+    mock_hass.states.async_set("number.min_soc", "8")
+    mock_hass.states.async_set("switch.grid", "off")
+    mock_hass.services.async_call = AsyncMock(side_effect=HomeAssistantError("inverter busy"))
+
+    coordinator = _make_coordinator(mock_hass, _CONTROL_CONFIG)
+    coordinator._is_backup_active = MagicMock(return_value=False)
+
+    await coordinator._control_kostal(50.0)
+
+    mock_hass.services.async_call.assert_awaited_once_with(
+        "number", "set_value", {"entity_id": "number.min_soc", "value": 50.0}
+    )
+    assert coordinator._last_soc_set is None
+    assert "Error setting min SOC" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_update_data_survives_min_soc_service_error(mock_hass):
+    """The polling update returns normally when the min SOC write fails."""
+    mock_hass.states.async_set("sensor.soc", "10")
+    mock_hass.states.async_set("number.min_soc", "8")
+    mock_hass.states.async_set("switch.grid", "off")
+    mock_hass.services.async_call = AsyncMock(side_effect=[HomeAssistantError("boom")])
+
+    coordinator = _make_coordinator(mock_hass, _CONTROL_CONFIG)
+    coordinator.is_enabled = True
+    coordinator.is_active = True
+    coordinator.initial_calculated_soc = 50.0
+    coordinator._is_backup_active = MagicMock(return_value=False)
+    coordinator._handle_auto_charge = AsyncMock()
+
+    with patch(
+        "custom_components.inverter_charge_night.dt_util.now",
+        return_value=datetime(2026, 1, 15, 2, 0),
+    ):
+        data = await coordinator._async_update_data()
+
+    assert isinstance(data, dict)
+    assert data["is_active"] is True
+    assert data["target_reached"] is False
+    assert data["current_soc"] == 10.0
+    # Only the failed min SOC write was attempted; no grid charge command
+    mock_hass.services.async_call.assert_awaited_once_with(
+        "number", "set_value", {"entity_id": "number.min_soc", "value": 50.0}
+    )

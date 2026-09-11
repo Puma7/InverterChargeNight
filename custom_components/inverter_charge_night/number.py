@@ -89,5 +89,7 @@ class MinSOCOverrideNumber(InverterChargeNightEntity, NumberEntity):
         self.async_write_ha_state()
         
         if self.coordinator.is_active and self.coordinator.is_enabled:
-            await self.coordinator._control_kostal(value)
+            # The refresh applies the override through the mode-correct control
+            # path (charge or discharge); calling the charge path here directly
+            # would switch grid charging on even in discharge mode.
             await self.coordinator.async_request_refresh()

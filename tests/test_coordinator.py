@@ -286,7 +286,7 @@ async def test_verify_and_restore_min_soc_sets_value(mock_hass):
     )
     coordinator.is_active = True
     coordinator.is_enabled = True
-    coordinator.minimum_calculated_soc = 70.0
+    coordinator.initial_calculated_soc = 70.0
 
     await coordinator._verify_and_restore_min_soc()
 
