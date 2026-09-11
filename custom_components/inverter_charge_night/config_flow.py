@@ -1,8 +1,17 @@
-"""Config flow for Inverter Charge Night integration."""
+"""Config flow for Inverter Charge Night integration.
+
+The configuration is collected in a four-step wizard (entities, time & SOC,
+charge power, advanced). The same four steps are used for the initial setup,
+the reconfigure flow and the options flow; only the ``step_id`` values and the
+way the result is stored differ.
+"""
+
+from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 import voluptuous as vol
 
@@ -13,53 +22,103 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er, selector
 
 from .const import (
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
+    CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_START_DATE,
+    CONF_AUTO_EFFICIENT_CHARGE,
+    CONF_BACKUP_MODE_ENTITY,
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
+    CONF_CHARGE_POWER_ENTITY,
+    CONF_CHARGE_POWER_RECEIVED_ENTITY,
+    CONF_CHARGE_POWER_SENT_ENTITY,
+    CONF_COMMAND_DELAY,
     CONF_DEFAULT_MIN_SOC,
-    CONF_PV_FORECAST_TODAY_ENTITY,
+    CONF_END_TIME,
     CONF_FORCE_DISCHARGE_SWITCH,
+    CONF_FORECAST_ERROR_MARGIN,
+    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_MAX_CHARGE_POWER_W,
+    CONF_MIN_CHARGE_POWER_W,
     CONF_OPERATION_MODE,
+    CONF_PV_FORECAST_ENTITY,
+    CONF_PV_FORECAST_TODAY_ENTITY,
+    CONF_START_TIME,
+    CONF_UPDATE_INTERVAL,
+    CONF_USER_MAX_SOC,
+    CONF_USER_MIN_SOC,
+    DEFAULT_COMMAND_DELAY,
+    DEFAULT_END_TIME,
+    DEFAULT_FORECAST_ERROR_MARGIN,
+    DEFAULT_MAX_CHARGE_POWER_W,
+    DEFAULT_MAX_SOC,
+    DEFAULT_MIN_CHARGE_POWER_W,
+    DEFAULT_MIN_SOC,
+    DEFAULT_OPERATION_MODE,
+    DEFAULT_START_TIME,
+    DEFAULT_UPDATE_INTERVAL,
+    DOMAIN,
+    MODE_MORNING_DISCHARGE,
+    MODE_NIGHT_CHARGE,
+)
+from .util import parse_time_str
+
+_LOGGER = logging.getLogger(__name__)
+
+DEFAULT_NAME = "Inverter Charge Night"
+DEFAULT_BATTERY_CAPACITY = 10.0
+
+# Keys collected by each wizard step. Every stored config key belongs to
+# exactly one step; the strings.json step of the same name labels it.
+STEP_USER_KEYS: tuple[str, ...] = (
+    CONF_NAME,
+    CONF_OPERATION_MODE,
+    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_PV_FORECAST_ENTITY,
+    CONF_PV_FORECAST_TODAY_ENTITY,
+    CONF_BATTERY_SOC_ENTITY,
+    CONF_BATTERY_CAPACITY,
+)
+STEP_TIME_SOC_KEYS: tuple[str, ...] = (
+    CONF_START_TIME,
+    CONF_END_TIME,
+    CONF_USER_MIN_SOC,
+    CONF_USER_MAX_SOC,
+    CONF_DEFAULT_MIN_SOC,
+    CONF_FORECAST_ERROR_MARGIN,
+)
+STEP_POWER_KEYS: tuple[str, ...] = (
+    CONF_MIN_CHARGE_POWER_W,
+    CONF_MAX_CHARGE_POWER_W,
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
+    CONF_CHARGE_POWER_ENTITY,
+    CONF_CHARGE_POWER_SENT_ENTITY,
+    CONF_CHARGE_POWER_RECEIVED_ENTITY,
+    CONF_AUTO_EFFICIENT_CHARGE,
+    CONF_FORCE_DISCHARGE_SWITCH,
+)
+STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_UPDATE_INTERVAL,
     CONF_COMMAND_DELAY,
     CONF_ACTIVE_START_DATE,
     CONF_ACTIVE_END_DATE,
     CONF_BACKUP_MODE_ENTITY,
+)
+
+# Number selectors return floats; these keys were always stored as integers.
+_INT_KEYS: tuple[str, ...] = (
+    CONF_UPDATE_INTERVAL,
     CONF_MIN_CHARGE_POWER_W,
     CONF_MAX_CHARGE_POWER_W,
-    CONF_CHARGE_POWER_ENTITY,
-    CONF_CHARGE_POWER_SENT_ENTITY,
-    CONF_CHARGE_POWER_RECEIVED_ENTITY,
-    CONF_AUTO_EFFICIENT_CHARGE,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
-    CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_PV_FORECAST_ENTITY,
-    CONF_START_TIME,
-    CONF_END_TIME,
-    CONF_USER_MIN_SOC,
-    CONF_USER_MAX_SOC,
-    CONF_FORECAST_ERROR_MARGIN,
-    DEFAULT_END_TIME,
-    DEFAULT_FORECAST_ERROR_MARGIN,
-    DEFAULT_MAX_SOC,
-    DEFAULT_MIN_SOC,
-    DEFAULT_OPERATION_MODE,
-    DEFAULT_START_TIME,
-    DEFAULT_UPDATE_INTERVAL,
-    DEFAULT_COMMAND_DELAY,
-    DEFAULT_ACTIVE_START_DATE,
-    DEFAULT_ACTIVE_END_DATE,
-    DEFAULT_MIN_CHARGE_POWER_W,
-    DEFAULT_MAX_CHARGE_POWER_W,
-    DEFAULT_ABSOLUTE_MAX_CHARGE_POWER_W,
-    MODE_MORNING_DISCHARGE,
-    MODE_NIGHT_CHARGE,
-    DOMAIN,
 )
-from .util import parse_time_str
 
-_LOGGER = logging.getLogger(__name__)
+SchemaBuilder = Callable[[Mapping[str, Any]], vol.Schema]
+NextStep = Callable[[], Awaitable[ConfigFlowResult]]
 
 
 def validate_soc(value: float) -> bool:
@@ -89,18 +148,6 @@ def _normalize_date_value(value: str | date | None) -> str | None:
     try:
         parsed = date.fromisoformat(value)
         return parsed.isoformat()
-    except (ValueError, TypeError):
-        return None
-
-
-def _default_date_value(value: str | date | None) -> date | None:
-    """Convert stored ISO string to date for selector defaults."""
-    if value in (None, ""):
-        return None
-    if isinstance(value, date):
-        return value
-    try:
-        return date.fromisoformat(value)
     except (ValueError, TypeError):
         return None
 
@@ -193,119 +240,361 @@ def _validate_user_input(
     return errors
 
 
+def _errors_for(step_keys: tuple[str, ...], errors: Mapping[str, str]) -> dict[str, str]:
+    """Keep only the errors that belong to fields of the given step."""
+    return {key: reason for key, reason in errors.items() if key in step_keys}
+
+
+def _process_step(
+    hass: HomeAssistant,
+    data: dict[str, Any],
+    step_keys: tuple[str, ...],
+    user_input: Mapping[str, Any],
+) -> dict[str, str]:
+    """Validate one step's input against everything collected so far.
+
+    On success the step's fields are merged into ``data``; optional fields the
+    user cleared (absent from ``user_input``) are removed so that clearing a
+    field in the reconfigure or options flow actually takes effect.
+    """
+    errors = _errors_for(step_keys, _validate_user_input({**data, **user_input}, hass))
+    if errors:
+        return errors
+    for key in step_keys:
+        if key in user_input:
+            data[key] = user_input[key]
+        else:
+            data.pop(key, None)
+    return errors
+
+
+def _finalize_data(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize collected data before it is stored in the config entry."""
+    result = dict(data)
+    result[CONF_ACTIVE_START_DATE] = _normalize_date_value(result.get(CONF_ACTIVE_START_DATE))
+    result[CONF_ACTIVE_END_DATE] = _normalize_date_value(result.get(CONF_ACTIVE_END_DATE))
+    for key in _INT_KEYS:
+        if result.get(key) is not None:
+            result[key] = int(result[key])
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Selector helpers
+# ---------------------------------------------------------------------------
+
+
+def _entity_selector(
+    domain: str | list[str] | None = None, device_class: str | None = None
+) -> Any:
+    """Entity picker, optionally limited to a domain and device class."""
+    config = selector.EntitySelectorConfig()
+    if domain:
+        config["domain"] = domain
+    if device_class:
+        config["device_class"] = device_class
+    return cast(Any, selector.EntitySelector(config))
+
+
+def _number_selector(
+    min_value: float,
+    max_value: float,
+    step: float,
+    unit: str | None = None,
+    mode: selector.NumberSelectorMode = selector.NumberSelectorMode.BOX,
+) -> Any:
+    """Number input with unit and bounds (box or slider)."""
+    config = selector.NumberSelectorConfig(min=min_value, max=max_value, step=step, mode=mode)
+    if unit:
+        config["unit_of_measurement"] = unit
+    return cast(Any, selector.NumberSelector(config))
+
+
+def _time_selector() -> Any:
+    return cast(Any, selector.TimeSelector())
+
+
+def _date_selector() -> Any:
+    return cast(Any, selector.DateSelector())
+
+
+def _bool_selector() -> Any:
+    return cast(Any, selector.BooleanSelector())
+
+
+def _text_selector() -> Any:
+    return cast(Any, selector.TextSelector())
+
+
+def _mode_selector() -> Any:
+    return cast(
+        Any,
+        selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[MODE_NIGHT_CHARGE, MODE_MORNING_DISCHARGE],
+                translation_key="operation_mode",
+            )
+        ),
+    )
+
+
+def _required(key: str, defaults: Mapping[str, Any], fallback: Any = None) -> vol.Required:
+    """Required field, prefilled from stored data or a constant fallback."""
+    value = defaults.get(key)
+    if value in (None, ""):
+        value = fallback
+    if value is None:
+        return vol.Required(key)
+    return vol.Required(key, default=value)
+
+
+def _optional(key: str, value: Any) -> vol.Optional:
+    """Optional field; a stored value is only *suggested* so it can be cleared."""
+    if value in (None, ""):
+        return vol.Optional(key)
+    return vol.Optional(key, description={"suggested_value": value})
+
+
+# ---------------------------------------------------------------------------
+# Schema builders (one per wizard step)
+# ---------------------------------------------------------------------------
+
+_PERCENT: dict[str, Any] = {
+    "min_value": 0,
+    "max_value": 100,
+    "step": 1,
+    "unit": "%",
+    "mode": selector.NumberSelectorMode.SLIDER,
+}
+_WATTS: dict[str, Any] = {"min_value": 100, "max_value": 30000, "step": 10, "unit": "W"}
+_CONTROL_DOMAINS = ["number", "input_number"]
+
+
+def _schema_entities(defaults: Mapping[str, Any]) -> vol.Schema:
+    """Step 1: name, operation mode, core entities and battery capacity."""
+    return vol.Schema(
+        {
+            _required(CONF_NAME, defaults, DEFAULT_NAME): _text_selector(),
+            _required(CONF_OPERATION_MODE, defaults, DEFAULT_OPERATION_MODE): _mode_selector(),
+            _required(CONF_KOSTAL_MIN_SOC_ENTITY, defaults): _entity_selector("number"),
+            _required(CONF_KOSTAL_GRID_CHARGE_SWITCH, defaults): _entity_selector("switch"),
+            _required(CONF_PV_FORECAST_ENTITY, defaults): _entity_selector("sensor"),
+            _optional(
+                CONF_PV_FORECAST_TODAY_ENTITY, defaults.get(CONF_PV_FORECAST_TODAY_ENTITY)
+            ): _entity_selector("sensor"),
+            _required(CONF_BATTERY_SOC_ENTITY, defaults): _entity_selector("sensor", "battery"),
+            _required(
+                CONF_BATTERY_CAPACITY, defaults, DEFAULT_BATTERY_CAPACITY
+            ): _number_selector(0.5, 200, 0.1, "kWh"),
+        }
+    )
+
+
+def _schema_time_soc(defaults: Mapping[str, Any]) -> vol.Schema:
+    """Step 2: time window and SOC limits."""
+    return vol.Schema(
+        {
+            _required(CONF_START_TIME, defaults, DEFAULT_START_TIME): _time_selector(),
+            _required(CONF_END_TIME, defaults, DEFAULT_END_TIME): _time_selector(),
+            _required(CONF_USER_MIN_SOC, defaults, DEFAULT_MIN_SOC): _number_selector(**_PERCENT),
+            _required(CONF_USER_MAX_SOC, defaults, DEFAULT_MAX_SOC): _number_selector(**_PERCENT),
+            _required(CONF_DEFAULT_MIN_SOC, defaults, DEFAULT_MIN_SOC): _number_selector(**_PERCENT),
+            _required(
+                CONF_FORECAST_ERROR_MARGIN, defaults, DEFAULT_FORECAST_ERROR_MARGIN
+            ): _number_selector(**_PERCENT),
+        }
+    )
+
+
+def _schema_power(defaults: Mapping[str, Any]) -> vol.Schema:
+    """Step 3: charge power limits and the optional power entities."""
+    return vol.Schema(
+        {
+            _required(
+                CONF_MIN_CHARGE_POWER_W, defaults, DEFAULT_MIN_CHARGE_POWER_W
+            ): _number_selector(**_WATTS),
+            _required(
+                CONF_MAX_CHARGE_POWER_W, defaults, DEFAULT_MAX_CHARGE_POWER_W
+            ): _number_selector(**_WATTS),
+            _optional(
+                CONF_ABSOLUTE_MAX_CHARGE_POWER_W, defaults.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_W)
+            ): _number_selector(**_WATTS),
+            _optional(
+                CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
+                defaults.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY),
+            ): _entity_selector(_CONTROL_DOMAINS),
+            _optional(
+                CONF_CHARGE_POWER_ENTITY, defaults.get(CONF_CHARGE_POWER_ENTITY)
+            ): _entity_selector(_CONTROL_DOMAINS),
+            _optional(
+                CONF_CHARGE_POWER_SENT_ENTITY, defaults.get(CONF_CHARGE_POWER_SENT_ENTITY)
+            ): _entity_selector("sensor", "power"),
+            _optional(
+                CONF_CHARGE_POWER_RECEIVED_ENTITY, defaults.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
+            ): _entity_selector("sensor", "power"),
+            vol.Required(
+                CONF_AUTO_EFFICIENT_CHARGE,
+                default=bool(defaults.get(CONF_AUTO_EFFICIENT_CHARGE, False)),
+            ): _bool_selector(),
+            _optional(
+                CONF_FORCE_DISCHARGE_SWITCH, defaults.get(CONF_FORCE_DISCHARGE_SWITCH)
+            ): _entity_selector("switch"),
+        }
+    )
+
+
+def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
+    """Step 4: update interval, command delay, active dates and backup mode."""
+    return vol.Schema(
+        {
+            _required(
+                CONF_UPDATE_INTERVAL, defaults, DEFAULT_UPDATE_INTERVAL
+            ): _number_selector(60, 3600, 60, "s", selector.NumberSelectorMode.SLIDER),
+            _required(
+                CONF_COMMAND_DELAY, defaults, DEFAULT_COMMAND_DELAY
+            ): _number_selector(0, 5, 0.1, "s"),
+            _optional(
+                CONF_ACTIVE_START_DATE, _normalize_date_value(defaults.get(CONF_ACTIVE_START_DATE))
+            ): _date_selector(),
+            _optional(
+                CONF_ACTIVE_END_DATE, _normalize_date_value(defaults.get(CONF_ACTIVE_END_DATE))
+            ): _date_selector(),
+            _optional(
+                CONF_BACKUP_MODE_ENTITY, defaults.get(CONF_BACKUP_MODE_ENTITY)
+            ): _entity_selector(["binary_sensor", "switch", "sensor"]),
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Config flow (initial setup + reconfigure), four steps each
+# ---------------------------------------------------------------------------
+
+
 class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Inverter Charge Night."""
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        """Initialize the flow."""
+        self._data: dict[str, Any] = {}
+
+    async def _async_wizard_step(
+        self,
+        step_id: str,
+        step_keys: tuple[str, ...],
+        build_schema: SchemaBuilder,
+        user_input: dict[str, Any] | None,
+        next_step: NextStep,
+    ) -> ConfigFlowResult:
+        """Show one wizard step, or validate its input and continue."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors = _process_step(self.hass, self._data, step_keys, user_input)
+            if not errors:
+                return await next_step()
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=build_schema({**self._data, **(user_input or {})}),
+            errors=errors,
+        )
+
+    # -- Initial setup ------------------------------------------------------
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the initial step."""
-        errors: dict[str, str] = {}
+        """Step 1 of 4: entities."""
+        return await self._async_wizard_step(
+            "user", STEP_USER_KEYS, _schema_entities, user_input, self.async_step_time_soc
+        )
 
-        if user_input is not None:
-            errors = _validate_user_input(user_input, self.hass)
+    async def async_step_time_soc(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Step 2 of 4: time window and SOC."""
+        return await self._async_wizard_step(
+            "time_soc", STEP_TIME_SOC_KEYS, _schema_time_soc, user_input, self.async_step_power
+        )
 
-            if not errors:
-                user_input = dict(user_input)
-                user_input[CONF_ACTIVE_START_DATE] = _normalize_date_value(
-                    user_input.get(CONF_ACTIVE_START_DATE)
-                )
-                user_input[CONF_ACTIVE_END_DATE] = _normalize_date_value(
-                    user_input.get(CONF_ACTIVE_END_DATE)
-                )
-                return self.async_create_entry(
-                    title=user_input.get(CONF_NAME, "Inverter Charge Night"),
-                    data=user_input,
-                )
+    async def async_step_power(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Step 3 of 4: charge power."""
+        return await self._async_wizard_step(
+            "power", STEP_POWER_KEYS, _schema_power, user_input, self.async_step_advanced
+        )
 
-        # Build schema with entity selectors
-        # Labels come from strings.json
-        schema = {
-            vol.Required(CONF_NAME, default="Inverter Charge Night"): str,
-            vol.Required(
-                CONF_OPERATION_MODE, default=DEFAULT_OPERATION_MODE
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[MODE_NIGHT_CHARGE, MODE_MORNING_DISCHARGE],
-                    translation_key="operation_mode",
-                )
-            ),
-            vol.Required(CONF_KOSTAL_MIN_SOC_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="number")
-            ),
-            vol.Required(CONF_KOSTAL_GRID_CHARGE_SWITCH): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="switch")
-            ),
-            vol.Required(CONF_PV_FORECAST_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig()
-            ),
-            vol.Required(CONF_BATTERY_SOC_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Required(CONF_BATTERY_CAPACITY, default=10.0): vol.Coerce(float),
-            vol.Required(CONF_START_TIME, default=DEFAULT_START_TIME): str,
-            vol.Required(CONF_END_TIME, default=DEFAULT_END_TIME): str,
-            vol.Required(CONF_USER_MIN_SOC, default=DEFAULT_MIN_SOC): vol.Coerce(float),
-            vol.Required(CONF_USER_MAX_SOC, default=DEFAULT_MAX_SOC): vol.Coerce(float),
-            vol.Required(
-                CONF_FORECAST_ERROR_MARGIN, default=DEFAULT_FORECAST_ERROR_MARGIN
-            ): vol.Coerce(float),
-            vol.Required(CONF_DEFAULT_MIN_SOC, default=DEFAULT_MIN_SOC): vol.Coerce(
-                float
-            ),
-            vol.Required(CONF_UPDATE_INTERVAL, default=DEFAULT_UPDATE_INTERVAL): vol.All(
-                vol.Coerce(int), vol.Range(min=60, max=3600)
-            ),
-            vol.Required(CONF_COMMAND_DELAY, default=DEFAULT_COMMAND_DELAY): vol.All(
-                vol.Coerce(float), vol.Range(min=0.0, max=5.0)
-            ),
-            vol.Optional(
-                CONF_ACTIVE_START_DATE,
-                default=_default_date_value(DEFAULT_ACTIVE_START_DATE),
-            ): selector.DateSelector(),
-            vol.Optional(
-                CONF_ACTIVE_END_DATE,
-                default=_default_date_value(DEFAULT_ACTIVE_END_DATE),
-            ): selector.DateSelector(),
-            vol.Optional(CONF_BACKUP_MODE_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig()
-            ),
-            vol.Optional(
-                CONF_ABSOLUTE_MAX_CHARGE_POWER_W, default=None
-            ): vol.Any(None, vol.All(vol.Coerce(int), vol.Range(min=100))),
-            vol.Optional(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="number")
-            ),
-            vol.Required(
-                CONF_MIN_CHARGE_POWER_W, default=DEFAULT_MIN_CHARGE_POWER_W
-            ): vol.All(vol.Coerce(int), vol.Range(min=100)),
-            vol.Required(
-                CONF_MAX_CHARGE_POWER_W, default=DEFAULT_MAX_CHARGE_POWER_W
-            ): vol.All(vol.Coerce(int), vol.Range(min=100)),
-            vol.Optional(CONF_CHARGE_POWER_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="number")
-            ),
-            vol.Optional(CONF_CHARGE_POWER_SENT_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(CONF_CHARGE_POWER_RECEIVED_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
-            vol.Optional(CONF_AUTO_EFFICIENT_CHARGE, default=False): bool,
-            vol.Optional(CONF_PV_FORECAST_TODAY_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig()
-            ),
-            vol.Optional(CONF_FORCE_DISCHARGE_SWITCH): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="switch")
-            ),
-        }
+    async def async_step_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Step 4 of 4: advanced options, then create the entry."""
+        return await self._async_wizard_step(
+            "advanced", STEP_ADVANCED_KEYS, _schema_advanced, user_input, self._async_create
+        )
 
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema(schema),
-            errors=errors,
+    async def _async_create(self) -> ConfigFlowResult:
+        data = _finalize_data(self._data)
+        await self.async_set_unique_id(data[CONF_KOSTAL_MIN_SOC_ENTITY])
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=data[CONF_NAME], data=data)
+
+    # -- Reconfigure --------------------------------------------------------
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Reconfigure step 1 of 4: entities."""
+        if not self._data:
+            self._data = dict(self._get_reconfigure_entry().data)
+        return await self._async_wizard_step(
+            "reconfigure",
+            STEP_USER_KEYS,
+            _schema_entities,
+            user_input,
+            self.async_step_reconfigure_time_soc,
+        )
+
+    async def async_step_reconfigure_time_soc(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Reconfigure step 2 of 4: time window and SOC."""
+        return await self._async_wizard_step(
+            "reconfigure_time_soc",
+            STEP_TIME_SOC_KEYS,
+            _schema_time_soc,
+            user_input,
+            self.async_step_reconfigure_power,
+        )
+
+    async def async_step_reconfigure_power(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Reconfigure step 3 of 4: charge power."""
+        return await self._async_wizard_step(
+            "reconfigure_power",
+            STEP_POWER_KEYS,
+            _schema_power,
+            user_input,
+            self.async_step_reconfigure_advanced,
+        )
+
+    async def async_step_reconfigure_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Reconfigure step 4 of 4: advanced options, then update the entry."""
+        return await self._async_wizard_step(
+            "reconfigure_advanced",
+            STEP_ADVANCED_KEYS,
+            _schema_advanced,
+            user_input,
+            self._async_reconfigure_finish,
+        )
+
+    async def _async_reconfigure_finish(self) -> ConfigFlowResult:
+        return self.async_update_reload_and_abort(
+            self._get_reconfigure_entry(), data=_finalize_data(self._data)
         )
 
     @staticmethod
@@ -315,165 +604,75 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return OptionsFlowHandler(config_entry)
 
 
+# ---------------------------------------------------------------------------
+# Options flow, the same four steps writing back into entry.data
+# ---------------------------------------------------------------------------
+
+
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for Inverter Charge Night."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize options flow."""
         self._config_entry = config_entry
+        self._data: dict[str, Any] = dict(config_entry.data)
+
+    async def _async_wizard_step(
+        self,
+        step_id: str,
+        step_keys: tuple[str, ...],
+        build_schema: SchemaBuilder,
+        user_input: dict[str, Any] | None,
+        next_step: NextStep,
+    ) -> ConfigFlowResult:
+        """Show one wizard step, or validate its input and continue."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            errors = _process_step(self.hass, self._data, step_keys, user_input)
+            if not errors:
+                return await next_step()
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=build_schema({**self._data, **(user_input or {})}),
+            errors=errors,
+        )
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Manage the options."""
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            errors = _validate_user_input(user_input, self.hass)
-
-            if not errors:
-                user_input = dict(user_input)
-                user_input[CONF_ACTIVE_START_DATE] = _normalize_date_value(
-                    user_input.get(CONF_ACTIVE_START_DATE)
-                )
-                user_input[CONF_ACTIVE_END_DATE] = _normalize_date_value(
-                    user_input.get(CONF_ACTIVE_END_DATE)
-                )
-                # Update the config entry with new data
-                self.hass.config_entries.async_update_entry(
-                    self._config_entry, data=user_input
-                )
-                # Preserve existing options (auto-efficiency history lives there)
-                return self.async_create_entry(
-                    title="", data=dict(self._config_entry.options)
-                )
-
-        # Build schema with current values as defaults
-        current_data = self._config_entry.data
-        schema = {
-            vol.Required(CONF_NAME, default=current_data.get(CONF_NAME, "Inverter Charge Night")): str,
-            vol.Required(
-                CONF_OPERATION_MODE,
-                default=current_data.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE),
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[MODE_NIGHT_CHARGE, MODE_MORNING_DISCHARGE],
-                    translation_key="operation_mode",
-                )
-            ),
-            vol.Required(
-                CONF_KOSTAL_MIN_SOC_ENTITY,
-                default=current_data.get(CONF_KOSTAL_MIN_SOC_ENTITY),
-            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="number")),
-            vol.Required(
-                CONF_KOSTAL_GRID_CHARGE_SWITCH,
-                default=current_data.get(CONF_KOSTAL_GRID_CHARGE_SWITCH),
-            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="switch")),
-            vol.Required(
-                CONF_PV_FORECAST_ENTITY,
-                default=current_data.get(CONF_PV_FORECAST_ENTITY),
-            ): selector.EntitySelector(selector.EntitySelectorConfig()),
-            vol.Required(
-                CONF_BATTERY_SOC_ENTITY,
-                default=current_data.get(CONF_BATTERY_SOC_ENTITY),
-            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
-            vol.Required(
-                CONF_BATTERY_CAPACITY,
-                default=current_data.get(CONF_BATTERY_CAPACITY, 10.0),
-            ): vol.Coerce(float),
-            vol.Required(
-                CONF_START_TIME,
-                default=current_data.get(CONF_START_TIME, DEFAULT_START_TIME),
-            ): str,
-            vol.Required(
-                CONF_END_TIME,
-                default=current_data.get(CONF_END_TIME, DEFAULT_END_TIME),
-            ): str,
-            vol.Required(
-                CONF_USER_MIN_SOC,
-                default=current_data.get(CONF_USER_MIN_SOC, DEFAULT_MIN_SOC),
-            ): vol.Coerce(float),
-            vol.Required(
-                CONF_USER_MAX_SOC,
-                default=current_data.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC),
-            ): vol.Coerce(float),
-            vol.Required(
-                CONF_FORECAST_ERROR_MARGIN,
-                default=current_data.get(CONF_FORECAST_ERROR_MARGIN, DEFAULT_FORECAST_ERROR_MARGIN),
-            ): vol.Coerce(float),
-            vol.Required(
-                CONF_DEFAULT_MIN_SOC,
-                default=current_data.get(CONF_DEFAULT_MIN_SOC, DEFAULT_MIN_SOC),
-            ): vol.Coerce(float),
-            vol.Required(
-                CONF_UPDATE_INTERVAL,
-                default=current_data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
-            ): vol.All(vol.Coerce(int), vol.Range(min=60, max=3600)),
-            vol.Required(
-                CONF_COMMAND_DELAY,
-                default=current_data.get(CONF_COMMAND_DELAY, DEFAULT_COMMAND_DELAY),
-            ): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=5.0)),
-            vol.Optional(
-                CONF_ACTIVE_START_DATE,
-                default=_default_date_value(
-                    current_data.get(CONF_ACTIVE_START_DATE, DEFAULT_ACTIVE_START_DATE)
-                ),
-            ): selector.DateSelector(),
-            vol.Optional(
-                CONF_ACTIVE_END_DATE,
-                default=_default_date_value(
-                    current_data.get(CONF_ACTIVE_END_DATE, DEFAULT_ACTIVE_END_DATE)
-                ),
-            ): selector.DateSelector(),
-            vol.Optional(
-                CONF_BACKUP_MODE_ENTITY,
-                default=current_data.get(CONF_BACKUP_MODE_ENTITY),
-            ): selector.EntitySelector(selector.EntitySelectorConfig()),
-            vol.Optional(
-                CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
-                default=current_data.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_W),
-            ): vol.Any(None, vol.All(vol.Coerce(int), vol.Range(min=100))),
-            vol.Optional(
-                CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
-                default=current_data.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY),
-            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="number")),
-            vol.Required(
-                CONF_MIN_CHARGE_POWER_W,
-                default=current_data.get(CONF_MIN_CHARGE_POWER_W, DEFAULT_MIN_CHARGE_POWER_W),
-            ): vol.All(vol.Coerce(int), vol.Range(min=100)),
-            vol.Required(
-                CONF_MAX_CHARGE_POWER_W,
-                default=current_data.get(CONF_MAX_CHARGE_POWER_W, DEFAULT_MAX_CHARGE_POWER_W),
-            ): vol.All(vol.Coerce(int), vol.Range(min=100)),
-            vol.Optional(
-                CONF_CHARGE_POWER_ENTITY,
-                default=current_data.get(CONF_CHARGE_POWER_ENTITY),
-            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="number")),
-            vol.Optional(
-                CONF_CHARGE_POWER_SENT_ENTITY,
-                default=current_data.get(CONF_CHARGE_POWER_SENT_ENTITY),
-            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
-            vol.Optional(
-                CONF_CHARGE_POWER_RECEIVED_ENTITY,
-                default=current_data.get(CONF_CHARGE_POWER_RECEIVED_ENTITY),
-            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor")),
-            vol.Optional(
-                CONF_AUTO_EFFICIENT_CHARGE,
-                default=current_data.get(CONF_AUTO_EFFICIENT_CHARGE, False),
-            ): bool,
-            vol.Optional(
-                CONF_PV_FORECAST_TODAY_ENTITY,
-                default=current_data.get(CONF_PV_FORECAST_TODAY_ENTITY),
-            ): selector.EntitySelector(selector.EntitySelectorConfig()),
-            vol.Optional(
-                CONF_FORCE_DISCHARGE_SWITCH,
-                default=current_data.get(CONF_FORCE_DISCHARGE_SWITCH),
-            ): selector.EntitySelector(selector.EntitySelectorConfig(domain="switch")),
-        }
-
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(schema),
-            errors=errors,
+        """Options step 1 of 4: entities."""
+        return await self._async_wizard_step(
+            "init", STEP_USER_KEYS, _schema_entities, user_input, self.async_step_time_soc
         )
 
+    async def async_step_time_soc(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Options step 2 of 4: time window and SOC."""
+        return await self._async_wizard_step(
+            "time_soc", STEP_TIME_SOC_KEYS, _schema_time_soc, user_input, self.async_step_power
+        )
+
+    async def async_step_power(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Options step 3 of 4: charge power."""
+        return await self._async_wizard_step(
+            "power", STEP_POWER_KEYS, _schema_power, user_input, self.async_step_advanced
+        )
+
+    async def async_step_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Options step 4 of 4: advanced options, then save."""
+        return await self._async_wizard_step(
+            "advanced", STEP_ADVANCED_KEYS, _schema_advanced, user_input, self._async_save
+        )
+
+    async def _async_save(self) -> ConfigFlowResult:
+        # The settings live in entry.data (unchanged for existing installations);
+        # entry.options only holds the auto-efficiency history, which is preserved.
+        self.hass.config_entries.async_update_entry(
+            self._config_entry, data=_finalize_data(self._data)
+        )
+        return self.async_create_entry(title="", data=dict(self._config_entry.options))
