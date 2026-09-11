@@ -30,7 +30,7 @@ async def test_async_update_entry_rearms_backup_mode_listener(mock_hass, mock_co
     coordinator = MagicMock()
     coordinator.config = {}
     coordinator.async_request_refresh = AsyncMock()
-    mock_hass.data = {DOMAIN: {mock_config_entry.entry_id: coordinator}}
+    mock_config_entry.runtime_data = coordinator
 
     await async_update_entry(mock_hass, mock_config_entry)
 
@@ -45,7 +45,7 @@ async def test_async_update_entry_backup_listener_error(mock_hass, mock_config_e
     coordinator.config = {}
     coordinator._setup_backup_mode_listener.side_effect = Exception("boom")
     coordinator.async_request_refresh = AsyncMock()
-    mock_hass.data = {DOMAIN: {mock_config_entry.entry_id: coordinator}}
+    mock_config_entry.runtime_data = coordinator
 
     await async_update_entry(mock_hass, mock_config_entry)
 
