@@ -4,12 +4,10 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from . import InverterChargeNightCoordinator
-from .const import DOMAIN
+from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 
 REDACT_KEYS = {
     "pv_forecast_entity",
@@ -27,10 +25,10 @@ REDACT_KEYS = {
 
 
 async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, entry: ConfigEntry
+    hass: HomeAssistant, entry: InverterChargeNightConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    coordinator: InverterChargeNightCoordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    coordinator: InverterChargeNightCoordinator | None = getattr(entry, "runtime_data", None)
     data: dict[str, Any] = {
         "entry": async_redact_data(dict(entry.data), REDACT_KEYS),
         "options": async_redact_data(dict(entry.options), REDACT_KEYS),
