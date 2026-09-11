@@ -27,7 +27,7 @@ async def test_battery_soc_listener_stops_on_target(mock_hass):
     coordinator.is_active = True
     coordinator.is_enabled = True
     coordinator.target_reached = False
-    coordinator.minimum_calculated_soc = 50.0
+    coordinator.initial_calculated_soc = 50.0
     coordinator._stop_grid_charging = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
 
@@ -59,7 +59,7 @@ async def test_battery_soc_listener_handles_stop_error(mock_hass):
     coordinator.is_active = True
     coordinator.is_enabled = True
     coordinator.target_reached = False
-    coordinator.minimum_calculated_soc = 50.0
+    coordinator.initial_calculated_soc = 50.0
     coordinator._stop_grid_charging = AsyncMock(side_effect=Exception("boom"))
     coordinator.async_request_refresh = AsyncMock()
 
@@ -99,7 +99,7 @@ async def test_inverter_min_soc_listener_triggers_restore(mock_hass):
     )
     coordinator.is_active = True
     coordinator.is_enabled = True
-    coordinator.minimum_calculated_soc = 70.0
+    coordinator.initial_calculated_soc = 70.0
     coordinator._verify_and_restore_min_soc = AsyncMock()
 
     captured = {}
@@ -119,3 +119,86 @@ async def test_inverter_min_soc_listener_triggers_restore(mock_hass):
     await captured["callback"](event)
 
     coordinator._verify_and_restore_min_soc.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_battery_soc_listener_uses_current_target_soc(mock_hass):
+    """An override above the plan is the target; the diagnostic minimum is ignored."""
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_BATTERY_SOC_ENTITY: "sensor.soc"}
+    )
+    coordinator.is_active = True
+    coordinator.is_enabled = True
+    coordinator.target_reached = False
+    coordinator.initial_calculated_soc = 50.0
+    coordinator.minimum_calculated_soc = 50.0
+    coordinator.override_soc = 70.0
+    coordinator._stop_grid_charging = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    captured = {}
+
+    def _capture(hass, entity_id, callback):
+        captured["callback"] = callback
+        return MagicMock()
+
+    with patch(
+        "custom_components.inverter_charge_night.async_track_state_change_event",
+        side_effect=_capture,
+    ):
+        coordinator._setup_battery_soc_listener()
+
+    event = MagicMock()
+    event.data = {"new_state": MagicMock(state="55")}
+    await captured["callback"](event)
+
+    coordinator._stop_grid_charging.assert_not_awaited()
+    assert coordinator.target_reached is False
+
+    event.data = {"new_state": MagicMock(state="70")}
+    await captured["callback"](event)
+
+    coordinator._stop_grid_charging.assert_awaited_once()
+    assert coordinator.target_reached is True
+
+
+@pytest.mark.asyncio
+async def test_battery_soc_listener_without_target_does_nothing(mock_hass):
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_BATTERY_SOC_ENTITY: "sensor.soc"}
+    )
+    coordinator.is_active = True
+    coordinator.is_enabled = True
+    coordinator._stop_grid_charging = AsyncMock()
+
+    captured = {}
+
+    def _capture(hass, entity_id, callback):
+        captured["callback"] = callback
+        return MagicMock()
+
+    with patch(
+        "custom_components.inverter_charge_night.async_track_state_change_event",
+        side_effect=_capture,
+    ):
+        coordinator._setup_battery_soc_listener()
+
+    event = MagicMock()
+    event.data = {"new_state": MagicMock(state="99")}
+    await captured["callback"](event)
+
+    coordinator._stop_grid_charging.assert_not_awaited()
+    assert coordinator.target_reached is False
+
+
+def test_current_target_soc_prefers_override_then_initial_then_calculated(mock_hass):
+    coordinator = _make_coordinator(mock_hass, {})
+    assert coordinator.current_target_soc() is None
+    coordinator.calculated_soc = 40.0
+    assert coordinator.current_target_soc() == 40.0
+    coordinator.initial_calculated_soc = 45.0
+    assert coordinator.current_target_soc() == 45.0
+    coordinator.override_soc = 70.0
+    assert coordinator.current_target_soc() == 70.0
+    coordinator.override_soc = None
+    assert coordinator.current_target_soc() == 45.0

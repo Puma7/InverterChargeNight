@@ -33,3 +33,23 @@ async def test_async_unload_entry_no_unload(mock_hass, mock_config_entry):
     result = await async_unload_entry(mock_hass, mock_config_entry)
 
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_async_unload_entry_removes_all_listeners(mock_hass, mock_config_entry):
+    coordinator = MagicMock()
+    coordinator.is_active = False
+
+    mock_hass.data[DOMAIN] = {mock_config_entry.entry_id: coordinator}
+    mock_hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+
+    result = await async_unload_entry(mock_hass, mock_config_entry)
+
+    assert result is True
+    coordinator.remove_time_triggers.assert_called_once()
+    coordinator._remove_battery_soc_listener.assert_called_once()
+    coordinator._remove_inverter_min_soc_listener.assert_called_once()
+    coordinator._remove_backup_mode_listener.assert_called_once()
+    coordinator._stop_periodic_verification.assert_called_once()
+    coordinator._cancel_skip_next_expiry.assert_called_once()
+    assert mock_config_entry.entry_id not in mock_hass.data[DOMAIN]

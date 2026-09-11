@@ -152,6 +152,7 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     # Update time triggers with new configuration
     try:
         coordinator.update_time_triggers()
+        coordinator._setup_backup_mode_listener()
     except Exception as e:
         _LOGGER.error("Error updating time triggers: %s", e, exc_info=True)
         # Restore old config if update failed
@@ -193,6 +194,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConf
         coordinator.remove_time_triggers()
         coordinator._remove_battery_soc_listener()
         coordinator._remove_inverter_min_soc_listener()
+        coordinator._remove_backup_mode_listener()
         coordinator._stop_periodic_verification()
         coordinator._cancel_skip_next_expiry()
     
@@ -246,6 +248,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
         self._auto_missing_entities_logged = False
+
+    def current_target_soc(self) -> float | None:
+        """The SOC the inverter should hold right now: manual override, else the plan."""
+        if self.override_soc is not None:
+            return self.override_soc
+        return self.initial_calculated_soc if self.initial_calculated_soc is not None else self.calculated_soc
 
     @property
     def is_discharge_mode(self) -> bool:
@@ -1173,10 +1181,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as e:
                 _LOGGER.error("Error turning off force discharge: %s", e, exc_info=True)
         
-        # Reset stored original value and tracking after successful reset
+        # _last_soc_set is log information only; always forget it so the next
+        # window starts from what the inverter actually reports.
+        self._last_soc_set = None
+        # Reset stored original value and override after successful reset
         if reset_success:
             self.original_min_soc = None
-            self._last_soc_set = None
             self.override_soc = None  # Clear override when resetting
         await self._reset_absolute_charge_power()
 
@@ -1202,7 +1212,20 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.info("Outside active date range during update - resetting settings")
             await self._on_window_end(dt_util.now())
             return inactive_data
-        
+        # Safety net for a lost end trigger (DST change, stalled event loop, failed
+        # trigger setup): the window is bounded by the clock, not only by the trigger.
+        # _is_time_between is inclusive at both ends, so a poll in the end minute
+        # leaves the window to the trigger.
+        start, end = self._window_times()
+        if not self._is_time_between(dt_util.now().time(), start, end):
+            _LOGGER.warning(
+                "Window end was missed (now outside %s-%s); ending window from polling update",
+                start,
+                end,
+            )
+            await self._on_window_end(dt_util.now())
+            return inactive_data
+
         try:
             battery_capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
             error_margin = float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0))
@@ -1261,20 +1284,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Update display SOC to match calculated SOC
         self.calculated_soc = calculated_soc
         
-        # Use override SOC if set, otherwise use calculated SOC
-        # CRITICAL: Always use minimum value (initial or override, whichever is lower)
-        if self.override_soc is not None:
-            # If override is set, use it and update minimum if it's lower
-            target_soc = self.override_soc
-            if self.minimum_calculated_soc is None or self.override_soc < self.minimum_calculated_soc:
-                self.minimum_calculated_soc = self.override_soc
-                _LOGGER.info("Updated minimum SOC to %.1f%% (override is lower)", self.override_soc)
-        else:
-            # Use calculated SOC, but ensure minimum is tracked
-            target_soc = calculated_soc
-            if self.minimum_calculated_soc is None or calculated_soc < self.minimum_calculated_soc:
-                self.minimum_calculated_soc = calculated_soc
-                _LOGGER.info("Updated minimum SOC to %.1f%% (calculated is lower)", calculated_soc)
+        # The single source of truth for the target: manual override, else the plan.
+        current_target = self.current_target_soc()
+        target_soc: float = current_target if current_target is not None else calculated_soc
+        # minimum_calculated_soc is diagnostic only: the lowest target seen this window.
+        if self.minimum_calculated_soc is None or target_soc < self.minimum_calculated_soc:
+            self.minimum_calculated_soc = target_soc
+            _LOGGER.info(
+                "Updated minimum SOC to %.1f%% (%s is lower)",
+                target_soc,
+                "override" if self.override_soc is not None else "calculated",
+            )
         
         # SAFETY: Before controlling Kostal, verify we can check battery SOC
         # This prevents turning on grid charge switch if battery SOC is unavailable
@@ -1342,10 +1362,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if state and state.state not in ("unknown", "unavailable"):
                 try:
                     current_soc = float(state.state)
-                    # minimum_calculated_soc is always assigned above in this method, so pyright
-                    # narrows it to float and flags the None check as unnecessary. The check is
-                    # kept as a defensive guard; plan 004 reworks this target logic.
-                    check_target = self.minimum_calculated_soc if self.minimum_calculated_soc is not None else target_soc  # pyright: ignore[reportUnnecessaryComparison]
+                    check_target = target_soc
                     if self._is_target_reached(current_soc, check_target):
                         if not self.target_reached:
                             _LOGGER.info(
@@ -1477,13 +1494,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 
                 # Only update if value changed significantly (avoid unnecessary service calls and EEPROM wear)
                 # CRITICAL: Threshold increased to 0.5 to prevent "bricking" inverter memory
+                # The inverter's reported value is authoritative; _last_soc_set is log information only
                 if min_soc_current_value is None or abs(min_soc_current_value - target_soc) > 0.5:
-                    # Also check if we just set this value (prevent rapid updates)
-                    if self._last_soc_set is None or abs(self._last_soc_set - target_soc) > 0.5:
-                        need_to_set_min_soc = True
-                    else:
-                        _LOGGER.debug("Min SOC already set to %.1f%% recently, skipping update", target_soc)
-                        self._last_soc_set = target_soc
+                    need_to_set_min_soc = True
                 else:
                     _LOGGER.debug("Min SOC already at target: %.1f%%", target_soc)
                     self._last_soc_set = target_soc
@@ -1495,20 +1508,27 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # so the inverter processes them together and only does DC checks once
         if need_to_set_min_soc and kostal_min_soc_entity:
             # Set min SOC first
-            await self.hass.services.async_call(
-                "number",
-                "set_value",
-                {"entity_id": kostal_min_soc_entity, "value": target_soc},
-            )
-            self._last_soc_set = target_soc
-            _LOGGER.info(
-                "Set Kostal min SOC to %.1f%% (was %s)",
-                target_soc,
-                f"{min_soc_current_value:.1f}%" if min_soc_current_value is not None else "unknown",
-            )
-            
+            min_soc_set = False
+            try:
+                await self.hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": kostal_min_soc_entity, "value": target_soc},
+                )
+                self._last_soc_set = target_soc
+                min_soc_set = True
+                _LOGGER.info(
+                    "Set Kostal min SOC to %.1f%% (was %s)",
+                    target_soc,
+                    f"{min_soc_current_value:.1f}%" if min_soc_current_value is not None else "unknown",
+                )
+            except Exception as e:
+                # Without the new floor the inverter would charge against the wrong
+                # min SOC, so grid charging is not switched on; the next poll retries.
+                _LOGGER.error("Error setting min SOC: %s", e, exc_info=True)
+
             # Immediately send grid charge command (configurable delay) so inverter processes both together
-            if kostal_grid_charge_switch and not should_skip_charging:
+            if min_soc_set and kostal_grid_charge_switch and not should_skip_charging:
                 command_delay = float(self.config.get(CONF_COMMAND_DELAY, 0.1))
                 await asyncio.sleep(command_delay)  # Configurable delay
                 
@@ -1643,10 +1663,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         pass
 
                 if min_soc_current_value is None or abs(min_soc_current_value - target_soc) > 0.5:
-                    if self._last_soc_set is None or abs(self._last_soc_set - target_soc) > 0.5:
-                        need_to_set_min_soc = True
-                    else:
-                        self._last_soc_set = target_soc
+                    need_to_set_min_soc = True
                 else:
                     self._last_soc_set = target_soc
             except Exception as e:
@@ -1748,10 +1765,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             
             try:
                 current_soc = float(new_state.state)
-                # Use minimum SOC for target check (always the lowest value we want to maintain)
-                target_soc = self.minimum_calculated_soc if self.minimum_calculated_soc is not None else (
-                    self.override_soc if self.override_soc is not None else self.calculated_soc
-                )
+                target_soc = self.current_target_soc()
                 
                 if target_soc is None:
                     return
@@ -1816,8 +1830,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             
             try:
                 current_inverter_soc = float(new_state.state)
-                # Get our target SOC (minimum of initial and any override)
-                target_soc = self.minimum_calculated_soc if self.minimum_calculated_soc is not None else self.initial_calculated_soc
+                target_soc = self.current_target_soc()
                 
                 if target_soc is None:
                     return
@@ -1896,8 +1909,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         self._verifying_min_soc = True
         try:
-            # Get our target SOC (minimum of initial and any override)
-            target_soc = self.minimum_calculated_soc if self.minimum_calculated_soc is not None else self.initial_calculated_soc
+            target_soc = self.current_target_soc()
             
             if target_soc is None:
                 return
