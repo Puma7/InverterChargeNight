@@ -27,6 +27,7 @@ async def async_setup_entry(
         [
             CalculatedSOCSensor(coordinator, entry),
             BestChargePowerSensor(coordinator, entry),
+            PlannedChargePowerSensor(coordinator, entry),
         ]
     )
 
@@ -60,6 +61,13 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
             "current_soc": data.get("current_soc"),
             "operation_mode": data.get("operation_mode"),
             "skip_next": data.get("skip_next", False),
+            # Planner v2 (plan 006): only present while a bridge plan exists
+            "plan_reason": data.get("plan_reason"),
+            "bridge_kwh": data.get("bridge_kwh"),
+            "surplus_kwh": data.get("surplus_kwh"),
+            "lower_bound_soc": data.get("lower_bound_soc"),
+            "upper_bound_soc": data.get("upper_bound_soc"),
+            "pv_crossover": data.get("pv_crossover"),
             ATTR_SNOW_NIGHTS: self.coordinator.snow_nights,
         }
 
@@ -86,3 +94,24 @@ class BestChargePowerSensor(InverterChargeNightEntity, SensorEntity):
         if isinstance(best_power, int):
             return float(best_power)
         return None
+
+
+class PlannedChargePowerSensor(InverterChargeNightEntity, SensorEntity):
+    """The AC charge power planned for the remaining window (plan 006, step 6)."""
+
+    _attr_translation_key = "planned_charge_power"
+    _attr_native_unit_of_measurement = "W"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:battery-clock"
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "planned_charge_power")
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the planned setpoint, or None outside a night charge window."""
+        value = self.coordinator.planned_charge_power_w
+        return float(value) if value is not None else None
