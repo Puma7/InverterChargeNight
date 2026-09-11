@@ -98,7 +98,7 @@ Voraussetzung: `homeassistant`, `pytest`, `pytest-cov`, `pytest-asyncio`, `mypy`
 
 **Nicht im Umfang**:
 - `__init__.py` (Coordinator) – Plan 002 und 004 ändern ihn; hier nichts anfassen, auch nicht `_parse_time`.
-- Umbenennung der `kostal_*`-Keys – braucht eine Entry-Migration, Backlog 008.
+- Umbenennung der `kostal_*`-Keys – braucht eine Entry-Migration, Backlog 009.
 - Energiezähler-Keys (`grid_import_energy_entity` usw.) – Plan 006 entscheidet, ob sie zurückkommen.
   In diesem Plan werden sie aus `en.json` entfernt.
 
@@ -282,5 +282,5 @@ ausgenommen, `util.py` nicht).
   `tests/test_config_flow.py` bleiben, damit die Dateien nicht wieder auseinanderlaufen.
 - `parse_time_str` akzeptiert jetzt Sekunden; der Coordinator (`_parse_time`) ruft dieselbe Funktion,
   also profitiert er automatisch.
-- Backlog 008 wird die `kostal_*`-Keys umbenennen; dafür wird `VERSION` in der Flow-Klasse auf 2 gesetzt
+- Backlog 009 wird die `kostal_*`-Keys umbenennen; dafür wird `VERSION` in der Flow-Klasse auf 2 gesetzt
   und `async_migrate_entry` ergänzt. Dieser Plan lässt `VERSION = 1`.

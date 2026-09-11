@@ -85,8 +85,9 @@ Alle Punkte wurden im Code nachgelesen, nicht nur vom Audit gemeldet.
 | L5 | **Ein Fenster, fest im Jahr.** Nur ein Start/Ende-Paar, ein optionaler Datumsbereich, kein Kalender pro Quartal, kein Preissignal. | `__init__.py:775-787`, `:403-426`; keine Preis-Keys | Avacon-Zeitfenster pro Quartal müssen manuell umgestellt werden. |
 | L6 | **Plan wird beim Fensterstart eingefroren**, obwohl Solcast nachts mehrfach aktualisiert. Forecast-Tagwahl hängt an `now.hour < 12`, nicht am Fensterende. | `__init__.py:255-275`, `:1191-1207` | Falscher Solartag bei Fenstern, die nicht über Mitternacht gehen; kein Nachjustieren bei geändertem Forecast. |
 | L7 | **Verbrauchsdaten waren schon entworfen** (`grid_import_energy_entity`, `battery_charge_energy_entity`, `home_consumption_energy_entity`) und sind mit dem Merge verschwunden. | `translations/en.json:44-65`; `git show 5c31112:custom_components/inverter_charge_night/auto_efficiency.py` | Günstigster Weg zu einem verbrauchsbewussten Planer. |
+| L9 | **Kein Schnee-Override.** Bei Schnee auf den Modulen liefert jeder Forecast Ertrag, der nicht kommt; es gibt keinen Weg, die nächsten Nächte auf das Maximum zu laden, ohne die Konfiguration zu ändern. Der bestehende Override gilt nur im laufenden Fenster und wird am Fensterende gelöscht (`__init__.py:1076`). | Eigentümer-Anforderung; `_on_window_end` | Tage mit Schnee kaufen tagsüber zum Tagestarif. |
 | L8 | **Kostal-Vertrag statt Wechselrichter-Abstraktion**: Min-SOC-`number` + Netzlade-`switch` + AC-Limit-`number` + Force-Discharge-`switch`; Keys heißen `kostal_*`. | `const.py:27-28`, `config_flow.py:235-240` | Fronius/SMA mit Betriebsart-Select und Leistungs-Sollwert sind nicht konfigurierbar. |
-| L9 | **Morning-Discharge-Modus widerspricht dem Ziel**: speist morgens ins Netz ein, genau in der Zeit, in der der Speicher das Haus überbrücken soll. Override ruft dort trotzdem den Ladepfad. | `__init__.py:1519-1525`, `CHANGELOG.md:12`, `number.py:89` | Produktentscheidung nötig: dynamischer Tarif (behalten, so benennen) oder Überbrückungsmodus (umbauen). |
+| L10 | **Morning-Discharge-Modus widerspricht dem Ziel**: speist morgens ins Netz ein, genau in der Zeit, in der der Speicher das Haus überbrücken soll. Override ruft dort trotzdem den Ladepfad. | `__init__.py:1519-1525`, `CHANGELOG.md:12`, `number.py:89` | Produktentscheidung nötig: dynamischer Tarif (behalten, so benennen) oder Überbrückungsmodus (umbauen). |
 
 ---
 
@@ -139,22 +140,24 @@ vorliegt; bis dahin bleibt der Kostal-Pfad, aber ohne Markennamen in Keys und La
 | 004 | Steuerlogik-Fehler mit kleinem Umfang: ein Ziel, Override-Pfad, Backup-Listener, Veto, Fensterprüfung | P1 | M | 003 | TODO |
 | 005 | Rücksetz-Robustheit und Persistenz über Neustarts | P1 | L | 003, 004 | TODO |
 | 006 | Planer v2 (Design und Prototyp): Überbrückung, Sonnenaufgang, Verbrauch, Entladesperre, Ladeleistung | P2 | L | 001–005 | TODO |
+| 007 | Schnee-Override: Zahl-Entität "Schnee-Nächte", lädt die nächsten N Nächte auf das Maximum und zählt herunter | P2 | S | 004, 005 | TODO |
 
 Status-Werte: TODO | IN PROGRESS | DONE | BLOCKED (mit Grund) | REJECTED (mit Begründung)
 
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 
-- **007 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des Config-Entrys, tägliche Neubestimmung.
-- **008 Wechselrichter-Profile** (L8): erst Spike gegen die realen Entitäten der Fronius- und SMA-Integrationen, dann Fähigkeitsschnittstelle; Umbenennung `kostal_*` → `min_soc_entity` / `grid_charge_switch` mit `async_migrate_entry`.
-- **009 Morning-Discharge entscheiden** (L9): entweder als "dynamischer Tarif"-Funktion dokumentieren oder zum Überbrückungsmodus umbauen. Bis dahin mindestens Override-Pfad korrigieren (in 004 enthalten).
-- **010 Preissignal** (L5): Tibber/aWATTar/EPEX-Sensor als Eingang, ersetzt den festen Zeitplan durch Kostenoptimierung.
-- **011 Doku-Bereinigung**: README auf 2.0 und 28 Felder bringen (Forecast-Entität für MORGEN, nicht heute), Platzhalter-URLs, elf Audit-Dateien im Wurzelverzeichnis nach `docs/history/`, `de.json` anlegen.
+- **008 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des Config-Entrys, tägliche Neubestimmung.
+- **009 Wechselrichter-Profile** (L8): erst Spike gegen die realen Entitäten der Fronius- und SMA-Integrationen, dann Fähigkeitsschnittstelle; Umbenennung `kostal_*` → `min_soc_entity` / `grid_charge_switch` mit `async_migrate_entry`.
+- **010 Morning-Discharge entscheiden** (L9): entweder als "dynamischer Tarif"-Funktion dokumentieren oder zum Überbrückungsmodus umbauen. Bis dahin mindestens Override-Pfad korrigieren (in 004 enthalten).
+- **011 Preissignal** (L5): Tibber/aWATTar/EPEX-Sensor als Eingang, ersetzt den festen Zeitplan durch Kostenoptimierung.
+- **012 Doku-Bereinigung**: README auf 2.0 und 28 Felder bringen (Forecast-Entität für MORGEN, nicht heute), Platzhalter-URLs, elf Audit-Dateien im Wurzelverzeichnis nach `docs/history/`, `de.json` anlegen.
 
 ### Abhängigkeiten
 
 - 002 braucht 001, weil Reconfigure-Flow und `unique_id` im Assistenten sitzen.
 - 004 und 005 brauchen 003, weil der Coordinator sonst ohne Coverage und ohne echten Test-Hass umgebaut würde.
 - 006 braucht 005, weil ein Planer, der die Entladung sperrt, einen zuverlässigen Reset voraussetzt.
+- 007 braucht 004 (eine Zielquelle) und 005 (der Schneezähler muss einen Neustart überleben).
 
 ### Geprüft und verworfen
 

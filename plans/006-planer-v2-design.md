@@ -72,9 +72,9 @@ und Fensterzeiten ein Ziel und eine Ladeleistung ableitet, sowie eine Entladespe
 - `plans/006-DECISIONS.md` (neu; Fragen an den Eigentümer mit Empfehlung)
 
 **Nicht im Umfang**:
-- Zeitplanmodell mit mehreren Fenstern (Backlog 007) und Preissignal (Backlog 010).
-- Wechselrichter-Profile (Backlog 008): die Entladesperre wird als eine weitere optionale Entität umgesetzt, nicht als Abstraktion.
-- Umbau des Morning-Discharge-Modus (Backlog 009).
+- Zeitplanmodell mit mehreren Fenstern (Backlog 008) und Preissignal (Backlog 011).
+- Wechselrichter-Profile (Backlog 009): die Entladesperre wird als eine weitere optionale Entität umgesetzt, nicht als Abstraktion.
+- Umbau des Morning-Discharge-Modus (Backlog 010).
 
 ## Git-Vorgehen
 
@@ -203,8 +203,8 @@ Sollwert um mehr als 100 W ändert (Schreibschonung). Neuer Sensor `planned_char
 1. Welche Entität sperrt beim Kostal Plenticore die Entladung (Entladeleistungsgrenze oder Betriebsart)? Empfehlung: Leistungsgrenze, weil sie zum Erfassen/Zurücksetzen passt.
 2. Verbrauchsquelle: Hausverbrauchszähler (empfohlen) oder fester Mittelwert?
 3. PV-Kreuzung: fester Versatz nach Sonnenaufgang (Start 90 min) oder aus Zählern gelernt (später)?
-4. Preise als feste Werte eintragen (empfohlen als Start) oder Preissensor (Backlog 010)?
-5. Morning-Discharge: behalten als Tarif-Funktion oder ersetzen (Backlog 009)?
+4. Preise als feste Werte eintragen (empfohlen als Start) oder Preissensor (Backlog 011)?
+5. Morning-Discharge: behalten als Tarif-Funktion oder ersetzen (Backlog 010)?
 
 ## Testplan
 
@@ -232,5 +232,5 @@ Sollwert um mehr als 100 W ändert (Schreibschonung). Neuer Sensor `planned_char
 ## Wartungshinweise
 
 - `planner.py` bleibt frei von HA-Imports, damit es als reine Funktion testbar ist; alle Zustandslesungen leben im Coordinator.
-- Backlog 007 (Zeitplan) ändert nur, woher `window_end` kommt; Backlog 010 (Preise) ersetzt `prices_ct` durch Zeitreihen.
+- Backlog 008 (Zeitplan) ändert nur, woher `window_end` kommt; Backlog 011 (Preise) ersetzt `prices_ct` durch Zeitreihen.
 - Beim Wechsel des Standardmodus auf `bridge` (nach Erprobung beim Eigentümer) `DEFAULT_PLANNER_MODE` ändern und `CHANGELOG.md` als Breaking Change dokumentieren.
