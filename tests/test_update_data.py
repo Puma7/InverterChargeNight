@@ -293,7 +293,7 @@ async def test_async_update_data_stops_when_already_at_target(mock_hass):
 )
 def test_parse_forecast_energy_units(mock_hass, state, unit, expected_kwh):
     attributes = {"unit_of_measurement": unit} if unit else {}
-    mock_hass.states.get.return_value = create_mock_state("sensor.pv", state, attributes)
+    mock_hass.states.async_set("sensor.pv", state, attributes)
     coordinator = _make_coordinator(mock_hass, {})
 
     energy, available = coordinator._parse_forecast_energy("sensor.pv")
@@ -303,7 +303,7 @@ def test_parse_forecast_energy_units(mock_hass, state, unit, expected_kwh):
 
 
 def test_parse_forecast_energy_unsupported_unit_is_unavailable(mock_hass, caplog):
-    mock_hass.states.get.return_value = create_mock_state("sensor.pv", "3500", {"unit_of_measurement": "W"})
+    mock_hass.states.async_set("sensor.pv", "3500", {"unit_of_measurement": "W"})
     coordinator = _make_coordinator(mock_hass, {})
 
     assert coordinator._parse_forecast_energy("sensor.pv") == (0.0, False)
@@ -311,8 +311,8 @@ def test_parse_forecast_energy_unsupported_unit_is_unavailable(mock_hass, caplog
 
 
 def test_parse_forecast_energy_all_malformed_list_is_unavailable(mock_hass):
-    mock_hass.states.get.return_value = create_mock_state("sensor.pv", 
-        "unavailable", {"forecast": [{"wh": "n/a"}, "junk"]}
+    mock_hass.states.async_set(
+        "sensor.pv", "unavailable", {"forecast": [{"wh": "n/a"}, "junk"]}
     )
     coordinator = _make_coordinator(mock_hass, {})
 
@@ -320,8 +320,8 @@ def test_parse_forecast_energy_all_malformed_list_is_unavailable(mock_hass):
 
 
 def test_parse_forecast_energy_partially_malformed_list(mock_hass, caplog):
-    mock_hass.states.get.return_value = create_mock_state("sensor.pv", 
-        "unavailable", {"forecast": [{"wh": 1000}, {"wh": "n/a"}]}
+    mock_hass.states.async_set(
+        "sensor.pv", "unavailable", {"forecast": [{"wh": 1000}, {"wh": "n/a"}]}
     )
     coordinator = _make_coordinator(mock_hass, {})
 
