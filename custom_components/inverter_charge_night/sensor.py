@@ -7,11 +7,10 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, Sen
 from homeassistant.const import EntityCategory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import InverterChargeNightCoordinator
+from .entity import InverterChargeNightEntity
 from .const import DOMAIN
 
 
@@ -30,11 +29,10 @@ async def async_setup_entry(
     )
 
 
-class CalculatedSOCSensor(CoordinatorEntity[InverterChargeNightCoordinator], SensorEntity):
+class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
     """Sensor for calculated SOC."""
 
     _attr_translation_key = "calculated_soc"
-    _attr_has_entity_name = True
     _attr_native_unit_of_measurement = "%"
     _attr_device_class = SensorDeviceClass.BATTERY
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -42,15 +40,7 @@ class CalculatedSOCSensor(CoordinatorEntity[InverterChargeNightCoordinator], Sen
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_calculated_soc"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title or "Inverter Charge Night",
-            manufacturer="Custom Integration",
-            model="Inverter Charge Night",
-        )
+        super().__init__(coordinator, entry, "calculated_soc")
 
     @property
     def native_value(self) -> float | None:
@@ -71,11 +61,10 @@ class CalculatedSOCSensor(CoordinatorEntity[InverterChargeNightCoordinator], Sen
         }
 
 
-class BestChargePowerSensor(CoordinatorEntity[InverterChargeNightCoordinator], SensorEntity):
+class BestChargePowerSensor(InverterChargeNightEntity, SensorEntity):
     """Sensor for best charge power found by auto efficient charge."""
 
     _attr_translation_key = "best_charge_power"
-    _attr_has_entity_name = True
     _attr_native_unit_of_measurement = "W"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -84,20 +73,12 @@ class BestChargePowerSensor(CoordinatorEntity[InverterChargeNightCoordinator], S
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_best_charge_power"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title or "Inverter Charge Night",
-            manufacturer="Custom Integration",
-            model="Inverter Charge Night",
-        )
+        super().__init__(coordinator, entry, "best_charge_power")
 
     @property
     def native_value(self) -> float | None:
         """Return the best charge power if available."""
-        data = self.coordinator.auto_efficiency_data
+        data = self.coordinator.get_auto_efficiency_data()
         best_power = data.get("best_power_w")
         if isinstance(best_power, int):
             return float(best_power)

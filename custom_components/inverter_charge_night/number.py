@@ -8,11 +8,10 @@ from homeassistant.const import EntityCategory
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import InverterChargeNightCoordinator
+from .entity import InverterChargeNightEntity
 from .const import (
     CONF_USER_MIN_SOC,
     CONF_USER_MAX_SOC,
@@ -32,11 +31,10 @@ async def async_setup_entry(
     async_add_entities([MinSOCOverrideNumber(coordinator, entry)])
 
 
-class MinSOCOverrideNumber(CoordinatorEntity[InverterChargeNightCoordinator], NumberEntity):
+class MinSOCOverrideNumber(InverterChargeNightEntity, NumberEntity):
     """Number entity for manual SOC override."""
 
     _attr_translation_key = "min_soc_override"
-    _attr_has_entity_name = True
     _attr_native_min_value = 0.0
     _attr_native_max_value = 100.0
     _attr_native_step = 1
@@ -47,15 +45,7 @@ class MinSOCOverrideNumber(CoordinatorEntity[InverterChargeNightCoordinator], Nu
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the number entity."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_min_soc_override"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title or "Inverter Charge Night",
-            manufacturer="Custom Integration",
-            model="Inverter Charge Night",
-        )
+        super().__init__(coordinator, entry, "min_soc_override")
         self._override_value: float | None = None
 
     @property

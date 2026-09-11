@@ -270,9 +270,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _parse_forecast_energy(self, entity_id: str | None) -> tuple[float, bool]:
         """Parse forecast energy from an entity, handling multiple Solcast formats.
 
-        Mirrors the original inline parsing logic with these improvements:
-        - Per-item exception handling for Solcast forecast lists
-        - unit_of_measurement check before falling back to value-based heuristic
+        The entity state is used when available: unit_of_measurement decides
+        Wh/kWh/MWh, an unsupported unit marks the forecast unavailable, and
+        without a unit values above 1000 are assumed to be Wh. When the state
+        is unknown/unavailable the Solcast ``forecast``, ``today_forecast`` and
+        ``forecast_today`` attributes are tried in that order.
 
         Returns:
             Tuple of (forecast_energy_kwh, forecast_available).
@@ -291,13 +293,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 value = float(state.state)
                 # Use unit_of_measurement to decide Wh vs kWh when available;
                 # fall back to original heuristic (threshold 1000) when unit is absent
-                unit = str(state.attributes.get("unit_of_measurement", "")).lower()
+                unit_attr = state.attributes.get("unit_of_measurement")
+                unit = unit_attr.strip().lower() if isinstance(unit_attr, str) else ""
                 if unit in ("wh", "watthour", "watthours"):
                     energy = value / 1000.0
                 elif unit in ("kwh", "kilowatthour", "kilowatthours"):
                     energy = value
+                elif unit in ("mwh", "megawatthour", "megawatthours"):
+                    energy = value * 1000.0
+                elif unit:
+                    # Not an energy unit we understand (e.g. W, kW): do not guess,
+                    # report the forecast as unavailable so the safe fallback applies
+                    _LOGGER.warning(
+                        "Forecast entity %s reports unsupported unit_of_measurement '%s'; "
+                        "treating forecast as unavailable",
+                        entity_id,
+                        unit_attr,
+                    )
+                    return 0.0, False
                 elif value > 1000:
-                    # Original heuristic preserved: values above 1000 assumed to be Wh
+                    # No unit available: values above 1000 are assumed to be Wh
                     energy = value / 1000.0
                 else:
                     energy = value
@@ -315,13 +330,27 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             forecast_data = state.attributes.get("forecast", [])
             if forecast_data:
                 total = 0.0
+                parsed_items = 0
+                skipped_items = 0
                 for item in forecast_data:
                     if not isinstance(item, dict):
+                        skipped_items += 1
                         continue
                     try:
                         total += float(item.get("wh", item.get("pv_power_forecast", 0)) or 0) / 1000.0
+                        parsed_items += 1
                     except (ValueError, TypeError):
-                        continue  # Skip malformed items instead of crashing
+                        skipped_items += 1  # Skip malformed items instead of crashing
+                if skipped_items:
+                    _LOGGER.warning(
+                        "Skipped %d malformed item(s) in forecast attribute of %s",
+                        skipped_items,
+                        entity_id,
+                    )
+                if parsed_items == 0:
+                    # Nothing usable: report unavailable so the safe fallback applies
+                    # instead of treating the forecast as a legitimate 0 kWh
+                    return 0.0, False
                 return max(0.0, total), True
         elif "today_forecast" in state.attributes:
             try:
@@ -528,12 +557,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         finally:
             self._original_absolute_charge_power = None
 
-    @property
-    def auto_efficiency_data(self) -> dict[str, Any]:
-        """Return persisted auto efficiency data (public access for sensors)."""
-        return self._get_auto_efficiency_data()
-
-    def _get_auto_efficiency_data(self) -> dict[str, Any]:
+    def get_auto_efficiency_data(self) -> dict[str, Any]:
         """Load persisted auto efficiency data from entry options."""
         data = dict(self.entry.options.get(CONF_AUTO_EFFICIENCY_DATA, {}))
         data.setdefault("history", {})
@@ -557,7 +581,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
 
         step_w = 100  # 0.1 kW precision
-        data = self._get_auto_efficiency_data()
+        data = self.get_auto_efficiency_data()
         history = {int(k): v for k, v in data.get("history", {}).items()}
         range_min = int(data.get("range_min_w", min_w))
         range_max = int(data.get("range_max_w", max_w))
@@ -642,7 +666,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         loss = 1.0 - (self._auto_energy_received_wh / self._auto_energy_sent_wh)
         loss = max(0.0, min(loss, 1.0))
 
-        data = self._get_auto_efficiency_data()
+        data = self.get_auto_efficiency_data()
         history = dict(data.get("history", {}))
         history[str(self._auto_test_power_w)] = loss
         data["history"] = history
@@ -706,7 +730,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         candidate = self._select_next_auto_test_power_w()
         if candidate is None:
-            data = self._get_auto_efficiency_data()
+            data = self.get_auto_efficiency_data()
             best_power = data.get("best_power_w")
             if isinstance(best_power, int):
                 await self._set_ac_charge_limit_w(best_power)
@@ -731,58 +755,74 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return start_time <= check_time <= end_time
         return check_time >= start_time or check_time <= end_time
 
-    def setup_time_triggers(self) -> None:
-        """Set up time-based triggers for window start/end."""
+    def setup_time_triggers(self, *, check_window: bool = True) -> None:
+        """Set up time-based triggers for window start/end.
+
+        When ``check_window`` is True (the default) a task is scheduled that
+        evaluates whether the window is currently active. Callers that schedule
+        that check themselves pass False so it does not run twice.
+        """
         # Clear any existing triggers
         self.remove_time_triggers()
-        
+
         # Get and validate times
         start_time_str = str(self.config.get(CONF_START_TIME, DEFAULT_START_TIME))
         end_time_str = str(self.config.get(CONF_END_TIME, DEFAULT_END_TIME))
-        
+
         try:
             # Parse and validate times
             start_hour, start_minute = self._parse_time(start_time_str, DEFAULT_START_TIME)
             end_hour, end_minute = self._parse_time(end_time_str, DEFAULT_END_TIME)
-            
-            # Create time objects for comparison
-            # Log the active window
-            _LOGGER.info(
-                "Setting up charge window: %02d:%02d - %02d:%02d",
-                start_hour,
-                start_minute,
-                end_hour,
-                end_minute,
-            )
-            
-            # Trigger at start time
-            self._time_triggers.append(
-                async_track_time_change(
-                    self.hass,
-                    self._on_window_start,
-                    hour=start_hour,
-                    minute=start_minute,
-                    second=0,
+
+            if (start_hour, start_minute) == (end_hour, end_minute):
+                # The config flow rejects equal times, but entries created before
+                # that validation existed (or an invalid time falling back to its
+                # default) can still produce them. Registering triggers would start
+                # and end the window in the same minute, so skip them and say why.
+                _LOGGER.warning(
+                    "Start time and end time are both %02d:%02d; the charge window will "
+                    "never activate. Set different times in the integration options.",
+                    start_hour,
+                    start_minute,
                 )
-            )
-            
-            # Trigger at end time
-            self._time_triggers.append(
-                async_track_time_change(
-                    self.hass,
-                    self._on_window_end,
-                    hour=end_hour,
-                    minute=end_minute,
-                    second=0,
+            else:
+                _LOGGER.info(
+                    "Setting up charge window: %02d:%02d - %02d:%02d",
+                    start_hour,
+                    start_minute,
+                    end_hour,
+                    end_minute,
                 )
-            )
-            
-            # Check if we're already in the active window
-            self.hass.async_create_task(
-                self._check_current_window(),
-                name="inverter_charge_night_check_window_setup",
-            )
-            
+
+                # Trigger at start time
+                self._time_triggers.append(
+                    async_track_time_change(
+                        self.hass,
+                        self._on_window_start,
+                        hour=start_hour,
+                        minute=start_minute,
+                        second=0,
+                    )
+                )
+
+                # Trigger at end time
+                self._time_triggers.append(
+                    async_track_time_change(
+                        self.hass,
+                        self._on_window_end,
+                        hour=end_hour,
+                        minute=end_minute,
+                        second=0,
+                    )
+                )
+
+            if check_window:
+                # Check if we're already in the active window
+                self.hass.async_create_task(
+                    self._check_current_window(),
+                    name="inverter_charge_night_check_window_setup",
+                )
+
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.error("Failed to set up time triggers: %s", err, exc_info=True)
             self.remove_time_triggers()  # Clean up any partial setup
@@ -808,8 +848,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.entry.data != self.config:
             self.config = self.entry.data
         
-        # Set up new triggers with updated times
-        self.setup_time_triggers()
+        # Set up new triggers with updated times. The window check is scheduled
+        # below, so tell setup_time_triggers not to schedule its own.
+        self.setup_time_triggers(check_window=False)
         
         # If battery SOC entity changed and we're active, update the listener
         new_battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
@@ -1189,8 +1230,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._on_window_end(dt_util.now())
             return inactive_data
         
-        # Get forecast data (uses today's forecast for discharge, tomorrow's for charge)
-        pv_forecast_entity = self._get_active_forecast_entity()
         try:
             battery_capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
             error_margin = float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0))
@@ -1200,16 +1239,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Error parsing configuration values: %s", e)
             return inactive_data
         
-        forecast_energy, forecast_available = self._parse_forecast_energy(pv_forecast_entity)
-
         # Use initial SOC calculated at window start, or recalculate if initial failed
         calculated_soc: float | None
         if self.initial_calculated_soc is not None:
             calculated_soc = self.initial_calculated_soc
             _LOGGER.debug("Using stored initial SOC: %.1f%%", calculated_soc)
         else:
-            # Fallback: recalculate if initial calculation failed
+            # Fallback: recalculate if initial calculation failed. The forecast is
+            # only read here so the normal path does not parse it on every poll.
             _LOGGER.warning("Initial SOC not available, recalculating as fallback")
+            # Uses today's forecast for discharge, tomorrow's for charge
+            pv_forecast_entity = self._get_active_forecast_entity()
+            forecast_energy, forecast_available = self._parse_forecast_energy(pv_forecast_entity)
             calculated_soc = calculate_required_soc(
                 forecast_energy,
                 battery_capacity,
