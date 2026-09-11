@@ -61,4 +61,5 @@ ATTR_TARGET_SOC = "target_soc"
 ATTR_CURRENT_SOC = "current_soc"
 ATTR_OPERATION_MODE = "operation_mode"
 ATTR_SKIP_NEXT = "skip_next"
+ATTR_SNOW_NIGHTS = "snow_nights"  # nights left in snow mode (charge to user max)
 

@@ -29,7 +29,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up the number platform."""
     coordinator = entry.runtime_data
-    async_add_entities([MinSOCOverrideNumber(coordinator, entry)])
+    async_add_entities([MinSOCOverrideNumber(coordinator, entry), SnowNightsNumber(coordinator, entry)])
 
 
 class MinSOCOverrideNumber(InverterChargeNightEntity, NumberEntity):
@@ -94,4 +94,44 @@ class MinSOCOverrideNumber(InverterChargeNightEntity, NumberEntity):
             # The refresh applies the override through the mode-correct control
             # path (charge or discharge); calling the charge path here directly
             # would switch grid charging on even in discharge mode.
+            await self.coordinator.async_request_refresh()
+
+
+class SnowNightsNumber(InverterChargeNightEntity, NumberEntity):
+    """Number of upcoming nights that charge to the user maximum (snow on the modules).
+
+    Snow mode overrides the forecast and the manual override; the coordinator
+    counts the value down at every window end.
+    """
+
+    _attr_translation_key = "snow_nights"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 14
+    _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
+    _attr_icon = "mdi:snowflake"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the number entity."""
+        super().__init__(coordinator, entry, "snow_nights")
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of snow nights left."""
+        return self.coordinator.snow_nights
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set the number of snow nights and apply it to a running window at once."""
+        nights = max(0, int(value))
+        _LOGGER.info("Snow nights set to %d", nights)
+        self.coordinator.snow_nights = nights
+        if nights > 0:
+            # The target moved up: let the update loop charge again
+            self.coordinator.target_reached = False
+        self.coordinator._persist_state()
+        self.async_write_ha_state()
+
+        if self.coordinator.is_active and self.coordinator.is_enabled:
+            # The refresh applies the new target through the mode-correct control path
             await self.coordinator.async_request_refresh()

@@ -51,6 +51,7 @@ from .const import (
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
     DEFAULT_END_TIME,
+    DEFAULT_MAX_SOC,
     DEFAULT_OPERATION_MODE,
     DEFAULT_SAFE_FALLBACK_SOC,
     DEFAULT_START_TIME,
@@ -261,6 +262,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._time_triggers: list[CALLBACK_TYPE] = []
         self._last_soc_set: float | None = None
         self.override_soc: float | None = None
+        # Snow on the modules: the next N windows charge to the user maximum,
+        # ignoring the forecast. Counts down at every window end.
+        self.snow_nights: int = 0
         self._original_absolute_charge_power: float | None = None
         self._original_ac_charge_power: float | None = None  # W, captured before the finder's first write
         self._pending_reset = False  # window ended but the inverter is not back at its original settings
@@ -300,6 +304,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "initial_calculated_soc": self.initial_calculated_soc if self.is_active else None,
             "original_ac_charge_power": self._original_ac_charge_power,
             "pending_reset": self._pending_reset,
+            "snow_nights": self.snow_nights,
         }
         self.hass.config_entries.async_update_entry(self.entry, options=options)
 
@@ -316,6 +321,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.initial_calculated_soc = _as_float(state.get("initial_calculated_soc"))
         self._original_ac_charge_power = _as_float(state.get("original_ac_charge_power"))
         self._pending_reset = state.get("pending_reset") is True
+        snow_raw = state.get("snow_nights")
+        if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
+            self.snow_nights = snow_raw
 
         until_raw = state.get("skip_next_until")
         if isinstance(until_raw, str):
@@ -335,7 +343,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("Restored runtime state: %s", state)
 
     def current_target_soc(self) -> float | None:
-        """The SOC the inverter should hold right now: manual override, else the plan."""
+        """The SOC the inverter should hold right now: snow mode, else manual override, else the plan."""
+        if self.snow_nights > 0:
+            user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC))
+            if self.override_soc is not None and self.override_soc != user_max_soc:
+                _LOGGER.debug(
+                    "Snow mode: ignoring manual override %.1f%%, charging to %.0f%%",
+                    self.override_soc,
+                    user_max_soc,
+                )
+            return user_max_soc
         if self.override_soc is not None:
             return self.override_soc
         return self.initial_calculated_soc if self.initial_calculated_soc is not None else self.calculated_soc
@@ -1109,6 +1126,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _calculate_initial_soc(self) -> None:
         """Calculate and store the initial SOC for this charging period."""
+        if self.snow_nights > 0:
+            # Snow on the modules: the forecast is wrong by definition, so it
+            # is not read. Charge to the user maximum for this window.
+            user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC))
+            self.initial_calculated_soc = user_max_soc
+            self.minimum_calculated_soc = user_max_soc
+            self.calculated_soc = user_max_soc
+            _LOGGER.info(
+                "Snow mode: charging to %.0f%% (%d night(s) remaining)", user_max_soc, self.snow_nights
+            )
+            self._persist_state()
+            return
         try:
             # Get configuration values
             battery_capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
@@ -1215,6 +1244,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._reset_retry_count = 0
                 self._schedule_reset_retry()
             self._persist_state()
+            if self.snow_nights > 0:
+                self.snow_nights -= 1
+                _LOGGER.info("Snow mode: %d night(s) remaining", self.snow_nights)
+                self._persist_state()
             await self.async_request_refresh()
 
     def _schedule_reset_retry(self) -> None:
