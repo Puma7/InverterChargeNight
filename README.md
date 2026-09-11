@@ -97,7 +97,7 @@ Evidence:
 2. **Add this repository to HACS**:
    - Go to **HACS** → **Integrations**
    - Click the three dots menu (⋮) → **Custom repositories**
-   - Add repository URL: `https://github.com/yourusername/inverter-charge-night`
+   - Add repository URL: `https://github.com/Puma7/InverterChargeNight`
    - Category: **Integration**
    - Click **Add**
 
@@ -454,7 +454,7 @@ The integration updates every **15 minutes** (900 seconds) by default. This is d
 
 For issues, questions, or contributions:
 
-- **GitHub Issues**: [Create an issue](https://github.com/yourusername/inverter-charge-night/issues)
+- **GitHub Issues**: [Create an issue](https://github.com/Puma7/InverterChargeNight/issues)
 - **Home Assistant Community**: [Forum Discussion](https://community.home-assistant.io/)
 
 ## License
