@@ -1,7 +1,4 @@
-[run]
-omit =
-    custom_components/inverter_charge_night/__init__.py
-    custom_components/inverter_charge_night/config_flow.py
-
 [report]
-fail_under = 100
+# Ratchet: measured total over the whole package (no omit), rounded down.
+# May only go up - whoever adds tests raises it. See AGENTS.md "Running tests".
+fail_under = 85

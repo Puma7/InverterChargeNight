@@ -24,10 +24,9 @@ def _make_coordinator(hass, data):
 
 
 @pytest.mark.asyncio
-async def test_stop_grid_charging_when_off(mock_hass):
-    grid_state = MagicMock()
-    grid_state.state = "off"
-    mock_hass.states.get.return_value = grid_state
+async def test_stop_grid_charging_when_off(mock_hass, caplog):
+    caplog.set_level("DEBUG")
+    mock_hass.states.async_set("switch.grid", "off")
     mock_hass.services.async_call = AsyncMock()
     coordinator = _make_coordinator(
         mock_hass, {CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid"}
@@ -37,12 +36,15 @@ async def test_stop_grid_charging_when_off(mock_hass):
 
     await coordinator._stop_grid_charging()
 
-    assert not mock_hass.services.async_call.called
+    assert "Grid charge already off" in caplog.text
+    mock_hass.services.async_call.assert_not_awaited()
+    coordinator._reset_absolute_charge_power.assert_awaited_once()
+    coordinator._finalize_auto_test.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_stop_grid_charging_state_unavailable(mock_hass):
-    mock_hass.states.get.return_value = None
+async def test_stop_grid_charging_state_unavailable(mock_hass, caplog):
+    # The strict hass returns None for the unregistered switch.grid
     mock_hass.services.async_call = AsyncMock()
     coordinator = _make_coordinator(
         mock_hass, {CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid"}
@@ -52,7 +54,9 @@ async def test_stop_grid_charging_state_unavailable(mock_hass):
 
     await coordinator._stop_grid_charging()
 
-    assert not mock_hass.services.async_call.called
+    assert "Cannot stop grid charge - entity state unavailable" in caplog.text
+    mock_hass.services.async_call.assert_not_awaited()
+    coordinator._reset_absolute_charge_power.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -86,14 +90,17 @@ async def test_control_kostal_min_soc_already_set(mock_hass):
 
     await coordinator._control_kostal(50.0)
 
-    assert not mock_hass.services.async_call.called
+    # Inverter already at 50 % and the switch already on: nothing to send, but the
+    # coordinator records the value as set and captures the original min SOC.
+    mock_hass.services.async_call.assert_not_awaited()
+    assert coordinator._last_soc_set == 50.0
+    # 50 % is more than 10 points above the 8 % default, so the default is stored
+    assert coordinator.original_min_soc == 8.0
 
 
 @pytest.mark.asyncio
 async def test_control_kostal_stores_default_when_min_soc_unavailable(mock_hass):
-    min_soc_state = MagicMock()
-    min_soc_state.state = "unavailable"
-    mock_hass.states.get.return_value = min_soc_state
+    mock_hass.states.async_set("number.min_soc", "unavailable")
     mock_hass.services.async_call = AsyncMock()
 
     coordinator = _make_coordinator(

@@ -23,10 +23,7 @@ def _make_coordinator(hass: HomeAssistant, data: dict, options: dict | None = No
 
 
 def test_get_power_w_converts_kw(mock_hass: HomeAssistant):
-    state = MagicMock()
-    state.state = "2.5"
-    state.attributes = {"unit_of_measurement": "kW"}
-    mock_hass.states.get.return_value = state
+    mock_hass.states.async_set("sensor.power", "2.5", {"unit_of_measurement": "kW"})
 
     coordinator = _make_coordinator(mock_hass, {CONF_MIN_CHARGE_POWER_W: 1000, CONF_MAX_CHARGE_POWER_W: 2000})
     assert coordinator._get_power_w("sensor.power") == 2500.0
@@ -49,10 +46,7 @@ def test_select_next_auto_test_power_within_range(mock_hass: HomeAssistant):
 @pytest.mark.asyncio
 async def test_apply_absolute_charge_power_limit_converts_units(mock_hass: HomeAssistant):
     mock_hass.services.async_call = AsyncMock()
-    state = MagicMock()
-    state.state = "12.0"
-    state.attributes = {"unit_of_measurement": "kW"}
-    mock_hass.states.get.return_value = state
+    mock_hass.states.async_set("number.abs_max", "12.0", {"unit_of_measurement": "kW"})
 
     coordinator = _make_coordinator(
         mock_hass,
@@ -76,10 +70,7 @@ async def test_apply_absolute_charge_power_limit_converts_units(mock_hass: HomeA
 @pytest.mark.asyncio
 async def test_reset_absolute_charge_power_restores_original(mock_hass: HomeAssistant):
     mock_hass.services.async_call = AsyncMock()
-    state = MagicMock()
-    state.state = "12.0"
-    state.attributes = {"unit_of_measurement": "kW"}
-    mock_hass.states.get.return_value = state
+    mock_hass.states.async_set("number.abs_max", "12.0", {"unit_of_measurement": "kW"})
 
     coordinator = _make_coordinator(
         mock_hass,

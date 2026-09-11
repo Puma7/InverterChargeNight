@@ -25,18 +25,20 @@ def _make_coordinator(hass, data):
 
 
 @pytest.mark.asyncio
-async def test_control_kostal_skips_on_backup(mock_hass):
+async def test_control_kostal_skips_on_backup(mock_hass, caplog):
+    caplog.set_level("INFO")
     coordinator = _make_coordinator(mock_hass, {})
     coordinator._is_backup_active = MagicMock(return_value=True)
     mock_hass.services.async_call = AsyncMock()
 
     await coordinator._control_kostal(50.0)
 
-    assert not mock_hass.services.async_call.called
+    assert "Backup mode active - skipping Kostal control" in caplog.text
+    mock_hass.services.async_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_control_kostal_invalid_target(mock_hass):
+async def test_control_kostal_invalid_target(mock_hass, caplog):
     coordinator = _make_coordinator(
         mock_hass, {CONF_USER_MIN_SOC: 10.0, CONF_USER_MAX_SOC: 90.0}
     )
@@ -45,7 +47,8 @@ async def test_control_kostal_invalid_target(mock_hass):
 
     await coordinator._control_kostal(5.0)
 
-    assert not mock_hass.services.async_call.called
+    assert "Target SOC 5.0% is outside allowed range [10.0%, 90.0%]" in caplog.text
+    mock_hass.services.async_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -90,9 +93,7 @@ async def test_control_kostal_sets_min_and_grid(mock_hass):
 
 @pytest.mark.asyncio
 async def test_stop_grid_charging_turns_off_and_resets(mock_hass):
-    grid_state = MagicMock()
-    grid_state.state = "on"
-    mock_hass.states.get.return_value = grid_state
+    mock_hass.states.async_set("switch.grid", "on")
     mock_hass.services.async_call = AsyncMock()
 
     coordinator = _make_coordinator(
@@ -103,6 +104,8 @@ async def test_stop_grid_charging_turns_off_and_resets(mock_hass):
 
     await coordinator._stop_grid_charging()
 
-    mock_hass.services.async_call.assert_awaited()
+    mock_hass.services.async_call.assert_awaited_once_with(
+        "switch", "turn_off", {"entity_id": "switch.grid"}
+    )
     coordinator._reset_absolute_charge_power.assert_awaited()
     coordinator._finalize_auto_test.assert_called_once()

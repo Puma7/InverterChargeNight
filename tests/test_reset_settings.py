@@ -52,11 +52,14 @@ async def test_reset_settings_sets_min_soc_and_turns_off_grid(mock_hass):
 
 
 @pytest.mark.asyncio
-async def test_reset_settings_warns_without_entities(mock_hass):
+async def test_reset_settings_warns_without_entities(mock_hass, caplog):
     mock_hass.services.async_call = AsyncMock()
     coordinator = _make_coordinator(mock_hass, {CONF_DEFAULT_MIN_SOC: 8.0})
     coordinator._reset_absolute_charge_power = AsyncMock()
 
     await coordinator._reset_settings()
 
-    assert not mock_hass.services.async_call.called
+    assert "No min SOC entity configured - cannot reset" in caplog.text
+    assert "No grid charge switch configured - cannot reset" in caplog.text
+    mock_hass.services.async_call.assert_not_awaited()
+    coordinator._reset_absolute_charge_power.assert_awaited_once()
