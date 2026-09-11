@@ -86,7 +86,8 @@ class MinSOCOverrideNumber(InverterChargeNightEntity, NumberEntity):
         
         if self.coordinator.minimum_calculated_soc is None or value < self.coordinator.minimum_calculated_soc:
             self.coordinator.minimum_calculated_soc = value
-        
+
+        self.coordinator._persist_state()
         self.async_write_ha_state()
         
         if self.coordinator.is_active and self.coordinator.is_enabled:
