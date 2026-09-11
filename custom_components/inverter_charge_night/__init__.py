@@ -1316,7 +1316,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if state and state.state not in ("unknown", "unavailable"):
                 try:
                     current_soc = float(state.state)
-                    check_target = self.minimum_calculated_soc if self.minimum_calculated_soc is not None else target_soc
+                    # minimum_calculated_soc is always assigned above in this method, so pyright
+                    # narrows it to float and flags the None check as unnecessary. The check is
+                    # kept as a defensive guard; plan 004 reworks this target logic.
+                    check_target = self.minimum_calculated_soc if self.minimum_calculated_soc is not None else target_soc  # pyright: ignore[reportUnnecessaryComparison]
                     if self._is_target_reached(current_soc, check_target):
                         if not self.target_reached:
                             _LOGGER.info(

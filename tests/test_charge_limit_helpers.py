@@ -21,7 +21,7 @@ def _make_coordinator(hass, data):
 
 
 @pytest.mark.asyncio
-async def test_set_ac_charge_limit_unsupported_domain(mock_hass):
+async def test_set_ac_charge_limit_unsupported_domain(mock_hass, caplog):
     coordinator = _make_coordinator(
         mock_hass, {CONF_CHARGE_POWER_ENTITY: "sensor.power"}
     )
@@ -29,15 +29,13 @@ async def test_set_ac_charge_limit_unsupported_domain(mock_hass):
 
     await coordinator._set_ac_charge_limit_w(5000)
 
-    assert not mock_hass.services.async_call.called
+    assert "sensor.power has unsupported domain sensor" in caplog.text
+    mock_hass.services.async_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_set_ac_charge_limit_kw_unit(mock_hass):
-    state = MagicMock()
-    state.state = "10"
-    state.attributes = {"unit_of_measurement": "kW"}
-    mock_hass.states.get.return_value = state
+    mock_hass.states.async_set("number.charge_limit", "10", {"unit_of_measurement": "kW"})
     mock_hass.services.async_call = AsyncMock()
 
     coordinator = _make_coordinator(
@@ -54,7 +52,7 @@ async def test_set_ac_charge_limit_kw_unit(mock_hass):
 
 
 @pytest.mark.asyncio
-async def test_apply_absolute_charge_power_limit_invalid_domain(mock_hass):
+async def test_apply_absolute_charge_power_limit_invalid_domain(mock_hass, caplog):
     coordinator = _make_coordinator(
         mock_hass,
         {
@@ -66,4 +64,5 @@ async def test_apply_absolute_charge_power_limit_invalid_domain(mock_hass):
 
     await coordinator._apply_absolute_charge_power_limit()
 
-    assert not mock_hass.services.async_call.called
+    assert "sensor.abs_max has unsupported domain sensor" in caplog.text
+    mock_hass.services.async_call.assert_not_awaited()

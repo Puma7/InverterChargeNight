@@ -67,10 +67,7 @@ def test_is_within_date_range_false(mock_hass):
 
 
 def test_is_backup_active(mock_hass):
-    state = MagicMock()
-    state.state = "on"
-    state.attributes = {}
-    mock_hass.states.get.return_value = state
+    mock_hass.states.async_set("binary_sensor.backup_mode", "on")
 
     coordinator = _make_coordinator(
         mock_hass,
@@ -141,9 +138,7 @@ def test_finalize_auto_test_discards_short_duration(mock_hass):
 
 @pytest.mark.asyncio
 async def test_handle_auto_charge_uses_best_power_and_disables(mock_hass):
-    grid_state = MagicMock()
-    grid_state.state = "on"
-    mock_hass.states.get.return_value = grid_state
+    mock_hass.states.async_set("switch.grid", "on")
     mock_hass.config_entries.async_update_entry = MagicMock()
 
     coordinator = _make_coordinator(
@@ -199,16 +194,14 @@ async def test_handle_auto_charge_missing_entities_no_action(mock_hass):
     )
     coordinator.auto_efficient_charge = True
     await coordinator._handle_auto_charge()
-    assert not mock_hass.services.async_call.called
+    assert coordinator._auto_missing_entities_logged is True
+    mock_hass.services.async_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_handle_auto_charge_grid_off_finalizes_test(mock_hass):
     mock_hass.services.async_call = AsyncMock()
-
-    grid_state = MagicMock()
-    grid_state.state = "off"
-    mock_hass.states.get.return_value = grid_state
+    mock_hass.states.async_set("switch.grid", "off")
 
     coordinator = _make_coordinator(
         mock_hass,
@@ -256,9 +249,7 @@ async def test_calculate_initial_soc_preserves_inverter_value(mock_hass):
 
 @pytest.mark.asyncio
 async def test_calculate_initial_soc_uses_safe_fallback_when_forecast_unavailable(mock_hass):
-    pv_state = MagicMock()
-    pv_state.state = "unavailable"
-    mock_hass.states.get.return_value = pv_state
+    mock_hass.states.async_set("sensor.pv", "unavailable")
 
     coordinator = _make_coordinator(
         mock_hass,
