@@ -23,14 +23,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `discharge_block` attributes on `calculated_soc`.
 - **Snow override** - `number.inverter_charge_night_snow_nights` charges the next N nights to the
   maximum SOC, for when snow on the modules makes the PV forecast wrong.
+- **Efficiency search sensor** (`sensor.…_efficiency_search`) - what the search is doing, the
+  whole series of measured losses, the search range, and why the last measurement was discarded.
+- **Optional energy meters for the efficiency search** (`charge_energy_sent_entity`,
+  `charge_energy_received_entity`) - two kWh meters measure the charging loss exactly.
 - **Planner v2** (bridge mode): the target SOC bridges from the window end until PV covers the
   house load, and leaves headroom for the next day's forecast.
 - Config wizard with explanations and a reconfigure flow, repair issues on a broken setup, state
   that survives a restart, and a CI matrix testing the minimum and the current Home Assistant
   plus an end-to-end test against a real HA core.
 
+- **German translation** (`translations/de.json`) — the wizard, every field description, the
+  entity names and the error messages, checked against `strings.json` by a test so it cannot
+  fall behind.
+
 ### Changed
 
+- **The efficiency search now measures what it claims to measure.** It waits out the ramp to a
+  new setpoint, integrates the charge power between sensor readings instead of once per poll,
+  and can use two kWh meters instead of the power sensors. A measurement is only recorded when
+  the inverter really charged at the power under test, long enough, with enough energy, and
+  with a loss a charger can physically have — a loss at or below zero used to be clamped to
+  zero, which made a pair of sensors on the same side of the charger win the search for good.
+  It also takes several measurements per window instead of one per night, so the search
+  usually finishes inside a single window.
+- **Entity names.** The operation mode select and the skip switch had no translated name, so
+  Home Assistant showed them — next to the main switch — as three entries all called "Inverter
+  Charge Night". They are now Automation, Efficiency search, Skip the next window, Target SOC
+  override, Window active and Target SOC.
 - The efficiency finder is subordinate to the house connection limit: it does not start a test
   the connection cannot carry, and a running test is abandoned when the house load rises.
 - The min SOC written to the inverter and the charge target are now two separate values. With

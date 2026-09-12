@@ -547,6 +547,27 @@ def test_translations_are_a_copy_of_strings():
     assert _load("translations/en.json") == _load("strings.json")
 
 
+def _string_paths(value, prefix=""):
+    """Every leaf of a translation file, by path."""
+    if isinstance(value, dict):
+        paths = set()
+        for key, child in value.items():
+            paths |= _string_paths(child, f"{prefix}/{key}")
+        return paths
+    return {prefix}
+
+
+def test_the_german_translation_covers_every_string():
+    """A half-translated file shows English and German side by side.
+
+    Home Assistant falls back per string, not per file, so a missing key is
+    not a visible error - it just leaves that one label in English.
+    """
+    english = _string_paths(_load("strings.json"))
+    german = _string_paths(_load("translations/de.json"))
+    assert german == english
+
+
 def test_every_step_labels_exactly_its_fields():
     strings = _load("strings.json")
     for (section, step_id), schema_name in STEP_SCHEMAS.items():

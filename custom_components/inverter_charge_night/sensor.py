@@ -11,7 +11,16 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 from .entity import InverterChargeNightEntity
-from .const import ATTR_DISCHARGE_BLOCK, ATTR_INVERTER_FLOOR_SOC, ATTR_SNOW_NIGHTS
+from .const import (
+    ATTR_DISCHARGE_BLOCK,
+    ATTR_INVERTER_FLOOR_SOC,
+    ATTR_SNOW_NIGHTS,
+    AUTO_TEST_STATE_FINISHED,
+    AUTO_TEST_STATE_IDLE,
+    AUTO_TEST_STATE_MEASURING,
+    AUTO_TEST_STATE_SETTLING,
+    AUTO_TEST_STATE_WAITING,
+)
 
 PARALLEL_UPDATES = 0
 
@@ -29,6 +38,7 @@ async def async_setup_entry(
             BestChargePowerSensor(coordinator, entry),
             PlannedChargePowerSensor(coordinator, entry),
             GridChargeHeadroomSensor(coordinator, entry),
+            EfficiencySearchSensor(coordinator, entry),
         ]
     )
 
@@ -147,3 +157,37 @@ class GridChargeHeadroomSensor(InverterChargeNightEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Show whether the house connection limit is currently braking."""
         return self.coordinator.grid_limit_attributes()
+
+
+class EfficiencySearchSensor(InverterChargeNightEntity, SensorEntity):
+    """What the efficiency search is doing, and what it has found so far.
+
+    The search takes one measurement per night and needs several nights, so
+    without this sensor there is no way to tell a search that is working from
+    one that is quietly discarding every sample.
+    """
+
+    _attr_translation_key = "efficiency_search"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_options = [
+        AUTO_TEST_STATE_IDLE,
+        AUTO_TEST_STATE_WAITING,
+        AUTO_TEST_STATE_SETTLING,
+        AUTO_TEST_STATE_MEASURING,
+        AUTO_TEST_STATE_FINISHED,
+    ]
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "efficiency_search")
+
+    @property
+    def native_value(self) -> str:
+        """Return the state of the search."""
+        return str(self.coordinator.auto_test_state)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the measurements, the search range and the last result."""
+        return self.coordinator.auto_test_attributes()

@@ -34,6 +34,8 @@ from .const import (
     CONF_BRIDGE_RESERVE_KWH,
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_ENTITY,
+    CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
+    CONF_CHARGE_ENERGY_SENT_ENTITY,
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
     CONF_COMMAND_DELAY,
@@ -133,6 +135,8 @@ STEP_POWER_KEYS: tuple[str, ...] = (
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
+    CONF_CHARGE_ENERGY_SENT_ENTITY,
+    CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
     CONF_AUTO_EFFICIENT_CHARGE,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_DISCHARGE_LIMIT_ENTITY,
@@ -225,6 +229,8 @@ _ENTITY_KEYS_TO_VALIDATE = [
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
+    CONF_CHARGE_ENERGY_SENT_ENTITY,
+    CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
@@ -286,6 +292,20 @@ def _validate_user_input(
             errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY] = "required_entity"
     elif abs_max_entity:
         errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_W] = "required_value"
+
+    meters = [
+        key
+        for key in (CONF_CHARGE_ENERGY_SENT_ENTITY, CONF_CHARGE_ENERGY_RECEIVED_ENTITY)
+        if user_input.get(key)
+    ]
+    if len(meters) == 1:
+        # One meter alone measures nothing: the loss is the difference of two.
+        missing = (
+            CONF_CHARGE_ENERGY_RECEIVED_ENTITY
+            if meters[0] == CONF_CHARGE_ENERGY_SENT_ENTITY
+            else CONF_CHARGE_ENERGY_SENT_ENTITY
+        )
+        errors[missing] = "required_entity"
 
     if user_input.get(CONF_AUTO_EFFICIENT_CHARGE):
         if not user_input.get(CONF_CHARGE_POWER_ENTITY):
@@ -568,6 +588,12 @@ def _schema_power(defaults: Mapping[str, Any]) -> vol.Schema:
             _optional(
                 CONF_CHARGE_POWER_RECEIVED_ENTITY, defaults.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
             ): _entity_selector("sensor", "power"),
+            _optional(
+                CONF_CHARGE_ENERGY_SENT_ENTITY, defaults.get(CONF_CHARGE_ENERGY_SENT_ENTITY)
+            ): _entity_selector("sensor", "energy"),
+            _optional(
+                CONF_CHARGE_ENERGY_RECEIVED_ENTITY, defaults.get(CONF_CHARGE_ENERGY_RECEIVED_ENTITY)
+            ): _entity_selector("sensor", "energy"),
             vol.Required(
                 CONF_AUTO_EFFICIENT_CHARGE,
                 default=bool(defaults.get(CONF_AUTO_EFFICIENT_CHARGE, False)),

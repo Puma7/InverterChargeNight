@@ -143,6 +143,7 @@ vorliegt; bis dahin bleibt der Kostal-Pfad, aber ohne Markennamen in Keys und La
 | 007 | Schnee-Override: Zahl-Entität "Schnee-Nächte", lädt die nächsten N Nächte auf das Maximum und zählt herunter | P2 | S | 004, 005 | DONE |
 | 008 | Ladeleistung gegen den Hausanschluss begrenzen (Dauerlast, Sicherungsgröße, Netzbezug) | P1 | M | 006 | DONE |
 | 009 | Entladung im Fenster sperren: Schalter, sonst Leistungsgrenze, sonst Min-SOC anheben | P1 | M | 004, 005, 006 | DONE |
+| 010 | Effizienzsuche messbar machen: Einschwingen, Energiezähler, Annahmekriterien, Sichtbarkeit | P1 | M | 008 | DONE |
 
 Status-Werte: TODO | IN PROGRESS | DONE | BLOCKED (mit Grund) | REJECTED (mit Begründung)
 
@@ -202,12 +203,35 @@ zieht, und hätte genau diese Leistung an Hauslast verdeckt.
 Ein Test fährt beide Funktionen in einem Fenster:
 `tests/test_grid_limit.py::test_the_connection_limit_and_the_discharge_block_run_together`.
 
+### 2.6 Nachtrag 2026-09-12: Effizienzsuche und Benennung der Entitäten
+
+Der Eigentümer fragte, ob die Effizienzsuche überhaupt funktioniert, und meldete drei gleich
+benannte Entitäten in der Konfiguration. Beides bestätigt:
+
+**Effizienzsuche** (Plan 010): Neun Befunde, alle behoben. Der schwerste: der Verlust wurde auf
+[0, 1] geklemmt, also hat eine Fehlkonfiguration mit zwei Sensoren auf derselben Seite des
+Ladegeräts einen Verlust von 0 % ergeben und die Suche dauerhaft gewonnen. Dazu: keine Prüfung,
+ob der Wechselrichter dem Sollwert überhaupt folgte (ein fast voller Speicher drosselt), eine
+starre Mindestdauer von 30 Minuten, an der jede Messung bei hoher Ladeleistung scheitert, und
+eine Integration nur alle 15 Minuten mit dem Momentanwert am Intervallende.
+
+**Benennung**: Auf `develop` fehlen in der `entity`-Sektion der Übersetzungen die Einträge für
+`select.operation_mode` und `switch.skip_next`. Home Assistant fällt dann auf den Gerätenamen
+zurück und zeigt sie beide als „Inverter Charge Night" — zusammen mit dem Hauptschalter, dessen
+übersetzter Name ebenfalls „Inverter Charge Night" lautet. Das sind die drei gleich benannten
+Einträge. In diesem Branch waren die fehlenden Einträge durch Plan 001 schon ergänzt; jetzt sind
+zusätzlich alle Anzeigenamen sprechend (Automatik, Effizienzsuche, Nächstes Fenster überspringen,
+Zielladestand …), und es gibt eine vollständige deutsche Übersetzung (`translations/de.json`,
+383 Zeichenketten, durch einen Test gegen `strings.json` abgesichert).
+
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 
 - **010 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des Config-Entrys, tägliche Neubestimmung.
 - **011 Wechselrichter-Profile** (L8): erst Spike gegen die realen Entitäten der Fronius- und SMA-Integrationen, dann Fähigkeitsschnittstelle; Umbenennung `kostal_*` → `min_soc_entity` / `grid_charge_switch` mit `async_migrate_entry`.
 - **012 Morning-Discharge entscheiden** (L9): entweder als "dynamischer Tarif"-Funktion dokumentieren oder zum Überbrückungsmodus umbauen. Bis dahin mindestens Override-Pfad korrigieren (in 004 enthalten).
 - **013 Preissignal** (L5): Tibber/aWATTar/EPEX-Sensor als Eingang, ersetzt den festen Zeitplan durch Kostenoptimierung.
+- **015 Effizienz je Ladestandsband**: Verluste hängen auch vom SOC ab; die Suche bucht heute nur
+  auf die Leistung. Wer das verfeinern will, misst pro SOC-Band (Plan 010, Wartungshinweise).
 - **014 Doku-Bereinigung**: README auf 2.0 und 28 Felder bringen (Forecast-Entität für MORGEN, nicht heute), Platzhalter-URLs, elf Audit-Dateien im Wurzelverzeichnis nach `docs/history/`, `de.json` anlegen.
 
 ### Abhängigkeiten

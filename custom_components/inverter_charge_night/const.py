@@ -115,3 +115,21 @@ DISCHARGE_BLOCK_VIA_MIN_SOC = "min_soc"
 DEFAULT_DISCHARGE_BLOCK_MODE = DISCHARGE_BLOCK_AUTO
 ATTR_INVERTER_FLOOR_SOC = "inverter_floor_soc"  # what is written to the min SOC entity
 ATTR_DISCHARGE_BLOCK = "discharge_block"  # switch | limit | min_soc | off
+
+# Efficiency finder, measurement rules (plan 010). What the finder looks for is
+# the charge power at which the least energy is lost between the grid and the
+# battery. That only works if every sample really was measured at the power it
+# is filed under, so a sample has to survive all of these:
+CONF_CHARGE_ENERGY_SENT_ENTITY = "charge_energy_sent_entity"  # kWh meter, optional but exact
+CONF_CHARGE_ENERGY_RECEIVED_ENTITY = "charge_energy_received_entity"  # kWh meter, optional
+AUTO_TEST_SETTLE_S = 120  # the ramp to the new setpoint is not part of the measurement
+AUTO_TEST_MIN_DURATION_S = 300  # measured time after settling
+AUTO_TEST_MIN_ENERGY_WH = 300.0  # ... and this much energy, so 20 kW is measurable too
+AUTO_TEST_MIN_FOLLOW_RATIO = 0.8  # the inverter has to draw what it was told to draw
+AUTO_TEST_MAX_PLAUSIBLE_LOSS = 0.5  # above this the sensors are wrong, not the inverter
+AUTO_TEST_MAX_ATTEMPTS = 2  # after this many failures a power counts as unmeasurable
+AUTO_TEST_STATE_IDLE = "idle"
+AUTO_TEST_STATE_MEASURING = "measuring"
+AUTO_TEST_STATE_SETTLING = "settling"
+AUTO_TEST_STATE_FINISHED = "finished"
+AUTO_TEST_STATE_WAITING = "waiting"

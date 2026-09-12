@@ -60,12 +60,25 @@ the Bronze and Silver rules are met and the Gold rules are met except
   the entry -- only an entity that another entry already drives is refused, because two
   controllers would push the same inverter towards opposite targets.
 
+**The integration is switched on but seems to do nothing**
+- It only controls the inverter *inside the time window*. Outside it,
+  `binary_sensor.…_active` is `off` and nothing is written to the inverter — that is the normal
+  state for most of the day.
+- **Active start/end date** (step 4) is empty by default, which means the window runs all year.
+  If your reduced grid fee only applies in certain months (§14a windows often do), enter the
+  date range there; outside it the integration stays out of the way.
+- `sensor.…_calculated_soc` shows the target of the *running* window and its `is_active`
+  attribute says whether one is running at all.
+
 **Battery SOC entity is unavailable**
 - The integration will skip grid charging for safety until the SOC entity is available again.
 
-**Auto Efficient Charge Finder does not run**
-- Ensure the AC limit entity and both power sensors are configured.
-- Each test requires at least 30 minutes of continuous charging to be recorded.
+**The efficiency search finds nothing**
+- The AC charge limit entity and both charge power sensors have to be configured.
+- Look at `sensor.…_efficiency_search`: its `last_result` attribute says why the last
+  measurement was discarded. The usual causes are a battery that is full before a measurement
+  completes, and two sensors that measure the same side of the charger (the loss then comes out
+  at or below zero). See [Efficiency search](#efficiency-search).
 
 **Download diagnostics**
 - Go to **Settings → Devices & Services → Inverter Charge Night → Download diagnostics**.
@@ -194,10 +207,13 @@ To find entities:
      the other is rejected.
    - **Battery Max AC Charge Limit Entity** (optional): The number entity the planned charge
      power and the efficiency finder write to
-   - **Charge Power Sent / Received** (optional): The two power sensors the efficiency finder
-     compares to measure the charging loss
-   - **Auto Efficient Charge Finder**: Enables the search; requires the AC limit entity and both
-     power sensors
+   - **Charge power drawn / arriving in the battery** (optional): The two power sensors the
+     efficiency search compares to measure the charging loss. "Drawn" is the AC side, "arriving"
+     the battery side
+   - **Energy meters drawn / stored** (optional): kWh meters of the same two quantities. They
+     make the measurement exact and are preferred over the power sensors when both are set
+   - **Efficiency search**: Enables the search; requires the AC limit entity and both power
+     sensors. See [Efficiency search](#efficiency-search)
    - **Force Discharge Switch** (optional): Switch that forces discharge to the grid, used by
      `Morning Discharge`
    - **Discharge Power Limit Entity** (optional): Number entity set to 0 at the window start so
@@ -225,62 +241,26 @@ To find entities:
 
 ### Step 3: Verify Installation
 
-After configuration, you should see these ten entities:
+After configuration you should see these twelve entities, all on the device **Inverter Charge
+Night**:
 
-- **`sensor.inverter_charge_night_calculated_soc`** - The target SOC the planner calculated
-  - Unit: `%`
-  - Attributes: `is_active`, `target_reached`, `current_soc`, `operation_mode`, `skip_next`,
-    `snow_nights`, `inverter_floor_soc`, `discharge_block`, and in Bridge mode `plan_reason`,
-    `bridge_kwh`, `surplus_kwh`, `lower_bound_soc`, `upper_bound_soc`, `pv_crossover`
-  - `inverter_floor_soc` is what is written to the inverter's min SOC entity. It is higher than
-    the target while the discharge block runs over the min SOC (see
-    [Discharge in the Window](#discharge-in-the-window)); `discharge_block` names the way in use
-    (`switch` / `limit` / `min_soc` / `off`)
+```
+switch.inverter_charge_night_enabled                       Automation
+switch.inverter_charge_night_auto_efficient_charge_finder  Efficiency search
+switch.inverter_charge_night_skip_next                     Skip the next window (24 h)
+select.inverter_charge_night_operation_mode                Operation mode
+number.inverter_charge_night_min_soc_override              Target SOC override
+number.inverter_charge_night_snow_nights                   Snow nights
+binary_sensor.inverter_charge_night_active                 Window active
+sensor.inverter_charge_night_calculated_soc                Target SOC
+sensor.inverter_charge_night_planned_charge_power          Planned charge power
+sensor.inverter_charge_night_best_charge_power             Most efficient charge power
+sensor.inverter_charge_night_efficiency_search             Efficiency search
+sensor.inverter_charge_night_grid_charge_headroom          Charge power left by the house connection
+```
 
-- **`sensor.inverter_charge_night_best_charge_power`** - Best AC charge power found
-  - Unit: `W`
-  - The last stored optimum of the Auto Efficient Charge Finder
+What each one is for: [Entity List](#entity-list-end-user).
 
-- **`sensor.inverter_charge_night_planned_charge_power`** - AC power planned for the rest of the window
-  - Unit: `W`, diagnostic entity
-  - The constant power that still reaches the target before the window ends, clamped to the
-    configured min/max, to the efficiency optimum and to what the house connection can carry.
-    In Bridge mode - and in either mode once a house connection limit is configured - it is
-    also written to the AC charge limit entity; otherwise it is shown for information only.
-
-- **`sensor.inverter_charge_night_grid_charge_headroom`** - What the house connection still allows
-  - Unit: `W`, diagnostic entity
-  - Attributes: `budget_w`, `grid_import_w`, `other_load_w`, `limited`
-  - Only has a value while a window runs and a house connection limit is configured. See
-    [House connection](#house-connection).
-
-- **`binary_sensor.inverter_charge_night_active`** - Whether the window is currently running
-  - `on`: inside the configured time window
-  - `off`: outside the window
-
-- **`switch.inverter_charge_night_enabled`** - Enable/disable the integration
-  - When switched off: resets all inverter settings and stops controlling it
-
-- **`switch.inverter_charge_night_auto_efficient_charge_finder`** - Auto Efficient Charge Finder
-  - Searches for the most efficient AC charge limit and turns itself off when done
-
-- **`switch.inverter_charge_night_skip_next`** - Skip the next cycle
-  - Skips one window for 24 hours and then expires by itself. Turning it on during a running
-    window ends that window immediately.
-
-- **`select.inverter_charge_night_operation_mode`** - Operation mode
-  - `Night Charge` or `Morning Discharge`. Switching while a window runs resets the inverter
-    first, then re-evaluates the window in the new mode.
-
-- **`number.inverter_charge_night_min_soc_override`** - Manual override for the target SOC
-  - Range 0 - 100, step 1, clamped into the configured min/max SOC
-  - Replaces the planner's target until the window ends
-
-- **`number.inverter_charge_night_snow_nights`** - Snow on the modules
-  - Range 0 - 14, step 1
-  - Charges the next N nights to the maximum SOC, ignoring both the forecast and the manual
-    override, and counts down by one after each night-charge window that reaches its
-    configured end time (a skipped, aborted or morning-discharge window does not use one up)
 
 ## Example Automations
 
@@ -326,7 +306,8 @@ action:
 - **Winter / low PV forecast**: Use higher target SOC to ensure enough overnight capacity.
 - **Summer / high PV forecast**: Use lower target SOC to create more daytime storage headroom.
 - **Backup/Island mode**: Disable integration when backup mode is active to avoid AC charging.
-- **Efficiency tuning**: Enable Auto Efficient Charge Finder for a few nights to find best AC limit.
+- **Efficiency tuning**: Switch on the efficiency search; it measures the charge power with the
+  smallest loss, usually within a single window, and then switches itself off.
 - **Snow on the modules**: Set `Snow nights` to the number of nights the panels will stay
   covered; each of those nights charges to the maximum and the counter drops by one.
 - **One-off exception (EV charging, guests)**: Turn on `Skip Next` to skip the coming window;
@@ -351,16 +332,42 @@ entities:
   - number.inverter_charge_night_snow_nights
 ```
 
-**Auto Finder card**
+**Efficiency search card**
 ```yaml
 type: entities
-title: Auto Efficient Charge
+title: Efficiency search
 entities:
   - switch.inverter_charge_night_auto_efficient_charge_finder
+  - sensor.inverter_charge_night_efficiency_search
   - sensor.inverter_charge_night_best_charge_power
 ```
 
 ## Entity List (End-User)
+
+Every entity below belongs to the device **Inverter Charge Night**, so Home Assistant shows it
+as "Inverter Charge Night <name>". The entity ids are stable; the display names are translated
+(English and German ship with the integration).
+
+| What you see | Entity | What it is for |
+|---|---|---|
+| Automation | `switch.…_enabled` | The main switch. Off means the integration controls nothing. |
+| Efficiency search | `switch.…_auto_efficient_charge_finder` | Starts the search for the most efficient charge power. Switches itself off when it is done. |
+| Skip the next window (24 h) | `switch.…_skip_next` | Skips one window, then expires by itself. |
+| Operation mode | `select.…_operation_mode` | Night Charge or Morning Discharge. |
+| Target SOC override | `number.…_min_soc_override` | Overrules the planner for this window. |
+| Snow nights | `number.…_snow_nights` | Charge the next N nights to the maximum. |
+| Window active | `binary_sensor.…_active` | Whether a window is running right now. |
+| Target SOC | `sensor.…_calculated_soc` | What the planner wants in the battery. |
+| Planned charge power | `sensor.…_planned_charge_power` | What the battery is being charged with. |
+| Most efficient charge power | `sensor.…_best_charge_power` | The result of the efficiency search. |
+| Efficiency search | `sensor.…_efficiency_search` | What the search is doing and what it has measured. |
+| Charge power left by the house connection | `sensor.…_grid_charge_headroom` | What the connection still allows the battery. |
+
+> **The three entities that all used to be called "Inverter Charge Night".** Before this
+> version the operation mode select and the skip switch had no translated name, so Home
+> Assistant fell back to the device name and showed three identical entries under
+> Configuration. They are now called *Automation*, *Efficiency search* and *Skip the next
+> window*.
 
 - **`sensor.inverter_charge_night_calculated_soc`** - The target SOC the planner calculated
   - Unit: `%`
@@ -373,8 +380,16 @@ entities:
     (`switch` / `limit` / `min_soc` / `off`)
 
 - **`sensor.inverter_charge_night_best_charge_power`** - Best AC charge power found
-  - Unit: `W`
-  - The last stored optimum of the Auto Efficient Charge Finder
+  - Unit: `W`, diagnostic entity
+  - The charge power with the smallest measured loss, see [Efficiency search](#efficiency-search)
+
+- **`sensor.inverter_charge_night_efficiency_search`** - What the search is doing
+  - States: `Off`, `Waiting for charging`, `Settling`, `Measuring`, `Finished`
+  - Attributes: `test_power_w`, `best_power_w`, `best_loss_pct`, `loss_by_power_pct`,
+    `search_range_w`, `measured_energy_kwh`, `measuring_for_min`, `last_result`,
+    `measurement_source`
+  - `loss_by_power_pct` is the whole measurement series: charge power in W against the measured
+    loss in percent. `last_result` also says why a measurement was discarded, if it was
 
 - **`sensor.inverter_charge_night_planned_charge_power`** - AC power planned for the rest of the window
   - Unit: `W`, diagnostic entity
@@ -396,8 +411,9 @@ entities:
 - **`switch.inverter_charge_night_enabled`** - Enable/disable the integration
   - When switched off: resets all inverter settings and stops controlling it
 
-- **`switch.inverter_charge_night_auto_efficient_charge_finder`** - Auto Efficient Charge Finder
-  - Searches for the most efficient AC charge limit and turns itself off when done
+- **`switch.inverter_charge_night_auto_efficient_charge_finder`** - Efficiency search
+  - Measures the charge power with the smallest loss and turns itself off when it has found it.
+    See [Efficiency search](#efficiency-search)
 
 - **`switch.inverter_charge_night_skip_next`** - Skip the next cycle
   - Skips one window for 24 hours and then expires by itself. Turning it on during a running
@@ -490,6 +506,50 @@ Snow nights beat everything, then the manual override, then the planner:
 2. a manual override set on `number.inverter_charge_night_min_soc_override`
 3. the SOC the planner calculated at the window start (re-planned during the window, but in
    Night Charge mode the target never drops below what was already reached)
+
+### Efficiency search
+
+Cheap energy is only cheap if it arrives in the battery. A charger that loses 25 % at 2 kW
+turns a 14 ct/kWh window tariff into 18.7 ct/kWh of stored energy; at 7 % loss the same window
+costs 15 ct/kWh. Inverter and battery have a sweet spot somewhere in between their minimum and
+their maximum, and where it lies depends on the hardware — so the integration measures it
+rather than guessing.
+
+Switch on **Efficiency search** (step 3 of the wizard, or the switch of the same name) and,
+while charging from the grid, it works through the charge power range:
+
+1. It writes a charge power and waits **two minutes** — the ramp to a new setpoint belongs to
+   no power in particular.
+2. It then measures for at least **five minutes and 0.3 kWh**, integrating the power sensors
+   between their readings, or reading the two energy meters if you configured them.
+3. It records the loss `1 − received / drawn` for that power and moves on to the next
+   candidate, halving the remaining range each time (golden-section search).
+4. When the range is narrower than 100 W it stores the optimum, leaves it on the inverter and
+   switches itself off. `sensor.…_best_charge_power` keeps the result, and the planner never
+   asks for more than the optimum once it exists.
+
+Because it takes several measurements per window, a six-hour window is usually enough to find
+the optimum; it does not need a week of nights.
+
+**What it refuses to record**, because a wrong sample steers every later night:
+
+- a measurement where the inverter did not follow the setpoint — a battery that is nearly full
+  tapers the charge, and a sample taken at 3 kW must not be filed under 10 kW;
+- a measurement that was too short or moved too little energy (this also happens when the
+  battery is full before the measurement is done — after two such attempts that power is
+  treated as unmeasurable and the search lowers its ceiling);
+- a loss below zero, which would mean the battery received more than was drawn: the two
+  sensors are measuring the same side of the charger;
+- a loss above 50 %, which is a wiring or unit problem, not an inverter.
+
+`sensor.…_efficiency_search` shows what is going on, and its `last_result` attribute names the
+reason whenever a measurement was discarded. If every measurement is discarded, the sensors are
+the place to look first: **drawn** must be the AC side of the charger and **received** the
+battery side.
+
+> The search needs the AC charge limit entity and both charge power sensors. Two kWh meters are
+> optional, but they make the result exact: a difference of two meter readings is the energy
+> that really flowed, with no assumption about what the power did in between.
 
 ### House connection
 
