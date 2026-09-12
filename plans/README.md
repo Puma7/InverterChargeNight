@@ -141,8 +141,8 @@ vorliegt; bis dahin bleibt der Kostal-Pfad, aber ohne Markennamen in Keys und La
 | 005 | Rücksetz-Robustheit und Persistenz über Neustarts | P1 | L | 003, 004 | DONE |
 | 006 | Planer v2 (Design und Prototyp): Überbrückung, Sonnenaufgang, Verbrauch, Entladesperre, Ladeleistung | P2 | L | 001–005 | DONE |
 | 007 | Schnee-Override: Zahl-Entität "Schnee-Nächte", lädt die nächsten N Nächte auf das Maximum und zählt herunter | P2 | S | 004, 005 | DONE |
-| 008 | Ladeleistung gegen den Hausanschluss begrenzen (Dauerlast, Sicherungsgröße, Netzbezug) | P1 | M | 006 | TODO |
-| 009 | Entladung im Fenster sperren: Schalter, sonst Leistungsgrenze, sonst Min-SOC anheben | P1 | M | 004, 005, 006 | TODO |
+| 008 | Ladeleistung gegen den Hausanschluss begrenzen (Dauerlast, Sicherungsgröße, Netzbezug) | P1 | M | 006 | DONE |
+| 009 | Entladung im Fenster sperren: Schalter, sonst Leistungsgrenze, sonst Min-SOC anheben | P1 | M | 004, 005, 006 | DONE |
 
 Status-Werte: TODO | IN PROGRESS | DONE | BLOCKED (mit Grund) | REJECTED (mit Begründung)
 
@@ -174,6 +174,27 @@ Am 2026-09-12 folgte eine Prüfung auf Lauffähigkeit mit dem aktuellen Home Ass
 | `PlanInput` trägt zwei ungenutzte Felder | Irreführend | offen |
 | 11 veraltete Audit-Dateien im Wurzelverzeichnis | Widersprechen dem Code | offen, Backlog 012 |
 
+
+### 2.5 Nachtrag 2026-09-12: Hausanschluss und Entladesperre (Pläne 008, 009)
+
+Beide Pläne sind umgesetzt und anschließend gegen den laufenden Code geprüft. Die Prüfung fand
+zehn Befunde; alle sind behoben:
+
+| Befund | Wirkung | Status |
+|---|---|---|
+| Die Anschlussgrenze wurde vom Wechselrichter genommen, sobald das Ladeziel erreicht war | Der angehobene Min-SOC lässt den Wechselrichter weiter kaufen — stundenlang ohne Grenze | behoben: die Grenze bleibt bis zum Fensterende und wird bei jeder Laständerung nachgeführt |
+| Ein gespeicherter Boden konnte einen unsauberen Neustart überleben | Der Speicher bliebe dauerhaft gesperrt | behoben: ohne gesicherten Original-Min-SOC lief kein Fenster, der Boden wird verworfen |
+| Netzbezugssensor ohne Einheit wurde als Watt gelesen | Ein kW-Template-Sensor hätte die Grenze aufgehoben | behoben: nur W und kW werden akzeptiert |
+| 400 V (Außenleiterspannung) wurde als Strangspannung gerechnet | Budget um √3 zu groß, die Grenze greift zu spät | behoben: über 300 V wird bei drei Phasen durch √3 geteilt |
+| Netzbezugs-Entität ohne Ladeleistungs-Entität konfigurierbar | Schutzfunktion sichtbar, aber wirkungslos | behoben: der Assistent verlangt beide |
+| Eigenanteil am Netzbezug aus dem Sollwert statt aus der Messung | Fremdlast wird unterschätzt, solange der Speicher dem Sollwert nicht folgt | behoben: die gemessene Ladeleistung zählt, und zwar die kleinere der beiden |
+| `limited` meldete "Budget kleiner als das Maximum" statt "hält gerade zurück" | Irreführende Anzeige | behoben: gemessen am zuletzt geplanten Bedarf |
+| Der Netzbezugs-Listener blieb beim Ausschalten der Integration bestehen | Schreibzugriffe nach dem Ausschalten | behoben |
+| Der Boden folgte der eigenen Netzladung | Rückkopplung: Boden → Ladung → höherer Boden, bis zum Nutzermaximum | behoben: der Boden folgt nur Anstiegen, die nicht von uns kommen |
+| Effizienztest lief unbegrenzt weiter, wenn die Wallboxen mittendrin starteten, und buchte den Verlust auf die angeforderte Leistung | Anschlussüberlastung und eine falsche Effizienzhistorie | behoben: kein Test ohne Platz, laufender Test wird abgebrochen |
+
+Ein Test fährt beide Funktionen in einem Fenster:
+`tests/test_grid_limit.py::test_the_connection_limit_and_the_discharge_block_run_together`.
 
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 

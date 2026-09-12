@@ -253,6 +253,9 @@ async def test_inverter_charge_night_switch_on_off():
     coordinator._reset_settings.assert_awaited()
     coordinator._remove_battery_soc_listener.assert_called_once()
     coordinator._remove_inverter_min_soc_listener.assert_called_once()
+    # The grid import listener would otherwise keep writing charge limits after
+    # the user has switched the integration off.
+    coordinator._remove_grid_import_listener.assert_called_once()
     coordinator._stop_periodic_verification.assert_awaited_once()
 
     await switch.async_turn_on()

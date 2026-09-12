@@ -19,6 +19,7 @@ strict ``mock_hass`` fixture, the clock pinned inside the window.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -399,6 +400,91 @@ async def test_floor_follows_the_charge_level_upwards(mock_hass, coordinator):
     assert coordinator._window_floor_soc == 83.0
     assert coordinator.inverter_floor_soc() == 83.0
     assert _runtime_state(coordinator)["window_floor_soc"] == 83.0
+
+
+@pytest.mark.asyncio
+async def test_an_entry_from_before_the_block_is_told_what_changed(mock_hass, caplog):
+    """The default is 'auto', so an upgrade starts raising the min SOC by itself."""
+    caplog.set_level(logging.INFO)
+    _register(mock_hass, battery=str(ABOVE_TARGET))
+    made = _make(mock_hass, {k: v for k, v in CONFIG.items() if k != CONF_DISCHARGE_BLOCK_MODE})
+    try:
+        await made._on_window_start(WINDOW_START)
+
+        assert "shows a higher min SOC than the charge target" in caplog.text
+        # Once per window, not on every poll
+        caplog.clear()
+        await made._apply_discharge_block(announce=True)
+        assert "shows a higher min SOC" not in caplog.text
+    finally:
+        await made._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_a_configured_mode_says_nothing_about_an_upgrade(mock_hass, caplog):
+    caplog.set_level(logging.INFO)
+    _register(mock_hass, battery=str(ABOVE_TARGET))
+    made = _make(mock_hass, {**CONFIG, CONF_DISCHARGE_BLOCK_MODE: DISCHARGE_BLOCK_AUTO})
+    try:
+        await made._on_window_start(WINDOW_START)
+        assert "shows a higher min SOC" not in caplog.text
+    finally:
+        await made._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_the_floor_does_not_follow_our_own_grid_charging(mock_hass, coordinator):
+    """Otherwise the floor feeds back on itself and ratchets to the maximum.
+
+    The floor is written to the min SOC, the inverter buys energy up to it and
+    overshoots a little, the floor follows - and the next round starts one step
+    higher. Over a six-hour window that walks the battery to the user maximum
+    at full price, past the planned target and with no room for the next day's
+    PV.
+    """
+    await coordinator._on_window_start(WINDOW_START)
+    assert coordinator._window_floor_soc == ABOVE_TARGET
+
+    # The inverter is buying on our order and has overshot the written floor
+    mock_hass.states.async_set(GRID, "on")
+    for overshoot in ("71", "72", "73"):
+        mock_hass.states.async_set(BATTERY, overshoot)
+        coordinator._update_window_floor()
+
+    assert coordinator._window_floor_soc == ABOVE_TARGET
+    assert coordinator.inverter_floor_soc() == ABOVE_TARGET
+
+
+@pytest.mark.asyncio
+async def test_the_floor_follows_a_rise_we_did_not_order(mock_hass, coordinator):
+    """Charge that arrived from somewhere else is exactly what the block protects."""
+    await coordinator._on_window_start(WINDOW_START)
+    mock_hass.states.async_set(GRID, "off")
+
+    mock_hass.states.async_set(BATTERY, "83")
+    coordinator._update_window_floor()
+
+    assert coordinator._window_floor_soc == 83.0
+
+
+@pytest.mark.asyncio
+async def test_without_a_grid_switch_the_charge_target_decides(mock_hass):
+    """No switch to read: while the target is not reached the rise is ours."""
+    _register(mock_hass, battery=str(ABOVE_TARGET))
+    made = _make(mock_hass, {k: v for k, v in CONFIG.items() if k != CONF_KOSTAL_GRID_CHARGE_SWITCH})
+    try:
+        await made._on_window_start(WINDOW_START)
+        assert made._window_floor_soc == ABOVE_TARGET
+
+        mock_hass.states.async_set(BATTERY, "80")
+        made._update_window_floor()
+        assert made._window_floor_soc == ABOVE_TARGET
+
+        made.target_reached = True
+        made._update_window_floor()
+        assert made._window_floor_soc == 80.0
+    finally:
+        await made._stop_periodic_verification()
 
 
 @pytest.mark.asyncio

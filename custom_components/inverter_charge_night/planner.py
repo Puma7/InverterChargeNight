@@ -209,7 +209,10 @@ def grid_budget_w(
 
     Implausible inputs never widen the budget: an unknown phase count counts as
     a single phase, and a voltage or percentage outside its sensible range falls
-    back to the documented default instead of being taken at face value.
+    back to the documented default instead of being taken at face value. A
+    three-phase voltage above 300 V is read as the line-to-line voltage written
+    on a German meter cabinet (400 V) and divided by sqrt(3), because taking it
+    as a phase voltage would inflate the budget by that same factor.
     """
     if explicit_max_w is not None and math.isfinite(explicit_max_w) and explicit_max_w > 0:
         return float(explicit_max_w)
@@ -217,6 +220,11 @@ def grid_budget_w(
         return None
     phase_count = 3 if phases == 3 else 1
     volts = float(voltage_v) if math.isfinite(voltage_v) and voltage_v > 0 else float(DEFAULT_GRID_VOLTAGE_V)
+    if phase_count == 3 and volts > 300:
+        # The number on a German meter cabinet is 400 V, the voltage between two
+        # phases. Taken as a phase voltage it would inflate the budget by sqrt(3)
+        # and the limit would never engage before the real one is passed.
+        volts /= math.sqrt(3.0)
     pct = (
         float(continuous_pct)
         if math.isfinite(continuous_pct) and 0 < continuous_pct <= 100

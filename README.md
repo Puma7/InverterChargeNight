@@ -537,6 +537,13 @@ and whether the limit is currently braking.
 > or anything else. If those alone can overload the connection, you need to limit them
 > yourself - with their own charge management, or with one of Home Assistant's load-management
 > integrations. Leave this feature off (no grid import entity) and nothing changes.
+
+The limit stays on the inverter for the **whole window**, not only while the battery is
+charging: once the min SOC floor is raised (see below) the inverter can buy power at any
+moment, so the cap is only handed back at the window end. And the efficiency finder never
+runs a test the connection cannot carry - a test that is already running when the wallboxes
+start is abandoned rather than continued at a power it was not measuring.
+
 ### Discharge in the Window
 
 Inside the cheap window the house should run from the grid, not from the battery. A kWh taken
@@ -576,7 +583,12 @@ the window end, like every other setting the integration touches.
 
 The floor only ever rises within a window, never falls (a jittering measurement must not cause
 writes), always stays inside your minimum and maximum SOC, survives a Home Assistant restart,
-and is cleared at the window end. The `sensor.inverter_charge_night_calculated_soc` attributes
+and is cleared at the window end. It does **not** follow the integration's own grid charging:
+otherwise the raised floor would make the inverter buy up to it, overshoot it a little, and the
+floor would follow - walking the battery to your maximum SOC at full price and leaving no room
+for the next day's PV. Charge that arrives from anywhere else is protected as before.
+
+The `sensor.inverter_charge_night_calculated_soc` attributes
 `inverter_floor_soc` and `discharge_block` (`switch` / `limit` / `min_soc` / `off`) say which
 way is in use and what the floor currently is.
 

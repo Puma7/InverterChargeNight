@@ -350,6 +350,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _grid_allowed_w: float | None = None
     _grid_limited: bool = False
     _grid_stale_logged: bool = False
+    _grid_plan_request_w: float | None = None
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the coordinator."""
@@ -415,6 +416,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_allowed_w: float | None = None
         self._grid_limited = False
         self._grid_stale_logged = False
+        self._grid_plan_request_w = None
         # Discharge block (plan 009). The floor is the highest battery SOC seen
         # this window; it only ever rises, so a jittering measurement cannot
         # produce a write. None outside a window.
@@ -465,7 +467,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.initial_calculated_soc = self._restore_soc(state, "initial_calculated_soc")
         self._original_ac_charge_power = _as_float(state.get("original_ac_charge_power"))
         self._original_discharge_limit = _as_float(state.get("original_discharge_limit"))
-        self._window_floor_soc = self._restore_soc(state, "window_floor_soc")
+        # The floor belongs to the window that also captured the inverter's
+        # original floor. Without that original no window was running when Home
+        # Assistant stopped, so a stored floor is stale: carrying it into the
+        # next window would charge the battery to a level nobody planned.
+        restored_floor = self._restore_soc(state, "window_floor_soc")
+        self._window_floor_soc = restored_floor if self.original_min_soc is not None else None
+        if restored_floor is not None and self._window_floor_soc is None:
+            _LOGGER.info(
+                "Discarding a stored discharge-block floor of %.1f%%: its window is over",
+                restored_floor,
+            )
         block_raw = state.get("original_discharge_block")
         if isinstance(block_raw, bool):
             self._original_discharge_block = block_raw
@@ -1055,6 +1067,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if isinstance(best, int) and required <= best:
             ceiling = max(min_w, min(max_w, float(best)))
         setpoint = float(round(max(min_w, min(required, ceiling))))
+        # What the battery would draw without the house connection limit. Kept
+        # so the sensor can say whether the limit is actually holding it back.
+        self._grid_plan_request_w = setpoint
         # Plan, then limit, then write - never the other way round (plan 008).
         setpoint = self._grid_limited_setpoint(setpoint)
         self.planned_charge_power_w = setpoint
@@ -1136,6 +1151,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Monotone on purpose: if the charge level falls anyway (the block did not
         take), the floor stays up and the inverter recharges from the grid -
         which is exactly right inside the window, where grid energy is cheap.
+
+        The floor does not follow our own grid charging. It would otherwise feed
+        back on itself: the floor is written to the min SOC, the inverter buys
+        energy up to it, overshoots it a little, the floor follows the new charge
+        level, and the battery ratchets to the user maximum night after night -
+        past the planned target, at full price, and with no room left for the
+        next day's PV.
         """
         if not self.is_active or self._ending:
             return
@@ -1147,6 +1169,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         previous = self._window_floor_soc
         if previous is not None and current <= previous:
             return
+        if previous is not None and self._grid_charging_is_on():
+            # Rising while we are buying: that is our own charge, not something
+            # the block has to protect. The target already keeps the floor up.
+            return
         self._window_floor_soc = current
         _LOGGER.info(
             "Discharge block: min SOC floor raised to %.1f%% (was %s)",
@@ -1154,6 +1180,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             f"{previous:.1f}%" if previous is not None else "unset",
         )
         self._persist_state()
+
+    def _grid_charging_is_on(self) -> bool:
+        """True while the inverter is charging the battery from the grid on our order."""
+        switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        if not switch:
+            # Without the switch the integration cannot tell; the charge target
+            # is the honest assumption while the target is not reached yet.
+            return not self.target_reached
+        state = self.hass.states.get(str(switch))
+        return state is not None and state.state == "on"
 
     def _discharge_block_switch_target(self) -> tuple[str, str] | None:
         """Return (entity_id, domain) of the discharge block switch, or None."""
@@ -1275,6 +1311,20 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if announce and self._discharge_block_logged != method:
             _LOGGER.info("Blocking battery discharge for this window via: %s", method)
+            if (
+                method == DISCHARGE_BLOCK_VIA_MIN_SOC
+                and self.config.get(CONF_DISCHARGE_BLOCK_MODE) is None
+            ):
+                # An entry configured before plan 009 never chose this; say so
+                # once, because the inverter now shows a min SOC above the
+                # charge target until the window ends.
+                _LOGGER.info(
+                    "No discharge block was configured, so the min SOC is raised to the "
+                    "charge level for the window and reset at its end. The inverter "
+                    "therefore shows a higher min SOC than the charge target while the "
+                    "window runs. Set the discharge block to 'off' in the options to keep "
+                    "the previous behaviour"
+                )
             self._discharge_block_logged = method
         if method == DISCHARGE_BLOCK_VIA_SWITCH:
             await self._apply_discharge_block_switch()
@@ -1519,6 +1569,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         self._original_ac_charge_power = None
         self._planned_setpoint_written_w = None
+        self._grid_plan_request_w = None
         return True
 
     async def _apply_absolute_charge_power_limit(self) -> None:
@@ -1672,8 +1723,54 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
 
+    async def _limit_the_efficiency_finder(self) -> None:
+        """Hold the finder's setpoint inside what the connection carries.
+
+        A running test is abandoned rather than corrected: its energy counters
+        were collected at the test power, and a sample that continues at a
+        different power would be recorded against a label the battery never
+        drew. The finder picks the value up again on a later night.
+        """
+        if not self._grid_limit_configured():
+            return
+        if self._auto_test_active and self._auto_test_power_w is not None:
+            reference = float(self._auto_test_power_w)
+        else:
+            reference = self._planned_setpoint_written_w or float(
+                self.config.get(CONF_MAX_CHARGE_POWER_W, DEFAULT_MAX_CHARGE_POWER_W)
+            )
+        allowed = self._grid_limited_setpoint(reference)
+        if allowed >= reference - PLANNED_POWER_WRITE_THRESHOLD_W:
+            return
+        if self._auto_test_active:
+            _LOGGER.info(
+                "House connection limit: abandoning the efficiency test at %s W, the "
+                "connection carries only %d W",
+                self._auto_test_power_w,
+                int(allowed),
+            )
+            self._reset_auto_test_state()
+        await self._set_ac_charge_limit_w(int(allowed))
+
     async def _start_auto_test(self, power_w: int) -> None:
-        """Start auto efficiency test at given power."""
+        """Start auto efficiency test at given power.
+
+        A test the connection cannot carry is not started at all: the written
+        setpoint would be the limited one while the result was filed under the
+        requested power, which would poison the efficiency history for every
+        later night.
+        """
+        if self._grid_limit_configured():
+            allowed = self._grid_limited_setpoint(float(power_w))
+            if allowed < power_w - PLANNED_POWER_WRITE_THRESHOLD_W:
+                _LOGGER.info(
+                    "Not testing the efficiency at %d W: the house connection carries "
+                    "only %d W right now",
+                    power_w,
+                    int(allowed),
+                )
+                await self._set_ac_charge_limit_w(int(allowed))
+                return
         await self._set_ac_charge_limit_w(power_w)
         self._auto_test_active = True
         self._auto_test_power_w = power_w
@@ -2984,8 +3081,20 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.error("Error stopping grid charge: %s", e, exc_info=True)
         await self._reset_absolute_charge_power()
         self._finalize_auto_test()
-        # Charging is over for this window: take a running test's value off the inverter
-        await self._reset_ac_charge_limit()
+        if self.is_active and self._grid_budget() is not None:
+            # The house connection limit stays on the inverter until the window
+            # ends. Reaching the charge target does not end the window: the
+            # raised min SOC floor can still make the inverter buy power, and
+            # the rest of the house (wallboxes) may still be running. The
+            # window-end reset restores the user's own value.
+            _LOGGER.debug(
+                "Target reached, but the house connection limit stays on the inverter "
+                "until the window ends"
+            )
+            await self._enforce_grid_limit_now()
+        else:
+            # Charging is over for this window: take a running test's value off the inverter
+            await self._reset_ac_charge_limit()
     
     def _setup_battery_soc_listener(self) -> None:
         """Set up a listener for battery SOC changes to check target more frequently."""
@@ -3329,8 +3438,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         unit = _unit_of(state)
         if unit in ("kw", "kilowatt", "kilowatts"):
             value *= 1000.0
-        elif unit not in ("w", "watt", "watts", ""):
-            _LOGGER.debug("Grid import %s reports an unusable unit %r", entity_id, unit)
+        elif unit not in ("w", "watt", "watts"):
+            # No unit is not trusted either: a template sensor reporting kW
+            # without one would read 33 as 33 W and lift the limit entirely.
+            _LOGGER.debug(
+                "Grid import %s reports the unusable unit %r - set W or kW on the sensor",
+                entity_id,
+                unit or "(none)",
+            )
             self._grid_import_w = None
             return None
         age_s = self._state_age_s(state, dt_util.now())
@@ -3341,6 +3456,56 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_import_w = value
         return value
 
+    def _own_charge_draw_w(self) -> float:
+        """What the battery itself is drawing right now, in W.
+
+        The written setpoint is only a request: during the ramp-up, with an
+        inverter that undercuts it, or after a manual change it can be well
+        above the real draw, and every watt overstated here is a watt of other
+        load that goes unnoticed. When the measured charge power is configured
+        and fresh, the smaller of the two is used - that never overstates our
+        own share, so the limit errs towards charging less.
+        """
+        written = self._planned_setpoint_written_w
+        measured: float | None = None
+        sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
+        if sent_entity:
+            state = self.hass.states.get(str(sent_entity))
+            age_s = self._state_age_s(state, dt_util.now()) if state else None
+            if age_s is None or age_s <= GRID_LIMIT_STALE_AFTER_S:
+                value = self._get_power_w(sent_entity)
+                if value is not None and value >= 0:
+                    measured = value
+        if measured is None:
+            return float(written or 0.0)
+        if written is None:
+            return measured
+        return min(measured, float(written))
+
+    async def _enforce_grid_limit_now(self) -> None:
+        """Keep the written charge limit within what the connection carries.
+
+        Used once charging itself is over but the window is not: the raised min
+        SOC floor can still make the inverter buy power, so the limit must stay
+        current rather than being handed back to the user's own value. Writes
+        only downwards, and only when the entity and a budget are configured.
+        """
+        if not self.is_active or self._ending or self._unloading:
+            return
+        if not self.config.get(CONF_GRID_IMPORT_ENTITY) or self._grid_budget() is None:
+            return
+        reference = self._planned_setpoint_written_w
+        if reference is None:
+            reference = float(self.config.get(CONF_MAX_CHARGE_POWER_W, DEFAULT_MAX_CHARGE_POWER_W))
+        allowed = self._grid_limited_setpoint(reference)
+        if allowed >= reference - PLANNED_POWER_WRITE_THRESHOLD_W:
+            return
+        _LOGGER.info(
+            "House connection limit: holding the charge limit at %d W after the target was reached",
+            int(allowed),
+        )
+        await self._set_ac_charge_limit_w(int(allowed))
+
     def _grid_limited_setpoint(self, planned_w: float) -> float:
         """Cap ``planned_w`` at what the house connection can still carry.
 
@@ -3348,10 +3513,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         configured. Otherwise the result is never above ``planned_w``: this
         method only ever takes power away.
 
-        ``self._grid_limited`` is set from the budget alone, not from this
-        call's ``planned_w``: it answers "is the connection holding the battery
-        below what it could otherwise draw", which must read the same whether
-        the caller passes a fresh plan or an already limited value.
+        ``self._grid_limited`` answers "is the connection holding the battery
+        below what it would otherwise draw". It is measured against the last
+        unlimited plan, not against this call's ``planned_w``, so that a caller
+        passing an already limited value (which is what holding the cap looks
+        like) does not make the flag drop back to False.
         """
         if not self.is_active:
             # Outside a window the integration controls nothing, so there is
@@ -3385,7 +3551,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._grid_stale_logged = False
         headroom = _as_float(self.config.get(CONF_GRID_HEADROOM_W, DEFAULT_GRID_HEADROOM_W))
-        own_w = self._planned_setpoint_written_w or 0.0
+        own_w = self._own_charge_draw_w()
         allowed = allowed_charge_power_w(
             budget_w,
             import_w,
@@ -3394,9 +3560,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._grid_allowed_w = allowed
         self._grid_other_load_w = max(0.0, import_w - max(0.0, own_w))
-        self._grid_limited = allowed < float(
-            self.config.get(CONF_MAX_CHARGE_POWER_W, DEFAULT_MAX_CHARGE_POWER_W)
-        )
+        request = self._grid_plan_request_w
+        if request is None:
+            request = float(self.config.get(CONF_MAX_CHARGE_POWER_W, DEFAULT_MAX_CHARGE_POWER_W))
+        self._grid_limited = allowed < request - PLANNED_POWER_WRITE_THRESHOLD_W
         limited = min(planned_w, allowed)
         if limited < min_w and limited < planned_w:
             # Below the inverter's own minimum the setpoint is meaningless; the
@@ -3470,11 +3637,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if not self.is_active or not self.is_enabled or self._ending or self._unloading:
             return
-        if self.is_discharge_mode or self.target_reached:
+        if self.is_discharge_mode:
+            return
+        if self.target_reached:
+            # The window is not over: the raised floor can still draw power, so
+            # the limit is kept current instead of being abandoned here.
+            await self._enforce_grid_limit_now()
             return
         if self.auto_efficient_charge or self._auto_test_active:
-            # The efficiency finder owns the limit; its own writes are capped in
-            # _set_ac_charge_limit_w.
+            # The finder owns the setpoint, but not the connection: a load that
+            # appears after its write has to reach the inverter too.
+            await self._limit_the_efficiency_finder()
             return
         written = self._planned_setpoint_written_w
         planned = self.planned_charge_power_w

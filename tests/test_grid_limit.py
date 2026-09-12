@@ -108,6 +108,25 @@ def test_budget_falls_back_to_the_defaults_for_implausible_inputs():
     assert grid_budget_w(63, 3, 230, 150, None) == default
 
 
+def test_a_line_to_line_voltage_does_not_widen_the_three_phase_budget():
+    """400 V is the voltage between two phases, not the phase voltage.
+
+    Somebody reading the number off the meter cabinet must not end up with a
+    budget that is sqrt(3) too large - the limit would then never engage
+    before the real connection limit is passed.
+    """
+    at_230 = grid_budget_w(63, 3, 230, 80, None)
+    at_400 = grid_budget_w(63, 3, 400, 80, None)
+    assert at_400 == pytest.approx(400 / math.sqrt(3) * 3 * 63 * 0.8)
+    assert at_400 == pytest.approx(at_230, rel=0.01)
+    assert at_400 < at_230 * 1.05
+
+
+def test_a_line_to_line_voltage_is_only_corrected_for_three_phases():
+    """On one phase 400 V is a real (if unusual) phase voltage."""
+    assert grid_budget_w(63, 1, 400, 80, None) == pytest.approx(400 * 63 * 0.8)
+
+
 def test_budget_rejects_non_finite_inputs():
     assert grid_budget_w(math.nan, 3, 230, 80, None) is None
     assert grid_budget_w(math.inf, 3, 230, 80, None) is None
@@ -358,6 +377,96 @@ async def test_the_own_charge_power_is_not_counted_twice(mock_hass, limited):
     assert limited.planned_charge_power_w == pytest.approx(first)
 
 
+def _set_sent(hass, value, *, unit="W", age_s=0.0):
+    """Register the measured charge power with a real ``last_reported``."""
+    hass.states.async_set(SENT, value, {"unit_of_measurement": unit})
+    state = hass.states.get(SENT)
+    state.last_reported = FOUR_HOURS_LEFT - timedelta(seconds=age_s)
+    state.last_updated = state.last_reported
+    state.last_changed = state.last_reported
+    return state
+
+
+@pytest_asyncio.fixture
+async def measured(mock_hass):
+    """The limited coordinator with the measured charge power configured."""
+    _register(mock_hass)
+    _set_sent(mock_hass, "0")
+    coordinator = _make_coordinator(
+        mock_hass, {**LIMITED_CONFIG, CONF_CHARGE_POWER_SENT_ENTITY: SENT}
+    )
+    yield coordinator
+    await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_the_setpoint_is_not_mistaken_for_the_real_draw(mock_hass, measured):
+    """A setpoint the inverter has not followed must not hide foreign load.
+
+    The written value is a request. While the battery is still ramping up - or
+    is not charging at all - the wallboxes account for the whole import, and
+    subtracting the request would leave room that the connection does not have.
+    """
+    _set_import(mock_hass, "33000")
+    await _start_with_target(measured, 100.0)
+    await measured._async_update_data()
+    first = BUDGET_W - 500 - 33000
+    assert measured.planned_charge_power_w == pytest.approx(first)
+
+    # The import is unchanged: the battery has not started drawing anything yet
+    _set_sent(mock_hass, "0")
+    await measured._async_update_data()
+
+    assert measured.planned_charge_power_w == pytest.approx(first)
+    assert measured.grid_limit_attributes()["other_load_w"] == pytest.approx(33000.0)
+
+
+@pytest.mark.asyncio
+async def test_the_measured_draw_is_subtracted_once_it_is_real(mock_hass, measured):
+    """Once the battery really draws its setpoint, that share is ours again."""
+    _set_import(mock_hass, "33000")
+    await _start_with_target(measured, 100.0)
+    await measured._async_update_data()
+    first = measured.planned_charge_power_w
+    assert first is not None
+
+    _set_import(mock_hass, str(33000 + first))
+    _set_sent(mock_hass, str(first))
+    await measured._async_update_data()
+
+    assert measured.planned_charge_power_w == pytest.approx(first)
+    assert measured.grid_limit_attributes()["other_load_w"] == pytest.approx(33000.0)
+
+
+@pytest.mark.asyncio
+async def test_a_draw_above_the_setpoint_is_taken_at_face_value(mock_hass, measured):
+    """The smaller of the two never overstates our own share of the import."""
+    _set_import(mock_hass, "33000")
+    await _start_with_target(measured, 100.0)
+    await measured._async_update_data()
+    written = measured._planned_setpoint_written_w
+    assert written is not None
+
+    _set_sent(mock_hass, str(written + 2000))
+    assert measured._own_charge_draw_w() == pytest.approx(written)
+
+
+@pytest.mark.asyncio
+async def test_a_stale_measurement_falls_back_to_the_setpoint(mock_hass, measured):
+    """An old reading says nothing about now; the request is the better guess."""
+    _set_import(mock_hass, "33000")
+    await _start_with_target(measured, 100.0)
+    await measured._async_update_data()
+    written = measured._planned_setpoint_written_w
+    assert written is not None
+
+    _set_sent(mock_hass, "0", age_s=GRID_LIMIT_STALE_AFTER_S + 60)
+    assert measured._own_charge_draw_w() == pytest.approx(written)
+
+    mock_hass.states.async_set(SENT, "unavailable")
+    assert measured._own_charge_draw_w() == pytest.approx(written)
+
+
 @pytest.mark.asyncio
 async def test_kilowatt_units_are_understood(mock_hass, limited):
     _set_import(mock_hass, "33", unit="kW")
@@ -428,12 +537,20 @@ async def test_an_unreadable_value_falls_back_to_the_minimum(mock_hass, limited)
 
 
 @pytest.mark.asyncio
-async def test_a_unitless_sensor_is_read_as_watts(mock_hass, limited):
-    _set_import(mock_hass, "33000", unit=None)
+async def test_a_sensor_without_a_unit_is_not_trusted(mock_hass, limited):
+    """A kW template sensor without a unit would read 33 as 33 W and lift the cap.
+
+    Every unusable unit, including none at all, falls back to the minimum charge
+    power instead of charging at whatever the missing information would allow.
+    """
+    _set_import(mock_hass, "33", unit=None)
     await _start_with_target(limited, 100.0)
     await limited._async_update_data()
 
-    assert limited.planned_charge_power_w == pytest.approx(BUDGET_W - 500 - 33000)
+    assert limited.planned_charge_power_w == pytest.approx(
+        float(limited.config[CONF_MIN_CHARGE_POWER_W])
+    )
+    assert limited._grid_import_w is None
 
 
 @pytest.mark.asyncio
@@ -503,28 +620,88 @@ async def test_headroom_mode_without_the_limit_writes_nothing(mock_hass):
 # --- 5. The efficiency finder is capped too ---------------------------------
 
 
-@pytest.mark.asyncio
-async def test_the_efficiency_finder_cannot_exceed_the_connection(mock_hass):
-    """The finder owns the limit, but not above what the connection carries."""
-    _register(mock_hass, import_w="33000")
-    config = {
+def _finder_config() -> dict:
+    return {
         **LIMITED_CONFIG,
         CONF_AUTO_EFFICIENT_CHARGE: True,
         CONF_CHARGE_POWER_SENT_ENTITY: SENT,
         CONF_CHARGE_POWER_RECEIVED_ENTITY: RECEIVED,
     }
+
+
+@pytest.mark.asyncio
+async def test_the_efficiency_finder_cannot_exceed_the_connection(mock_hass, caplog):
+    """A test the connection cannot carry is not started at all.
+
+    Starting it anyway would file the measured loss under the requested power
+    while the battery drew the limited one, and that wrong number would steer
+    every later night.
+    """
+    caplog.set_level(logging.INFO)
+    _register(mock_hass, import_w="33000")
     mock_hass.states.async_set(SENT, "0", {"unit_of_measurement": "W"})
     mock_hass.states.async_set(RECEIVED, "0", {"unit_of_measurement": "W"})
-    coordinator = _make_coordinator(mock_hass, config)
+    coordinator = _make_coordinator(mock_hass, _finder_config())
+    try:
+        await _start_with_target(coordinator, 100.0)
+        mock_hass.states.async_set(GRID, "on")
+        await coordinator._async_update_data()
+
+        assert coordinator._auto_test_active is False
+        written = _ac_writes(mock_hass)
+        assert written, "the connection limit must still reach the inverter"
+        assert written[-1] <= BUDGET_W - 500 - 33000
+        assert "Not testing the efficiency" in caplog.text
+    finally:
+        await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_the_efficiency_finder_runs_when_there_is_room(mock_hass):
+    """With a quiet house the finder works exactly as before."""
+    _register(mock_hass, import_w="1000")
+    mock_hass.states.async_set(SENT, "0", {"unit_of_measurement": "W"})
+    mock_hass.states.async_set(RECEIVED, "0", {"unit_of_measurement": "W"})
+    coordinator = _make_coordinator(mock_hass, _finder_config())
     try:
         await _start_with_target(coordinator, 100.0)
         mock_hass.states.async_set(GRID, "on")
         await coordinator._async_update_data()
 
         assert coordinator._auto_test_active is True
-        written = _ac_writes(mock_hass)
-        assert written, "the finder must have written a test value"
-        assert written[-1] <= BUDGET_W - 500 - 33000
+        assert coordinator._auto_test_power_w == _ac_writes(mock_hass)[-1]
+    finally:
+        await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_a_running_efficiency_test_is_abandoned_when_the_house_load_rises(
+    mock_hass, caplog
+):
+    """The finder owns the setpoint; the connection outranks it.
+
+    The sample is dropped rather than continued at a lower power: its counters
+    belong to the test power, and the finder can try again another night.
+    """
+    caplog.set_level(logging.INFO)
+    _register(mock_hass, import_w="1000")
+    mock_hass.states.async_set(SENT, "0", {"unit_of_measurement": "W"})
+    mock_hass.states.async_set(RECEIVED, "0", {"unit_of_measurement": "W"})
+    coordinator = _make_coordinator(mock_hass, _finder_config())
+    try:
+        await _start_with_target(coordinator, 100.0)
+        mock_hass.states.async_set(GRID, "on")
+        await coordinator._async_update_data()
+        assert coordinator._auto_test_active is True
+        mock_hass.services.async_call.reset_mock()
+
+        _set_import(mock_hass, "34000")  # both wallboxes start mid-test
+        with patch(NOW, return_value=LATER):
+            await coordinator._react_to_grid_import()
+
+        assert coordinator._auto_test_active is False
+        assert _ac_writes(mock_hass) == [0.0]
+        assert "abandoning the efficiency test" in caplog.text
     finally:
         await coordinator._stop_periodic_verification()
 
@@ -704,31 +881,65 @@ async def test_the_listener_does_nothing_before_the_first_write(mock_hass, limit
 
 
 @pytest.mark.asyncio
-async def test_the_listener_does_nothing_once_the_target_is_reached(mock_hass, limited):
+async def test_the_limit_stays_on_the_inverter_after_the_target_is_reached(
+    mock_hass, limited
+):
+    """Reaching the charge target does not end the window.
+
+    The raised min SOC floor can still make the inverter buy power, and the
+    wallboxes may still be running, so the connection limit has to stay on the
+    inverter until the window really ends - it must not be handed back to the
+    user's own value hours early.
+    """
     await _start_with_target(limited, 100.0)
     await limited._async_update_data()
     mock_hass.services.async_call.reset_mock()
     limited.target_reached = True
 
-    _set_import(mock_hass, "40000")
+    _set_import(mock_hass, "40000")  # the house alone is over the budget
     with patch(NOW, return_value=LATER):
         await limited._react_to_grid_import()
 
-    assert _ac_writes(mock_hass) == []
+    assert _ac_writes(mock_hass) == [0.0]
+    # Holding the cap is the limit doing its job, so it must still say so
+    assert limited.grid_limit_attributes()["limited"] is True
 
 
 @pytest.mark.asyncio
-async def test_the_listener_leaves_the_efficiency_finder_alone(mock_hass, limited):
+async def test_stopping_grid_charging_keeps_the_limit_while_the_window_runs(
+    mock_hass, limited
+):
+    """_stop_grid_charging must not restore the user's full charge limit mid-window."""
+    await _start_with_target(limited, 100.0)
+    await limited._async_update_data()
+    original = float(limited._original_ac_charge_power or 0)
+    mock_hass.services.async_call.reset_mock()
+    _set_import(mock_hass, "40000")
+
+    with patch(NOW, return_value=LATER):
+        await limited._stop_grid_charging()
+
+    assert original not in _ac_writes(mock_hass)
+    assert limited._original_ac_charge_power == original  # still restorable at window end
+
+
+@pytest.mark.asyncio
+async def test_the_listener_leaves_the_finder_alone_while_there_is_room(
+    mock_hass, limited
+):
+    """Nothing to correct: the finder's value fits inside the budget."""
     await _start_with_target(limited, 100.0)
     await limited._async_update_data()
     mock_hass.services.async_call.reset_mock()
     limited._auto_test_active = True
+    limited._auto_test_power_w = 2000
 
-    _set_import(mock_hass, "40000")
+    _set_import(mock_hass, "1000")
     with patch(NOW, return_value=LATER):
         await limited._react_to_grid_import()
 
     assert _ac_writes(mock_hass) == []
+    assert limited._auto_test_active is True
 
 
 @pytest.mark.asyncio
@@ -774,6 +985,31 @@ async def test_the_sensor_shows_the_headroom_and_its_inputs(mock_hass, limited):
     assert attributes["grid_import_w"] == 33000.0
     assert attributes["other_load_w"] == 33000.0
     assert attributes["limited"] is True
+
+
+@pytest.mark.asyncio
+async def test_the_sensor_reports_limited_against_what_was_asked_for(mock_hass, limited):
+    """``limited`` means the connection is holding the battery back.
+
+    A connection that carries less than the configured maximum is not by
+    itself holding anything back: as long as the battery gets the power the
+    plan asked for, nothing is being taken away.
+    """
+    # 20 kW of other load leaves 14 276 W: less than the 10 kW maximum the
+    # battery could take, but far more than the 556 W the plan asks for.
+    _set_import(mock_hass, "20000")
+    await _start_with_target(limited, 60.0)
+    await limited._async_update_data()
+
+    assert limited.planned_charge_power_w == 556.0
+    assert limited.grid_limit_attributes()["limited"] is False
+
+    # Now the wallboxes start and the plan cannot be met any more
+    _set_import(mock_hass, "34600")
+    await limited._async_update_data()
+
+    assert limited.planned_charge_power_w == 0.0
+    assert limited.grid_limit_attributes()["limited"] is True
 
 
 @pytest.mark.asyncio
@@ -853,16 +1089,32 @@ def test_implausible_house_connection_values_are_rejected(mock_hass, overrides, 
 
 def test_a_grid_entity_without_a_budget_is_rejected(mock_hass):
     """The entity alone would be read on every poll and never act."""
-    errors = _wizard_errors(mock_hass, **{CONF_GRID_IMPORT_ENTITY: GRID_IMPORT})
+    errors = _wizard_errors(
+        mock_hass,
+        **{CONF_GRID_IMPORT_ENTITY: GRID_IMPORT, CONF_CHARGE_POWER_ENTITY: AC_LIMIT},
+    )
     assert errors == {CONF_MAIN_FUSE_A: "required_value"}
 
     assert (
         _wizard_errors(
             mock_hass,
-            **{CONF_GRID_IMPORT_ENTITY: GRID_IMPORT, CONF_GRID_MAX_CONTINUOUS_W: 20000},
+            **{
+                CONF_GRID_IMPORT_ENTITY: GRID_IMPORT,
+                CONF_CHARGE_POWER_ENTITY: AC_LIMIT,
+                CONF_GRID_MAX_CONTINUOUS_W: 20000,
+            },
         )
         == {}
     )
+
+
+def test_a_grid_entity_without_a_charge_power_entity_is_rejected(mock_hass):
+    """The limit works by writing a lower setpoint; without the entity it is inert."""
+    errors = _wizard_errors(
+        mock_hass,
+        **{CONF_GRID_IMPORT_ENTITY: GRID_IMPORT, CONF_MAIN_FUSE_A: 63},
+    )
+    assert errors == {CONF_CHARGE_POWER_ENTITY: "required_entity"}
 
 
 def test_the_power_step_offers_every_house_connection_field():
@@ -886,3 +1138,62 @@ def test_the_phase_count_is_stored_as_an_integer():
     assert stored[CONF_GRID_PHASES] == 3
     assert isinstance(stored[CONF_GRID_PHASES], int)
     assert isinstance(stored[CONF_GRID_HEADROOM_W], int)
+
+
+# --- 10. Both protections in one window -------------------------------------
+
+
+def _min_soc_writes(hass) -> list[float]:
+    return [
+        c.args[2]["value"]
+        for c in hass.services.async_call.await_args_list
+        if c.args[0] == "number" and c.args[2].get("entity_id") == MIN_SOC
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_connection_limit_and_the_discharge_block_run_together(mock_hass):
+    """The combination this integration is actually installed for.
+
+    The battery starts the window fuller than the plan needs, so the discharge
+    block raises the min SOC to keep that charge - and a raised floor is exactly
+    what can make the inverter keep buying after the charge target is reached.
+    At the same time both wallboxes are running, so the house connection has
+    almost nothing left. The limit has to hold while the block holds, and the
+    window end has to give both settings back.
+    """
+    _register(mock_hass, import_w="33000")
+    mock_hass.states.async_set(BATTERY, "70")  # more than the plan asks for
+    coordinator = _make_coordinator(mock_hass, LIMITED_CONFIG)
+    try:
+        await coordinator._on_window_start(WINDOW_START)
+        coordinator.initial_calculated_soc = 60.0
+        await coordinator._async_update_data()
+
+        # The block keeps the charge: the inverter carries the floor, not the target
+        assert coordinator._window_floor_soc == 70.0
+        assert coordinator.current_target_soc() == 60.0
+        assert coordinator.inverter_floor_soc() == 70.0
+        assert _min_soc_writes(mock_hass)[-1] == 70.0
+        assert coordinator.target_reached is True
+
+        # ... and the connection still holds the charge power down, because the
+        # raised floor can make the inverter buy power at any moment
+        mock_hass.services.async_call.reset_mock()
+        _set_import(mock_hass, "34600")
+        with patch(NOW, return_value=LATER):
+            await coordinator._react_to_grid_import()
+
+        assert _ac_writes(mock_hass) == [0.0]
+        assert coordinator.grid_limit_attributes()["limited"] is True
+
+        # The window end gives the inverter back what it had
+        mock_hass.services.async_call.reset_mock()
+        with patch(NOW, return_value=WINDOW_END):
+            await coordinator._on_window_end(WINDOW_END)
+
+        assert _min_soc_writes(mock_hass)[-1] == 8.0
+        assert _ac_writes(mock_hass)[-1] == 6000.0
+        assert coordinator._window_floor_soc is None
+    finally:
+        await coordinator._stop_periodic_verification()
