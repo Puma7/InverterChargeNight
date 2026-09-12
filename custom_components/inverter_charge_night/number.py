@@ -40,25 +40,24 @@ class MinSOCOverrideNumber(InverterChargeNightEntity, NumberEntity):
     _attr_native_max_value = 100.0
     _attr_native_step = 1
     _attr_mode = NumberMode.BOX
-    _attr_icon = "mdi:battery-settings"
     _attr_native_unit_of_measurement = "%"
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the number entity."""
         super().__init__(coordinator, entry, "min_soc_override")
-        self._override_value: float | None = None
 
     @property
     def native_value(self) -> float | None:
-        """Return the override value or calculated SOC."""
-        if self.coordinator.override_soc is None:
-            if self._override_value is not None:
-                self._override_value = None
-            value = self.coordinator.data.get("calculated_soc")
-            return float(value) if value is not None else None
-        if self._override_value is not None:
-            return self._override_value
+        """Return the active override, else the SOC the planner calculated.
+
+        The coordinator owns the override (it survives a restart through the
+        persisted runtime state), so the entity keeps no copy of its own: after
+        a restart inside a window the UI would otherwise show the planner's
+        number while the inverter is driven to the restored override.
+        """
+        if self.coordinator.override_soc is not None:
+            return float(self.coordinator.override_soc)
         value = self.coordinator.data.get("calculated_soc")
         return float(value) if value is not None else None
 
@@ -80,7 +79,6 @@ class MinSOCOverrideNumber(InverterChargeNightEntity, NumberEntity):
             )
         
         value = clamped_value
-        self._override_value = value
         self.coordinator.override_soc = value
         self.coordinator.target_reached = False
         
@@ -109,7 +107,6 @@ class SnowNightsNumber(InverterChargeNightEntity, NumberEntity):
     _attr_native_max_value = 14
     _attr_native_step = 1
     _attr_mode = NumberMode.BOX
-    _attr_icon = "mdi:snowflake"
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:

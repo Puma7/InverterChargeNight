@@ -74,23 +74,24 @@ def test_best_charge_power_sensor():
 
 
 def test_min_soc_override_number_native_value_paths():
+    """The coordinator's override wins; without one the planner's SOC is shown."""
     coordinator = MagicMock()
     coordinator.config = {CONF_USER_MIN_SOC: 10.0, CONF_USER_MAX_SOC: 90.0}
     coordinator.data = {"calculated_soc": 40.0}
     coordinator.override_soc = None
     entry = _make_entry()
     number = MinSOCOverrideNumber(coordinator, entry)
-    number._override_value = 60.0
 
     assert number.native_value == 40.0
 
+    # An override restored into the coordinator (e.g. a restart inside a window)
+    # is shown even though this entity instance never set it (finding B14).
     coordinator.override_soc = 70.0
-    number._override_value = 75.0
-    assert number.native_value == 75.0
+    assert number.native_value == 70.0
 
-    coordinator.override_soc = 70.0
-    number._override_value = None
-    assert number.native_value == 40.0
+    coordinator.override_soc = None
+    coordinator.data = {}
+    assert number.native_value is None
 
 
 @pytest.mark.asyncio
@@ -179,7 +180,8 @@ def test_snow_nights_number_static_attributes_and_value():
     assert number.unique_id == "entry_1_snow_nights"
     assert number.translation_key == "snow_nights"
     assert (number.native_min_value, number.native_max_value, number.native_step) == (0, 14, 1)
-    assert number.icon == "mdi:snowflake"
+    # The icon comes from icons.json, not from a hardcoded _attr_icon
+    assert number.icon is None
 
 
 @pytest.mark.asyncio

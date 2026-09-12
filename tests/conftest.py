@@ -51,6 +51,8 @@ def mock_config_entry() -> ConfigEntry:
     entry.update_listeners = []
     entry.entry_id = "test_entry_id"
     entry.title = "Inverter Charge Night"
+    # The min SOC entity identifies the inverter and is the entry's unique id.
+    entry.unique_id = "number.kostal_min_soc"
     entry.data = {
         CONF_KOSTAL_MIN_SOC_ENTITY: "number.kostal_min_soc",
         CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.kostal_grid_charge",
@@ -92,6 +94,9 @@ def mock_hass() -> HomeAssistant:
     hass.services.async_call = AsyncMock()
     hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
     hass.config_entries = MagicMock()
+    # No other entry is configured unless a test says so; the config and options
+    # flows iterate this to detect a second entry pointed at the same inverter.
+    hass.config_entries.async_entries.return_value = []
     # ``bus`` and ``loop`` are instance attributes of HomeAssistant, so the spec
     # does not provide them. HA's event helpers (async_track_state_change_event,
     # async_track_time_change) need both and then return real unsubscribe callables.

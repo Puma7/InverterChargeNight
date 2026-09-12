@@ -44,6 +44,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_UPDATE_INTERVAL,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
+    MODE_MORNING_DISCHARGE,
     MODE_NIGHT_CHARGE,
 )
 
@@ -75,6 +76,12 @@ POWER_INPUT = {
 ADVANCED_INPUT = {
     CONF_UPDATE_INTERVAL: 900.0,
     CONF_COMMAND_DELAY: 0.1,
+}
+# Same step 1 input, but keeping the inverter the mock entry is already set up
+# for: changing it would trip the unique-id check of the reconfigure flow.
+RECONFIGURE_ENTITIES_INPUT = {
+    **ENTITIES_INPUT,
+    CONF_KOSTAL_MIN_SOC_ENTITY: "number.kostal_min_soc",
 }
 
 
@@ -258,7 +265,9 @@ async def test_reconfigure_flow_updates_entry(mock_hass, mock_config_entry, enti
     assert _defaults(result)[CONF_KOSTAL_MIN_SOC_ENTITY] == "number.kostal_min_soc"
     assert _defaults(result)[CONF_BATTERY_CAPACITY] == 10.0
 
-    result = await flow.async_step_reconfigure({**ENTITIES_INPUT, CONF_BATTERY_CAPACITY: 20.0})
+    result = await flow.async_step_reconfigure(
+        {**RECONFIGURE_ENTITIES_INPUT, CONF_BATTERY_CAPACITY: 20.0}
+    )
     assert result["step_id"] == "reconfigure_time_soc"
     assert _defaults(result)[CONF_END_TIME] == "05:59"
 
@@ -287,6 +296,29 @@ async def test_reconfigure_flow_updates_entry(mock_hass, mock_config_entry, enti
         mock_config_entry.entry_id
     )
 
+
+@pytest.mark.asyncio
+async def test_reconfigure_flow_rejects_another_inverter(
+    mock_hass, mock_config_entry, entity_registry
+):
+    """Pointing this entry at an inverter that belongs elsewhere must not be stored.
+
+    Without the unique-id check two coordinators would drive the same min SOC
+    entity towards opposite targets.
+    """
+    mock_hass.config_entries.async_get_known_entry.return_value = mock_config_entry
+    flow = _config_flow(
+        mock_hass, source=config_entries.SOURCE_RECONFIGURE, entry_id=mock_config_entry.entry_id
+    )
+
+    await flow.async_step_reconfigure(ENTITIES_INPUT)  # a different min SOC entity
+    await flow.async_step_reconfigure_time_soc(TIME_SOC_INPUT)
+    await flow.async_step_reconfigure_power(POWER_INPUT)
+    with pytest.raises(AbortFlow) as abort:
+        await flow.async_step_reconfigure_advanced(ADVANCED_INPUT)
+
+    assert abort.value.reason == "unique_id_mismatch"
+    mock_hass.config_entries.async_update_entry.assert_not_called()
 
 # --- options -----------------------------------------------------------------
 
@@ -344,6 +376,65 @@ async def test_options_flow_success_keeps_options(mock_hass, mock_config_entry, 
     assert stored[CONF_NAME] == "Test"
     assert stored[CONF_UPDATE_INTERVAL] == 900
 
+
+
+@pytest.mark.asyncio
+async def test_options_flow_rejects_entity_of_another_entry(
+    mock_hass, mock_config_entry, entity_registry
+):
+    """Saving an inverter that a second entry already drives is refused."""
+    other = MagicMock()
+    other.entry_id = "other_entry_id"
+    other.unique_id = "number.min_soc"
+    other.data = {CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc"}
+    mock_hass.config_entries.async_entries.return_value = [mock_config_entry, other]
+    flow = OptionsFlowHandler(mock_config_entry)
+    flow.hass = mock_hass
+
+    await flow.async_step_init(ENTITIES_INPUT)  # the other entry's min SOC entity
+    await flow.async_step_time_soc(TIME_SOC_INPUT)
+    await flow.async_step_power(POWER_INPUT)
+    result = await flow.async_step_advanced(ADVANCED_INPUT)
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "init"
+    assert result["errors"] == {CONF_KOSTAL_MIN_SOC_ENTITY: "entity_used_by_other_entry"}
+    mock_hass.config_entries.async_update_entry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_options_flow_keeps_runtime_changes(mock_hass, mock_config_entry, entity_registry):
+    """A field written while the dialog is open is not reverted on save.
+
+    The select entity, the switch and the efficiency finder write into
+    ``entry.data`` at runtime. Saving the dialog must keep such a change for
+    every field the user did not edit, and still apply the fields they did.
+    """
+    mock_config_entry.data = {
+        **mock_config_entry.data,
+        CONF_OPERATION_MODE: MODE_NIGHT_CHARGE,
+        CONF_AUTO_EFFICIENT_CHARGE: True,
+    }
+    flow = OptionsFlowHandler(mock_config_entry)
+    flow.hass = mock_hass
+
+    await flow.async_step_init({**ENTITIES_INPUT, CONF_OPERATION_MODE: MODE_NIGHT_CHARGE})
+    await flow.async_step_time_soc(TIME_SOC_INPUT)
+    # While the dialog is open the finder completes and disables itself, and the
+    # user flips the operation mode from the dashboard.
+    mock_config_entry.data = {
+        **mock_config_entry.data,
+        CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE,
+        CONF_AUTO_EFFICIENT_CHARGE: False,
+    }
+    await flow.async_step_power({**POWER_INPUT, CONF_AUTO_EFFICIENT_CHARGE: True})
+    await flow.async_step_advanced({**ADVANCED_INPUT, CONF_COMMAND_DELAY: 0.5})
+
+    stored = mock_hass.config_entries.async_update_entry.call_args.kwargs["data"]
+    assert stored[CONF_OPERATION_MODE] == MODE_MORNING_DISCHARGE
+    assert stored[CONF_AUTO_EFFICIENT_CHARGE] is False
+    # the value the user actually changed in the dialog still wins
+    assert stored[CONF_COMMAND_DELAY] == 0.5
 
 # --- shared validation -------------------------------------------------------
 

@@ -135,6 +135,10 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_DAY_PRICE_CT,
     CONF_FEED_IN_PRICE_CT,
 )
+# Every key the wizard owns; anything else in entry.data is written at runtime.
+_ALL_STEP_KEYS: frozenset[str] = frozenset(
+    STEP_USER_KEYS + STEP_TIME_SOC_KEYS + STEP_POWER_KEYS + STEP_ADVANCED_KEYS
+)
 # The three tariffs are only meaningful together: the planner compares them.
 _PRICE_KEYS: tuple[str, ...] = (CONF_NIGHT_PRICE_CT, CONF_DAY_PRICE_CT, CONF_FEED_IN_PRICE_CT)
 
@@ -678,9 +682,13 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def _async_reconfigure_finish(self) -> ConfigFlowResult:
-        return self.async_update_reload_and_abort(
-            self._get_reconfigure_entry(), data=_finalize_data(self._data)
-        )
+        data = _finalize_data(self._data)
+        # The min SOC entity identifies the inverter. Without this check the
+        # reconfigure flow could point this entry at an inverter that another
+        # entry already drives, leaving two coordinators fighting over it.
+        await self.async_set_unique_id(data[CONF_KOSTAL_MIN_SOC_ENTITY])
+        self._abort_if_unique_id_mismatch()
+        return self.async_update_reload_and_abort(self._get_reconfigure_entry(), data=data)
 
     @staticmethod
     @callback
@@ -701,6 +709,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Initialize options flow."""
         self._config_entry = config_entry
         self._data: dict[str, Any] = dict(config_entry.data)
+        # The state entry.data had when the dialog opened. _async_save compares
+        # against it to tell a field the user edited from one they only passed
+        # through, so that a runtime write does not get reverted on save.
+        self._opened_with: dict[str, Any] = dict(config_entry.data)
 
     async def _async_wizard_step(
         self,
@@ -754,10 +766,47 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             "advanced", STEP_ADVANCED_KEYS, _schema_advanced, user_input, self._async_save
         )
 
+    def _entry_using_min_soc_entity(self, entity_id: str) -> ConfigEntry | None:
+        """Return another configured entry that already drives this inverter."""
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            if entry.entry_id == self._config_entry.entry_id:
+                continue
+            if entity_id in (entry.unique_id, entry.data.get(CONF_KOSTAL_MIN_SOC_ENTITY)):
+                return entry
+        return None
+
+    def _merged_data(self) -> dict[str, Any]:
+        """Merge the collected values over the *current* entry.data.
+
+        The dialog snapshots entry.data when it opens, but the integration also
+        writes entry.data while it is open: the select entity stores the
+        operation mode and the switch and the efficiency finder store the auto
+        efficient charge flag. Writing the snapshot back wholesale would revert
+        such a change -- for instance re-enabling a finder that just completed
+        and disabled itself. So a field the user did not edit in this dialog
+        keeps whatever entry.data holds now; only the fields the user actually
+        changed (and the fields the user cleared) are written.
+        """
+        collected = _finalize_data(self._data)
+        data = dict(self._config_entry.data)
+        for key in _ALL_STEP_KEYS:
+            if key not in collected:
+                data.pop(key, None)  # optional field cleared in the dialog
+        for key, value in collected.items():
+            if key in data and self._opened_with.get(key) == value:
+                continue  # untouched here; keep the value entry.data has now
+            data[key] = value
+        return data
+
     async def _async_save(self) -> ConfigFlowResult:
+        min_soc_entity = self._data.get(CONF_KOSTAL_MIN_SOC_ENTITY)
+        if min_soc_entity and self._entry_using_min_soc_entity(min_soc_entity):
+            return self.async_show_form(
+                step_id="init",
+                data_schema=_schema_entities(self._data),
+                errors={CONF_KOSTAL_MIN_SOC_ENTITY: "entity_used_by_other_entry"},
+            )
         # The settings live in entry.data (unchanged for existing installations);
         # entry.options only holds the auto-efficiency history, which is preserved.
-        self.hass.config_entries.async_update_entry(
-            self._config_entry, data=_finalize_data(self._data)
-        )
+        self.hass.config_entries.async_update_entry(self._config_entry, data=self._merged_data())
         return self.async_create_entry(title="", data=dict(self._config_entry.options))
