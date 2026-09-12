@@ -4,8 +4,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        include:
+          # Oldest supported Home Assistant (the floor declared in hacs.json)
+          - python-version: "3.13"
+            homeassistant: "==2025.2.0"
+          # Newest Home Assistant; it requires Python 3.14
+          - python-version: "3.14"
+            homeassistant: ""
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -13,6 +20,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -r requirements-dev.txt
+      - run: pip install "homeassistant${{ matrix.homeassistant }}"
       - run: pytest
       - run: mypy custom_components/inverter_charge_night/
       - run: pyright
