@@ -39,6 +39,8 @@ from .const import (
     CONF_COMMAND_DELAY,
     CONF_DAY_PRICE_CT,
     CONF_DEFAULT_MIN_SOC,
+    CONF_DISCHARGE_BLOCK_MODE,
+    CONF_DISCHARGE_BLOCK_SWITCH,
     CONF_DISCHARGE_LIMIT_ENTITY,
     CONF_END_TIME,
     CONF_FEED_IN_PRICE_CT,
@@ -63,6 +65,7 @@ from .const import (
     DEFAULT_BRIDGE_RESERVE_KWH,
     DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_COMMAND_DELAY,
+    DEFAULT_DISCHARGE_BLOCK_MODE,
     DEFAULT_END_TIME,
     DEFAULT_FORECAST_ERROR_MARGIN,
     DEFAULT_MAX_CHARGE_POWER_W,
@@ -74,6 +77,8 @@ from .const import (
     DEFAULT_PV_CROSSOVER_DELAY_MIN,
     DEFAULT_START_TIME,
     DEFAULT_UPDATE_INTERVAL,
+    DISCHARGE_BLOCK_AUTO,
+    DISCHARGE_BLOCK_OFF,
     DOMAIN,
     MODE_MORNING_DISCHARGE,
     MODE_NIGHT_CHARGE,
@@ -139,6 +144,8 @@ STEP_POWER_KEYS: tuple[str, ...] = (
     CONF_GRID_CONTINUOUS_PCT,
     CONF_GRID_MAX_CONTINUOUS_W,
     CONF_GRID_HEADROOM_W,
+    CONF_DISCHARGE_BLOCK_SWITCH,
+    CONF_DISCHARGE_BLOCK_MODE,
 )
 STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_UPDATE_INTERVAL,
@@ -224,6 +231,7 @@ _ENTITY_KEYS_TO_VALIDATE = [
     CONF_DISCHARGE_LIMIT_ENTITY,
     CONF_HOUSE_LOAD_ENTITY,
     CONF_GRID_IMPORT_ENTITY,
+    CONF_DISCHARGE_BLOCK_SWITCH,
 ]
 
 
@@ -447,6 +455,18 @@ def _planner_mode_selector() -> Any:
     )
 
 
+def _discharge_block_mode_selector() -> Any:
+    return cast(
+        Any,
+        selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[DISCHARGE_BLOCK_AUTO, DISCHARGE_BLOCK_OFF],
+                translation_key="discharge_block_mode",
+            )
+        ),
+    )
+
+
 def _required(key: str, defaults: Mapping[str, Any], fallback: Any = None) -> vol.Required:
     """Required field, prefilled from stored data or a constant fallback."""
     value = defaults.get(key)
@@ -572,6 +592,12 @@ def _schema_power(defaults: Mapping[str, Any]) -> vol.Schema:
             _required(
                 CONF_GRID_HEADROOM_W, defaults, DEFAULT_GRID_HEADROOM_W
             ): _number_selector(0, 10000, 50, "W"),
+            _optional(
+                CONF_DISCHARGE_BLOCK_SWITCH, defaults.get(CONF_DISCHARGE_BLOCK_SWITCH)
+            ): _entity_selector("switch"),
+            _required(
+                CONF_DISCHARGE_BLOCK_MODE, defaults, DEFAULT_DISCHARGE_BLOCK_MODE
+            ): _discharge_block_mode_selector(),
         }
     )
 

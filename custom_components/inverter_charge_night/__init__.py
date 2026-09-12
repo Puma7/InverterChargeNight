@@ -58,6 +58,8 @@ from .const import (
     CONF_BRIDGE_RESERVE_KWH,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_LIMIT_ENTITY,
+    CONF_DISCHARGE_BLOCK_SWITCH,
+    CONF_DISCHARGE_BLOCK_MODE,
     CONF_FEED_IN_PRICE_CT,
     CONF_NIGHT_PRICE_CT,
     CONF_DAY_PRICE_CT,
@@ -78,6 +80,11 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_ACTIVE_START_DATE,
     DEFAULT_ACTIVE_END_DATE,
+    DEFAULT_DISCHARGE_BLOCK_MODE,
+    DISCHARGE_BLOCK_OFF,
+    DISCHARGE_BLOCK_VIA_SWITCH,
+    DISCHARGE_BLOCK_VIA_LIMIT,
+    DISCHARGE_BLOCK_VIA_MIN_SOC,
     MODE_MORNING_DISCHARGE,
     DOMAIN,
     # House connection limit (plan 008)
@@ -321,6 +328,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # may run on an instance whose constructor did not (test doubles built with
     # __new__).
     _original_discharge_limit: float | None = None
+    # Plan 009: the raised min SOC floor of the running window, the state the
+    # discharge block switch had before this window turned it on, and the way
+    # already announced in the log for this window.
+    _window_floor_soc: float | None = None
+    _original_discharge_block: bool | None = None
+    _discharge_block_logged: str | None = None
     # True while _on_window_end tears the window down: nothing may re-arm the
     # listeners or write the window target back to the inverter in between.
     _ending: bool = False
@@ -402,6 +415,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_allowed_w: float | None = None
         self._grid_limited = False
         self._grid_stale_logged = False
+        # Discharge block (plan 009). The floor is the highest battery SOC seen
+        # this window; it only ever rises, so a jittering measurement cannot
+        # produce a write. None outside a window.
+        self._window_floor_soc: float | None = None
+        self._original_discharge_block: bool | None = None
+        self._discharge_block_logged: str | None = None
         self._restore_state()
 
     # Persistence ------------------------------------------------------------
@@ -423,6 +442,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "initial_calculated_soc": self.initial_calculated_soc if self.is_active else None,
             "original_ac_charge_power": self._original_ac_charge_power,
             "original_discharge_limit": self._original_discharge_limit,
+            # The raised floor belongs to the running window only; a stale one
+            # would block the battery for good after a restart (plan 009).
+            "window_floor_soc": self._window_floor_soc if self.is_active else None,
+            "original_discharge_block": self._original_discharge_block,
             "original_absolute_charge_power": self._original_absolute_charge_power,
             "pending_reset": self._pending_reset,
             "snow_nights": self.snow_nights,
@@ -442,6 +465,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.initial_calculated_soc = self._restore_soc(state, "initial_calculated_soc")
         self._original_ac_charge_power = _as_float(state.get("original_ac_charge_power"))
         self._original_discharge_limit = _as_float(state.get("original_discharge_limit"))
+        self._window_floor_soc = self._restore_soc(state, "window_floor_soc")
+        block_raw = state.get("original_discharge_block")
+        if isinstance(block_raw, bool):
+            self._original_discharge_block = block_raw
         self._original_absolute_charge_power = _as_float(
             state.get("original_absolute_charge_power")
         )
@@ -515,6 +542,40 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.override_soc is not None:
             return self.override_soc
         return self.initial_calculated_soc if self.initial_calculated_soc is not None else self.calculated_soc
+
+    def inverter_floor_soc(self, target_soc: float | None = None) -> float | None:
+        """The value written to the inverter's min SOC entity (plan 009).
+
+        Charge target and written floor are two different things. They are equal
+        unless the discharge block runs over the min SOC: a battery does not
+        discharge below its min SOC, so raising the floor to the charge level the
+        window started at keeps stored PV in the battery while grid energy is
+        cheap. The floor only ever rises within a window and always stays inside
+        ``[user_min_soc, user_max_soc]``.
+
+        Everything that compares or restores the *written* min SOC must use this,
+        not :meth:`current_target_soc` - otherwise the verification writes the
+        raised floor straight back down. "Target reached" keeps using the charge
+        target.
+        """
+        if target_soc is None:
+            target_soc = self.current_target_soc()
+        if target_soc is None:
+            return None
+        if not self.is_active or self._ending:
+            return target_soc
+        if self._discharge_block_method() != DISCHARGE_BLOCK_VIA_MIN_SOC:
+            return target_soc
+        floor = self._window_floor_soc
+        if floor is None or floor <= target_soc:
+            return target_soc
+        user_min_soc = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
+        user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC))
+        if not user_min_soc <= target_soc <= user_max_soc:
+            # The target itself is out of bounds; _control_kostal refuses it and
+            # logs why. Raising it here would paper over that.
+            return target_soc
+        return max(user_min_soc, min(user_max_soc, floor))
 
     @property
     def is_discharge_mode(self) -> bool:
@@ -1045,21 +1106,183 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.info("%s to %.3f", what, value)
         return True
 
-    async def _apply_discharge_block(self, announce: bool = False) -> None:
-        """Set the discharge power limit to 0 so the house runs from the grid.
+    def _discharge_block_method(self) -> str | None:
+        """Which of the three ways blocks the discharge this window (plan 009).
 
-        The value found before the first write is remembered (and persisted) so
-        the window end can restore it. Never applied in discharge mode or in
-        backup mode. ``announce`` logs once that no entity is configured.
+        Checked against the configuration in this order: a switch of the
+        inverter, the discharge power limit, and finally the min SOC - which
+        needs no vendor feature at all. ``None`` means the battery is left free
+        to discharge: the mode is off, or this is a morning discharge window,
+        where a block would be pointless.
         """
-        if not self.config.get(CONF_DISCHARGE_LIMIT_ENTITY):
+        if self.is_discharge_mode:
+            return None
+        mode = str(self.config.get(CONF_DISCHARGE_BLOCK_MODE, DEFAULT_DISCHARGE_BLOCK_MODE))
+        if mode == DISCHARGE_BLOCK_OFF:
+            return None
+        if self.config.get(CONF_DISCHARGE_BLOCK_SWITCH):
+            return DISCHARGE_BLOCK_VIA_SWITCH
+        if self.config.get(CONF_DISCHARGE_LIMIT_ENTITY):
+            return DISCHARGE_BLOCK_VIA_LIMIT
+        return DISCHARGE_BLOCK_VIA_MIN_SOC
+
+    def discharge_block_state(self) -> str:
+        """The way in use, for the ``discharge_block`` sensor attribute."""
+        return self._discharge_block_method() or DISCHARGE_BLOCK_OFF
+
+    def _update_window_floor(self) -> None:
+        """Raise the window's min SOC floor to the current battery SOC.
+
+        Monotone on purpose: if the charge level falls anyway (the block did not
+        take), the floor stays up and the inverter recharges from the grid -
+        which is exactly right inside the window, where grid energy is cheap.
+        """
+        if not self.is_active or self._ending:
+            return
+        if self._discharge_block_method() != DISCHARGE_BLOCK_VIA_MIN_SOC:
+            return
+        current = self._current_battery_soc()
+        if current is None:
+            return
+        previous = self._window_floor_soc
+        if previous is not None and current <= previous:
+            return
+        self._window_floor_soc = current
+        _LOGGER.info(
+            "Discharge block: min SOC floor raised to %.1f%% (was %s)",
+            current,
+            f"{previous:.1f}%" if previous is not None else "unset",
+        )
+        self._persist_state()
+
+    def _discharge_block_switch_target(self) -> tuple[str, str] | None:
+        """Return (entity_id, domain) of the discharge block switch, or None."""
+        entity_id = self.config.get(CONF_DISCHARGE_BLOCK_SWITCH)
+        if not entity_id:
+            return None
+        domain = str(entity_id).split(".")[0]
+        if domain not in ("switch", "input_boolean"):
+            _LOGGER.warning(
+                "Discharge block switch %s has unsupported domain %s", entity_id, domain
+            )
+            return None
+        return str(entity_id), domain
+
+    async def _apply_discharge_block_switch(self) -> None:
+        """Turn the inverter's discharge block switch on, remembering its state."""
+        target = self._discharge_block_switch_target()
+        if target is None:
+            return
+        entity_id, domain = target
+        state = self.hass.states.get(entity_id)
+        if not state or state.state in ("unknown", "unavailable"):
+            _LOGGER.warning("Discharge block switch %s is unavailable - block deferred", entity_id)
+            return
+        was_on = state.state == "on"
+        if self._original_discharge_block is None:
+            self._original_discharge_block = was_on
+            _LOGGER.info("Stored original discharge block switch state: %s", state.state)
+            self._persist_state()
+        if was_on:
+            _LOGGER.debug("Discharge already blocked (%s is on)", entity_id)
+            return
+        try:
+            await self.hass.services.async_call(domain, "turn_on", {"entity_id": entity_id})
+        except Exception as e:  # pylint: disable=broad-except
+            _LOGGER.error("Error blocking discharge via %s: %s", entity_id, e, exc_info=True)
+            return
+        _LOGGER.info("Blocked battery discharge via %s", entity_id)
+
+    async def _reset_discharge_block_switch(self) -> bool:
+        """Put the discharge block switch back to the state captured at window start."""
+        if self._original_discharge_block is None:
+            return True
+        target = self._discharge_block_switch_target()
+        if target is None:
+            # Entity no longer configured or unusable: nothing we can restore
+            self._original_discharge_block = None
+            return True
+        entity_id, domain = target
+        state = self.hass.states.get(entity_id)
+        if not state or state.state in ("unknown", "unavailable"):
+            _LOGGER.error("Cannot reset discharge block - entity %s unavailable", entity_id)
+            return False
+        service = "turn_on" if self._original_discharge_block else "turn_off"
+        try:
+            await self.hass.services.async_call(domain, service, {"entity_id": entity_id})
+        except Exception as e:  # pylint: disable=broad-except
+            _LOGGER.error("Error resetting discharge block switch: %s", e, exc_info=True)
+            return False
+        _LOGGER.info("Reset discharge block switch %s to %s", entity_id, service)
+        self._original_discharge_block = None
+        return True
+
+    async def _write_raised_min_soc_floor(self) -> None:
+        """Write the floor to the min SOC entity when it sits above the target.
+
+        Only then: with floor == charge target nothing about the existing
+        control flow changes, and _control_kostal writes it on the next update
+        as it always did.
+        """
+        target_soc = self.current_target_soc()
+        floor_soc = self.inverter_floor_soc(target_soc)
+        if target_soc is None or floor_soc is None or floor_soc <= target_soc:
+            return
+        entity_id = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
+        if not entity_id:
+            return
+        state = self.hass.states.get(entity_id)
+        if not state or state.state in ("unknown", "unavailable"):
+            _LOGGER.debug("Cannot raise the min SOC floor yet - entity unavailable")
+            return
+        current = _as_float(state.state)
+        self._capture_original_min_soc(current)
+        if current is not None and abs(current - floor_soc) <= 0.5:
+            self._last_soc_set = floor_soc
+            return
+        try:
+            await self.hass.services.async_call(
+                "number", "set_value", {"entity_id": entity_id, "value": floor_soc}
+            )
+        except Exception as e:  # pylint: disable=broad-except
+            _LOGGER.error("Error raising the min SOC floor: %s", e, exc_info=True)
+            return
+        self._last_soc_set = floor_soc
+        _LOGGER.info(
+            "Discharge block: raised inverter min SOC to %.1f%% (charge target %.1f%%)",
+            floor_soc,
+            target_soc,
+        )
+
+    async def _apply_discharge_block(self, announce: bool = False) -> None:
+        """Keep the battery from running the house while the window is open.
+
+        Three ways, chosen by :meth:`_discharge_block_method`: the inverter's
+        own switch, the discharge power limit set to 0, or - on an inverter that
+        offers neither - raising the min SOC floor, which every battery honours.
+        Never applied in discharge mode or in backup mode. ``announce`` logs the
+        chosen way once per window.
+        """
+        if self.is_discharge_mode or self._is_backup_active():
+            return
+        method = self._discharge_block_method()
+        if method is None:
             if announce:
                 _LOGGER.info(
-                    "No discharge limit entity configured - the battery may discharge into the "
-                    "house during the window"
+                    "Discharge block is off - the battery may discharge into the house "
+                    "during the window"
                 )
             return
-        if self.is_discharge_mode or self._is_backup_active():
+        if announce and self._discharge_block_logged != method:
+            _LOGGER.info("Blocking battery discharge for this window via: %s", method)
+            self._discharge_block_logged = method
+        if method == DISCHARGE_BLOCK_VIA_SWITCH:
+            await self._apply_discharge_block_switch()
+            return
+        if method == DISCHARGE_BLOCK_VIA_MIN_SOC:
+            # The floor is written by _control_kostal and _verify_and_restore_min_soc,
+            # which both read it back through inverter_floor_soc().
+            self._update_window_floor()
             return
         target = self._discharge_limit_target()
         if target is None:
@@ -1775,6 +1998,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Night charge: keep stored PV in the battery while grid energy is cheap
         if not self.is_discharge_mode:
             await self._apply_discharge_block(announce=True)
+            # A floor above the charge target has to reach the inverter now:
+            # with the battery already above the target the update below returns
+            # early ("target reached") and _control_kostal never runs - which is
+            # exactly the case this block exists for.
+            await self._write_raised_min_soc_floor()
 
         await self.async_request_refresh()
 
@@ -1982,6 +2210,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.planned_charge_power_w = None
             self._pv_crossover = None
             self._sun_fallback_logged = False
+            # A raised floor must never outlive its window: the battery would be
+            # blocked for good. _reset_settings puts original_min_soc back on the
+            # inverter; this drops the floor that produced the raised value.
+            self._window_floor_soc = None
+            self._discharge_block_logged = None
             # A failed reset is retried until the inverter is back at its
             # original settings; original_min_soc is kept for that (F3).
             # _reset_settings marks and schedules that itself.
@@ -2166,6 +2399,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ok = False
         if not await self._reset_discharge_limit():
             ok = False
+        if not await self._reset_discharge_block_switch():
+            ok = False
         if not await self._reset_absolute_charge_power():
             ok = False
         # Forget the original values only once everything is back in place;
@@ -2173,6 +2408,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if ok:
             self.original_min_soc = None
             self.override_soc = None  # Clear override when resetting
+            # The inverter is back at its original floor, so the raised one is
+            # gone too - it must never survive into another window (plan 009).
+            self._window_floor_soc = None
         # Persist unconditionally: a partial reset already cleared some capture
         # values, and leaving the old ones in the options would resurrect
         # day-old limits after a restart.
@@ -2283,6 +2521,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         # Update display SOC to match calculated SOC
         self.calculated_soc = calculated_soc
+        # The discharge-block floor follows the charge level (plan 009)
+        self._update_window_floor()
         
         # The single source of truth for the target: manual override, else the plan.
         current_target = self.current_target_soc()
@@ -2467,6 +2707,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 should_skip_charging = True  # Safety: don't charge if we can't check SOC
         
+        # What goes on the min SOC entity: the charge target, or the raised
+        # discharge-block floor (plan 009), already clamped into the user bounds.
+        floor_soc = self.inverter_floor_soc(target_soc)
+        if floor_soc is None:
+            floor_soc = target_soc
+
         # Track if we need to set min SOC
         need_to_set_min_soc = False
         min_soc_current_value = None
@@ -2496,11 +2742,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # Only update if value changed significantly (avoid unnecessary service calls and EEPROM wear)
                     # CRITICAL: Threshold increased to 0.5 to prevent "bricking" inverter memory
                     # The inverter's reported value is authoritative; _last_soc_set is log information only
-                    if min_soc_current_value is None or abs(min_soc_current_value - target_soc) > 0.5:
+                    if min_soc_current_value is None or abs(min_soc_current_value - floor_soc) > 0.5:
                         need_to_set_min_soc = True
                     else:
-                        _LOGGER.debug("Min SOC already at target: %.1f%%", target_soc)
-                        self._last_soc_set = target_soc
+                        _LOGGER.debug("Min SOC already at target: %.1f%%", floor_soc)
+                        self._last_soc_set = floor_soc
             except Exception as e:
                 _LOGGER.error("Error preparing min SOC: %s", e, exc_info=True)
         
@@ -2514,13 +2760,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": kostal_min_soc_entity, "value": target_soc},
+                    {"entity_id": kostal_min_soc_entity, "value": floor_soc},
                 )
-                self._last_soc_set = target_soc
+                self._last_soc_set = floor_soc
                 min_soc_set = True
                 _LOGGER.info(
                     "Set Kostal min SOC to %.1f%% (was %s)",
-                    target_soc,
+                    floor_soc,
                     f"{min_soc_current_value:.1f}%" if min_soc_current_value is not None else "unknown",
                 )
             except Exception as e:
@@ -2825,17 +3071,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             
             try:
                 current_inverter_soc = float(new_state.state)
-                target_soc = self.current_target_soc()
+                # The written value is the floor, not the charge target (plan 009)
+                floor_soc = self.inverter_floor_soc()
                 
-                if target_soc is None:
+                if floor_soc is None:
                     return
                 
-                # Check if inverter min SOC doesn't match our target (with tolerance)
-                if abs(current_inverter_soc - target_soc) > 0.5:
+                # Check if inverter min SOC doesn't match the floor (with tolerance)
+                if abs(current_inverter_soc - floor_soc) > 0.5:
                     _LOGGER.debug(
                         "Inverter min SOC deviation detected via listener (%.1f%% vs %.1f%%), triggering restoration",
                         current_inverter_soc,
-                        target_soc
+                        floor_soc
                     )
                     # Restore to our target value - actual checking and restoration happens here
                     await self._verify_and_restore_min_soc()
@@ -2917,11 +3164,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # The discharge block belongs to the window state like the min SOC
             await self._apply_discharge_block()
 
+            # Two different values: the charge target decides "target reached",
+            # the floor is what the min SOC entity has to hold (plan 009).
             target_soc = self.current_target_soc()
 
             if target_soc is None:
                 return
             
+            floor_soc = self.inverter_floor_soc(target_soc)
+            if floor_soc is None:
+                return
+
             kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
             if not kostal_min_soc_entity:
                 return
@@ -2933,12 +3186,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             
             current_inverter_soc = float(state.state)
             
-            # Check if inverter min SOC doesn't match our target (with tolerance)
-            if abs(current_inverter_soc - target_soc) > 0.5:
+            # Check if inverter min SOC doesn't match the floor (with tolerance)
+            if abs(current_inverter_soc - floor_soc) > 0.5:
                 _LOGGER.warning(
                     "Inverter min SOC (%.1f%%) doesn't match our target (%.1f%%), restoring to target",
                     current_inverter_soc,
-                    target_soc
+                    floor_soc
                 )
                 # The window may have ended while this run was waiting
                 if not self.is_active:
@@ -2950,10 +3203,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": kostal_min_soc_entity, "value": target_soc},
+                    {"entity_id": kostal_min_soc_entity, "value": floor_soc},
                 )
-                self._last_soc_set = target_soc
-                _LOGGER.info("Restored inverter min SOC to %.1f%%", target_soc)
+                self._last_soc_set = floor_soc
+                _LOGGER.info("Restored inverter min SOC to %.1f%%", floor_soc)
             
             battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
             if battery_soc_entity:

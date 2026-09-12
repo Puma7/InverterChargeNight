@@ -1022,10 +1022,14 @@ async def test_discharge_block_never_set_in_discharge_mode(mock_hass):
 
 
 @pytest.mark.asyncio
-async def test_window_start_without_discharge_entity_logs_info(mock_hass, coordinator, caplog):
+async def test_window_start_without_discharge_entity_falls_back_to_min_soc(
+    mock_hass, coordinator, caplog
+):
+    """No switch and no power limit: the min SOC is the way, and it is logged once."""
     with caplog.at_level("INFO"):
         await coordinator._on_window_start(WINDOW_START)
-    assert "No discharge limit entity configured" in caplog.text
+    assert "Blocking battery discharge for this window via: min_soc" in caplog.text
+    assert coordinator.discharge_block_state() == "min_soc"
 
 
 @pytest.mark.asyncio
@@ -1187,6 +1191,9 @@ async def test_planned_power_two_kwh_in_four_hours_writes_556_w(mock_hass, power
     assert powered.planned_charge_power_w == 556.0
     assert data["planned_charge_power_w"] == 556.0
     assert mock_hass.services.async_call.await_args_list == [
+        # The bridge target (28.1 %) is below the 40 % in the battery, so the
+        # window start raises the min SOC floor to 40 % first (plan 009).
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 40.0}),
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}),
         call("switch", "turn_on", {"entity_id": GRID}),
         call("number", "set_value", {"entity_id": AC_LIMIT, "value": 556.0}),

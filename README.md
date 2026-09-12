@@ -15,8 +15,8 @@ A Home Assistant custom integration that intelligently calculates and sets the o
 - **Kostal Integration**: Directly controls Kostal inverter min SOC and grid charging switch.
 - **Forecast-Based**: Uses Solcast PV forecast data, picking today's or tomorrow's forecast entity depending on the time of day.
 - **Smart Charging**: Stops charging when the target SOC is reached, and plans the AC charge power needed for the rest of the window (`sensor.inverter_charge_night_planned_charge_power`).
-- **Discharge Block**: Optionally sets the battery discharge power limit to 0 for the duration of the window, so the house runs from the grid instead of emptying the battery that was just charged.
-- **Automatic Reset**: Restores the original min SOC, the grid charge switch, the AC charge limit and the discharge limit at the end of the window; a failed reset is retried after 1, 2 and 4 minutes, then every 15 minutes, until it works.
+- **Discharge Block**: Keeps the battery from running the house during the window, so stored PV is still there when energy is expensive. Uses the inverter's discharge lock switch, else the discharge power limit, else - on an inverter that offers neither - the min SOC, which every battery honours. See [Discharge in the Window](#discharge-in-the-window).
+- **Automatic Reset**: Restores the original min SOC, the grid charge switch, the AC charge limit, the discharge limit and the discharge block switch at the end of the window; a failed reset is retried after 1, 2 and 4 minutes, then every 15 minutes, until it works.
 - **Survives a restart**: The runtime state (active window, override, snow nights, captured original values) is persisted, so a restart inside a window continues where it left off.
 - **Manual overrides**: A target SOC override, a `Snow nights` counter that charges the next N nights to the maximum, and a `Skip Next` switch that skips one cycle for 24 hours.
 - **Efficiency finder**: Searches for the most efficient AC charge limit and disables itself once it has an answer.
@@ -230,8 +230,12 @@ After configuration, you should see these ten entities:
 - **`sensor.inverter_charge_night_calculated_soc`** - The target SOC the planner calculated
   - Unit: `%`
   - Attributes: `is_active`, `target_reached`, `current_soc`, `operation_mode`, `skip_next`,
-    `snow_nights`, and in Bridge mode `plan_reason`, `bridge_kwh`, `surplus_kwh`,
-    `lower_bound_soc`, `upper_bound_soc`, `pv_crossover`
+    `snow_nights`, `inverter_floor_soc`, `discharge_block`, and in Bridge mode `plan_reason`,
+    `bridge_kwh`, `surplus_kwh`, `lower_bound_soc`, `upper_bound_soc`, `pv_crossover`
+  - `inverter_floor_soc` is what is written to the inverter's min SOC entity. It is higher than
+    the target while the discharge block runs over the min SOC (see
+    [Discharge in the Window](#discharge-in-the-window)); `discharge_block` names the way in use
+    (`switch` / `limit` / `min_soc` / `off`)
 
 - **`sensor.inverter_charge_night_best_charge_power`** - Best AC charge power found
   - Unit: `W`
@@ -361,8 +365,12 @@ entities:
 - **`sensor.inverter_charge_night_calculated_soc`** - The target SOC the planner calculated
   - Unit: `%`
   - Attributes: `is_active`, `target_reached`, `current_soc`, `operation_mode`, `skip_next`,
-    `snow_nights`, and in Bridge mode `plan_reason`, `bridge_kwh`, `surplus_kwh`,
-    `lower_bound_soc`, `upper_bound_soc`, `pv_crossover`
+    `snow_nights`, `inverter_floor_soc`, `discharge_block`, and in Bridge mode `plan_reason`,
+    `bridge_kwh`, `surplus_kwh`, `lower_bound_soc`, `upper_bound_soc`, `pv_crossover`
+  - `inverter_floor_soc` is what is written to the inverter's min SOC entity. It is higher than
+    the target while the discharge block runs over the min SOC (see
+    [Discharge in the Window](#discharge-in-the-window)); `discharge_block` names the way in use
+    (`switch` / `limit` / `min_soc` / `off`)
 
 - **`sensor.inverter_charge_night_best_charge_power`** - Best AC charge power found
   - Unit: `W`
@@ -529,6 +537,50 @@ and whether the limit is currently braking.
 > or anything else. If those alone can overload the connection, you need to limit them
 > yourself - with their own charge management, or with one of Home Assistant's load-management
 > integrations. Leave this feature off (no grid import entity) and nothing changes.
+### Discharge in the Window
+
+Inside the cheap window the house should run from the grid, not from the battery. A kWh taken
+out of the battery at night is a kWh that has to be bought at the day tariff tomorrow, so
+discharging during the window trades expensive energy for cheap energy the wrong way round.
+
+There are three ways to stop it, and the integration picks the first one your configuration
+offers:
+
+1. **Block Discharge Switch** - a switch of the inverter that locks the battery discharge
+   (Kostal calls it "battery discharge lock"). Cleanest way, but not every manufacturer has one.
+2. **Discharge Power Limit Entity** - a number entity for the discharge power, set to 0 for the
+   window. Also vendor-specific.
+3. **Min SOC** - the fallback that always works. **No inverter guarantees either of the two
+   entities above, but every battery honours its min SOC**: a battery does not discharge below
+   it, and the min SOC entity is the one this integration controls anyway. Raising it to the
+   charge level the window started at leaves the stored energy where it is.
+
+**Discharge Block** (step 3 of the wizard) chooses between `Automatic` (the order above,
+default) and `Off` (the battery may discharge, as it did before this feature).
+
+#### Why the inverter may show a higher min SOC than the charge target
+
+With the min SOC fallback in use, the charge target and the value written to the inverter are
+**two different numbers**, on purpose:
+
+| Value | Meaning |
+|---|---|
+| charge target (`sensor.inverter_charge_night_calculated_soc`) | how far the battery is charged from the grid |
+| inverter floor (attribute `inverter_floor_soc`) | what is written to the min SOC entity |
+
+Example: the plan wants 45 %, the battery starts the window at 70 %. The integration writes
+**70 %** to the min SOC entity so the 70 % stay put, while grid charging still stops at the
+45 % target (it is already reached). The inverter therefore displays a min SOC of 70 % during
+the window -- **this is intended**, and the value captured before the window is written back at
+the window end, like every other setting the integration touches.
+
+The floor only ever rises within a window, never falls (a jittering measurement must not cause
+writes), always stays inside your minimum and maximum SOC, survives a Home Assistant restart,
+and is cleared at the window end. The `sensor.inverter_charge_night_calculated_soc` attributes
+`inverter_floor_soc` and `discharge_block` (`switch` / `limit` / `min_soc` / `off`) say which
+way is in use and what the floor currently is.
+
+Morning Discharge windows are never blocked -- there the point is to empty the battery.
 
 ### Operation Flow
 
@@ -538,13 +590,16 @@ and whether the limit is currently braking.
 2. The planner derives the target SOC in the configured planner mode
 3. The current Kostal min SOC, the AC charge limit and the discharge limit are stored so they
    can be restored later, and the values are persisted so they also survive a restart
-4. In Night Charge mode the discharge limit is set to 0 (if the entity is configured), so the
-   house runs from the grid and the energy just bought stays in the battery
+4. In Night Charge mode the discharge block is applied so the house runs from the grid and
+   the energy just bought stays in the battery: the block switch is turned on, or the discharge
+   limit is set to 0, or the min SOC floor is raised to the current charge level (see
+   "Discharge in the Window")
 
 **During Active Window (e.g., 00:00 - 05:59):**
 
 1. Target SOC is validated against the user limits
-2. Kostal min SOC is set to the target (only when it differs from the current value)
+2. Kostal min SOC is set to the inverter floor -- the charge target, or the raised
+   discharge-block floor if that is higher (only when it differs from the current value)
 3. Kostal grid charging is switched on (only when it is off), after the configured command delay
 4. The charge power needed for the remaining window time is planned, capped at what the house
    connection still carries, and published as
@@ -553,7 +608,8 @@ and whether the limit is currently braking.
    unless the efficiency finder currently owns that entity
 5. Battery SOC is watched by a state listener and by the update interval (15 minutes by default)
 6. When the target is reached, grid charging is switched off (the min SOC stays set)
-7. A periodic verification re-writes the min SOC if something outside the integration changed it
+7. A periodic verification re-writes the min SOC if something outside the integration changed
+   it, measured against the inverter floor, not the charge target
 8. Nothing is written while backup/island mode is active
 
 **In Morning Discharge mode** the same window drives the battery *down* to the target instead:
@@ -564,7 +620,8 @@ is turned on until the target is reached.
 
 1. Kostal min SOC is reset to the stored original (or the configured default if it is unknown)
 2. Kostal grid charging is switched off, as is the force discharge switch
-3. The AC charge limit, the absolute charge power limit and the discharge limit are restored
+3. The AC charge limit, the absolute charge power limit, the discharge limit and the
+   discharge block switch are restored, and the raised min SOC floor is dropped
 4. State flags (is_active, target_reached), the manual override and the stored originals are
    cleared, and `snow_nights` counts down by one if this was a night-charge window that
    reached its configured end time
@@ -772,6 +829,8 @@ Step 3 -- charge power:
 - `grid_continuous_pct` - Share of the nominal power allowed as continuous load
 - `grid_max_continuous_w` - The budget in W directly; takes precedence over the fuse size
 - `grid_headroom_w` - Safety margin kept below the budget
+- `discharge_block_switch` - Optional switch of the inverter that locks the battery discharge
+- `discharge_block_mode` - `auto` (default: switch, else power limit, else min SOC) or `off`
 
 Step 4 -- advanced:
 - `update_interval` - Coordinator refresh interval in seconds (default 900)
@@ -804,6 +863,7 @@ Defined in `const.py`:
 - `DEFAULT_GRID_VOLTAGE_V = 230`
 - `DEFAULT_GRID_CONTINUOUS_PCT = 80`
 - `DEFAULT_GRID_HEADROOM_W = 500`
+- `DEFAULT_DISCHARGE_BLOCK_MODE = "auto"`
 
 ### Safety Features
 
