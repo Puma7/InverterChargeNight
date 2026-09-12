@@ -225,6 +225,11 @@ def grid_budget_w(
         # phases. Taken as a phase voltage it would inflate the budget by sqrt(3)
         # and the limit would never engage before the real one is passed.
         volts /= math.sqrt(3.0)
+    if not 100.0 <= volts <= 300.0:
+        # Whatever that is, it is not a phase voltage of a house connection.
+        # The documented default is the safe answer: it can only make the
+        # budget smaller, never larger.
+        volts = float(DEFAULT_GRID_VOLTAGE_V)
     pct = (
         float(continuous_pct)
         if math.isfinite(continuous_pct) and 0 < continuous_pct <= 100
