@@ -64,6 +64,11 @@ fixed; regression tests in `tests/test_electrical_safety.py`.
 - The limit no longer writes to the inverter while backup/island mode owns it.
 - A target from a window that is long over is no longer reused for tonight.
 - A window ended by the polling safety net now counts as a completed night (snow nights).
+- The AC charge limit is read back on every verification run: an inverter integration can accept
+  a write and drop it, and a protective limit that is believed but not in force is the failure
+  this feature must not have.
+- Feeding into the grid is no longer read as a negative house load, which would have widened the
+  house connection budget.
 
 ### Changed
 

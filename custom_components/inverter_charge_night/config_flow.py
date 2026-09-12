@@ -29,6 +29,7 @@ from .const import (
     CONF_AUTO_EFFICIENT_CHARGE,
     CONF_AVG_HOUSE_LOAD_KW,
     CONF_BACKUP_MODE_ENTITY,
+    CONF_BACKUP_MODE_STATES,
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_BRIDGE_RESERVE_KWH,
@@ -157,6 +158,7 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_ACTIVE_START_DATE,
     CONF_ACTIVE_END_DATE,
     CONF_BACKUP_MODE_ENTITY,
+    CONF_BACKUP_MODE_STATES,
     CONF_HOUSE_LOAD_ENTITY,
     CONF_AVG_HOUSE_LOAD_KW,
     CONF_PV_CROSSOVER_DELAY_MIN,
@@ -653,6 +655,9 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
             _optional(
                 CONF_BACKUP_MODE_ENTITY, defaults.get(CONF_BACKUP_MODE_ENTITY)
             ): _entity_selector(["binary_sensor", "switch", "sensor"]),
+            _optional(
+                CONF_BACKUP_MODE_STATES, defaults.get(CONF_BACKUP_MODE_STATES)
+            ): _text_selector(),
             _optional(
                 CONF_HOUSE_LOAD_ENTITY, defaults.get(CONF_HOUSE_LOAD_ENTITY)
             ): _entity_selector("sensor", "energy"),

@@ -250,6 +250,29 @@ dieselbe Eigenschaft: **Ist etwas unbekannt, unlesbar oder fehlgeschlagen, muss 
 fließen, nie mehr** — und nichts, was die Integration am Wechselrichter gesetzt hat, darf sein
 Fenster überleben.
 
+### 2.8 Nachtrag 2026-09-12: Notstrom/Inselbetrieb und Kostal-Kompatibilität
+
+Der Eigentümer betreibt eine **manuelle Netzumschaltbox**: bei Stromausfall läuft das ganze Haus
+aus dem Speicher. Die Integration hatte dafür bereits das Feld „Notstrom-Entität", aber die
+Erkennung war unbrauchbar und in der gefährlichen Richtung fehlertolerant.
+
+| Befund | Wirkung | Status |
+|---|---|---|
+| `_is_backup_active` kannte nur `on/true/1/yes/backup/active/island` und gab bei allem anderen `False` zurück | Ein Zustandssensor, der `ESB`, `Inselbetrieb` oder `Notstrom` meldet, galt als **kein** Notstrom. Folge: Die Integration hebt im Inselbetrieb den Min-SOC an — **der Speicher versorgt das Haus nicht mehr, bei Stromausfall** | behoben: Wortschatz erweitert (`esb`, `ersatzstrom`, `insel*`, `notstrom`, `offgrid`, `gridswitchoff`, …), Binärentitäten werten Unbekanntes als Notstrom, Sensoren melden es einmalig mit Abhilfe |
+| Kein Weg, herstellerspezifische Zustände anzugeben | Nicht universell | behoben: neues Feld „Zustände für Notstrombetrieb" (kommagetrennt), z. B. `ESB` oder `17` |
+| Negativer Netzbezug (Einspeisung) wurde als negative Last gerechnet | Vergrößerte das Anschluss-Budget | behoben: auf 0 geklemmt |
+| Ein Schreibvorgang auf die Ladeleistung galt als wirksam, obwohl die Gegenseite ihn still verwerfen kann | KostalKore verwirft **jeden** Schreibvorgang, wenn der Wechselrichter nicht auf „extern über Modbus" steht — nur mit einer Logzeile auf seiner Seite. Die Anschlussgrenze wäre wirkungslos, ohne dass es auffällt | behoben: die periodische Verifikation liest das AC-Ladelimit zurück und schreibt nach, wenn der Wechselrichter einen **höheren** Wert hält |
+
+**Kompatibilität mit KOSTAL KORE** (`Puma7/KostalKore`) wurde vollständig gegengeprüft; das
+Ergebnis steht in `docs/kostal-kore.md`. Kurzfassung: Alle Pflichtentitäten sind vorhanden, die
+Entladesperre findet mit `Battery Disable Discharge` sogar den bevorzugten Herstellerschalter,
+und für die Effizienzsuche gibt es mit `Battery Charge from Grid Total` genau den richtigen
+Energiezähler. Drei Fallstricke: `Battery Charge Power (AC) Absolute` ist **vorzeichenbehaftet**
+(negativ = laden) und darf nie als Ladelimit konfiguriert werden; Register 1038 hat innerhalb
+von KostalKore mehrere Besitzer (Grid-Feed-In-Optimizer, SoC-Controller, Ladesperre, Batterietest),
+die sich mit uns überschreiben würden; und `Home Power from Grid` ist der Hausverbrauch aus dem
+Netz, **nicht** der Bezug am Hausanschluss — für die Anschlussgrenze muss der Zähler (KSEM) her.
+
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 
 - **010 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des Config-Entrys, tägliche Neubestimmung.

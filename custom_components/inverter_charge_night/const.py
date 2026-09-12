@@ -133,3 +133,78 @@ AUTO_TEST_STATE_MEASURING = "measuring"
 AUTO_TEST_STATE_SETTLING = "settling"
 AUTO_TEST_STATE_FINISHED = "finished"
 AUTO_TEST_STATE_WAITING = "waiting"
+
+# Backup / island operation. While the house runs on the battery instead of the
+# grid, this integration keeps its hands off the inverter completely: there is
+# nothing to charge from, and a raised min SOC would stop the battery from
+# supplying the house - in a power cut, of all moments.
+#
+# The state is read from whatever entity the installation offers. A switch or
+# binary sensor says on/off; a plain state sensor can say anything, so the
+# states that mean backup can be declared in the configuration. Kostal reports
+# "ESB" (Ersatzstrombetrieb) in its inverter state, other manufacturers use
+# their own words - hence both a list of recognised terms and a free-form
+# setting for the ones nobody has seen yet.
+CONF_BACKUP_MODE_STATES = "backup_mode_states"  # comma separated, optional
+BACKUP_ACTIVE_STATES: frozenset[str] = frozenset(
+    {
+        "on",
+        "true",
+        "1",
+        "yes",
+        "active",
+        "backup",
+        "backup_mode",
+        "backupmode",
+        "island",
+        "island_mode",
+        "islanding",
+        "esb",  # Kostal: Ersatzstrombetrieb
+        "ersatzstrom",
+        "ersatzstrombetrieb",
+        "insel",
+        "inselbetrieb",
+        "inselnetz",
+        "notstrom",
+        "notstrombetrieb",
+        "offgrid",
+        "off_grid",
+        "off-grid",
+        "standalone",
+        "emergency",
+        "emergency_power",
+        "gridswitchoff",  # the inverter has disconnected from the grid
+        "extswitchoff",
+    }
+)
+BACKUP_INACTIVE_STATES: frozenset[str] = frozenset(
+    {
+        "off",
+        "false",
+        "0",
+        "no",
+        "normal",
+        "grid",
+        "grid_mode",
+        "grid_connected",
+        "gridconnected",
+        "connected",
+        "online",
+        "netz",
+        "netzbetrieb",
+        "netzparallel",
+        # States a Kostal inverter reports in normal grid operation
+        "feedin",
+        "feed_in",
+        "throttled",
+        "standby",
+        "init",
+        "isomeas",
+        "gridcheck",
+        "gridprecheck",
+        "gridsync",
+        "startup",
+        "batterycharging",
+        "batterydischarging",
+    }
+)

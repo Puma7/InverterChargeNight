@@ -28,7 +28,10 @@ from .const import (
     CONF_OPERATION_MODE,
     CONF_UPDATE_INTERVAL,
     CONF_COMMAND_DELAY,
+    BACKUP_ACTIVE_STATES,
+    BACKUP_INACTIVE_STATES,
     CONF_BACKUP_MODE_ENTITY,
+    CONF_BACKUP_MODE_STATES,
     CONF_ACTIVE_START_DATE,
     CONF_ACTIVE_END_DATE,
     CONF_MIN_CHARGE_POWER_W,
@@ -380,6 +383,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _grid_limited: bool = False
     _grid_stale_logged: bool = False
     _grid_own_draw_logged: bool = False
+    _backup_unreadable_logged: bool = False
     _grid_plan_request_w: float | None = None
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -455,6 +459,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_limited = False
         self._grid_stale_logged = False
         self._grid_own_draw_logged = False
+        self._backup_unreadable_logged = False
+        self._backup_unknown_logged: set[str] = set()
         self._grid_plan_request_w = None
         # Discharge block (plan 009). The floor is the highest battery SOC seen
         # this window; it only ever rises, so a jittering measurement cannot
@@ -1504,19 +1510,83 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         return True
 
+    def _backup_mode_states(self) -> frozenset[str]:
+        """The states the user declared as "backup mode", lowercased."""
+        raw = self.config.get(CONF_BACKUP_MODE_STATES)
+        if not raw:
+            return frozenset()
+        return frozenset(
+            part.strip().lower() for part in str(raw).split(",") if part.strip()
+        )
+
     def _is_backup_active(self) -> bool:
-        """Check if backup mode entity indicates backup/island mode is active."""
+        """True while the house runs on the battery instead of the grid.
+
+        Backup (island) operation is the one state in which this integration
+        must keep its hands off the inverter entirely. There is no grid to
+        charge from, and - far more important - a raised min SOC would stop
+        the battery from supplying the house: the lights go out in a power
+        cut, which is precisely when they must not.
+
+        The state is read from whatever entity the user configured. A switch
+        or binary sensor answers on/off; a plain sensor can say anything at
+        all, so the states that mean backup can be declared in the
+        configuration (Kostal reports ``ESB`` for Ersatzstrombetrieb). Without
+        that declaration the words that unambiguously mean island operation
+        are recognised, and anything else is reported once in the log rather
+        than guessed at.
+        """
         backup_entity = self.config.get(CONF_BACKUP_MODE_ENTITY)
         if not backup_entity:
             return False
         state = self.hass.states.get(backup_entity)
         if not state or state.state in ("unknown", "unavailable", None):
+            if not self._backup_unreadable_logged:
+                _LOGGER.warning(
+                    "Backup mode entity %s is unavailable - the integration cannot tell "
+                    "whether the house is running on the battery",
+                    backup_entity,
+                )
+                self._backup_unreadable_logged = True
             return False
-        state_value = str(state.state).strip().lower()
-        if state_value in ("on", "true", "1", "yes", "backup", "active", "island"):
+        self._backup_unreadable_logged = False
+        value = str(state.state).strip().lower()
+
+        declared = self._backup_mode_states()
+        if declared:
+            # The user named the exact states; nothing else counts.
+            return value in declared
+
+        if value in BACKUP_ACTIVE_STATES:
             return True
-        if state_value in ("off", "false", "0", "no", "normal", "grid"):
+        if value in BACKUP_INACTIVE_STATES:
             return False
+
+        domain = str(backup_entity).split(".")[0]
+        if domain in ("switch", "binary_sensor", "input_boolean"):
+            # A binary entity has no third state, so whatever this is, it is
+            # not "off". Erring towards backup only costs a night of charging.
+            _LOGGER.warning(
+                "Backup mode entity %s reports the unexpected state %r - treating it as "
+                "backup mode and leaving the inverter alone",
+                backup_entity,
+                state.state,
+            )
+            return True
+
+        if value not in self._backup_unknown_logged:
+            # A sensor with free-form states: guessing either way is wrong.
+            # Saying so once, with the remedy, beats silently blocking the
+            # integration or silently ignoring an island.
+            self._backup_unknown_logged.add(value)
+            _LOGGER.warning(
+                "Backup mode entity %s reports %r, which the integration does not "
+                "recognise as backup or grid operation. If this state means the house "
+                "runs on the battery, add it to 'Backup mode states' in the options "
+                "(comma separated)",
+                backup_entity,
+                state.state,
+            )
         return False
 
     def _get_power_w(self, entity_id: str | None) -> float | None:
@@ -3733,6 +3803,46 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await asyncio.gather(task, return_exceptions=True)
         _LOGGER.debug("Stopped periodic verification task")
     
+    async def _verify_ac_charge_limit(self) -> None:
+        """Check that the charge limit we wrote is the one the inverter holds.
+
+        A service call that returns without raising is not proof of anything:
+        an inverter integration can accept the call and drop it - for instance
+        when the inverter is not in external-control mode, or when another
+        feature owns the same register and has written its own value since.
+        Silently believing our limit is in force is exactly the failure the
+        house connection protection must not have, so the value is read back
+        and rewritten when it has drifted.
+        """
+        written = self._planned_setpoint_written_w
+        if written is None or self._is_backup_active():
+            return
+        target = self._ac_charge_limit_target()
+        if target is None:
+            return
+        actual_w = self._get_power_w(target[0])
+        if actual_w is None:
+            return
+        if abs(actual_w - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
+            return
+        if actual_w < written:
+            # Someone or something is charging less than we asked for. That is
+            # never a danger, so it is noted and left alone.
+            _LOGGER.debug(
+                "AC charge limit is %.0f W, below the %.0f W we wrote - leaving it",
+                actual_w,
+                written,
+            )
+            return
+        _LOGGER.warning(
+            "The inverter holds an AC charge limit of %.0f W, not the %.0f W this "
+            "integration wrote - writing it again. If this repeats, the inverter is not "
+            "accepting external control, and the house connection limit cannot protect it",
+            actual_w,
+            written,
+        )
+        await self._set_ac_charge_limit_w(int(written))
+
     async def _verify_and_restore_min_soc(self) -> None:
         """Verify inverter min SOC matches our target and restore if needed."""
         if not self.is_active or not self.is_enabled or self._ending:
@@ -3750,6 +3860,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             # The discharge block belongs to the window state like the min SOC
             await self._apply_discharge_block()
+            await self._verify_ac_charge_limit()
 
             # Two different values: the charge target decides "target reached",
             # the floor is what the min SOC entity has to hold (plan 009).
@@ -3934,6 +4045,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Grid import %s is %.0f s old - treating it as unknown", entity_id, age_s)
             self._grid_import_w = None
             return None
+        # Feeding in is not "negative import": treated as a number it would
+        # make the foreign load look negative and hand the battery more than
+        # the connection has.
+        value = max(0.0, value)
         self._grid_import_w = value
         return value
 
