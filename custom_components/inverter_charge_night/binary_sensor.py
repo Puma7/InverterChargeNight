@@ -26,7 +26,6 @@ class ActiveWindowBinarySensor(InverterChargeNightEntity, BinarySensorEntity):
     """Binary sensor indicating if we're in the active window."""
 
     _attr_translation_key = "active"
-    _attr_icon = "mdi:clock-time-four"
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the binary sensor."""

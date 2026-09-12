@@ -16,7 +16,7 @@ A Home Assistant custom integration that intelligently calculates and sets the o
 - **Forecast-Based**: Uses Solcast PV forecast data, picking today's or tomorrow's forecast entity depending on the time of day.
 - **Smart Charging**: Stops charging when the target SOC is reached, and plans the AC charge power needed for the rest of the window (`sensor.inverter_charge_night_planned_charge_power`).
 - **Discharge Block**: Optionally sets the battery discharge power limit to 0 for the duration of the window, so the house runs from the grid instead of emptying the battery that was just charged.
-- **Automatic Reset**: Restores the original min SOC, the grid charge switch, the AC charge limit and the discharge limit at the end of the window; a failed reset is retried every 15 minutes.
+- **Automatic Reset**: Restores the original min SOC, the grid charge switch, the AC charge limit and the discharge limit at the end of the window; a failed reset is retried after 1, 2 and 4 minutes, then every 15 minutes, until it works.
 - **Survives a restart**: The runtime state (active window, override, snow nights, captured original values) is persisted, so a restart inside a window continues where it left off.
 - **Manual overrides**: A target SOC override, a `Snow nights` counter that charges the next N nights to the maximum, and a `Skip Next` switch that skips one cycle for 24 hours.
 - **Efficiency finder**: Searches for the most efficient AC charge limit and disables itself once it has an answer.
@@ -268,7 +268,8 @@ After configuration, you should see these ten entities:
 - **`number.inverter_charge_night_snow_nights`** - Snow on the modules
   - Range 0 - 14, step 1
   - Charges the next N nights to the maximum SOC, ignoring both the forecast and the manual
-    override, and counts down by one at every window end
+    override, and counts down by one after each night-charge window that reaches its
+    configured end time (a skipped, aborted or morning-discharge window does not use one up)
 
 ## Example Automations
 
@@ -391,7 +392,8 @@ entities:
 - **`number.inverter_charge_night_snow_nights`** - Snow on the modules
   - Range 0 - 14, step 1
   - Charges the next N nights to the maximum SOC, ignoring both the forecast and the manual
-    override, and counts down by one at every window end
+    override, and counts down by one after each night-charge window that reaches its
+    configured end time (a skipped, aborted or morning-discharge window does not use one up)
 
 ## How It Works
 
@@ -501,8 +503,10 @@ is turned on until the target is reached.
 2. Kostal grid charging is switched off, as is the force discharge switch
 3. The AC charge limit, the absolute charge power limit and the discharge limit are restored
 4. State flags (is_active, target_reached), the manual override and the stored originals are
-   cleared, and `snow_nights` counts down by one
-5. A reset that failed (e.g. an unavailable entity) is retried every 15 minutes until it works
+   cleared, and `snow_nights` counts down by one if this was a night-charge window that
+   reached its configured end time
+5. A reset that failed (e.g. an unavailable entity) is retried after 1, 2 and 4 minutes, then
+   every 15 minutes, until it works
 
 **Safety Mechanisms:**
 - Automatic reset if the integration is unloaded during an active window

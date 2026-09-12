@@ -1902,7 +1902,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.error("Error resetting settings at window end: %s", e, exc_info=True)
                 # Continue to reset state flags even if reset fails; the reset
                 # did not get far enough to mark itself pending.
-                self._mark_reset_pending(False)
+                self._record_reset_outcome(False)
         finally:
             # First, so a failure in the rest of this block cannot leave the
             # coordinator permanently ending: every window check and every
@@ -1950,7 +1950,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._reset_retry_count,
         )
 
-    def _mark_reset_pending(self, ok: bool) -> None:
+    def _record_reset_outcome(self, ok: bool) -> None:
         """Record whether the inverter is back at its original settings.
 
         Every caller of :meth:`_reset_settings` gets the retry for free this
@@ -1997,7 +1997,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.info("Deferred reset of the inverter settings succeeded")
         except Exception as e:
             _LOGGER.error("Error retrying reset: %s", e, exc_info=True)
-            self._mark_reset_pending(False)
+            self._record_reset_outcome(False)
 
     async def _reset_settings(self) -> bool:
         """Reset the inverter to its original settings.
@@ -2023,9 +2023,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 kostal_min_soc_entity,
             )
             kostal_min_soc_entity = None
-            restore_min_soc = False
-        else:
-            restore_min_soc = kostal_min_soc_entity is not None
         kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
 
         ok = True
@@ -2051,7 +2048,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as e:
                 _LOGGER.error("Error resetting min SOC: %s", e, exc_info=True)
                 ok = False
-        elif not restore_min_soc and self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY) is None:
+        elif not self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY):
+            # Reaching here with one configured means the guard above skipped the
+            # restore, which already logged why.
             _LOGGER.warning("No min SOC entity configured - cannot reset")
 
         # Turn off grid charge
@@ -2113,7 +2112,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Persist unconditionally: a partial reset already cleared some capture
         # values, and leaving the old ones in the options would resurrect
         # day-old limits after a restart.
-        self._mark_reset_pending(ok)
+        self._record_reset_outcome(ok)
         return ok
 
     async def _async_update_data(self) -> dict[str, Any]:

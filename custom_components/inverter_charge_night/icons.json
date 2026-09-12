@@ -13,14 +13,14 @@
     },
     "switch": {
       "enabled": {
-        "default": "mdi:power-plug",
+        "default": "mdi:battery-charging-wireless",
         "state": {
           "on": "mdi:power-plug",
           "off": "mdi:power-plug-off"
         }
       },
       "auto_efficient_charge_finder": {
-        "default": "mdi:auto-fix",
+        "default": "mdi:flash-auto",
         "state": {
           "on": "mdi:auto-fix",
           "off": "mdi:auto-fix"
@@ -41,7 +41,7 @@
     },
     "binary_sensor": {
       "active": {
-        "default": "mdi:weather-night",
+        "default": "mdi:clock-time-four",
         "state": {
           "on": "mdi:weather-night",
           "off": "mdi:weather-sunny"
