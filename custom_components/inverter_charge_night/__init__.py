@@ -1742,6 +1742,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         allowed = self._grid_limited_setpoint(reference)
         if allowed >= reference - PLANNED_POWER_WRITE_THRESHOLD_W:
             return
+        if self._grid_write_is_debounced():
+            return
         if self._auto_test_active:
             _LOGGER.info(
                 "House connection limit: abandoning the efficiency test at %s W, the "
@@ -1751,6 +1753,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             self._reset_auto_test_state()
         await self._set_ac_charge_limit_w(int(allowed))
+        self._planned_setpoint_written_w = allowed
 
     async def _start_auto_test(self, power_w: int) -> None:
         """Start auto efficiency test at given power.
@@ -3464,7 +3467,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         above the real draw, and every watt overstated here is a watt of other
         load that goes unnoticed. When the measured charge power is configured
         and fresh, the smaller of the two is used - that never overstates our
-        own share, so the limit errs towards charging less.
+        own share, so the limit errs towards charging less. Without that
+        measurement the setpoint stands in for the draw only while a charge is
+        still being ordered: once the target is reached the limit caps a battery
+        that draws nothing, and subtracting it would hide that much house load.
         """
         written = self._planned_setpoint_written_w
         measured: float | None = None
@@ -3477,6 +3483,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if value is not None and value >= 0:
                     measured = value
         if measured is None:
+            if self.target_reached:
+                return 0.0
             return float(written or 0.0)
         if written is None:
             return measured
@@ -3500,11 +3508,31 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         allowed = self._grid_limited_setpoint(reference)
         if allowed >= reference - PLANNED_POWER_WRITE_THRESHOLD_W:
             return
+        if self._grid_write_is_debounced():
+            return
         _LOGGER.info(
             "House connection limit: holding the charge limit at %d W after the target was reached",
             int(allowed),
         )
         await self._set_ac_charge_limit_w(int(allowed))
+        # What stands on the inverter is the reference for the next reading, so
+        # an unchanged load does not write the same value over and over.
+        self._planned_setpoint_written_w = allowed
+        self.planned_charge_power_w = allowed
+
+    def _grid_write_is_debounced(self) -> bool:
+        """True while the last charge-limit write is too recent to follow up.
+
+        A power sensor reports every few seconds; without this the inverter
+        would be written to on every reading for as long as the limit engages.
+        """
+        last_write = self._grid_limit_last_write
+        if last_write is None:
+            return False
+        if (dt_util.now() - last_write).total_seconds() >= GRID_LIMIT_MIN_WRITE_INTERVAL_S:
+            return False
+        _LOGGER.debug("House connection limit changed again within the debounce - waiting")
+        return True
 
     def _grid_limited_setpoint(self, planned_w: float) -> float:
         """Cap ``planned_w`` at what the house connection can still carry.
@@ -3656,13 +3684,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         limited = self._grid_limited_setpoint(planned)
         if limited > written - PLANNED_POWER_WRITE_THRESHOLD_W:
             return
-        now = dt_util.now()
-        last_write = self._grid_limit_last_write
-        if (
-            last_write is not None
-            and (now - last_write).total_seconds() < GRID_LIMIT_MIN_WRITE_INTERVAL_S
-        ):
-            _LOGGER.debug("House connection limit changed again within the debounce - waiting")
+        if self._grid_write_is_debounced():
             return
         _LOGGER.info(
             "House connection limit: lowering the charge power from %.0f W to %.0f W",
