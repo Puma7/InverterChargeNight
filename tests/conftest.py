@@ -10,7 +10,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import frame
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_registry import EntityRegistry
-from homeassistant.setup import async_setup_component
 
 from custom_components.inverter_charge_night.const import (
     DOMAIN,
@@ -47,6 +46,9 @@ def _no_frame_report():
 def mock_config_entry() -> ConfigEntry:
     """Create a mock config entry."""
     entry = MagicMock(spec=ConfigEntry)
+    # update_listeners is an instance attribute, so spec= does not provide it.
+    # HA 2026.9's async_update_reload_and_abort reads it.
+    entry.update_listeners = []
     entry.entry_id = "test_entry_id"
     entry.title = "Inverter Charge Night"
     entry.data = {
