@@ -9,6 +9,9 @@
       },
       "planned_charge_power": {
         "default": "mdi:battery-clock"
+      },
+      "grid_charge_headroom": {
+        "default": "mdi:transmission-tower"
       }
     },
     "switch": {

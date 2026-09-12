@@ -27,6 +27,7 @@ REDACT_KEYS = {
     "force_discharge_switch",
     "discharge_limit_entity",
     "house_load_entity",
+    "grid_import_entity",
 }
 
 

@@ -26,7 +26,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from .const import DEFAULT_SAFE_FALLBACK_SOC
+from .const import (
+    DEFAULT_GRID_CONTINUOUS_PCT,
+    DEFAULT_GRID_VOLTAGE_V,
+    DEFAULT_SAFE_FALLBACK_SOC,
+)
 
 REASON_BRIDGE = "bridge"
 REASON_HEADROOM = "headroom"
@@ -177,3 +181,69 @@ def required_charge_power_w(
     if hours_remaining <= 0:
         return math.inf
     return missing_kwh * 1000.0 / hours_remaining / efficiency
+
+
+# House connection limit (plan 008) -------------------------------------------
+#
+# Pure arithmetic, deliberately free of Home Assistant: the coordinator reads the
+# states and decides what to do with the result. Both functions round towards
+# charging *less* wherever an input is missing or implausible, because the
+# consequence of being wrong in the other direction is a warm meter terminal
+# over a six-hour window.
+
+
+def grid_budget_w(
+    fuse_a: float | None,
+    phases: int,
+    voltage_v: float,
+    continuous_pct: float,
+    explicit_max_w: float | None,
+) -> float | None:
+    """Return the continuously permissible grid import in W.
+
+    ``None`` means nothing is configured and no limit applies. An explicit
+    budget wins over the fuse calculation. Otherwise the rating is
+    ``voltage_v * fuse_a`` on one phase and ``3 * voltage_v * fuse_a`` on three
+    (which is the same as ``sqrt(3) * 400 V * I`` at a 230 V phase voltage), and
+    the budget is ``continuous_pct`` of it.
+
+    Implausible inputs never widen the budget: an unknown phase count counts as
+    a single phase, and a voltage or percentage outside its sensible range falls
+    back to the documented default instead of being taken at face value.
+    """
+    if explicit_max_w is not None and math.isfinite(explicit_max_w) and explicit_max_w > 0:
+        return float(explicit_max_w)
+    if fuse_a is None or not math.isfinite(fuse_a) or fuse_a <= 0:
+        return None
+    phase_count = 3 if phases == 3 else 1
+    volts = float(voltage_v) if math.isfinite(voltage_v) and voltage_v > 0 else float(DEFAULT_GRID_VOLTAGE_V)
+    pct = (
+        float(continuous_pct)
+        if math.isfinite(continuous_pct) and 0 < continuous_pct <= 100
+        else float(DEFAULT_GRID_CONTINUOUS_PCT)
+    )
+    return phase_count * volts * float(fuse_a) * pct / 100.0
+
+
+def allowed_charge_power_w(
+    budget_w: float,
+    grid_import_w: float,
+    own_charge_w: float,
+    headroom_w: float,
+) -> float:
+    """Return what the battery may additionally draw from the grid, in W.
+
+    ``grid_import_w`` already contains the battery's own charge power, so it is
+    subtracted out: what remains is the load this integration does not control
+    (wallboxes, heat pump, the rest of the house). The battery gets whatever the
+    budget still has left after that load and the safety margin.
+
+    The result is never negative and never larger than the budget. A non-finite
+    input yields 0: an unusable number must stop the charge, not uncap it.
+    """
+    values = (budget_w, grid_import_w, own_charge_w, headroom_w)
+    if not all(math.isfinite(value) for value in values):
+        return 0.0
+    # Feeding in (a negative import) does not earn the battery extra budget.
+    other_load_w = max(0.0, max(0.0, grid_import_w) - max(0.0, own_charge_w))
+    return max(0.0, budget_w - max(0.0, headroom_w) - other_load_w)

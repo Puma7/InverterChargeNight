@@ -240,8 +240,15 @@ After configuration, you should see these ten entities:
 - **`sensor.inverter_charge_night_planned_charge_power`** - AC power planned for the rest of the window
   - Unit: `W`, diagnostic entity
   - The constant power that still reaches the target before the window ends, clamped to the
-    configured min/max and to the efficiency optimum. In Bridge mode it is also written to the
-    AC charge limit entity; otherwise it is shown for information only.
+    configured min/max, to the efficiency optimum and to what the house connection can carry.
+    In Bridge mode - and in either mode once a house connection limit is configured - it is
+    also written to the AC charge limit entity; otherwise it is shown for information only.
+
+- **`sensor.inverter_charge_night_grid_charge_headroom`** - What the house connection still allows
+  - Unit: `W`, diagnostic entity
+  - Attributes: `budget_w`, `grid_import_w`, `other_load_w`, `limited`
+  - Only has a value while a window runs and a house connection limit is configured. See
+    [House connection](#house-connection).
 
 - **`binary_sensor.inverter_charge_night_active`** - Whether the window is currently running
   - `on`: inside the configured time window
@@ -364,8 +371,15 @@ entities:
 - **`sensor.inverter_charge_night_planned_charge_power`** - AC power planned for the rest of the window
   - Unit: `W`, diagnostic entity
   - The constant power that still reaches the target before the window ends, clamped to the
-    configured min/max and to the efficiency optimum. In Bridge mode it is also written to the
-    AC charge limit entity; otherwise it is shown for information only.
+    configured min/max, to the efficiency optimum and to what the house connection can carry.
+    In Bridge mode - and in either mode once a house connection limit is configured - it is
+    also written to the AC charge limit entity; otherwise it is shown for information only.
+
+- **`sensor.inverter_charge_night_grid_charge_headroom`** - What the house connection still allows
+  - Unit: `W`, diagnostic entity
+  - Attributes: `budget_w`, `grid_import_w`, `other_load_w`, `limited`
+  - Only has a value while a window runs and a house connection limit is configured. See
+    [House connection](#house-connection).
 
 - **`binary_sensor.inverter_charge_night_active`** - Whether the window is currently running
   - `on`: inside the configured time window
@@ -469,6 +483,53 @@ Snow nights beat everything, then the manual override, then the planner:
 3. the SOC the planner calculated at the window start (re-planned during the window, but in
    Night Charge mode the target never drops below what was already reached)
 
+### House connection
+
+The cheap-tariff window is exactly when every big load runs at once. Two wallboxes with 22 kW
+and 11 kW are already 33 kW, and a 63 A three-phase connection is only about 43 kW nominal. A
+short peak is not the problem: the window lasts six hours, and that *continuous* load heats the
+contacts at the meter, the terminals and the fuses. Meter terminals are the usual weak point.
+The battery is the only load this integration can control, so it is the one that gives way.
+
+With a grid import sensor and a fuse size configured, the integration keeps the total import
+under a continuous budget:
+
+```
+nominal  = phases x phase voltage x fuse current     3 x 230 V x 63 A = 43 470 W
+budget   = nominal x continuous share                43 470 W x 80 %  = 34 776 W
+other    = grid import - the battery's own setpoint
+allowed  = budget - safety margin - other
+```
+
+With 33 kW of wallboxes running, `allowed` is `34 776 - 500 - 33 000 = 1 276 W`, and the
+battery is held to that instead of the several kW the planner would otherwise ask for. If the
+rest of the house uses the budget entirely, the charge power goes to 0 for as long as that
+lasts. Instead of the fuse size you can enter the maximum continuous power directly
+(`grid_max_continuous_w`); it then takes precedence.
+
+The limit is a protection, not an optimisation, so it behaves accordingly:
+
+- It applies in **both planner modes**. In Headroom mode the AC charge limit is normally not
+  written at all; once a house connection limit is configured, it is.
+- It only ever charges **less**. If the grid import sensor is unavailable, has not reported for
+  five minutes, or uses a unit the integration cannot read as watts, the charge power falls
+  back to the configured minimum rather than carrying on blind.
+- It never engages **outside a window**: outside the window the integration does not control
+  the inverter at all.
+- Not even the efficiency finder may order more than the connection carries.
+- Between the regular polls a listener on the grid import sensor lowers the setpoint within
+  about 30 seconds when the house load rises. It only ever lowers; raising it again waits for
+  the next poll, so a load that drops for a moment does not push the battery straight back up.
+
+`sensor.inverter_charge_night_grid_charge_headroom` shows the current `allowed` value and,
+in its attributes, the budget, the measured import, the load the integration does not control
+and whether the limit is currently braking.
+
+> **The integration controls only the battery.** It cannot throttle your wallboxes, heat pump
+> or anything else. If those alone can overload the connection, you need to limit them
+> yourself - with their own charge management, or with one of Home Assistant's load-management
+> integrations. Leave this feature off (no grid import entity) and nothing changes.
+
 ### Operation Flow
 
 **At Window Start:**
@@ -485,9 +546,11 @@ Snow nights beat everything, then the manual override, then the planner:
 1. Target SOC is validated against the user limits
 2. Kostal min SOC is set to the target (only when it differs from the current value)
 3. Kostal grid charging is switched on (only when it is off), after the configured command delay
-4. The charge power needed for the remaining window time is planned and published as
-   `sensor.inverter_charge_night_planned_charge_power`; in Bridge mode it is also written to the
-   AC charge limit entity, unless the efficiency finder currently owns that entity
+4. The charge power needed for the remaining window time is planned, capped at what the house
+   connection still carries, and published as
+   `sensor.inverter_charge_night_planned_charge_power`; in Bridge mode - and in either mode once
+   a house connection limit is configured - it is also written to the AC charge limit entity,
+   unless the efficiency finder currently owns that entity
 5. Battery SOC is watched by a state listener and by the update interval (15 minutes by default)
 6. When the target is reached, grid charging is switched off (the min SOC stays set)
 7. A periodic verification re-writes the min SOC if something outside the integration changed it
@@ -515,6 +578,8 @@ is turned on until the target is reached.
   restart
 - Fallback to the configured default if the original value is unavailable
 - A missing or unavailable battery SOC sensor stops grid charging instead of guessing
+- The charge power is capped at what the house connection can carry continuously; an
+  unreadable, stale or oddly-united grid import sensor lowers it instead of removing the cap
 - Comprehensive error handling with logging
 
 ## Configuration Examples
@@ -699,6 +764,14 @@ Step 3 -- charge power:
 - `auto_efficient_charge` - Efficiency finder enabled (also written at runtime by the switch)
 - `force_discharge_switch` - Optional switch that forces discharge to the grid
 - `discharge_limit_entity` - Optional number entity blocked to 0 during the window
+- `grid_import_entity` - Optional sensor with the current grid import in W or kW; without it
+  the charge power is not limited against the house connection
+- `main_fuse_a` - Main fuse of the house connection, per phase
+- `grid_phases` - 1 or 3
+- `grid_voltage_v` - Phase voltage (230 V in Germany)
+- `grid_continuous_pct` - Share of the nominal power allowed as continuous load
+- `grid_max_continuous_w` - The budget in W directly; takes precedence over the fuse size
+- `grid_headroom_w` - Safety margin kept below the budget
 
 Step 4 -- advanced:
 - `update_interval` - Coordinator refresh interval in seconds (default 900)
@@ -727,6 +800,10 @@ Defined in `const.py`:
 - `DEFAULT_PV_CROSSOVER_DELAY_MIN = 90`
 - `DEFAULT_BRIDGE_RESERVE_KWH = 0.5`
 - `DEFAULT_CHARGE_EFFICIENCY = 0.90`
+- `DEFAULT_GRID_PHASES = 3`
+- `DEFAULT_GRID_VOLTAGE_V = 230`
+- `DEFAULT_GRID_CONTINUOUS_PCT = 80`
+- `DEFAULT_GRID_HEADROOM_W = 500`
 
 ### Safety Features
 
@@ -738,7 +815,8 @@ The integration includes multiple safety mechanisms:
 4. **Rate Limiting**: Prevents excessive service calls
 5. **Unload Safety**: Automatic reset if integration unloaded during active window
 6. **Fallback Mechanisms**: Uses configured defaults if original values unavailable
-7. **Comprehensive Logging**: All operations logged at appropriate levels
+7. **House Connection Limit**: Charge power capped at what the connection carries for hours
+8. **Comprehensive Logging**: All operations logged at appropriate levels
 
 ### Forecast Data Parsing
 

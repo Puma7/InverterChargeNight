@@ -79,6 +79,18 @@ from .const import (
     MODE_NIGHT_CHARGE,
     PLANNER_MODE_BRIDGE,
     PLANNER_MODE_HEADROOM,
+    # House connection limit (plan 008)
+    CONF_GRID_IMPORT_ENTITY,
+    CONF_MAIN_FUSE_A,
+    CONF_GRID_PHASES,
+    CONF_GRID_VOLTAGE_V,
+    CONF_GRID_CONTINUOUS_PCT,
+    CONF_GRID_MAX_CONTINUOUS_W,
+    CONF_GRID_HEADROOM_W,
+    DEFAULT_GRID_PHASES,
+    DEFAULT_GRID_VOLTAGE_V,
+    DEFAULT_GRID_CONTINUOUS_PCT,
+    DEFAULT_GRID_HEADROOM_W,
 )
 from .util import parse_time_str
 
@@ -119,6 +131,14 @@ STEP_POWER_KEYS: tuple[str, ...] = (
     CONF_AUTO_EFFICIENT_CHARGE,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_DISCHARGE_LIMIT_ENTITY,
+    # House connection limit (plan 008)
+    CONF_GRID_IMPORT_ENTITY,
+    CONF_MAIN_FUSE_A,
+    CONF_GRID_PHASES,
+    CONF_GRID_VOLTAGE_V,
+    CONF_GRID_CONTINUOUS_PCT,
+    CONF_GRID_MAX_CONTINUOUS_W,
+    CONF_GRID_HEADROOM_W,
 )
 STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_UPDATE_INTERVAL,
@@ -149,6 +169,9 @@ _INT_KEYS: tuple[str, ...] = (
     CONF_MAX_CHARGE_POWER_W,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
     CONF_PV_CROSSOVER_DELAY_MIN,
+    CONF_GRID_PHASES,
+    CONF_GRID_MAX_CONTINUOUS_W,
+    CONF_GRID_HEADROOM_W,
 )
 
 SchemaBuilder = Callable[[Mapping[str, Any]], vol.Schema]
@@ -200,6 +223,7 @@ _ENTITY_KEYS_TO_VALIDATE = [
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_DISCHARGE_LIMIT_ENTITY,
     CONF_HOUSE_LOAD_ENTITY,
+    CONF_GRID_IMPORT_ENTITY,
 ]
 
 
@@ -270,6 +294,30 @@ def _validate_user_input(
     efficiency = user_input.get(CONF_CHARGE_EFFICIENCY)
     if efficiency is not None and not 0 < efficiency <= 1:
         errors[CONF_CHARGE_EFFICIENCY] = "invalid_efficiency"
+    # House connection limit (plan 008). The limit only ever charges less, but a
+    # nonsensical value should be caught here rather than silently corrected.
+    phases = user_input.get(CONF_GRID_PHASES)
+    if phases is not None and int(phases) not in (1, 3):
+        errors[CONF_GRID_PHASES] = "invalid_phases"
+    fuse_a = user_input.get(CONF_MAIN_FUSE_A)
+    if fuse_a is not None and fuse_a <= 0:
+        errors[CONF_MAIN_FUSE_A] = "invalid_current"
+    grid_max_w = user_input.get(CONF_GRID_MAX_CONTINUOUS_W)
+    if grid_max_w is not None and grid_max_w <= 0:
+        errors[CONF_GRID_MAX_CONTINUOUS_W] = "invalid_power"
+    grid_headroom = user_input.get(CONF_GRID_HEADROOM_W)
+    if grid_headroom is not None and grid_headroom < 0:
+        errors[CONF_GRID_HEADROOM_W] = "invalid_power"
+    voltage = user_input.get(CONF_GRID_VOLTAGE_V)
+    if voltage is not None and voltage <= 0:
+        errors[CONF_GRID_VOLTAGE_V] = "invalid_voltage"
+    pct = user_input.get(CONF_GRID_CONTINUOUS_PCT)
+    if pct is not None and not 0 < pct <= 100:
+        errors[CONF_GRID_CONTINUOUS_PCT] = "invalid_soc"
+    if user_input.get(CONF_GRID_IMPORT_ENTITY) and grid_max_w is None and fuse_a is None:
+        # Without a budget the entity would be read but never act.
+        errors[CONF_MAIN_FUSE_A] = "required_value"
+
     prices_set = [key for key in _PRICE_KEYS if user_input.get(key) is not None]
     if prices_set and len(prices_set) != len(_PRICE_KEYS):
         for key in _PRICE_KEYS:
@@ -504,6 +552,26 @@ def _schema_power(defaults: Mapping[str, Any]) -> vol.Schema:
             _optional(
                 CONF_DISCHARGE_LIMIT_ENTITY, defaults.get(CONF_DISCHARGE_LIMIT_ENTITY)
             ): _entity_selector(_CONTROL_DOMAINS),
+            # House connection limit (plan 008)
+            _optional(
+                CONF_GRID_IMPORT_ENTITY, defaults.get(CONF_GRID_IMPORT_ENTITY)
+            ): _entity_selector("sensor", "power"),
+            _optional(CONF_MAIN_FUSE_A, defaults.get(CONF_MAIN_FUSE_A)): _number_selector(
+                6, 250, 1, "A"
+            ),
+            _required(CONF_GRID_PHASES, defaults, DEFAULT_GRID_PHASES): _number_selector(1, 3, 2),
+            _required(
+                CONF_GRID_VOLTAGE_V, defaults, DEFAULT_GRID_VOLTAGE_V
+            ): _number_selector(100, 500, 1, "V"),
+            _required(
+                CONF_GRID_CONTINUOUS_PCT, defaults, DEFAULT_GRID_CONTINUOUS_PCT
+            ): _number_selector(**_PERCENT),
+            _optional(
+                CONF_GRID_MAX_CONTINUOUS_W, defaults.get(CONF_GRID_MAX_CONTINUOUS_W)
+            ): _number_selector(500, 100000, 100, "W"),
+            _required(
+                CONF_GRID_HEADROOM_W, defaults, DEFAULT_GRID_HEADROOM_W
+            ): _number_selector(0, 10000, 50, "W"),
         }
     )
 

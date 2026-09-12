@@ -80,12 +80,30 @@ from .const import (
     DEFAULT_ACTIVE_END_DATE,
     MODE_MORNING_DISCHARGE,
     DOMAIN,
+    # House connection limit (plan 008)
+    CONF_GRID_IMPORT_ENTITY,
+    CONF_MAIN_FUSE_A,
+    CONF_GRID_PHASES,
+    CONF_GRID_VOLTAGE_V,
+    CONF_GRID_CONTINUOUS_PCT,
+    CONF_GRID_MAX_CONTINUOUS_W,
+    CONF_GRID_HEADROOM_W,
+    DEFAULT_GRID_PHASES,
+    DEFAULT_GRID_VOLTAGE_V,
+    DEFAULT_GRID_CONTINUOUS_PCT,
+    DEFAULT_GRID_HEADROOM_W,
+    DEFAULT_MIN_CHARGE_POWER_W,
+    DEFAULT_MAX_CHARGE_POWER_W,
+    GRID_LIMIT_STALE_AFTER_S,
+    GRID_LIMIT_MIN_WRITE_INTERVAL_S,
 )
 from .calculation import calculate_required_soc
 from .planner import (
     REASON_FALLBACK,
     PlanInput,
     PlanResult,
+    allowed_charge_power_w,
+    grid_budget_w,
     plan_target_soc,
     required_charge_power_w,
 )
@@ -261,6 +279,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConf
         coordinator._cancel_window_check()
         coordinator._remove_battery_soc_listener()
         coordinator._remove_inverter_min_soc_listener()
+        coordinator._remove_grid_import_listener()
         coordinator._remove_backup_mode_listener()
         await coordinator._stop_periodic_verification()
         coordinator._cancel_skip_next_expiry()
@@ -308,6 +327,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _switching_mode: bool = False
     # True once async_unload_entry started: no new timers may be armed.
     _unloading: bool = False
+    # House connection limit (plan 008): read by the sensor and by the teardown
+    # paths, which may run on an instance whose constructor did not.
+    _grid_limit_listener: CALLBACK_TYPE | None = None
+    _grid_limit_last_write: datetime | None = None
+    _grid_budget_cache_w: float | None = None
+    _grid_import_w: float | None = None
+    _grid_other_load_w: float | None = None
+    _grid_allowed_w: float | None = None
+    _grid_limited: bool = False
+    _grid_stale_logged: bool = False
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the coordinator."""
@@ -364,6 +393,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._planned_setpoint_written_w: float | None = None
         self._house_load_cache: tuple[datetime, list[float]] | None = None
         self._sun_fallback_logged = False
+        # House connection limit (plan 008)
+        self._grid_limit_listener: CALLBACK_TYPE | None = None
+        self._grid_limit_last_write: datetime | None = None
+        self._grid_budget_cache_w: float | None = None
+        self._grid_import_w: float | None = None
+        self._grid_other_load_w: float | None = None
+        self._grid_allowed_w: float | None = None
+        self._grid_limited = False
+        self._grid_stale_logged = False
         self._restore_state()
 
     # Persistence ------------------------------------------------------------
@@ -913,9 +951,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         setpoint stays within [min, max] charge power and, when the efficiency
         finder has an optimum and ``required`` is below it, does not exceed the
         optimum. The value is always computed for the ``planned_charge_power``
-        sensor; it is written to the AC charge limit only in bridge mode, not
-        while the finder owns the limit, and only when it moves by more than
-        PLANNED_POWER_WRITE_THRESHOLD_W.
+        sensor; it is written to the AC charge limit in bridge mode and, since
+        plan 008, whenever a house connection limit is configured - a protection
+        must not depend on the planner mode. It is never written while the
+        finder owns the limit, and only when it moves by more than
+        PLANNED_POWER_WRITE_THRESHOLD_W. The house connection limit is applied
+        after the calculation and before the write; that order is what keeps the
+        setpoint from ever exceeding what the connection can carry.
         """
         self.planned_charge_power_w = None
         if self.target_reached:
@@ -952,8 +994,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if isinstance(best, int) and required <= best:
             ceiling = max(min_w, min(max_w, float(best)))
         setpoint = float(round(max(min_w, min(required, ceiling))))
+        # Plan, then limit, then write - never the other way round (plan 008).
+        setpoint = self._grid_limited_setpoint(setpoint)
         self.planned_charge_power_w = setpoint
-        if not self._planner_mode_is_bridge or self.auto_efficient_charge or self._auto_test_active:
+        if self.auto_efficient_charge or self._auto_test_active:
+            return
+        if not self._planner_mode_is_bridge and not self._grid_limit_configured():
+            # The planner only owns the setpoint in bridge mode, but the house
+            # connection limit is a protection and must not depend on the mode.
             return
         if self._ac_charge_limit_target() is None:
             return
@@ -1192,11 +1240,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         The value found on the entity before the first write is remembered so
         that ``_reset_ac_charge_limit`` can restore it; without a readable value
         nothing is written, because a test value must never be left behind.
+
+        This is the single place where a charge setpoint reaches the inverter,
+        so the house connection limit is applied here as well (plan 008): not
+        even the efficiency finder may order more than the connection carries.
         """
         target = self._ac_charge_limit_target()
         if target is None:
             return
         entity_id, domain = target
+        limited_w = int(self._grid_limited_setpoint(float(power_w)))
+        if limited_w < power_w:
+            _LOGGER.info(
+                "House connection limit: writing %d W instead of the requested %d W",
+                limited_w,
+                power_w,
+            )
+            power_w = limited_w
         if self._original_ac_charge_power is None:
             current_w = self._get_power_w(entity_id)
             if current_w is None:
@@ -1209,7 +1269,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._original_ac_charge_power = current_w
             _LOGGER.info("Stored original AC charge limit: %.0f W", current_w)
             self._persist_state()
-        await self._write_ac_charge_limit(entity_id, domain, power_w, "Set AC charge limit")
+        if await self._write_ac_charge_limit(entity_id, domain, power_w, "Set AC charge limit"):
+            self._grid_limit_last_write = dt_util.now()
 
     async def _reset_ac_charge_limit(self) -> bool:
         """Restore the AC charge limit captured before the finder's first write.
@@ -1705,6 +1766,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # applies the target as soon as the entity reports a value.
         self._setup_battery_soc_listener()
         self._setup_inverter_min_soc_listener()
+        self._setup_grid_import_listener()
         await self._start_periodic_verification()
 
         # Calculate and store initial SOC for this charging period
@@ -1841,6 +1903,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 try:
                     self._remove_battery_soc_listener()
                     self._remove_inverter_min_soc_listener()
+                    self._remove_grid_import_listener()
                     await self._stop_periodic_verification()
                     try:
                         await self._reset_settings()
@@ -1895,6 +1958,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # after the reset.
             self._remove_battery_soc_listener()
             self._remove_inverter_min_soc_listener()
+            self._remove_grid_import_listener()
             await self._stop_periodic_verification()
             try:
                 await self._reset_settings()
@@ -2945,3 +3009,240 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._backup_mode_listener()
             self._backup_mode_listener = None
             _LOGGER.debug("Removed backup mode listener")
+
+    # House connection limit (plan 008) --------------------------------------
+    #
+    # During the cheap-tariff window the big loads run at the same time: two
+    # wallboxes are 33 kW on their own, and a 63 A three-phase connection is
+    # only about 43 kW. Six hours at that level heats the meter terminals and
+    # the fuse contacts, so the battery - the only load this integration
+    # controls - has to give way to the rest of the house.
+    #
+    # This is a safety feature, not an optimisation: it applies in both planner
+    # modes, and every uncertainty (no reading, a stale reading, an unparseable
+    # unit) charges *less*, never more. It never engages outside a window,
+    # because outside a window the integration controls nothing.
+
+    def _grid_budget(self) -> float | None:
+        """The configured continuous grid budget in W, or None when unconfigured."""
+        phases_raw = _as_float(self.config.get(CONF_GRID_PHASES, DEFAULT_GRID_PHASES))
+        voltage = _as_float(self.config.get(CONF_GRID_VOLTAGE_V, DEFAULT_GRID_VOLTAGE_V))
+        pct = _as_float(self.config.get(CONF_GRID_CONTINUOUS_PCT, DEFAULT_GRID_CONTINUOUS_PCT))
+        budget = grid_budget_w(
+            _as_float(self.config.get(CONF_MAIN_FUSE_A)),
+            int(phases_raw) if phases_raw is not None else DEFAULT_GRID_PHASES,
+            voltage if voltage is not None else float(DEFAULT_GRID_VOLTAGE_V),
+            pct if pct is not None else float(DEFAULT_GRID_CONTINUOUS_PCT),
+            _as_float(self.config.get(CONF_GRID_MAX_CONTINUOUS_W)),
+        )
+        self._grid_budget_cache_w = budget
+        return budget
+
+    def _grid_limit_configured(self) -> bool:
+        """True when a budget *and* a grid import entity are set.
+
+        Without the import entity there is nothing to measure against, and the
+        documented behaviour is then exactly as before: no limiting at all.
+        """
+        return bool(self.config.get(CONF_GRID_IMPORT_ENTITY)) and self._grid_budget() is not None
+
+    @staticmethod
+    def _state_age_s(state: Any, now: datetime) -> float | None:
+        """Seconds since the state last reported, or None when not determinable."""
+        for attribute in ("last_reported", "last_updated", "last_changed"):
+            stamp = getattr(state, attribute, None)
+            if isinstance(stamp, datetime):
+                try:
+                    return (now - stamp).total_seconds()
+                except (TypeError, ValueError):
+                    return None
+        return None
+
+    def _read_grid_import_w(self, entity_id: str) -> float | None:
+        """Current grid import in W, or None when it is missing, stale or odd.
+
+        Stricter than :meth:`_get_power_w` on purpose: a unit this integration
+        does not understand (kVA, A, MW) must not be read as watts, because
+        mistaking MW for W would remove the limit entirely.
+        """
+        state = self.hass.states.get(entity_id)
+        if not state or state.state in ("unknown", "unavailable", None):
+            self._grid_import_w = None
+            return None
+        value = _as_float(state.state)
+        if value is None:
+            self._grid_import_w = None
+            return None
+        unit = _unit_of(state)
+        if unit in ("kw", "kilowatt", "kilowatts"):
+            value *= 1000.0
+        elif unit not in ("w", "watt", "watts", ""):
+            _LOGGER.debug("Grid import %s reports an unusable unit %r", entity_id, unit)
+            self._grid_import_w = None
+            return None
+        age_s = self._state_age_s(state, dt_util.now())
+        if age_s is not None and age_s > GRID_LIMIT_STALE_AFTER_S:
+            _LOGGER.debug("Grid import %s is %.0f s old - treating it as unknown", entity_id, age_s)
+            self._grid_import_w = None
+            return None
+        self._grid_import_w = value
+        return value
+
+    def _grid_limited_setpoint(self, planned_w: float) -> float:
+        """Cap ``planned_w`` at what the house connection can still carry.
+
+        Returns ``planned_w`` unchanged when no window is active or nothing is
+        configured. Otherwise the result is never above ``planned_w``: this
+        method only ever takes power away.
+
+        ``self._grid_limited`` is set from the budget alone, not from this
+        call's ``planned_w``: it answers "is the connection holding the battery
+        below what it could otherwise draw", which must read the same whether
+        the caller passes a fresh plan or an already limited value.
+        """
+        if not self.is_active:
+            # Outside a window the integration controls nothing, so there is
+            # nothing to hold back either.
+            return planned_w
+        entity_id = self.config.get(CONF_GRID_IMPORT_ENTITY)
+        budget_w = self._grid_budget()
+        if not entity_id or budget_w is None:
+            self._grid_allowed_w = None
+            self._grid_other_load_w = None
+            self._grid_limited = False
+            return planned_w
+
+        min_w = float(self.config.get(CONF_MIN_CHARGE_POWER_W, DEFAULT_MIN_CHARGE_POWER_W))
+        import_w = self._read_grid_import_w(str(entity_id))
+        if import_w is None:
+            # Blind: the connection may already be at its limit. Fall back to
+            # the minimum charge power instead of carrying on at full power.
+            if not self._grid_stale_logged:
+                _LOGGER.warning(
+                    "Grid import %s is unavailable or stale - limiting the charge power to "
+                    "%.0f W until it reports again",
+                    entity_id,
+                    min_w,
+                )
+                self._grid_stale_logged = True
+            self._grid_allowed_w = None
+            self._grid_other_load_w = None
+            self._grid_limited = True
+            return min(planned_w, min_w)
+
+        self._grid_stale_logged = False
+        headroom = _as_float(self.config.get(CONF_GRID_HEADROOM_W, DEFAULT_GRID_HEADROOM_W))
+        own_w = self._planned_setpoint_written_w or 0.0
+        allowed = allowed_charge_power_w(
+            budget_w,
+            import_w,
+            own_w,
+            headroom if headroom is not None else float(DEFAULT_GRID_HEADROOM_W),
+        )
+        self._grid_allowed_w = allowed
+        self._grid_other_load_w = max(0.0, import_w - max(0.0, own_w))
+        self._grid_limited = allowed < float(
+            self.config.get(CONF_MAX_CHARGE_POWER_W, DEFAULT_MAX_CHARGE_POWER_W)
+        )
+        limited = min(planned_w, allowed)
+        if limited < min_w and limited < planned_w:
+            # Below the inverter's own minimum the setpoint is meaningless; the
+            # connection simply has no room for the battery right now.
+            _LOGGER.info(
+                "House connection has no room for the battery: %.0f W other load leaves "
+                "%.0f W of a %.0f W budget",
+                self._grid_other_load_w,
+                allowed,
+                budget_w,
+            )
+            limited = 0.0
+        return limited
+
+    @property
+    def grid_charge_headroom_w(self) -> float | None:
+        """What the connection still allows the battery, for the sensor."""
+        if not self.is_active or not self._grid_limit_configured():
+            return None
+        return self._grid_allowed_w
+
+    def grid_limit_attributes(self) -> dict[str, Any]:
+        """Attributes of the house connection limit for the sensor."""
+        return {
+            "budget_w": self._grid_budget_cache_w,
+            "grid_import_w": self._grid_import_w,
+            "other_load_w": self._grid_other_load_w,
+            "limited": self._grid_limited,
+        }
+
+    def _setup_grid_import_listener(self) -> None:
+        """Watch the grid import so a rising house load is answered between polls."""
+        self._remove_grid_import_listener()
+        self._grid_stale_logged = False
+        self._grid_limit_last_write = None
+        if self.is_discharge_mode:
+            # A discharge window feeds the house from the battery; the battery
+            # is not drawing from the connection then.
+            return
+        entity_id = self.config.get(CONF_GRID_IMPORT_ENTITY)
+        if not entity_id or self._grid_budget() is None:
+            return
+
+        async def _on_grid_import_change(event: Event[EventStateChangedData]) -> None:
+            """Throttle the battery when the rest of the house needs the connection."""
+            try:
+                await self._react_to_grid_import()
+            except Exception as e:  # pylint: disable=broad-except
+                _LOGGER.error("Unexpected error in grid import listener: %s", e, exc_info=True)
+
+        self._grid_limit_listener = async_track_state_change_event(
+            self.hass,
+            str(entity_id),
+            _on_grid_import_change,
+        )
+        _LOGGER.debug("Set up grid import listener for %s", entity_id)
+
+    def _remove_grid_import_listener(self) -> None:
+        """Remove the grid import listener."""
+        if self._grid_limit_listener:
+            self._grid_limit_listener()
+            self._grid_limit_listener = None
+            _LOGGER.debug("Removed grid import listener")
+
+    async def _react_to_grid_import(self) -> None:
+        """Lower the written setpoint immediately when the connection gets tight.
+
+        Downwards only. A load peak that ends is picked up by the next regular
+        poll, so a momentary dip cannot make the setpoint jump back up - and a
+        mistake here can therefore only ever reduce the charge power.
+        """
+        if not self.is_active or not self.is_enabled or self._ending or self._unloading:
+            return
+        if self.is_discharge_mode or self.target_reached:
+            return
+        if self.auto_efficient_charge or self._auto_test_active:
+            # The efficiency finder owns the limit; its own writes are capped in
+            # _set_ac_charge_limit_w.
+            return
+        written = self._planned_setpoint_written_w
+        planned = self.planned_charge_power_w
+        if written is None or planned is None:
+            return
+        limited = self._grid_limited_setpoint(planned)
+        if limited > written - PLANNED_POWER_WRITE_THRESHOLD_W:
+            return
+        now = dt_util.now()
+        last_write = self._grid_limit_last_write
+        if (
+            last_write is not None
+            and (now - last_write).total_seconds() < GRID_LIMIT_MIN_WRITE_INTERVAL_S
+        ):
+            _LOGGER.debug("House connection limit changed again within the debounce - waiting")
+            return
+        _LOGGER.info(
+            "House connection limit: lowering the charge power from %.0f W to %.0f W",
+            written,
+            limited,
+        )
+        await self._set_ac_charge_limit_w(int(limited))
+        self._planned_setpoint_written_w = limited
+        self.planned_charge_power_w = limited
