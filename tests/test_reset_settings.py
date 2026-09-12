@@ -11,6 +11,8 @@ from custom_components.inverter_charge_night import (
     InverterChargeNightCoordinator,
 )
 from custom_components.inverter_charge_night.const import (
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
     CONF_BACKUP_MODE_ENTITY,
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
@@ -29,7 +31,10 @@ from custom_components.inverter_charge_night.const import (
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
 )
-from custom_components.inverter_charge_night.switch import AutoEfficientChargeSwitch
+from custom_components.inverter_charge_night.switch import (
+    AutoEfficientChargeSwitch,
+    InverterChargeNightSwitch,
+)
 
 MIN_SOC = "number.min_soc"
 GRID = "switch.grid"
@@ -342,7 +347,12 @@ async def test_window_start_during_pending_reset_keeps_original(mock_hass):
 
 
 def test_restart_with_pending_reset_schedules_retry(mock_hass):
-    """A reset still pending at shutdown is retried after the next setup."""
+    """A reset still pending at shutdown is retried after the next setup.
+
+    The constructor only restores the flag (finding B10): arming the timer there
+    would run it on a coordinator that ``entry.runtime_data`` does not point at
+    yet and whose setup may still fail. ``async_setup_entry`` arms it afterwards.
+    """
     with patch(CALL_LATER, return_value=MagicMock()) as later:
         coordinator = _make_coordinator(
             mock_hass,
@@ -352,8 +362,21 @@ def test_restart_with_pending_reset_schedules_retry(mock_hass):
 
     assert coordinator._pending_reset is True
     assert coordinator.original_min_soc == 5.0
+    later.assert_not_called()
+
+    with patch(CALL_LATER, return_value=MagicMock()) as later:
+        coordinator.async_start_pending_reset_retry()
+
     later.assert_called_once()
     assert later.call_args.args[1] == RESET_RETRY_DELAYS[0]
+
+
+def test_restart_without_pending_reset_arms_nothing(mock_hass):
+    """Nothing is armed when the previous run left the inverter in order."""
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    with patch(CALL_LATER, return_value=MagicMock()) as later:
+        coordinator.async_start_pending_reset_retry()
+    later.assert_not_called()
 
 
 # AC charge limit (finding F7) ------------------------------------------------
@@ -483,3 +506,180 @@ async def test_finder_completion_keeps_best_power(mock_hass):
     assert coordinator._original_ac_charge_power is None
     assert await coordinator._reset_ac_charge_limit() is True
     mock_hass.services.async_call.assert_awaited_once()
+
+
+# Absolute charge power and self-marking resets (findings B3, B4, B5, B11) ------
+
+ABS_LIMIT = "number.absolute_charge_power"
+ABS_CONFIG = {
+    **CONFIG,
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY: ABS_LIMIT,
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_W: 5000,
+}
+
+
+@pytest.mark.asyncio
+async def test_absolute_charge_power_is_kept_when_the_reset_fails(mock_hass):
+    """A failed service call used to clear the original in a ``finally`` (finding B4)."""
+    mock_hass.states.async_set(MIN_SOC, "45")
+    mock_hass.states.async_set(GRID, "off")
+    mock_hass.states.async_set(ABS_LIMIT, "9000", {"unit_of_measurement": "W"})
+    coordinator = _make_coordinator(mock_hass, ABS_CONFIG)
+    coordinator._original_absolute_charge_power = 9000.0
+    mock_hass.services.async_call = AsyncMock(side_effect=Exception("inverter busy"))
+
+    assert await coordinator._reset_absolute_charge_power() is False
+    assert coordinator._original_absolute_charge_power == 9000.0
+
+    # ... and the whole reset reports failure, so it is retried
+    with patch(CALL_LATER, return_value=MagicMock()):
+        assert await coordinator._reset_settings() is False
+
+
+@pytest.mark.asyncio
+async def test_absolute_charge_power_reset_clears_only_on_success(mock_hass):
+    mock_hass.states.async_set(ABS_LIMIT, "9000", {"unit_of_measurement": "W"})
+    coordinator = _make_coordinator(mock_hass, ABS_CONFIG)
+    coordinator._original_absolute_charge_power = 9000.0
+
+    assert await coordinator._reset_absolute_charge_power() is True
+    assert coordinator._original_absolute_charge_power is None
+    mock_hass.services.async_call.assert_awaited_once_with(
+        "number", "set_value", {"entity_id": ABS_LIMIT, "value": 9000.0}
+    )
+
+    # Nothing captured, or an entity that is gone: nothing left to restore
+    assert await coordinator._reset_absolute_charge_power() is True
+    coordinator.config = {**CONFIG, CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY: "sensor.x"}
+    coordinator._original_absolute_charge_power = 9000.0
+    assert await coordinator._reset_absolute_charge_power() is True
+    assert coordinator._original_absolute_charge_power is None
+    mock_hass.services.async_call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_absolute_charge_power_is_not_written_without_a_readable_original(
+    mock_hass, caplog
+):
+    """A limit that cannot be restored must never be left on the inverter (finding B5)."""
+    mock_hass.states.async_set(ABS_LIMIT, "unavailable")
+    coordinator = _make_coordinator(mock_hass, ABS_CONFIG)
+
+    await coordinator._apply_absolute_charge_power_limit()
+
+    mock_hass.services.async_call.assert_not_awaited()
+    assert coordinator._original_absolute_charge_power is None
+    assert "not writing a limit that could not be restored" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_absolute_charge_power_survives_a_restart(mock_hass):
+    """The captured original was missing from the persisted state (finding B5)."""
+    mock_hass.states.async_set(ABS_LIMIT, "9000", {"unit_of_measurement": "W"})
+    coordinator = _make_coordinator(mock_hass, ABS_CONFIG)
+
+    await coordinator._apply_absolute_charge_power_limit()
+
+    assert coordinator._original_absolute_charge_power == 9000.0
+    assert _runtime_state(coordinator)["original_absolute_charge_power"] == 9000.0
+
+    restarted = InverterChargeNightCoordinator(mock_hass, coordinator.entry)
+    assert restarted._original_absolute_charge_power == 9000.0
+
+
+@pytest.mark.asyncio
+async def test_partial_reset_persists_the_cleared_capture_values(mock_hass):
+    """The reset only persisted on success, so a restart resurrected day-old limits."""
+    mock_hass.states.async_set(MIN_SOC, "unavailable")  # min SOC reset fails
+    mock_hass.states.async_set(GRID, "on")
+    mock_hass.states.async_set(ABS_LIMIT, "9000", {"unit_of_measurement": "W"})
+    coordinator = _make_coordinator(mock_hass, ABS_CONFIG)
+    coordinator.original_min_soc = 5.0
+    coordinator._original_absolute_charge_power = 9000.0
+    coordinator._persist_state()
+
+    with patch(CALL_LATER, return_value=MagicMock()):
+        assert await coordinator._reset_settings() is False
+
+    state = _runtime_state(coordinator)
+    # The absolute limit went back and must not come back after a restart ...
+    assert state["original_absolute_charge_power"] is None
+    # ... while the min SOC is still owed and stays for the retry
+    assert state["original_min_soc"] == 5.0
+    assert state["pending_reset"] is True
+
+
+@pytest.mark.asyncio
+async def test_failed_reset_marks_itself_pending_and_schedules_the_retry(mock_hass):
+    """Every caller gets the retry; only the window end used to arrange it (B3)."""
+    mock_hass.states.async_set(MIN_SOC, "unavailable")
+    mock_hass.states.async_set(GRID, "on")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.original_min_soc = 5.0
+
+    with patch(CALL_LATER, return_value=MagicMock()) as later:
+        assert await coordinator._reset_settings() is False
+
+    assert coordinator._pending_reset is True
+    later.assert_called_once()
+    assert later.call_args.args[1] == RESET_RETRY_DELAYS[0]
+    assert _runtime_state(coordinator)["pending_reset"] is True
+
+
+@pytest.mark.asyncio
+async def test_failed_reset_during_unload_persists_but_arms_no_timer(mock_hass, caplog):
+    """An async_call_later armed in the unload would fire on a dead coordinator."""
+    mock_hass.states.async_set(MIN_SOC, "unavailable")
+    mock_hass.states.async_set(GRID, "on")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.original_min_soc = 5.0
+    coordinator._unloading = True
+
+    with patch(CALL_LATER, return_value=MagicMock()) as later:
+        assert await coordinator._reset_settings() is False
+
+    later.assert_not_called()
+    assert coordinator._reset_retry_unsub is None
+    assert coordinator._pending_reset is True
+    # ... but the next setup picks it up from the persisted state
+    assert _runtime_state(coordinator)["pending_reset"] is True
+    assert "retrying after the next setup" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_turning_the_integration_off_retries_a_failed_reset(mock_hass):
+    """The enable switch ignored the result and left grid charging on (finding B3)."""
+    mock_hass.states.async_set(MIN_SOC, "unavailable")
+    mock_hass.states.async_set(GRID, "on")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.is_active = True
+    coordinator.original_min_soc = 5.0
+
+    switch = InverterChargeNightSwitch(coordinator, coordinator.entry)
+    switch.hass = mock_hass
+    switch.async_write_ha_state = MagicMock()
+
+    with patch(CALL_LATER, return_value=MagicMock()) as later:
+        await switch.async_turn_off()
+
+    assert coordinator._pending_reset is True
+    later.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_successful_reset_clears_the_pending_flag_and_the_timer(mock_hass):
+    mock_hass.states.async_set(MIN_SOC, "45")
+    mock_hass.states.async_set(GRID, "on")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.original_min_soc = 5.0
+    coordinator._pending_reset = True
+    unsub = MagicMock()
+    coordinator._reset_retry_unsub = unsub
+    coordinator._reset_retry_count = 3
+
+    assert await coordinator._reset_settings() is True
+
+    assert coordinator._pending_reset is False
+    assert coordinator._reset_retry_count == 0
+    unsub.assert_called_once()
+    assert _runtime_state(coordinator)["pending_reset"] is False
