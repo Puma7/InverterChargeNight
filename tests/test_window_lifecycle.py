@@ -498,7 +498,7 @@ from datetime import timedelta, timezone
 from homeassistant.helpers.recorder import DATA_INSTANCE
 import homeassistant.util.dt as dt_util
 
-from custom_components.inverter_charge_night import async_unload_entry
+from custom_components.inverter_charge_night import async_unload_entry, async_update_entry
 from custom_components.inverter_charge_night.const import (
     CONF_AUTO_EFFICIENCY_DATA,
     CONF_AVG_HOUSE_LOAD_KW,
@@ -522,6 +522,7 @@ from custom_components.inverter_charge_night.planner import (
     REASON_CONFLICT_HEADROOM_WINS,
 )
 
+CALL_LATER = "custom_components.inverter_charge_night.async_call_later"
 SUN = "sun.sun"
 DISCHARGE_LIMIT = "number.discharge_limit"
 AC_LIMIT = "number.ac_limit"
@@ -1353,7 +1354,7 @@ async def test_snow_nights_charge_to_max_without_forecast_and_count_down(
     )
     assert _persisted_snow_nights(mock_hass) == 2
 
-    await coordinator._on_window_end(WINDOW_END)
+    await coordinator._on_scheduled_window_end(WINDOW_END)
     assert coordinator.snow_nights == 1
     assert _persisted_snow_nights(mock_hass) == 1
     assert coordinator.is_active is False
@@ -1362,7 +1363,7 @@ async def test_snow_nights_charge_to_max_without_forecast_and_count_down(
     await coordinator._on_window_start(WINDOW_START)
     assert coordinator.initial_calculated_soc == USER_MAX
     assert PV not in _entities_read(mock_hass)
-    await coordinator._on_window_end(WINDOW_END)
+    await coordinator._on_scheduled_window_end(WINDOW_END)
     assert coordinator.snow_nights == 0
     assert _persisted_snow_nights(mock_hass) == 0
 
@@ -1371,7 +1372,7 @@ async def test_snow_nights_charge_to_max_without_forecast_and_count_down(
     await coordinator._on_window_start(WINDOW_START)
     assert coordinator.initial_calculated_soc == EXPECTED_TARGET
     assert PV in _entities_read(mock_hass)
-    await coordinator._on_window_end(WINDOW_END)
+    await coordinator._on_scheduled_window_end(WINDOW_END)
     assert coordinator.snow_nights == 0
 
 
@@ -1389,7 +1390,7 @@ async def test_snow_mode_beats_manual_override(mock_hass, coordinator):
     assert coordinator.current_target_soc() == USER_MAX
 
     # Once the snow nights are used up the override is cleared with the window
-    await coordinator._on_window_end(WINDOW_END)
+    await coordinator._on_scheduled_window_end(WINDOW_END)
     assert coordinator.snow_nights == 0
     assert coordinator.override_soc is None
     # The next window is planned from the forecast again
@@ -1407,3 +1408,243 @@ async def test_restart_restores_snow_nights_and_ignores_malformed_values(mock_ha
     for bad in (True, -1, "2", None):
         options[CONF_RUNTIME_STATE]["snow_nights"] = bad
         assert _make_coordinator(mock_hass, options=options).snow_nights == 0, bad
+
+
+# 16. Findings B1/B2/B6/B7/B9/B13 and Q2 ---------------------------------------
+#
+# The window end trigger fires every day regardless of state, the snow counter
+# used to tick down for windows that never ran, ``sun.sun``'s next_rising
+# pointed at the wrong solar day, and the options flow changed the operation
+# mode without tearing the running window down.
+
+
+@pytest.mark.asyncio
+async def test_window_end_without_an_active_window_touches_nothing(mock_hass, coordinator):
+    """The daily end trigger must not reset an inverter the integration never took over.
+
+    Skip next, a disabled integration, backup mode or a date range outside today
+    all leave ``is_active`` False - the min SOC the user set by hand has to
+    survive that, and an unavailable entity must not arm a retry chain.
+    """
+    mock_hass.states.async_set(MIN_SOC, "42")
+    mock_hass.services.async_call.reset_mock()
+
+    await coordinator._on_scheduled_window_end(WINDOW_END)
+
+    mock_hass.services.async_call.assert_not_awaited()
+    assert coordinator._pending_reset is False
+    assert coordinator.async_request_refresh.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_window_end_without_a_window_arms_no_retry_when_min_soc_is_unavailable(
+    mock_hass, coordinator
+):
+    """An unavailable entity outside a window must not start an endless retry chain."""
+    mock_hass.states.async_set(MIN_SOC, "unavailable")
+
+    with patch(CALL_LATER, return_value=MagicMock()) as later:
+        await coordinator._on_scheduled_window_end(WINDOW_END)
+
+    later.assert_not_called()
+    assert coordinator._reset_retry_unsub is None
+
+
+@pytest.mark.asyncio
+async def test_pending_reset_from_a_real_window_survives_the_next_end_trigger(
+    mock_hass, coordinator
+):
+    """The early return must not drop a reset that a real window left pending."""
+    await _start_and_apply(mock_hass, coordinator)
+    mock_hass.states.async_set(MIN_SOC, "unavailable")
+    with patch(CALL_LATER, return_value=MagicMock()):
+        await coordinator._on_scheduled_window_end(WINDOW_END)
+        assert coordinator._pending_reset is True
+
+        # The next night the trigger fires again without a window having run
+        await coordinator._on_scheduled_window_end(WINDOW_END)
+
+    assert coordinator._pending_reset is True
+    assert coordinator.original_min_soc == DEFAULT_MIN
+
+
+@pytest.mark.asyncio
+async def test_only_a_scheduled_end_uses_up_a_snow_night(mock_hass, coordinator):
+    """Skip next, backup mode and the date range end the window early - not a night."""
+    coordinator.snow_nights = 2
+    await coordinator._on_window_start(WINDOW_START)
+    await coordinator._on_window_end(WINDOW_END)
+    assert coordinator.snow_nights == 2
+
+    await coordinator._on_window_start(WINDOW_START)
+    await coordinator._on_scheduled_window_end(WINDOW_END)
+    assert coordinator.snow_nights == 1
+
+
+@pytest.mark.asyncio
+async def test_skip_next_during_a_snow_window_keeps_the_night(mock_hass, coordinator):
+    """Ending the window through the skip-next path leaves the counter alone."""
+    coordinator.snow_nights = 3
+    await coordinator._on_window_start(WINDOW_START)
+
+    coordinator.skip_next = True
+    await coordinator._check_current_window()
+
+    assert coordinator.is_active is False
+    assert coordinator.snow_nights == 3
+
+
+@pytest.mark.asyncio
+async def test_snow_mode_is_ignored_in_discharge_mode(mock_hass):
+    """A discharge window told to charge to the maximum reaches its target instantly."""
+    _real_task_runner(mock_hass)
+    _register_inverter(mock_hass, battery="80")
+    discharge = _make_coordinator(
+        mock_hass,
+        {**CONFIG, CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE, CONF_FORCE_DISCHARGE_SWITCH: FORCE},
+    )
+    mock_hass.states.async_set(FORCE, "off")
+    try:
+        discharge.snow_nights = 2
+        await discharge._on_window_start(WINDOW_START)
+
+        assert discharge.initial_calculated_soc == EXPECTED_TARGET
+        assert discharge.current_target_soc() == EXPECTED_TARGET
+
+        # ... and the night is not counted down either
+        await discharge._on_scheduled_window_end(WINDOW_END)
+        assert discharge.snow_nights == 2
+    finally:
+        await discharge._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_window_check_during_the_end_does_not_re_arm_the_window(mock_hass, coordinator):
+    """A concurrent check must not resurrect the window while the reset runs."""
+    await _start_and_apply(mock_hass, coordinator)
+    seen: list[bool] = []
+    original_reset = coordinator._reset_settings
+
+    async def _reset_and_check() -> bool:
+        # Something queued before the end runs between the reset's awaits
+        seen.append(coordinator.is_active)
+        await coordinator._check_current_window()
+        return await original_reset()
+
+    coordinator._reset_settings = _reset_and_check
+
+    await coordinator._on_window_end(WINDOW_END)
+
+    assert seen == [False]  # is_active is cleared before the first await
+    assert coordinator.is_active is False
+    assert coordinator._ending is False
+    assert coordinator._battery_soc_listener is None
+    assert coordinator._inverter_min_soc_listener is None
+    # The check did not write the night target back over the restored min SOC
+    assert mock_hass.services.async_call.await_args_list[-2:] == [
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
+        call("switch", "turn_off", {"entity_id": GRID}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_verification_bails_out_while_the_window_is_ending(mock_hass, coordinator):
+    """The min SOC is already restored; the verification must not undo that."""
+    await _start_and_apply(mock_hass, coordinator)
+    # The reset has put the original back, so the verification sees a deviation
+    mock_hass.states.async_set(MIN_SOC, str(DEFAULT_MIN))
+    coordinator._ending = True
+    mock_hass.services.async_call.reset_mock()
+
+    await coordinator._verify_and_restore_min_soc()
+
+    mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sunrise_belongs_to_the_solar_day_of_the_window_end(mock_hass):
+    """A window ending after sunrise must not bridge until tomorrow morning."""
+    _real_task_runner(mock_hass)
+    _persisting(mock_hass)
+    _register_inverter(mock_hass, battery="10")
+    # Today's sunrise (05:00) is past at 06:00, so sun.sun reports tomorrow's
+    _register_sun(
+        mock_hass,
+        rising="2026-01-16T05:00:00+00:00",
+        setting="2026-01-15T17:00:00+00:00",
+    )
+    morning = _make_coordinator(
+        mock_hass,
+        {**BRIDGE_CONFIG, CONF_START_TIME: "06:00", CONF_END_TIME: "08:00"},
+    )
+    try:
+        with patch(NOW, return_value=datetime(2026, 1, 15, 6, 0)):
+            await morning._on_window_start(WINDOW_START)
+
+        assert morning._pv_crossover == datetime(2026, 1, 15, 8, 0)  # clamped to the window end
+        assert morning.last_plan is not None
+        # Only the reserve is bridged, not 22 hours of house load
+        assert morning.last_plan.bridge_kwh == pytest.approx(0.5)
+        assert morning.initial_calculated_soc == 13.0
+    finally:
+        await morning._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_long_bridge_is_logged_as_a_warning(mock_hass, caplog):
+    """A bridge over 12 h means the sun times or the window end are off."""
+    _real_task_runner(mock_hass)
+    _persisting(mock_hass)
+    _register_inverter(mock_hass, battery="10")
+    _register_sun(mock_hass, rising="2026-01-15T23:00:00+00:00")
+    coordinator = _make_coordinator(mock_hass, BRIDGE_CONFIG)
+    try:
+        with patch(NOW, return_value=INSIDE_WINDOW):
+            await coordinator._plan_target(5.0, True)
+        assert "Bridging 18.5 h" in caplog.text
+    finally:
+        await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_no_charge_power_is_written_in_the_last_minute(mock_hass, powered):
+    """hours_remaining ~ 0 made required_charge_power_w infinite and ordered the maximum."""
+    with patch(NOW, return_value=datetime(2026, 1, 15, 5, 59, 30)):
+        await _start_with_target(powered, 90.0)
+        mock_hass.services.async_call.reset_mock()
+        await powered._plan_charge_power(90.0)
+
+    assert powered.planned_charge_power_w is None
+    mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_options_flow_mode_change_ends_the_running_window(mock_hass):
+    """Switching the mode through the options dialog used to leave the old one running."""
+    _real_task_runner(mock_hass)
+    _persisting(mock_hass)
+    _register_inverter(mock_hass)
+    mock_hass.states.async_set(FORCE, "off")
+    config = {**CONFIG, CONF_FORCE_DISCHARGE_SWITCH: FORCE}
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator.entry.runtime_data = coordinator
+    coordinator.update_time_triggers = MagicMock()
+    coordinator._setup_backup_mode_listener = MagicMock()
+    try:
+        await _start_and_apply(mock_hass, coordinator)
+        assert coordinator.is_active is True
+
+        coordinator.entry.data = {**config, CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE}
+        await async_update_entry(mock_hass, coordinator.entry)
+
+        assert coordinator.operation_mode == MODE_MORNING_DISCHARGE
+        assert coordinator.is_active is False
+        assert coordinator.override_soc is None
+        assert coordinator._battery_soc_listener is None
+        # The night settings are off before the discharge mode takes over
+        assert mock_hass.services.async_call.await_args_list == [
+            call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
+            call("switch", "turn_off", {"entity_id": GRID}),
+        ]
+    finally:
+        await coordinator._stop_periodic_verification()

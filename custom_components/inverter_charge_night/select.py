@@ -56,25 +56,10 @@ class OperationModeSelect(InverterChargeNightEntity, SelectEntity):
         if self.coordinator.operation_mode == option:
             return
 
-        old_mode = self.coordinator.operation_mode
-        _LOGGER.info("Switching operation mode from %s to %s", old_mode, option)
+        # The coordinator owns the teardown of the running window; the options
+        # flow reaches the same method, so both ways behave identically.
+        await self.coordinator.async_apply_operation_mode(option)
 
-        if self.coordinator.is_active:
-            try:
-                await self.coordinator._reset_settings()
-            except Exception as e:
-                _LOGGER.error("Error resetting settings during mode switch: %s", e, exc_info=True)
-            self.coordinator.is_active = False
-            self.coordinator.target_reached = False
-            self.coordinator.initial_calculated_soc = None
-            self.coordinator.minimum_calculated_soc = None
-            self.coordinator.override_soc = None
-            self.coordinator._remove_battery_soc_listener()
-            self.coordinator._remove_inverter_min_soc_listener()
-            await self.coordinator._stop_periodic_verification()
-            self.coordinator._persist_state()
-
-        self.coordinator.operation_mode = option
         data = dict(self._entry.data)
         data[CONF_OPERATION_MODE] = option
         self.hass.config_entries.async_update_entry(self._entry, data=data)

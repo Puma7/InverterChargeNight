@@ -1,10 +1,12 @@
 """Tests for select platform (OperationModeSelect)."""
 from __future__ import annotations
 
+from functools import partial
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.inverter_charge_night import InverterChargeNightCoordinator
 from custom_components.inverter_charge_night.select import (
     OperationModeSelect,
     async_setup_entry,
@@ -15,6 +17,17 @@ from custom_components.inverter_charge_night.const import (
     MODE_MORNING_DISCHARGE,
     MODE_NIGHT_CHARGE,
 )
+
+
+def _real_mode_switch(coordinator) -> None:
+    """Let the mock run the coordinator's real teardown for a mode change.
+
+    The teardown moved into ``async_apply_operation_mode`` so the options flow
+    goes through the same code (finding Q2); the select entity only calls it.
+    """
+    coordinator.async_apply_operation_mode = partial(
+        InverterChargeNightCoordinator.async_apply_operation_mode, coordinator
+    )
 
 
 @pytest.mark.asyncio
@@ -52,6 +65,7 @@ async def test_operation_mode_select_option_change(mock_config_entry, mock_coord
     mock_coordinator._remove_inverter_min_soc_listener = MagicMock()
     mock_coordinator._stop_periodic_verification = AsyncMock()
     mock_coordinator._check_current_window = AsyncMock()
+    _real_mode_switch(mock_coordinator)
 
     select = OperationModeSelect(mock_coordinator, mock_config_entry)
     select.hass = MagicMock()
@@ -108,6 +122,7 @@ async def test_operation_mode_select_reset_error_handled(mock_config_entry, mock
     mock_coordinator._remove_inverter_min_soc_listener = MagicMock()
     mock_coordinator._stop_periodic_verification = AsyncMock()
     mock_coordinator._check_current_window = AsyncMock()
+    _real_mode_switch(mock_coordinator)
 
     select = OperationModeSelect(mock_coordinator, mock_config_entry)
     select.hass = MagicMock()

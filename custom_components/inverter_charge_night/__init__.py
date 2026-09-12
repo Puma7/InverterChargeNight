@@ -109,6 +109,12 @@ type InverterChargeNightConfigEntry = ConfigEntry[InverterChargeNightCoordinator
 RESET_RETRY_DELAYS: tuple[int, ...] = (60, 120, 240)
 RESET_RETRY_INTERVAL = 900
 SKIP_NEXT_DURATION = timedelta(hours=24)
+# A bridge longer than this means the sunrise or the window end is off; the plan
+# is still made, but it is worth a warning in the log.
+MAX_PLAUSIBLE_BRIDGE_HOURS = 12.0
+# Below this much time left in the window the charge setpoint is not written any
+# more: the required power goes to infinity and would order the maximum.
+MIN_PLAN_HOURS_REMAINING = 1.0 / 60.0  # one minute
 # Home Assistant's built-in sun entity; next_rising / next_setting feed the planner
 SUN_ENTITY_ID = "sun.sun"
 
@@ -152,7 +158,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
     coordinator.setup_time_triggers()
     # Set up optional backup mode listener
     coordinator._setup_backup_mode_listener()
-    
+    # A reset the previous run could not finish is retried from here, not from
+    # the constructor: only now is the coordinator reachable and the setup done.
+    coordinator.async_start_pending_reset_retry()
+
     # Add update listener to handle config changes dynamically
     entry.async_on_unload(
         entry.add_update_listener(async_update_entry)
@@ -182,9 +191,17 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     old_start_time = coordinator.config.get(CONF_START_TIME, DEFAULT_START_TIME)
     old_end_time = coordinator.config.get(CONF_END_TIME, DEFAULT_END_TIME)
     
+    # The mode owns the window: a window still running in the old mode has to be
+    # torn down before the new mode takes over, otherwise the options dialog
+    # would leave force discharge on while grid charge is switched back on. The
+    # select entity goes through the same method. Done before the config is
+    # swapped so the reset still addresses the entities it wrote to.
+    await coordinator.async_apply_operation_mode(
+        entry.data.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE)
+    )
+
     # Update coordinator config reference
     coordinator.config = entry.data
-    coordinator.operation_mode = entry.data.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE)
     coordinator.auto_efficient_charge = entry.data.get(CONF_AUTO_EFFICIENT_CHARGE, False)
     coordinator._auto_missing_entities_logged = False
     coordinator._house_load_cache = None  # the meter or the average may have changed
@@ -228,6 +245,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         coordinator = entry.runtime_data
+        # From here on no timer may be armed any more: an async_call_later
+        # scheduled during the unload would fire on a dead coordinator. A failed
+        # reset is still persisted, so the next setup retries it.
+        coordinator._unloading = True
         # CRITICAL: Reset settings before unloading to prevent leaving inverter in bad state
         if coordinator.is_active:
             _LOGGER.warning("Integration unloading during active window - resetting settings")
@@ -237,6 +258,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConf
                 _LOGGER.error("Error resetting settings during unload: %s", e, exc_info=True)
                 # Continue with unload even if reset fails - we tried our best
         coordinator.remove_time_triggers()
+        coordinator._cancel_window_check()
         coordinator._remove_battery_soc_listener()
         coordinator._remove_inverter_min_soc_listener()
         coordinator._remove_backup_mode_listener()
@@ -249,13 +271,22 @@ async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConf
 
 
 def _as_float(value: Any) -> float | None:
-    """Return ``value`` as float, or None when it is missing or not numeric."""
+    """Return ``value`` as float, or None when it is missing or not usable.
+
+    Non-finite values (``nan``, ``inf``) are rejected as well: they parse fine
+    but poison every comparison afterwards - a ``nan`` battery SOC makes
+    ``target_reached`` unreachable, so grid charging would never stop.
+    """
     if value is None or isinstance(value, bool):
         return None
     try:
-        return float(value)
+        number = float(value)
     except (ValueError, TypeError):
         return None
+    if not math.isfinite(number):
+        _LOGGER.debug("Ignoring non-finite numeric value %r", value)
+        return None
+    return number
 
 
 def _unit_of(state: Any) -> str:
@@ -267,9 +298,15 @@ def _unit_of(state: Any) -> str:
 class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Coordinator for Inverter Charge Night integration."""
 
-    # Class-level default: _persist_state reads it and may run on an instance
-    # whose constructor did not (test doubles built with __new__).
+    # Class-level defaults: _persist_state and the window guards read these and
+    # may run on an instance whose constructor did not (test doubles built with
+    # __new__).
     _original_discharge_limit: float | None = None
+    # True while _on_window_end tears the window down: nothing may re-arm the
+    # listeners or write the window target back to the inverter in between.
+    _ending: bool = False
+    # True once async_unload_entry started: no new timers may be armed.
+    _unloading: bool = False
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialize the coordinator."""
@@ -294,6 +331,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.minimum_calculated_soc: float | None = None  # Store minimum SOC value (always <= initial)
         self.target_reached = False
         self._time_triggers: list[CALLBACK_TYPE] = []
+        self._window_check_task: asyncio.Task[None] | None = None
         self._last_soc_set: float | None = None
         self.override_soc: float | None = None
         # Snow on the modules: the next N windows charge to the user maximum,
@@ -346,6 +384,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "initial_calculated_soc": self.initial_calculated_soc if self.is_active else None,
             "original_ac_charge_power": self._original_ac_charge_power,
             "original_discharge_limit": self._original_discharge_limit,
+            "original_absolute_charge_power": self._original_absolute_charge_power,
             "pending_reset": self._pending_reset,
             "snow_nights": self.snow_nights,
         }
@@ -359,11 +398,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         state: dict[str, Any] = raw
         if isinstance(state.get("is_enabled"), bool):
             self.is_enabled = state["is_enabled"]
-        self.override_soc = _as_float(state.get("override_soc"))
-        self.original_min_soc = _as_float(state.get("original_min_soc"))
-        self.initial_calculated_soc = _as_float(state.get("initial_calculated_soc"))
+        self.override_soc = self._restore_soc(state, "override_soc")
+        self.original_min_soc = self._restore_soc(state, "original_min_soc")
+        self.initial_calculated_soc = self._restore_soc(state, "initial_calculated_soc")
         self._original_ac_charge_power = _as_float(state.get("original_ac_charge_power"))
         self._original_discharge_limit = _as_float(state.get("original_discharge_limit"))
+        self._original_absolute_charge_power = _as_float(
+            state.get("original_absolute_charge_power")
+        )
         self._pending_reset = state.get("pending_reset") is True
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
@@ -381,14 +423,48 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except (ValueError, TypeError):
                 _LOGGER.warning("Ignoring invalid persisted skip_next_until %r", until_raw)
 
-        if self._pending_reset:
-            _LOGGER.warning("Inverter settings were not reset before the last shutdown - retrying")
-            self._schedule_reset_retry()
         _LOGGER.debug("Restored runtime state: %s", state)
 
+    def _restore_soc(self, state: dict[str, Any], key: str) -> float | None:
+        """Return a persisted SOC percentage, or None when it is not a usable one.
+
+        Anything outside 0-100 % is dropped: a value like -1 or 1e9 would be
+        taken for a target and compared against the battery for the rest of the
+        window.
+        """
+        value = _as_float(state.get(key))
+        if value is None:
+            return None
+        if not 0.0 <= value <= 100.0:
+            _LOGGER.warning(
+                "Ignoring persisted %s %r - outside the valid range of 0-100 %%",
+                key,
+                state.get(key),
+            )
+            return None
+        return value
+
+    def async_start_pending_reset_retry(self) -> None:
+        """Arm the retry for a reset a previous run could not finish.
+
+        Called by ``async_setup_entry`` once ``entry.runtime_data`` is set. The
+        constructor must not arm it: the timer would fire on a coordinator that
+        is not reachable yet, and on a setup that may still fail.
+        """
+        if not self._pending_reset:
+            return
+        _LOGGER.warning("Inverter settings were not reset before the last shutdown - retrying")
+        self._reset_retry_count = 0
+        self._schedule_reset_retry()
+
     def current_target_soc(self) -> float | None:
-        """The SOC the inverter should hold right now: snow mode, else manual override, else the plan."""
-        if self.snow_nights > 0:
+        """The SOC the inverter should hold right now: snow mode, else manual override, else the plan.
+
+        Snow mode only applies to night charge. A morning discharge window told
+        to charge to the user maximum would reach its target instantly and do
+        nothing at all, so the counter is ignored (and not counted down) there.
+        """
+        if self.snow_nights > 0 and not self.is_discharge_mode:
             user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC))
             if self.override_soc is not None and self.override_soc != user_max_soc:
                 _LOGGER.debug(
@@ -447,6 +523,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         The end minute itself still belongs to the window (``_is_time_between``
         is inclusive), so an end time equal to the current minute is today's.
+
+        The result carries ``now``'s own tzinfo, so subtracting the two is
+        wall-clock arithmetic and the remaining window stays inside
+        [0 h, 24 h) across a DST change as well. What it cannot express is the
+        repeated hour of a fall-back, where the end minute occurs twice;
+        ``_plan_charge_power`` guards the resulting near-zero remainder.
         """
         _, end = self._window_times()
         end_dt = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
@@ -594,7 +676,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return dt_util.as_local(value) if value.tzinfo else value.replace(tzinfo=like.tzinfo)
 
     def _sun_times(self, now: datetime, window_end: datetime) -> tuple[datetime, datetime]:
-        """Return (next sunrise, next sunset) from ``sun.sun``.
+        """Return (sunrise of the window end's solar day, next sunset) from ``sun.sun``.
+
+        ``next_rising`` is by definition in the future, so for a window that
+        ends after that day's sunrise - a morning discharge window, or a night
+        window ending after sunrise in spring - it points at *tomorrow's*
+        sunrise. Using it would make the planner bridge a whole day. The
+        sunrise is therefore shifted back onto the calendar day of
+        ``window_end``, the same solar day the forecast entity is chosen for.
 
         Without a usable sun entity the sunrise is assumed two hours after the
         window end and the sunset ten hours after that; this is logged as a
@@ -608,6 +697,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             setting = dt_util.parse_datetime(str(state.attributes.get("next_setting", "")))
             sunrise = self._align_tz(rising, now) if rising else None
             sunset = self._align_tz(setting, now) if setting else None
+            if sunrise is not None:
+                # At most one day to go back: next_rising is less than 24 h away.
+                while sunrise.date() > window_end.date():
+                    sunrise -= timedelta(days=1)
         if sunrise is None or sunset is None:
             if sunrise is None:
                 sunrise = window_end + timedelta(hours=2)
@@ -717,6 +810,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             sunrise, sunset = self._sun_times(now, window_end)
             delay_min = int(float(self.config.get(CONF_PV_CROSSOVER_DELAY_MIN, DEFAULT_PV_CROSSOVER_DELAY_MIN)))
             pv_crossover = sunrise + timedelta(minutes=delay_min)
+            if pv_crossover < window_end:
+                # The sun is already up when the window ends (morning discharge,
+                # or a spring window ending after sunrise): there is nothing to
+                # bridge, PV carries the house from the window end onwards.
+                _LOGGER.debug(
+                    "PV crossover %s is before the window end %s - no bridge needed",
+                    pv_crossover,
+                    window_end,
+                )
+                pv_crossover = window_end
+            bridge_hours = (pv_crossover - window_end).total_seconds() / 3600.0
+            if bridge_hours > MAX_PLAUSIBLE_BRIDGE_HOURS:
+                _LOGGER.warning(
+                    "Bridging %.1f h from the window end %s to the PV crossover %s - check "
+                    "%s and the crossover delay; the target will be very high",
+                    bridge_hours,
+                    window_end,
+                    pv_crossover,
+                    SUN_ENTITY_ID,
+                )
             current_soc = self._current_battery_soc()
             plan = plan_target_soc(
                 PlanInput(
@@ -812,6 +925,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         now = dt_util.now()
         hours_remaining = max(0.0, (self._window_end_datetime(now) - now).total_seconds() / 3600.0)
+        if hours_remaining < MIN_PLAN_HOURS_REMAINING:
+            # required_charge_power_w would return infinity and the setpoint
+            # would collapse to the maximum in the last minute of the window.
+            _LOGGER.debug(
+                "Only %.4f h left in the window - not planning a charge power any more",
+                hours_remaining,
+            )
+            return
         try:
             required = required_charge_power_w(
                 target_soc,
@@ -1116,7 +1237,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return True
 
     async def _apply_absolute_charge_power_limit(self) -> None:
-        """Apply absolute max charge power (AC+DC) during AC charging."""
+        """Apply absolute max charge power (AC+DC) during AC charging.
+
+        Like the AC charge limit and the discharge block, the value found on the
+        entity before the first write is remembered (and persisted) so the
+        window end can restore it. Without a readable value nothing is written -
+        a limit that cannot be restored must never be left on the inverter.
+        """
         entity_id = self.config.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY)
         max_power = self.config.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_W)
         if not entity_id or max_power is None:
@@ -1127,19 +1254,29 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if max_power <= 0:
             return
-        if self._original_absolute_charge_power is None:
-            state = self.hass.states.get(entity_id)
-            if state and state.state not in ("unknown", "unavailable"):
-                try:
-                    self._original_absolute_charge_power = float(state.state)
-                except (ValueError, TypeError):
-                    self._original_absolute_charge_power = None
 
         domain = entity_id.split(".")[0]
         service = "set_value"
         if domain not in ("number", "input_number"):
             _LOGGER.warning("Absolute charge power entity %s has unsupported domain %s", entity_id, domain)
             return
+        if self._original_absolute_charge_power is None:
+            state = self.hass.states.get(entity_id)
+            current = (
+                _as_float(state.state)
+                if state and state.state not in ("unknown", "unavailable")
+                else None
+            )
+            if current is None:
+                _LOGGER.warning(
+                    "Cannot read the current absolute charge power from %s - not writing a "
+                    "limit that could not be restored",
+                    entity_id,
+                )
+                return
+            self._original_absolute_charge_power = current
+            _LOGGER.info("Stored original absolute charge power: %.3f", current)
+            self._persist_state()
         value = max_power
         state = self.hass.states.get(entity_id)
         unit = _unit_of(state)
@@ -1155,31 +1292,35 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception as e:
             _LOGGER.error("Error setting absolute charge power: %s", e, exc_info=True)
 
-    async def _reset_absolute_charge_power(self) -> None:
-        """Reset absolute charge power after AC charging ends."""
+    async def _reset_absolute_charge_power(self) -> bool:
+        """Restore the absolute charge power captured before the first write.
+
+        Returns True when nothing is left to restore; on failure the original
+        value is kept so a retry can still put it back.
+        """
         if self._original_absolute_charge_power is None:
-            return
+            return True
         entity_id = self.config.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY)
-        if not entity_id:
-            return
-        domain = entity_id.split(".")[0]
-        service = "set_value"
-        if domain not in ("number", "input_number"):
-            return
+        domain = str(entity_id).split(".")[0] if entity_id else ""
+        if not entity_id or domain not in ("number", "input_number"):
+            # Entity no longer configured or unusable: nothing we can restore
+            self._original_absolute_charge_power = None
+            return True
         value = self._original_absolute_charge_power
         state = self.hass.states.get(entity_id)
         unit = _unit_of(state)
         try:
             await self.hass.services.async_call(
                 domain,
-                service,
+                "set_value",
                 {"entity_id": entity_id, "value": value},
             )
-            _LOGGER.info("Reset absolute charge power to original value: %.3f (%s)", value, unit or "unitless")
         except Exception as e:
             _LOGGER.error("Error resetting absolute charge power: %s", e, exc_info=True)
-        finally:
-            self._original_absolute_charge_power = None
+            return False
+        _LOGGER.info("Reset absolute charge power to original value: %.3f (%s)", value, unit or "unitless")
+        self._original_absolute_charge_power = None
+        return True
 
     def get_auto_efficiency_data(self) -> dict[str, Any]:
         """Load persisted auto efficiency data from entry options."""
@@ -1413,7 +1554,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 for handler, trigger_time in (
                     (self._on_window_start, start),
-                    (self._on_window_end, end),
+                    (self._on_scheduled_window_end, end),
                 ):
                     self._time_triggers.append(
                         async_track_time_change(
@@ -1425,8 +1566,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
                     )
 
-            # Check if we're already in the active window
-            self.hass.async_create_task(
+            # Check if we're already in the active window. The handle is kept so
+            # the unload can cancel a check that has not run yet.
+            self._cancel_window_check()
+            self._window_check_task = self.hass.async_create_task(
                 self._check_current_window(),
                 name="inverter_charge_night_check_window",
             )
@@ -1440,6 +1583,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for trigger in self._time_triggers:
             trigger()
         self._time_triggers.clear()
+
+    def _cancel_window_check(self) -> None:
+        """Cancel a scheduled window check that has not run yet."""
+        task = self._window_check_task
+        self._window_check_task = None
+        if task is not None and not task.done():
+            task.cancel()
 
     def update_time_triggers(self) -> None:
         """Update time triggers when configuration changes."""
@@ -1467,6 +1617,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _check_current_window(self) -> None:
         """Check if we're currently in the active window and adjust state if needed."""
         try:
+            if self._ending:
+                # A window end is resetting the inverter right now. Re-arming the
+                # listeners here would write the window target back afterwards.
+                _LOGGER.debug("Window end in progress - skipping the window check")
+                return
+
             if self.skip_next:
                 if self.is_active:
                     _LOGGER.info("Skip next active - stopping window")
@@ -1539,6 +1695,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # previous window is superseded by this window's end. The original
         # value it kept is not captured again (original_min_soc stays set).
         self._cancel_reset_retry()
+        self._reset_retry_count = 0  # this window's end starts a fresh backoff
         self._pending_reset = False
 
         # Arm the listeners and the verification first. The target calculation
@@ -1560,9 +1717,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _calculate_initial_soc(self) -> None:
         """Calculate and store the initial SOC for this charging period."""
-        if self.snow_nights > 0:
+        if self.snow_nights > 0 and not self.is_discharge_mode:
             # Snow on the modules: the forecast is wrong by definition, so it
             # is not read. Charge to the user maximum for this window.
+            # Discharge windows are left alone (see current_target_soc).
             user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC))
             self.initial_calculated_soc = user_max_soc
             self.minimum_calculated_soc = user_max_soc
@@ -1656,26 +1814,79 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Error calculating initial SOC: %s", e)
             self.initial_calculated_soc = None
 
-    async def _on_window_end(self, now: datetime) -> None:
-        """Handle window end."""
+    async def async_apply_operation_mode(self, mode: str) -> None:
+        """Switch the operation mode, tearing an active window down first.
+
+        A running window belongs to the mode it was started in: its inverter
+        settings are reset and its listeners dropped before the new mode takes
+        over. Without that, switching night charge to morning discharge turns
+        grid charge on while force discharge is still on. Both ways into a mode
+        change - the select entity and the options flow - go through here.
+        """
+        if mode == self.operation_mode:
+            return
+        _LOGGER.info("Switching operation mode from %s to %s", self.operation_mode, mode)
+        if self.is_active:
+            try:
+                await self._reset_settings()
+            except Exception as e:
+                _LOGGER.error("Error resetting settings during mode switch: %s", e, exc_info=True)
+            self.is_active = False
+            self.target_reached = False
+            self.initial_calculated_soc = None
+            self.minimum_calculated_soc = None
+            self.override_soc = None
+            self._remove_battery_soc_listener()
+            self._remove_inverter_min_soc_listener()
+            await self._stop_periodic_verification()
+            self._persist_state()
+        self.operation_mode = mode
+
+    async def _on_scheduled_window_end(self, now: datetime) -> None:
+        """Time-trigger entry point: the window reached its configured end time.
+
+        Only an end that arrives here counts as a night that has been used up
+        (snow mode); every other caller ends the window early.
+        """
+        await self._on_window_end(now, scheduled=True)
+
+    async def _on_window_end(self, now: datetime, *, scheduled: bool = False) -> None:
+        """Handle window end.
+
+        The end trigger fires every day regardless of state, so without an
+        active window there is nothing to end: resetting anyway would write the
+        configured default over a min SOC the user set by hand, and arm an
+        endless retry chain when the entity happens to be unavailable. A reset
+        still pending from a real window is retried by its own timer.
+        """
+        if not self.is_active:
+            _LOGGER.debug("Window end without an active window - nothing to reset")
+            return
         mode_label = "Morning discharge" if self.is_discharge_mode else "Night charge"
         _LOGGER.info("%s window ended, resetting settings", mode_label)
-        # Stop everything that could write the night target back to the inverter
-        # before the reset. The verification task is awaited, so a run that has
-        # already passed its is_active check cannot finish after the reset.
-        self._remove_battery_soc_listener()
-        self._remove_inverter_min_soc_listener()
-        await self._stop_periodic_verification()
-        ok = False
+        # The window is over from this point on, before the first await: a
+        # concurrent window check or listener must not see it as active any more
+        # and re-arm what is being torn down here (finding B9).
+        self.is_active = False
+        self._ending = True
         try:
-            ok = await self._reset_settings()
-        except Exception as e:
-            _LOGGER.error("Error resetting settings at window end: %s", e, exc_info=True)
-            # Continue to reset state flags even if reset fails
+            # Stop everything that could write the night target back to the
+            # inverter before the reset. The verification task is awaited, so a
+            # run that has already passed its is_active check cannot finish
+            # after the reset.
+            self._remove_battery_soc_listener()
+            self._remove_inverter_min_soc_listener()
+            await self._stop_periodic_verification()
+            try:
+                await self._reset_settings()
+            except Exception as e:
+                _LOGGER.error("Error resetting settings at window end: %s", e, exc_info=True)
+                # Continue to reset state flags even if reset fails; the reset
+                # did not get far enough to mark itself pending.
+                self._mark_reset_pending(False)
         finally:
             # CRITICAL: Always reset state flags, even if reset operation failed
             self._finalize_auto_test()
-            self.is_active = False
             self.target_reached = False
             self.initial_calculated_soc = None  # Reset initial SOC for next charging period
             self.minimum_calculated_soc = None  # Reset minimum SOC for next charging period
@@ -1686,15 +1897,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._sun_fallback_logged = False
             # A failed reset is retried until the inverter is back at its
             # original settings; original_min_soc is kept for that (F3).
-            self._pending_reset = not ok
-            if not ok:
-                self._reset_retry_count = 0
-                self._schedule_reset_retry()
+            # _reset_settings marks and schedules that itself.
             self._persist_state()
-            if self.snow_nights > 0:
+            # Only a window that actually ran to its scheduled end uses up a snow
+            # night. A skipped, aborted or discharge window does not.
+            if scheduled and not self.is_discharge_mode and self.snow_nights > 0:
                 self.snow_nights -= 1
                 _LOGGER.info("Snow mode: %d night(s) remaining", self.snow_nights)
                 self._persist_state()
+            self._ending = False
             await self.async_request_refresh()
 
     def _schedule_reset_retry(self) -> None:
@@ -1717,6 +1928,29 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._reset_retry_count,
         )
 
+    def _mark_reset_pending(self, ok: bool) -> None:
+        """Record whether the inverter is back at its original settings.
+
+        Every caller of :meth:`_reset_settings` gets the retry for free this
+        way - the window end, a reload, the enable switch and the mode select
+        all used to drop the result on the floor and leave grid charging on with
+        nothing retrying. While the entry is unloading no timer is armed (it
+        would fire on a coordinator that no longer exists), but the flag is
+        persisted, so the next setup picks the retry up again.
+        """
+        self._pending_reset = not ok
+        if ok:
+            self._reset_retry_count = 0
+            self._cancel_reset_retry()
+        elif self._unloading:
+            _LOGGER.warning(
+                "Inverter settings are not reset and the entry is unloading - "
+                "retrying after the next setup"
+            )
+        else:
+            self._schedule_reset_retry()
+        self._persist_state()
+
     def _cancel_reset_retry(self) -> None:
         """Cancel a scheduled reset retry."""
         if self._reset_retry_unsub:
@@ -1735,25 +1969,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.info("Backup mode active - deferring the reset retry")
             self._schedule_reset_retry()
             return
-        ok = False
+        # _reset_settings marks the outcome and reschedules a failed retry itself
         try:
-            ok = await self._reset_settings()
+            if await self._reset_settings():
+                _LOGGER.info("Deferred reset of the inverter settings succeeded")
         except Exception as e:
             _LOGGER.error("Error retrying reset: %s", e, exc_info=True)
-        self._pending_reset = not ok
-        if ok:
-            self._reset_retry_count = 0
-            _LOGGER.info("Deferred reset of the inverter settings succeeded")
-        else:
-            self._schedule_reset_retry()
-        self._persist_state()
+            self._mark_reset_pending(False)
 
     async def _reset_settings(self) -> bool:
         """Reset the inverter to its original settings.
 
         Returns True when every target was reached: min SOC restored, grid
-        charging (and force discharge) off and the AC charge limit restored.
-        On False the values needed for a retry are kept.
+        charging (and force discharge) off and the charge/discharge limits
+        restored. On False the values needed for a retry are kept, the pending
+        flag is set and the retry is scheduled - callers do not have to look at
+        the result to keep the inverter from staying in the window's state.
         """
         # CRITICAL: Use stored original value if available, otherwise use configured default
         reset_min_soc = self.original_min_soc if self.original_min_soc is not None else float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
@@ -1835,15 +2066,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ok = False
         if not await self._reset_discharge_limit():
             ok = False
-        await self._reset_absolute_charge_power()
+        if not await self._reset_absolute_charge_power():
+            ok = False
         # Forget the original values only once everything is back in place;
         # a retry needs them otherwise.
         if ok:
             self.original_min_soc = None
             self.override_soc = None  # Clear override when resetting
-            self._pending_reset = False
-            self._cancel_reset_retry()
-            self._persist_state()
+        # Persist unconditionally: a partial reset already cleared some capture
+        # values, and leaving the old ones in the options would resurrect
+        # day-old limits after a restart.
+        self._mark_reset_pending(ok)
         return ok
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -2568,7 +2801,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     
     async def _verify_and_restore_min_soc(self) -> None:
         """Verify inverter min SOC matches our target and restore if needed."""
-        if not self.is_active or not self.is_enabled:
+        if not self.is_active or not self.is_enabled or self._ending:
             return
         if self._is_backup_active():
             _LOGGER.debug("Backup mode active - skipping min SOC verification")

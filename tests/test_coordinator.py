@@ -1,5 +1,6 @@
 """Test coordinator functionality."""
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,6 +8,8 @@ import pytest
 
 from custom_components.inverter_charge_night import (
     InverterChargeNightCoordinator,
+    _as_float,
+    async_unload_entry,
     async_update_entry,
 )
 from custom_components.inverter_charge_night.const import (
@@ -396,6 +399,7 @@ def test_persist_state_round_trip_next_to_auto_efficiency_data(mock_hass):
         "initial_calculated_soc": 65.0,
         "original_ac_charge_power": 6000.0,
         "original_discharge_limit": None,
+        "original_absolute_charge_power": None,
         "pending_reset": True,
         "snow_nights": 3,
     }
@@ -480,3 +484,97 @@ async def test_async_update_entry_ignores_options_only_change(mock_hass, mock_co
     coordinator.update_time_triggers.assert_not_called()
     coordinator._setup_backup_mode_listener.assert_not_called()
     coordinator.async_request_refresh.assert_not_awaited()
+
+# Non-finite numbers and out-of-range restores (finding B12) -------------------
+
+
+@pytest.mark.parametrize("value", ["nan", "NaN", "inf", "-inf", "Infinity", float("nan"), float("inf")])
+def test_as_float_rejects_non_finite_values(value):
+    """A nan SOC makes target_reached unreachable, so grid charging never stops."""
+    assert _as_float(value) is None
+
+
+@pytest.mark.parametrize(("value", "expected"), [("42.5", 42.5), (0, 0.0), (-3, -3.0)])
+def test_as_float_still_accepts_ordinary_numbers(value, expected):
+    assert _as_float(value) == expected
+
+
+def test_battery_soc_ignores_a_non_finite_state(mock_hass):
+    coordinator = _make_coordinator(mock_hass, {CONF_BATTERY_SOC_ENTITY: "sensor.soc"})
+    mock_hass.states.async_set("sensor.soc", "nan")
+    assert coordinator._current_battery_soc() is None
+
+    mock_hass.states.async_set("sensor.soc", "37.5")
+    assert coordinator._current_battery_soc() == 37.5
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf", 150.0, -1.0, "not a number"])
+def test_restore_state_drops_unusable_soc_values(mock_hass, bad, caplog):
+    """A restored target outside 0-100 % would be compared against the battery all window."""
+    coordinator = _make_coordinator(
+        mock_hass,
+        {},
+        options={
+            CONF_RUNTIME_STATE: {
+                "override_soc": bad,
+                "original_min_soc": bad,
+                "initial_calculated_soc": bad,
+            }
+        },
+    )
+    assert coordinator.override_soc is None
+    assert coordinator.original_min_soc is None
+    assert coordinator.initial_calculated_soc is None
+
+
+def test_restore_state_keeps_valid_soc_bounds(mock_hass):
+    coordinator = _make_coordinator(
+        mock_hass,
+        {},
+        options={CONF_RUNTIME_STATE: {"override_soc": 0, "original_min_soc": 100}},
+    )
+    assert coordinator.override_soc == 0.0
+    assert coordinator.original_min_soc == 100.0
+
+
+# The window check task handle (finding B10) ----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_window_check_task_is_kept_and_cancellable(mock_hass):
+    """setup_time_triggers dropped the handle, so the unload could not cancel it."""
+    created = []
+
+    def _create_task(coro, name=None, **kwargs):
+        task = asyncio.ensure_future(coro)
+        created.append(task)
+        return task
+
+    mock_hass.async_create_task = MagicMock(side_effect=_create_task)
+    coordinator = _make_coordinator(mock_hass, {})
+
+    coordinator.setup_time_triggers()
+    assert coordinator._window_check_task is created[-1]
+
+    # Re-registering the triggers does not leak the previous check either
+    coordinator.setup_time_triggers()
+    assert len(created) == 2
+
+    coordinator._cancel_window_check()
+    assert coordinator._window_check_task is None
+    await asyncio.gather(*created, return_exceptions=True)
+    assert [task.cancelled() for task in created] == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_unload_cancels_the_pending_window_check(mock_hass, mock_config_entry):
+    coordinator = MagicMock()
+    coordinator.is_active = False
+    coordinator._stop_periodic_verification = AsyncMock()
+    mock_config_entry.runtime_data = coordinator
+    mock_hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+
+    assert await async_unload_entry(mock_hass, mock_config_entry) is True
+
+    coordinator._cancel_window_check.assert_called_once()
+    assert coordinator._unloading is True

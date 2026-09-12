@@ -11,6 +11,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_DEFAULT_MIN_SOC,
     CONF_END_TIME,
     CONF_FORECAST_ERROR_MARGIN,
+    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_KOSTAL_MIN_SOC_ENTITY,
     CONF_PV_FORECAST_ENTITY,
     CONF_START_TIME,
     CONF_USER_MAX_SOC,
@@ -399,3 +401,52 @@ def test_parse_forecast_energy_partially_malformed_list(mock_hass, caplog):
     assert available is True
     assert "Skipped 1 malformed item(s)" in caplog.text
 
+
+
+# Window aborts from the polling update (findings B1, B2) ----------------------
+
+
+@pytest.mark.asyncio
+async def test_backup_abort_from_the_update_keeps_the_snow_night(mock_hass):
+    """Backup mode ends the window early - that is not a night that was used up."""
+    mock_hass.states.async_set("number.min_soc", "45")
+    mock_hass.states.async_set("switch.grid", "on")
+    coordinator = _make_coordinator(
+        mock_hass,
+        {
+            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_DEFAULT_MIN_SOC: 8.0,
+        },
+    )
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.is_active = True
+    coordinator.snow_nights = 2
+    coordinator._is_backup_active = MagicMock(return_value=True)
+
+    data = await coordinator._async_update_data()
+
+    assert data["is_active"] is False
+    assert coordinator.is_active is False
+    assert coordinator.snow_nights == 2
+
+
+@pytest.mark.asyncio
+async def test_update_outside_a_window_never_resets_the_inverter(mock_hass):
+    """The polling update leaves an inverter the integration does not own alone."""
+    mock_hass.states.async_set("number.min_soc", "42")
+    mock_hass.states.async_set("switch.grid", "off")
+    coordinator = _make_coordinator(
+        mock_hass,
+        {
+            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_DEFAULT_MIN_SOC: 8.0,
+        },
+    )
+    coordinator.is_active = False
+
+    data = await coordinator._async_update_data()
+
+    assert data["is_active"] is False
+    mock_hass.services.async_call.assert_not_awaited()
