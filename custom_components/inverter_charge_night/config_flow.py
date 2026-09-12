@@ -710,9 +710,10 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors={CONF_KOSTAL_MIN_SOC_ENTITY: "entity_used_by_other_entry"},
             )
         # The unique id follows the inverter, so a later entry for the old
-        # entity is not blocked and a later one for the new entity is.
+        # entity is not blocked and a later one for the new entity is. It has
+        # to be passed here: async_set_unique_id only writes the flow context.
         await self.async_set_unique_id(min_soc_entity)
-        return self.async_update_reload_and_abort(entry, data=data)
+        return self.async_update_reload_and_abort(entry, data=data, unique_id=min_soc_entity)
 
     @staticmethod
     @callback

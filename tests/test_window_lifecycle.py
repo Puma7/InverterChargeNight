@@ -1695,7 +1695,7 @@ async def test_mode_switch_blocks_verification_during_the_reset(mock_hass):
 
     async def _reset_and_verify() -> bool:
         # a verification run that yielded into the middle of the reset
-        seen.append(coordinator.is_active or coordinator._ending)
+        seen.append(coordinator._ending)
         await coordinator._verify_and_restore_min_soc()
         return await real_reset()
 
