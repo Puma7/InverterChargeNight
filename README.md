@@ -4,42 +4,60 @@ A Home Assistant custom integration that intelligently calculates and sets the o
 
 ## Latest Release
 
-- Current version: `1.0.3`
+- Current version: the `version` field of `custom_components/inverter_charge_night/manifest.json`
 - Changelog: `CHANGELOG.md`
-- Focus: startup trigger-noise reduction, robust forecast unit parsing, and audit-driven reliability fixes
 
 ## Features
 
-- **Automatic SOC Calculation**: Calculates target SOC based on PV forecast using the formula: `(Battery Capacity - Forecast Energy) / Battery Capacity × 100`
-- **Time-Based Control**: Automatically activates during a configurable time window (e.g., midnight to 6 AM)
-- **Kostal Integration**: Directly controls Kostal inverter min SOC and grid charging switch
-- **Forecast-Based**: Uses Solcast PV forecast data to predict next day's solar production
-- **Smart Charging**: Automatically stops charging when target SOC is reached
-- **Automatic Reset**: Restores original min SOC at the end of the time window
-- **Highly Configurable**: Adjustable update interval and command delay to suit different inverter models and network conditions
+- **Two planner modes**: `Headroom` keeps room in the battery for tomorrow's PV forecast; `Bridge` additionally covers the house load from the window end until the PV output exceeds it. See [Planner Modes](#planner-modes).
+- **Two operation modes**: `Night Charge` charges the battery from the grid during the window; `Morning Discharge` empties it towards the grid before sunrise. Switchable at runtime with `select.inverter_charge_night_operation_mode`.
+- **Time-Based Control**: Automatically activates during a configurable time window (e.g., midnight to 6 AM); the window may span midnight.
+- **Kostal Integration**: Directly controls Kostal inverter min SOC and grid charging switch.
+- **Forecast-Based**: Uses Solcast PV forecast data, picking today's or tomorrow's forecast entity depending on the time of day.
+- **Smart Charging**: Stops charging when the target SOC is reached, and plans the AC charge power needed for the rest of the window (`sensor.inverter_charge_night_planned_charge_power`).
+- **Discharge Block**: Optionally sets the battery discharge power limit to 0 for the duration of the window, so the house runs from the grid instead of emptying the battery that was just charged.
+- **Automatic Reset**: Restores the original min SOC, the grid charge switch, the AC charge limit and the discharge limit at the end of the window; a failed reset is retried every 15 minutes.
+- **Survives a restart**: The runtime state (active window, override, snow nights, captured original values) is persisted, so a restart inside a window continues where it left off.
+- **Manual overrides**: A target SOC override, a `Snow nights` counter that charges the next N nights to the maximum, and a `Skip Next` switch that skips one cycle for 24 hours.
+- **Efficiency finder**: Searches for the most efficient AC charge limit and disables itself once it has an answer.
+- **Full UI configuration**: Four-step wizard for setup, reconfigure and options, plus diagnostics and a repair issue when a required entity is missing.
 
 ## Requirements
 
-- Home Assistant 2024.x or later
+- Home Assistant 2025.2.0 or later (the floor declared in `hacs.json`; CI tests that floor and the newest release)
 - Kostal inverter integration installed and configured
 - Solcast integration installed and configured (or another PV forecast source)
 - Battery SOC sensor available in Home Assistant
+- For the Bridge planner: the built-in `sun` integration, and optionally a cumulative house consumption meter (kWh) with recorder statistics
 
-## Quality Scale (Bronze)
+## Quality Scale (Gold)
 
-This custom integration aligns with the Home Assistant Bronze quality scale.
-Evidence:
-- UI setup via `config_flow`
-- Setup/unload tests (`tests/test_setup.py`)
-- Core logic tests (`tests/test_calculation.py`, `tests/test_auto_efficiency.py`)
-- High-level documentation and configuration steps (this README + `documentation.md`)
-- Quality scale declaration: `custom_components/inverter_charge_night/quality_scale.yaml`
+The declared status per rule lives in `custom_components/inverter_charge_night/quality_scale.yaml`;
+the Bronze and Silver rules are met and the Gold rules are met except
+`exception_translations`. Evidence:
+
+- UI setup, reconfigure and options flows via `config_flow` (`unique_config_entry`, `reconfiguration_flow`)
+- `runtime_data` instead of `hass.data`, and `PARALLEL_UPDATES` on every platform
+- Startup entity check that raises `ConfigEntryNotReady` and files a repair issue (`test_before_setup`, `repair_issues`)
+- Icon translations in `icons.json` instead of hardcoded icons
+- Diagnostics with every entity id redacted (`diagnostics.py`)
+- Strict typing: `mypy --strict` and `pyright` in strict mode over the whole package
+- Tests covering setup/unload, the control loop, the planner and the flows (`tests/`)
 
 ## Troubleshooting
 
 **Integration does not start or stops immediately**
-- Check that all required entities exist and are available.
+- Check that all required entities exist and are available. If the min SOC entity, the grid
+  charge switch or the battery SOC sensor is unknown at startup, setup is retried and a repair
+  issue appears under **Settings → System → Repairs** naming the missing entity.
 - Verify the time window and optional date range settings.
+
+**Settings need to be changed**
+- **Settings → Devices & Services → Inverter Charge Night → Configure** opens the same four-step
+  wizard as the initial setup and saves into the config entry.
+- The three-dot menu of the entry offers **Reconfigure** for the same fields. The Kostal min SOC
+  entity identifies the inverter, so it cannot be pointed at an inverter another entry already
+  uses -- the flow aborts instead of creating a second controller for the same hardware.
 
 **Battery SOC entity is unavailable**
 - The integration will skip grid charging for safety until the SOC entity is available again.
@@ -50,13 +68,6 @@ Evidence:
 
 **Download diagnostics**
 - Go to **Settings → Devices & Services → Inverter Charge Night → Download diagnostics**.
-
-## Quality Scale Checklist (Silver Readiness)
-
-- Diagnostics supported (`diagnostics.py` + `manifest.json`)
-- Troubleshooting section present (this README)
-- Configurable via UI (`config_flow`)
-- Tests cover setup/unload + core logic (`tests/`)
 
 ## Installation
 
@@ -79,11 +90,20 @@ Evidence:
    ├── config_flow.py
    ├── const.py
    ├── calculation.py
+   ├── planner.py
+   ├── util.py
+   ├── entity.py
+   ├── diagnostics.py
    ├── sensor.py
    ├── switch.py
+   ├── select.py
    ├── number.py
    ├── binary_sensor.py
-   └── strings.json
+   ├── icons.json
+   ├── icon.svg
+   ├── quality_scale.yaml
+   ├── strings.json
+   └── translations/en.json
    ```
 
 4. **Restart Home Assistant**
@@ -140,39 +160,63 @@ To find entities:
    - Search for "Inverter Charge Night"
    - Click on it
 
-2. **Fill in the configuration form**:
+2. **Walk through the four wizard steps**. The same four steps are used for the initial setup,
+   for **Reconfigure** and for **Configure** (options), so every setting can be changed later.
 
-   **Basic Settings:**
-   - **Integration Name**: Give your integration a name (e.g., "Inverter Charge Night")
+   **Step 1 -- Entities**
+   - **Name**: Name for this integration instance
+   - **Operation Mode**: `Night Charge` (charge from the grid overnight) or `Morning Discharge`
+     (discharge before sunrise to make room for solar)
+   - **Kostal Min SOC Number Entity**: The number entity that controls min SOC. It also identifies
+     this instance, so each inverter can only be configured once.
+   - **Kostal Grid Charge Switch**: The switch that enables/disables grid charging
+   - **PV Forecast Entity (tomorrow)**: Forecast for the next day, used when the window runs
+     before midnight
+   - **PV Forecast Today Entity** (optional): Today's forecast, used when the window runs after
+     midnight; falls back to the entity above when unset
+   - **Battery SOC Sensor**: The sensor showing the current SOC in percent
+   - **Battery Capacity**: Total capacity in kWh (e.g., `35.8`)
 
-   **Kostal Entities:**
-   - **Kostal Min SOC Number Entity**: Select the number entity that controls min SOC
-   - **Kostal Grid Charge Switch**: Select the switch that controls grid charging
+   **Step 2 -- Time & SOC**
+   - **Start Time** / **End Time**: The window; it may span midnight (e.g., `22:00` to `05:59`)
+   - **Minimum SOC** / **Maximum SOC**: Hard bounds; every target is clamped into this range
+   - **Default Min SOC to restore at end time**: Used when the original value could not be read
+     (typically `8.0` for Kostal)
+   - **Forecast Error Margin**: Safety buffer added to the forecast before the calculation
+   - **Planner Mode**: `Headroom` (default) or `Bridge`, see [Planner Modes](#planner-modes)
 
-   **Data Sources:**
-   - **PV Forecast Entity (Solcast)**: Select your Solcast forecast entity
-   - **Battery SOC Sensor**: Select your battery SOC sensor
+   **Step 3 -- Charge Power**
+   - **Min Charge Power** / **Max Charge Power**: The band the planner and the efficiency finder
+     may use (W)
+   - **Battery Charge Max (AC+DC)** and its **Entity** (optional): An absolute charge power limit
+     applied during AC charging and reset afterwards. Both belong together: setting one without
+     the other is rejected.
+   - **Battery Max AC Charge Limit Entity** (optional): The number entity the planned charge
+     power and the efficiency finder write to
+   - **Charge Power Sent / Received** (optional): The two power sensors the efficiency finder
+     compares to measure the charging loss
+   - **Auto Efficient Charge Finder**: Enables the search; requires the AC limit entity and both
+     power sensors
+   - **Force Discharge Switch** (optional): Switch that forces discharge to the grid, used by
+     `Morning Discharge`
+   - **Discharge Power Limit Entity** (optional): Number entity set to 0 at the window start so
+     the house runs from the grid; the previous value is restored at the window end
 
-   **Battery Configuration:**
-   - **Battery Capacity (kWh)**: Enter your total battery capacity (e.g., 35.8)
-
-   **Time Window:**
-   - **Start Time (HH:MM)**: When night charging should start (e.g., `00:00` for midnight)
-   - **End Time (HH:MM)**: When night charging should end (e.g., `05:59` for 5:59 AM)
-
-   **SOC Limits:**
-   - **Minimum SOC (%)**: Minimum allowed SOC (e.g., `8.0`)
-   - **Maximum SOC (%)**: Maximum allowed SOC (e.g., `100.0`)
-
-   **Forecast Settings:**
-   - **Forecast Error Margin (%)**: Safety buffer for forecast uncertainty (e.g., `10.0` for 10% buffer)
-
-   **Advanced Settings:**
-   - **Update Interval (seconds)**: How often to refresh data (default: `900` / 15 minutes)
-   - **Command Delay (seconds)**: Delay between setting min SOC and enabling grid charge (default: `0.1`)
-
-   **Reset Value:**
-   - **Default Min SOC to restore (%)**: The min SOC value to restore at end time (typically `8.0` for Kostal)
+   **Step 4 -- Advanced**
+   - **Update Interval**: How often the coordinator refreshes (default `900` s)
+   - **Command Delay**: Delay between the min SOC and the grid charge command (default `0.1` s)
+   - **Active Start Date** / **Active End Date** (optional): Restrict the integration to a season
+   - **Backup Mode Entity** (optional): While it is active, nothing is written to the inverter
+   - **House Consumption Energy Meter** (optional): Cumulative kWh meter; the Bridge planner
+     learns an hourly load profile from the last 14 days of recorder statistics
+   - **Average House Load**: Fallback load in kW when no meter is configured (default `0.5`)
+   - **PV Crossover Delay**: Minutes after sunrise until PV output exceeds the house load
+     (default `90`)
+   - **Bridge Reserve**: Safety reserve in kWh added to the bridge energy (default `0.5`)
+   - **Charge Efficiency**: Grid-to-battery efficiency used to plan the charge power
+     (default `0.9`)
+   - **Night / Day / Feed-in Price** (optional): Tariffs in ct/kWh. Set all three or none; the
+     Bridge planner uses them to decide a conflict between bridging and PV headroom.
 
 3. **Submit the configuration**
    - Review all settings
@@ -180,35 +224,50 @@ To find entities:
 
 ### Step 3: Verify Installation
 
-After configuration, you should see new entities:
+After configuration, you should see these ten entities:
 
-- **`sensor.inverter_charge_night_calculated_soc`** - Shows the calculated target SOC
+- **`sensor.inverter_charge_night_calculated_soc`** - The target SOC the planner calculated
   - Unit: `%`
-  - Attributes: `is_active`, `target_reached`, `current_soc`
-  
-- **`switch.inverter_charge_night_enabled`** - Enable/disable the integration
-  - When disabled: Resets all settings and stops controlling inverter
-  
-- **`binary_sensor.inverter_charge_night_active`** - Shows if currently in active window
-  - `on`: Currently in configured time window
-  - `off`: Outside time window
-  
-- **`number.inverter_charge_night_min_soc_override`** - Manual override for target SOC
-  - Range: 0 - 100
-  - Step: 1
-  - When set: Overrides automatic calculation while active
-
-- **`number.inverter_charge_night_snow_nights`** - Snow on the modules: charge the next N nights to the maximum
-  - Range: 0 - 14, Step: 1
-  - Bei Schnee auf den Modulen: Anzahl der nächsten Nächte, in denen bis zum Maximum geladen wird; zählt automatisch herunter.
-  - Overrides the forecast and the manual override; counts down at every window end
-
-- **`switch.inverter_charge_night_auto_efficient_charge_finder`** - Auto efficient charge finder
-  - Finds the most efficient AC charge limit and turns itself off when done
+  - Attributes: `is_active`, `target_reached`, `current_soc`, `operation_mode`, `skip_next`,
+    `snow_nights`, and in Bridge mode `plan_reason`, `bridge_kwh`, `surplus_kwh`,
+    `lower_bound_soc`, `upper_bound_soc`, `pv_crossover`
 
 - **`sensor.inverter_charge_night_best_charge_power`** - Best AC charge power found
   - Unit: `W`
-  - Shows the last stored optimal point for AC charging efficiency
+  - The last stored optimum of the Auto Efficient Charge Finder
+
+- **`sensor.inverter_charge_night_planned_charge_power`** - AC power planned for the rest of the window
+  - Unit: `W`, diagnostic entity
+  - The constant power that still reaches the target before the window ends, clamped to the
+    configured min/max and to the efficiency optimum. In Bridge mode it is also written to the
+    AC charge limit entity; otherwise it is shown for information only.
+
+- **`binary_sensor.inverter_charge_night_active`** - Whether the window is currently running
+  - `on`: inside the configured time window
+  - `off`: outside the window
+
+- **`switch.inverter_charge_night_enabled`** - Enable/disable the integration
+  - When switched off: resets all inverter settings and stops controlling it
+
+- **`switch.inverter_charge_night_auto_efficient_charge_finder`** - Auto Efficient Charge Finder
+  - Searches for the most efficient AC charge limit and turns itself off when done
+
+- **`switch.inverter_charge_night_skip_next`** - Skip the next cycle
+  - Skips one window for 24 hours and then expires by itself. Turning it on during a running
+    window ends that window immediately.
+
+- **`select.inverter_charge_night_operation_mode`** - Operation mode
+  - `Night Charge` or `Morning Discharge`. Switching while a window runs resets the inverter
+    first, then re-evaluates the window in the new mode.
+
+- **`number.inverter_charge_night_min_soc_override`** - Manual override for the target SOC
+  - Range 0 - 100, step 1, clamped into the configured min/max SOC
+  - Replaces the planner's target until the window ends
+
+- **`number.inverter_charge_night_snow_nights`** - Snow on the modules
+  - Range 0 - 14, step 1
+  - Charges the next N nights to the maximum SOC, ignoring both the forecast and the manual
+    override, and counts down by one at every window end
 
 ## Example Automations
 
@@ -255,6 +314,12 @@ action:
 - **Summer / high PV forecast**: Use lower target SOC to create more daytime storage headroom.
 - **Backup/Island mode**: Disable integration when backup mode is active to avoid AC charging.
 - **Efficiency tuning**: Enable Auto Efficient Charge Finder for a few nights to find best AC limit.
+- **Snow on the modules**: Set `Snow nights` to the number of nights the panels will stay
+  covered; each of those nights charges to the maximum and the counter drops by one.
+- **One-off exception (EV charging, guests)**: Turn on `Skip Next` to skip the coming window;
+  it expires by itself after 24 hours.
+- **House load after the window**: Switch the planner to `Bridge` so the battery also carries
+  the house until the PV output takes over in the morning.
 
 ## Dashboard Examples (Lovelace)
 
@@ -264,8 +329,11 @@ type: entities
 title: Inverter Charge Night
 entities:
   - switch.inverter_charge_night_enabled
+  - switch.inverter_charge_night_skip_next
+  - select.inverter_charge_night_operation_mode
   - binary_sensor.inverter_charge_night_active
   - sensor.inverter_charge_night_calculated_soc
+  - sensor.inverter_charge_night_planned_charge_power
   - number.inverter_charge_night_min_soc_override
   - number.inverter_charge_night_snow_nights
 ```
@@ -281,32 +349,61 @@ entities:
 
 ## Entity List (End-User)
 
-- **`switch.inverter_charge_night_enabled`**  
-  Turns the integration on/off. Disabling resets grid charging settings.
+- **`sensor.inverter_charge_night_calculated_soc`** - The target SOC the planner calculated
+  - Unit: `%`
+  - Attributes: `is_active`, `target_reached`, `current_soc`, `operation_mode`, `skip_next`,
+    `snow_nights`, and in Bridge mode `plan_reason`, `bridge_kwh`, `surplus_kwh`,
+    `lower_bound_soc`, `upper_bound_soc`, `pv_crossover`
 
-- **`binary_sensor.inverter_charge_night_active`**  
-  Indicates whether the current time is inside the configured window.
+- **`sensor.inverter_charge_night_best_charge_power`** - Best AC charge power found
+  - Unit: `W`
+  - The last stored optimum of the Auto Efficient Charge Finder
 
-- **`sensor.inverter_charge_night_calculated_soc`**  
-  Target SOC based on PV forecast. Attributes show `current_soc`, `target_reached`.
+- **`sensor.inverter_charge_night_planned_charge_power`** - AC power planned for the rest of the window
+  - Unit: `W`, diagnostic entity
+  - The constant power that still reaches the target before the window ends, clamped to the
+    configured min/max and to the efficiency optimum. In Bridge mode it is also written to the
+    AC charge limit entity; otherwise it is shown for information only.
 
-- **`number.inverter_charge_night_min_soc_override`**  
-  Manual override for target SOC (integer %). Overrides automatic calculation.
+- **`binary_sensor.inverter_charge_night_active`** - Whether the window is currently running
+  - `on`: inside the configured time window
+  - `off`: outside the window
 
-- **`number.inverter_charge_night_snow_nights`**  
-  Bei Schnee auf den Modulen: Anzahl der nächsten Nächte, in denen bis zum Maximum geladen wird; zählt automatisch herunter.
+- **`switch.inverter_charge_night_enabled`** - Enable/disable the integration
+  - When switched off: resets all inverter settings and stops controlling it
 
-- **`switch.inverter_charge_night_auto_efficient_charge_finder`**  
-  Starts the efficiency search for best AC charge limit, auto-disables when done.
+- **`switch.inverter_charge_night_auto_efficient_charge_finder`** - Auto Efficient Charge Finder
+  - Searches for the most efficient AC charge limit and turns itself off when done
 
-- **`sensor.inverter_charge_night_best_charge_power`**  
-  Best AC charge power found (W). Used as target for AC limit.
+- **`switch.inverter_charge_night_skip_next`** - Skip the next cycle
+  - Skips one window for 24 hours and then expires by itself. Turning it on during a running
+    window ends that window immediately.
+
+- **`select.inverter_charge_night_operation_mode`** - Operation mode
+  - `Night Charge` or `Morning Discharge`. Switching while a window runs resets the inverter
+    first, then re-evaluates the window in the new mode.
+
+- **`number.inverter_charge_night_min_soc_override`** - Manual override for the target SOC
+  - Range 0 - 100, step 1, clamped into the configured min/max SOC
+  - Replaces the planner's target until the window ends
+
+- **`number.inverter_charge_night_snow_nights`** - Snow on the modules
+  - Range 0 - 14, step 1
+  - Charges the next N nights to the maximum SOC, ignoring both the forecast and the manual
+    override, and counts down by one at every window end
 
 ## How It Works
 
-### Calculation Formula
+### Planner Modes
 
-The integration calculates the target SOC using:
+The planner decides the target SOC for the window. Which formula it uses is set by **Planner
+Mode** in step 2 of the wizard; both clamp the result into the configured minimum and maximum
+SOC, and both fall back to a safe 50 % (instead of charging to the maximum) when no forecast is
+available.
+
+#### Headroom (default)
+
+Only keeps room for tomorrow's PV production:
 
 ```
 Target SOC = (Battery Capacity - Forecast Energy × (1 + Error Margin)) / Battery Capacity × 100
@@ -332,34 +429,87 @@ Target SOC = (Battery Capacity - Forecast Energy × (1 + Error Margin)) / Batter
 - If forecast is 0: Uses maximum SOC (or user_max_soc)
 - Result is always clamped between user_min_soc and user_max_soc
 
+#### Bridge
+
+Bridge answers a second question the headroom formula ignores: what does the house consume
+*after* the cheap window, before the PV covers it? It derives two bounds, both in kWh and then
+converted to SOC:
+
+- **Lower bound (bridge)**: the house load from the window end until the PV crossover
+  (sunrise from `sun.sun` plus the configured **PV Crossover Delay**), plus the **Bridge
+  Reserve**. Below this the house buys energy at the day tariff after the window.
+- **Upper bound (headroom)**: tomorrow's forecast with margin, minus the daytime load until
+  sunset. Only that surplus needs room in the battery, because the bridge energy is consumed
+  again before the crossover and frees its own room.
+
+The hourly load profile comes from the **House Consumption Energy Meter** (learned from the last
+14 days of recorder statistics, cached for 15 minutes); without a meter the **Average House
+Load** is used for every hour.
+
+- `lower <= upper`: both fit, and the lower bound wins -- never buy more than needed.
+- `lower > upper`: the bounds conflict. With the three tariffs configured, the planner compares
+  the cost of charging past the headroom bound (night price minus lost feed-in tariff) with the
+  cost of leaving the bridge uncovered (day price minus night price) and takes the cheaper one.
+  Without tariffs the bridge wins, because grid energy by day costs more than the feed-in
+  tariff that is lost when PV finds no room.
+
+The chosen bound and its inputs are exposed as attributes of
+`sensor.inverter_charge_night_calculated_soc` (`plan_reason`, `bridge_kwh`, `surplus_kwh`,
+`lower_bound_soc`, `upper_bound_soc`, `pv_crossover`).
+
+#### Target precedence
+
+Snow nights beat everything, then the manual override, then the planner:
+
+1. `snow_nights > 0` -> the configured maximum SOC
+2. a manual override set on `number.inverter_charge_night_min_soc_override`
+3. the SOC the planner calculated at the window start (re-planned during the window, but in
+   Night Charge mode the target never drops below what was already reached)
+
 ### Operation Flow
+
+**At Window Start:**
+
+1. The forecast entity for the time of day is read (today's before noon, tomorrow's after)
+2. The planner derives the target SOC in the configured planner mode
+3. The current Kostal min SOC, the AC charge limit and the discharge limit are stored so they
+   can be restored later, and the values are persisted so they also survive a restart
+4. In Night Charge mode the discharge limit is set to 0 (if the entity is configured), so the
+   house runs from the grid and the energy just bought stays in the battery
 
 **During Active Window (e.g., 00:00 - 05:59):**
 
-1. Integration reads PV forecast from Solcast (supports multiple data formats)
-2. Calculates target SOC based on forecast and battery capacity
-3. Validates target SOC is within user-defined limits
-4. Stores original Kostal min SOC value (if not already stored)
-5. Sets Kostal min SOC to calculated value (only if different from current)
-6. Enables Kostal grid charging switch (only if currently off)
-7. Monitors battery SOC every 15 minutes
-8. When target SOC is reached, turns off grid charging (min SOC remains set)
-9. Recalculates periodically (every 15 minutes) if forecast updates
-10. Rate limiting prevents excessive service calls
+1. Target SOC is validated against the user limits
+2. Kostal min SOC is set to the target (only when it differs from the current value)
+3. Kostal grid charging is switched on (only when it is off), after the configured command delay
+4. The charge power needed for the remaining window time is planned and published as
+   `sensor.inverter_charge_night_planned_charge_power`; in Bridge mode it is also written to the
+   AC charge limit entity, unless the efficiency finder currently owns that entity
+5. Battery SOC is watched by a state listener and by the update interval (15 minutes by default)
+6. When the target is reached, grid charging is switched off (the min SOC stays set)
+7. A periodic verification re-writes the min SOC if something outside the integration changed it
+8. Nothing is written while backup/island mode is active
+
+**In Morning Discharge mode** the same window drives the battery *down* to the target instead:
+the min SOC acts as a floor, grid charging is kept off, and the optional force discharge switch
+is turned on until the target is reached.
 
 **At Window End (e.g., 05:59):**
 
-1. Resets Kostal min SOC to original value (or configured default if original not available)
-2. Turns off Kostal grid charging switch
-3. Clears stored original min SOC value
-4. Resets state flags (is_active, target_reached)
-5. Integration enters standby mode until next window
+1. Kostal min SOC is reset to the stored original (or the configured default if it is unknown)
+2. Kostal grid charging is switched off, as is the force discharge switch
+3. The AC charge limit, the absolute charge power limit and the discharge limit are restored
+4. State flags (is_active, target_reached), the manual override and the stored originals are
+   cleared, and `snow_nights` counts down by one
+5. A reset that failed (e.g. an unavailable entity) is retried every 15 minutes until it works
 
 **Safety Mechanisms:**
-- Automatic reset if integration is unloaded during active window
-- State flags always reset even if reset operation fails
-- Original min SOC value stored and restored
-- Fallback to configured default if original value unavailable
+- Automatic reset if the integration is unloaded during an active window
+- State flags always reset even if the reset operation fails
+- Original values stored, persisted and restored; a pending reset is picked up again after a
+  restart
+- Fallback to the configured default if the original value is unavailable
+- A missing or unavailable battery SOC sensor stops grid charging instead of guessing
 - Comprehensive error handling with logging
 
 ## Configuration Examples
@@ -424,7 +574,12 @@ Target SOC = (Battery Capacity - Forecast Energy × (1 + Error Margin)) / Batter
 
 ### Manual Override
 
-You can manually override the calculated SOC using the `number.inverter_charge_night_min_soc_override` entity. This will override the automatic calculation while the integration is active. The override value is applied immediately if the integration is in the active window.
+You can manually override the calculated SOC using the
+`number.inverter_charge_night_min_soc_override` entity. The value is rounded to a whole percent
+and clamped into the configured minimum and maximum SOC, and it replaces the planner's target
+until the window ends. Inside a running window it takes effect immediately, on the control path
+that matches the operation mode. The override lives in the coordinator and is persisted, so it
+also survives a restart inside the window -- and `Snow nights` still takes precedence over it.
 
 ### Disabling the Integration
 
@@ -438,8 +593,13 @@ Use the `switch.inverter_charge_night_enabled` entity to temporarily disable the
 
 Monitor the integration status using:
 - **`sensor.inverter_charge_night_calculated_soc`** - Current calculated target SOC
-  - Check attributes for `is_active`, `target_reached`, `current_soc`
+  - Check attributes for `is_active`, `target_reached`, `current_soc`, `operation_mode`,
+    `skip_next`, `snow_nights` and, in Bridge mode, the planner's bounds and reason
+- **`sensor.inverter_charge_night_planned_charge_power`** - The AC power planned for the rest
+  of the window
 - **`binary_sensor.inverter_charge_night_active`** - Whether currently in active window
+- **Diagnostics** - **Download diagnostics** on the entry dumps the configuration (entity ids
+  redacted) together with the coordinator's runtime state
 - **Home Assistant Logs** - Detailed operation logs at INFO/DEBUG level
 
 ### Update Interval
@@ -467,41 +627,85 @@ This integration is provided as-is for personal use.
 
 The integration uses Home Assistant's standard patterns:
 
-- **Coordinator Pattern**: `DataUpdateCoordinator` manages state and updates
-- **Platform Entities**: Separate entities for sensor, switch, binary_sensor, and number
-- **Config Flow**: UI-based configuration with entity selectors
+- **Coordinator Pattern**: `DataUpdateCoordinator` manages state and updates, stored in
+  `entry.runtime_data`
+- **Platform Entities**: sensor, binary_sensor, switch, select and number, all built on the
+  shared base class in `entity.py` so they share one device and the unique-id scheme
+- **Pure Planner**: `planner.py` holds the Bridge arithmetic as pure functions with no Home
+  Assistant imports; every state read happens in the coordinator
+- **Config Flow**: Four-step wizard with entity selectors, shared by the setup, reconfigure and
+  options flows
 - **Time-based Triggers**: `async_track_time_change` for window start/end
+- **Icon Translations**: `icons.json` is the single source for entity icons
 
 ### File Structure
 
 ```
 custom_components/inverter_charge_night/
-├── __init__.py              # Main integration setup and coordinator
+├── __init__.py              # Integration setup and the coordinator (control loop)
 ├── manifest.json            # Integration metadata
-├── config_flow.py           # Configuration UI
+├── config_flow.py           # Four-step setup, reconfigure and options flows
 ├── const.py                 # Constants and configuration keys
-├── calculation.py           # SOC calculation logic
-├── sensor.py                # Calculated SOC sensor entity
-├── switch.py                # Enable/disable switch entity
-├── number.py                # Manual override number entity
+├── calculation.py           # Headroom SOC formula and forecast helpers
+├── planner.py               # Bridge planner (pure functions) and charge power
+├── util.py                  # Small shared helpers (time parsing)
+├── entity.py                # Shared entity base class (device info, unique id)
+├── diagnostics.py           # Diagnostics dump with redacted entity ids
+├── sensor.py                # Calculated SOC, best and planned charge power
+├── switch.py                # Enable, efficiency finder and skip next switches
+├── select.py                # Operation mode selector
+├── number.py                # Min SOC override and snow nights
 ├── binary_sensor.py         # Active window binary sensor
-└── strings.json             # UI strings and translations
+├── icons.json               # Icon translations for every entity
+├── quality_scale.yaml       # Quality scale status per rule
+├── strings.json             # UI strings and translations
+└── translations/en.json     # Byte-identical copy of strings.json
 ```
 
 ### Configuration Keys
 
-All configuration options stored in `entry.data`:
-- `kostal_min_soc_entity` - Kostal min SOC number entity ID
+All configuration options are stored in `entry.data`; `entry.options` only holds the
+efficiency history (`auto_efficiency_data`) and the persisted runtime state (`runtime_state`).
+The full list with labels and help texts lives in `strings.json`.
+
+Step 1 -- entities:
+- `operation_mode` - `night_charge` or `morning_discharge`
+- `kostal_min_soc_entity` - Kostal min SOC number entity ID (also the entry's unique id)
 - `kostal_grid_charge_switch` - Kostal grid charge switch entity ID
-- `pv_forecast_entity` - PV forecast entity ID (Solcast)
+- `pv_forecast_entity` - PV forecast entity ID for the next day (Solcast)
+- `pv_forecast_today_entity` - optional forecast entity ID for today
 - `battery_soc_entity` - Battery SOC sensor entity ID
 - `battery_capacity` - Battery capacity in kWh (float)
-- `start_time` - Window start time (HH:MM format)
-- `end_time` - Window end time (HH:MM format)
-- `user_min_soc` - Minimum allowed SOC (0-100)
-- `user_max_soc` - Maximum allowed SOC (0-100, must be > user_min_soc)
+
+Step 2 -- time and SOC:
+- `start_time` / `end_time` - Window bounds (HH:MM; may span midnight)
+- `user_min_soc` / `user_max_soc` - Hard SOC bounds (0-100, max must be > min)
+- `default_min_soc` - Min SOC to restore at end time (0-100)
 - `forecast_error_margin` - Forecast error margin percentage (0-100)
-- `default_min_soc` - Default min SOC to restore at end time (0-100)
+- `planner_mode` - `headroom` (default) or `bridge`
+
+Step 3 -- charge power:
+- `min_charge_power_w` / `max_charge_power_w` - Charge power band in W
+- `absolute_max_charge_power_w` + `absolute_max_charge_power_entity` - Optional AC+DC limit
+  (both or neither)
+- `charge_power_entity` - Optional number entity for the AC charge limit
+- `charge_power_sent_entity` / `charge_power_received_entity` - Optional power sensors for the
+  efficiency finder
+- `auto_efficient_charge` - Efficiency finder enabled (also written at runtime by the switch)
+- `force_discharge_switch` - Optional switch that forces discharge to the grid
+- `discharge_limit_entity` - Optional number entity blocked to 0 during the window
+
+Step 4 -- advanced:
+- `update_interval` - Coordinator refresh interval in seconds (default 900)
+- `command_delay` - Delay between min SOC and grid charge commands in seconds
+- `active_start_date` / `active_end_date` - Optional seasonal restriction (YYYY-MM-DD)
+- `backup_mode_entity` - Optional backup/island mode entity
+- `house_load_entity` - Optional cumulative house consumption meter (kWh)
+- `avg_house_load_kw` - Fallback average house load in kW
+- `pv_crossover_delay_min` - Minutes after sunrise until PV exceeds the load
+- `bridge_reserve_kwh` - Safety reserve added to the bridge energy
+- `charge_efficiency` - Grid-to-battery efficiency used for the charge power plan
+- `night_price_ct` / `day_price_ct` / `feed_in_price_ct` - Optional tariffs, all three or none
 
 ### Default Values
 
@@ -512,6 +716,12 @@ Defined in `const.py`:
 - `DEFAULT_END_TIME = "05:59"`
 - `DEFAULT_FORECAST_ERROR_MARGIN = 10.0`
 - `DEFAULT_UPDATE_INTERVAL = 900` (15 minutes)
+- `DEFAULT_SAFE_FALLBACK_SOC = 50.0` (used when no forecast is available)
+- `DEFAULT_PLANNER_MODE = "headroom"`
+- `DEFAULT_AVG_HOUSE_LOAD_KW = 0.5`
+- `DEFAULT_PV_CROSSOVER_DELAY_MIN = 90`
+- `DEFAULT_BRIDGE_RESERVE_KWH = 0.5`
+- `DEFAULT_CHARGE_EFFICIENCY = 0.90`
 
 ### Safety Features
 
@@ -546,21 +756,13 @@ All critical operations include error handling:
 
 ### Developer Checks (CI)
 
-Recommended checks for CI or local validation:
-- `pytest -q -p pytest_asyncio.plugin -p pytest_cov.plugin`
+`.github/workflows/ci.yml` runs, on the oldest supported and on the newest Home Assistant
+release, plus `hassfest` and the HACS action:
+- `pytest` (with the coverage ratchet from `.coveragerc`)
+- `mypy custom_components/inverter_charge_night/`
 - `pyright`
-- `mypy custom_components/inverter_charge_night`
 
 ## Changelog
 
-### Version 1.0.0
-- Initial release
-- SOC calculation based on PV forecast with error margin
-- Kostal inverter control (min SOC and grid charge switch)
-- Time-based activation with configurable window
-- Automatic reset at end time with original value restoration
-- Manual override capability
-- Comprehensive error handling and safety mechanisms
-- Rate limiting to prevent excessive service calls
-- Support for multiple Solcast forecast data formats
-
+See `CHANGELOG.md` for the release history; the current version is the `version` field of
+`custom_components/inverter_charge_night/manifest.json`.

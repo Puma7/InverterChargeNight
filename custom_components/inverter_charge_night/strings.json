@@ -231,12 +231,14 @@
       "required_value": "Value must be provided when entity is set",
       "start_end_time_must_differ": "Start time and end time must be different",
       "invalid_efficiency": "Charge efficiency must be between 0 and 1",
-      "all_prices_required": "Set all three prices (night, day, feed-in) or none"
+      "all_prices_required": "Set all three prices (night, day, feed-in) or none",
+      "entity_used_by_other_entry": "This min SOC entity already belongs to another configured entry"
     },
     "abort": {
       "already_configured": "Integration is already configured",
       "already_in_progress": "Configuration flow is already in progress",
-      "reconfigure_successful": "Configuration updated"
+      "reconfigure_successful": "Configuration updated",
+      "unique_id_mismatch": "The selected min SOC entity belongs to a different inverter than this entry"
     }
   },
   "options": {
@@ -363,7 +365,8 @@
       "required_value": "Value must be provided when entity is set",
       "start_end_time_must_differ": "Start time and end time must be different",
       "invalid_efficiency": "Charge efficiency must be between 0 and 1",
-      "all_prices_required": "Set all three prices (night, day, feed-in) or none"
+      "all_prices_required": "Set all three prices (night, day, feed-in) or none",
+      "entity_used_by_other_entry": "This min SOC entity already belongs to another configured entry"
     }
   },
   "selector": {

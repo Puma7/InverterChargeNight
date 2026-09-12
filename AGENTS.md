@@ -27,8 +27,9 @@ tests raises `fail_under` to the new measurement in the same change. Never lower
 test reads; do not rely on `MagicMock` states. Assert positively on `hass.services.async_call`
 (`assert_awaited_with`, `await_args_list`), not only "was not called".
 
-The same commands run in CI (`.github/workflows/ci.yml`) on Python 3.12 and 3.13, together with
-`hassfest` and the HACS action.
+The same commands run in CI (`.github/workflows/ci.yml`) against the oldest supported Home
+Assistant (the floor from `hacs.json`, on Python 3.13) and the newest release (on Python 3.14),
+together with `hassfest` and the HACS action.
 
 ### Type checking
 
@@ -39,10 +40,10 @@ pyright
 
 Both `mypy` and `pyright` are configured in strict mode and must pass with **0 errors**. Both check
 with `python_version` / `pythonVersion` 3.13 because current Home Assistant releases use 3.13 syntax;
-the integration itself stays compatible with 3.12. `config_flow.py` is temporarily excluded from
-pyright only, until plan 001 lands its rewrite. The `reportIncompatibleVariableOverride` rule is
-disabled in pyright because HA's `CoordinatorEntity` and entity base classes have a framework-level
-conflict on the `available` property.
+the integration itself stays compatible with 3.12. Nothing is excluded from either checker: both
+cover the whole package, `config_flow.py` included (plan 001 landed its rewrite). The
+`reportIncompatibleVariableOverride` rule is disabled in pyright because HA's `CoordinatorEntity`
+and entity base classes have a framework-level conflict on the `available` property.
 
 ### Key gotchas
 

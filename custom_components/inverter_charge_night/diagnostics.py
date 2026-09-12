@@ -9,6 +9,10 @@ from homeassistant.util import dt as dt_util
 
 from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 
+# Every config key that names an entity of the user's system. The test
+# ``test_every_entity_config_key_is_redacted`` derives the expected set from
+# ``const.py``, so a newly added ``*_entity`` / ``*_switch`` key cannot be
+# forgotten here.
 REDACT_KEYS = {
     "pv_forecast_entity",
     "battery_soc_entity",
@@ -21,6 +25,8 @@ REDACT_KEYS = {
     "backup_mode_entity",
     "pv_forecast_today_entity",
     "force_discharge_switch",
+    "discharge_limit_entity",
+    "house_load_entity",
 }
 
 

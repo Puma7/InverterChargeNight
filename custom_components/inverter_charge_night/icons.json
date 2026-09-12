@@ -7,11 +7,8 @@
       "best_charge_power": {
         "default": "mdi:flash"
       },
-      "charging_efficiency": {
-        "default": "mdi:lightning-bolt-circle"
-      },
-      "auto_test_status": {
-        "default": "mdi:test-tube"
+      "planned_charge_power": {
+        "default": "mdi:battery-clock"
       }
     },
     "switch": {
@@ -28,6 +25,18 @@
           "on": "mdi:auto-fix",
           "off": "mdi:auto-fix"
         }
+      },
+      "skip_next": {
+        "default": "mdi:debug-step-over",
+        "state": {
+          "on": "mdi:debug-step-over",
+          "off": "mdi:play"
+        }
+      }
+    },
+    "select": {
+      "operation_mode": {
+        "default": "mdi:swap-horizontal"
       }
     },
     "binary_sensor": {

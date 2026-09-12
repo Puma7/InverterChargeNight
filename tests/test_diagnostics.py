@@ -4,7 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from custom_components.inverter_charge_night import const
 from custom_components.inverter_charge_night.diagnostics import (
+    REDACT_KEYS,
     async_get_config_entry_diagnostics,
 )
 
@@ -53,3 +55,21 @@ async def test_diagnostics_without_coordinator_omits_state(mock_hass, mock_confi
 
     assert set(diagnostics) == {"entry", "options"}
     assert diagnostics["entry"]["kostal_min_soc_entity"] == "**REDACTED**"
+
+def test_every_entity_config_key_is_redacted():
+    """A config key that names an entity of the user's system must be redacted.
+
+    The expected set is derived from ``const.py`` so that the next ``*_entity``
+    or ``*_switch`` key cannot be forgotten in ``REDACT_KEYS`` (finding F14:
+    ``discharge_limit_entity`` and ``house_load_entity`` were missing).
+    """
+    entity_keys = {
+        value
+        for name, value in vars(const).items()
+        if name.startswith("CONF_")
+        and isinstance(value, str)
+        and (value.endswith("_entity") or value.endswith("_switch"))
+    }
+
+    assert entity_keys, "no entity config keys found - the derivation is broken"
+    assert REDACT_KEYS == entity_keys

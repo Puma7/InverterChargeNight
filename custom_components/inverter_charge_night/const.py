@@ -20,7 +20,6 @@ DEFAULT_ACTIVE_START_DATE = ""  # Optional YYYY-MM-DD
 DEFAULT_ACTIVE_END_DATE = ""  # Optional YYYY-MM-DD
 DEFAULT_MIN_CHARGE_POWER_W = 1000  # Default min charge power (W)
 DEFAULT_MAX_CHARGE_POWER_W = 10000  # Default max charge power (W)
-DEFAULT_ABSOLUTE_MAX_CHARGE_POWER_W = 10000  # Default absolute max charge power (W)
 
 # Configuration keys
 CONF_OPERATION_MODE = "operation_mode"
@@ -79,12 +78,5 @@ HOUSE_LOAD_PROFILE_CACHE_S = 900  # 15 minutes
 PLANNED_POWER_WRITE_THRESHOLD_W = 100  # write the charge setpoint only when it moves more than this
 
 # Attributes
-ATTR_CALCULATED_SOC = "calculated_soc"
-ATTR_ORIGINAL_MIN_SOC = "original_min_soc"
-ATTR_IS_ACTIVE = "is_active"
-ATTR_TARGET_SOC = "target_soc"
-ATTR_CURRENT_SOC = "current_soc"
-ATTR_OPERATION_MODE = "operation_mode"
-ATTR_SKIP_NEXT = "skip_next"
 ATTR_SNOW_NIGHTS = "snow_nights"  # nights left in snow mode (charge to user max)
 
