@@ -34,6 +34,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
+    CONF_BACKUP_MODE_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
     CONF_COMMAND_DELAY,
     CONF_DEFAULT_MIN_SOC,
@@ -176,6 +177,7 @@ PV = "sensor.pv"
 SUN = "sun.sun"
 AC_LIMIT = "number.ac_limit"
 GRID_IMPORT = "sensor.grid_import"
+BACKUP = "binary_sensor.backup_mode"
 SENT = "sensor.charge_sent"
 RECEIVED = "sensor.charge_received"
 
@@ -465,6 +467,34 @@ async def test_a_stale_measurement_falls_back_to_the_setpoint(mock_hass, measure
 
     mock_hass.states.async_set(SENT, "unavailable")
     assert measured._own_charge_draw_w() == pytest.approx(written)
+
+
+@pytest.mark.asyncio
+async def test_backup_mode_keeps_the_integration_off_the_inverter(mock_hass):
+    """Island mode: no grid import to limit, and the inverter is not ours."""
+    _register(mock_hass, import_w="33000")
+    mock_hass.states.async_set(BACKUP, "on")
+    coordinator = _make_coordinator(
+        mock_hass, {**LIMITED_CONFIG, CONF_BACKUP_MODE_ENTITY: BACKUP}
+    )
+    try:
+        await _start_with_target(coordinator, 100.0)
+        await coordinator._async_update_data()
+
+        # The poll ends the window instead of driving the inverter
+        assert _ac_writes(mock_hass) == []
+        assert coordinator.is_active is False
+
+        # A grid reading arriving before the window end has propagated is
+        # answered by the listener's own backup check, not by a write
+        coordinator.is_active = True
+        _set_import(mock_hass, "40000")
+        with patch(NOW, return_value=LATER):
+            await coordinator._react_to_grid_import()
+
+        assert _ac_writes(mock_hass) == []
+    finally:
+        await coordinator._stop_periodic_verification()
 
 
 @pytest.mark.asyncio
