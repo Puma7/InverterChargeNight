@@ -305,6 +305,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # True while _on_window_end tears the window down: nothing may re-arm the
     # listeners or write the window target back to the inverter in between.
     _ending: bool = False
+    _switching_mode: bool = False
     # True once async_unload_entry started: no new timers may be armed.
     _unloading: bool = False
 
@@ -1823,24 +1824,42 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         grid charge on while force discharge is still on. Both ways into a mode
         change - the select entity and the options flow - go through here.
         """
-        if mode == self.operation_mode:
+        if mode == self.operation_mode or self._switching_mode:
+            # Persisting state re-enters the entry update listener, which can
+            # call this again while the teardown below is still awaiting.
             return
-        _LOGGER.info("Switching operation mode from %s to %s", self.operation_mode, mode)
-        if self.is_active:
-            try:
-                await self._reset_settings()
-            except Exception as e:
-                _LOGGER.error("Error resetting settings during mode switch: %s", e, exc_info=True)
-            self.is_active = False
-            self.target_reached = False
-            self.initial_calculated_soc = None
-            self.minimum_calculated_soc = None
-            self.override_soc = None
-            self._remove_battery_soc_listener()
-            self._remove_inverter_min_soc_listener()
-            await self._stop_periodic_verification()
-            self._persist_state()
-        self.operation_mode = mode
+        self._switching_mode = True
+        try:
+            _LOGGER.info("Switching operation mode from %s to %s", self.operation_mode, mode)
+            if self.is_active:
+                # Same order as the window end: the window is over before the
+                # first await, so a concurrent window check or verification
+                # cannot re-arm listeners or write the old target back on top
+                # of the values the reset restores.
+                self.is_active = False
+                self._ending = True
+                try:
+                    self._remove_battery_soc_listener()
+                    self._remove_inverter_min_soc_listener()
+                    await self._stop_periodic_verification()
+                    try:
+                        await self._reset_settings()
+                    except Exception as e:
+                        _LOGGER.error(
+                            "Error resetting settings during mode switch: %s", e, exc_info=True
+                        )
+                finally:
+                    self._ending = False
+                self.target_reached = False
+                self.initial_calculated_soc = None
+                self.minimum_calculated_soc = None
+                self.override_soc = None
+                self.last_plan = None
+                self.planned_charge_power_w = None
+                self._persist_state()
+            self.operation_mode = mode
+        finally:
+            self._switching_mode = False
 
     async def _on_scheduled_window_end(self, now: datetime) -> None:
         """Time-trigger entry point: the window reached its configured end time.
@@ -1885,6 +1904,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # did not get far enough to mark itself pending.
                 self._mark_reset_pending(False)
         finally:
+            # First, so a failure in the rest of this block cannot leave the
+            # coordinator permanently ending: every window check and every
+            # verification would become a no-op for the life of the entry.
+            self._ending = False
             # CRITICAL: Always reset state flags, even if reset operation failed
             self._finalize_auto_test()
             self.target_reached = False
@@ -1905,7 +1928,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.snow_nights -= 1
                 _LOGGER.info("Snow mode: %d night(s) remaining", self.snow_nights)
                 self._persist_state()
-            self._ending = False
             await self.async_request_refresh()
 
     def _schedule_reset_retry(self) -> None:
@@ -1977,6 +1999,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Error retrying reset: %s", e, exc_info=True)
             self._mark_reset_pending(False)
 
+    def _has_captured_settings(self) -> bool:
+        """Whether anything was captured that a reset would have to restore."""
+        return any(
+            value is not None
+            for value in (
+                self.original_min_soc,
+                self._original_ac_charge_power,
+                self._original_discharge_limit,
+                self._original_absolute_charge_power,
+            )
+        )
+
     async def _reset_settings(self) -> bool:
         """Reset the inverter to its original settings.
 
@@ -1989,6 +2023,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # CRITICAL: Use stored original value if available, otherwise use configured default
         reset_min_soc = self.original_min_soc if self.original_min_soc is not None else float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
         kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
+        if kostal_min_soc_entity and not self._has_captured_settings():
+            # Nothing was captured, so this integration never changed the floor:
+            # writing the configured default would clobber a min SOC the user set
+            # by hand (reachable by disabling the integration outside a window).
+            # Switching grid charge and force discharge off below stays safe.
+            _LOGGER.debug("Min SOC restore skipped - no original value was captured")
+            kostal_min_soc_entity = None
         kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
 
         ok = True

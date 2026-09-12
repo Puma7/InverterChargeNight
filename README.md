@@ -55,9 +55,10 @@ the Bronze and Silver rules are met and the Gold rules are met except
 **Settings need to be changed**
 - **Settings → Devices & Services → Inverter Charge Night → Configure** opens the same four-step
   wizard as the initial setup and saves into the config entry.
-- The three-dot menu of the entry offers **Reconfigure** for the same fields. The Kostal min SOC
-  entity identifies the inverter, so it cannot be pointed at an inverter another entry already
-  uses -- the flow aborts instead of creating a second controller for the same hardware.
+- The three-dot menu of the entry offers **Reconfigure** for the same fields. Both ways accept a
+  new min SOC entity, so a replaced inverter or a renamed entity can be pointed at without losing
+  the entry -- only an entity that another entry already drives is refused, because two
+  controllers would push the same inverter towards opposite targets.
 
 **Battery SOC entity is unavailable**
 - The integration will skip grid charging for safety until the SOC entity is available again.

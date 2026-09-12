@@ -683,3 +683,42 @@ async def test_successful_reset_clears_the_pending_flag_and_the_timer(mock_hass)
     assert coordinator._reset_retry_count == 0
     unsub.assert_called_once()
     assert _runtime_state(coordinator)["pending_reset"] is False
+
+
+@pytest.mark.asyncio
+async def test_reset_leaves_an_untouched_min_soc_alone(mock_hass, caplog):
+    """Disabling the integration outside a window must not write the default.
+
+    Nothing was captured, so the integration never changed the floor; writing
+    the configured default would clobber a value the user set by hand, and a
+    failed write would then arm a retry chain for a reset nobody asked for.
+    """
+    mock_hass.states.async_set(MIN_SOC, "42", {"unit_of_measurement": "%"})
+    mock_hass.states.async_set(GRID, "off")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    assert coordinator.original_min_soc is None
+
+    ok = await coordinator._reset_settings()
+
+    assert ok is True
+    assert coordinator._pending_reset is False
+    assert not any(
+        call.args[:2] == ("number", "set_value")
+        for call in mock_hass.services.async_call.await_args_list
+    )
+    assert float(mock_hass.states.get(MIN_SOC).state) == 42
+
+
+@pytest.mark.asyncio
+async def test_reset_still_switches_grid_charging_off_without_a_capture(mock_hass):
+    """Switching off is always safe, so it happens even with nothing captured."""
+    mock_hass.states.async_set(MIN_SOC, "42", {"unit_of_measurement": "%"})
+    mock_hass.states.async_set(GRID, "on")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+
+    await coordinator._reset_settings()
+
+    assert (
+        call("switch", "turn_off", {"entity_id": GRID})
+        in mock_hass.services.async_call.await_args_list
+    )
