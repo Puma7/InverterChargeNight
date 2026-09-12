@@ -39,7 +39,6 @@ class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):
     """Switch to enable/disable the integration."""
 
     _attr_translation_key = "enabled"
-    _attr_icon = "mdi:battery-charging-wireless"
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
@@ -89,7 +88,6 @@ class SkipNextSwitch(InverterChargeNightEntity, SwitchEntity):
     """Switch to skip the next window cycle for 24 hours."""
 
     _attr_translation_key = "skip_next"
-    _attr_icon = "mdi:debug-step-over"
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
@@ -135,7 +133,6 @@ class AutoEfficientChargeSwitch(InverterChargeNightEntity, SwitchEntity):
     """Switch to enable/disable auto efficient charge finder."""
 
     _attr_translation_key = "auto_efficient_charge_finder"
-    _attr_icon = "mdi:flash-auto"
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:

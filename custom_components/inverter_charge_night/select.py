@@ -36,7 +36,6 @@ class OperationModeSelect(InverterChargeNightEntity, SelectEntity):
     """Select entity for choosing between night charge and morning discharge."""
 
     _attr_translation_key = "operation_mode"
-    _attr_icon = "mdi:swap-horizontal"
     _attr_entity_category = EntityCategory.CONFIG
     _attr_options = [MODE_NIGHT_CHARGE, MODE_MORNING_DISCHARGE]
 

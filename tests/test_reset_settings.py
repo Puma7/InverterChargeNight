@@ -707,6 +707,31 @@ async def test_reset_leaves_an_untouched_min_soc_alone(mock_hass, caplog):
         for call in mock_hass.services.async_call.await_args_list
     )
     assert float(mock_hass.states.get(MIN_SOC).state) == 42
+    # The entity IS configured, so the "not configured" warning must stay away
+    assert "No min SOC entity configured" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_another_capture_does_not_re_enable_the_default_write(mock_hass, caplog):
+    """Only a captured floor may be restored, not a captured charge limit.
+
+    A window that starts while the min SOC entity is unavailable captures no
+    floor, but the planner still captures the AC charge limit. That must not
+    make the reset write the configured default over an untouched floor.
+    """
+    mock_hass.states.async_set(MIN_SOC, "42", {"unit_of_measurement": "%"})
+    mock_hass.states.async_set(GRID, "off")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.original_min_soc = None
+    coordinator._original_ac_charge_power = 5000.0
+
+    await coordinator._reset_settings()
+
+    assert not any(
+        c.args[:2] == ("number", "set_value") and c.args[2]["entity_id"] == MIN_SOC
+        for c in mock_hass.services.async_call.await_args_list
+    )
+    assert float(mock_hass.states.get(MIN_SOC).state) == 42
 
 
 @pytest.mark.asyncio

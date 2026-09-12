@@ -39,7 +39,6 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
     _attr_native_unit_of_measurement = "%"
     _attr_device_class = SensorDeviceClass.BATTERY
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:battery-charging"
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor."""
@@ -80,7 +79,6 @@ class BestChargePowerSensor(InverterChargeNightEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:flash"
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor."""
@@ -104,7 +102,6 @@ class PlannedChargePowerSensor(InverterChargeNightEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:battery-clock"
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor."""
