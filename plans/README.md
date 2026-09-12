@@ -224,6 +224,32 @@ zusätzlich alle Anzeigenamen sprechend (Automatik, Effizienzsuche, Nächstes Fe
 Zielladestand …), und es gibt eine vollständige deutsche Übersetzung (`translations/de.json`,
 383 Zeichenketten, durch einen Test gegen `strings.json` abgesichert).
 
+### 2.7 Nachtrag 2026-09-12: Review mit Schwerpunkt elektrische Sicherheit
+
+Auf Wunsch des Eigentümers ein eigener Durchgang über den gesamten PR-Diff mit der Frage: Wo kann
+diese Integration mehr Strom ziehen, als der Anschluss trägt, oder eine Einstellung am
+Wechselrichter stehen lassen? Zwölf Befunde, alle behoben:
+
+| # | Befund | Wirkung | Status |
+|---|---|---|---|
+| S1 | Der Fensterzustand wurde nicht persistiert | Ein Neustart über das Fensterende hinweg (HA-Update nachts) ließ **Netzladung an und den angehobenen Min-SOC stehen** — der Speicher wird tagsüber aus dem Netz vollgekauft, jeden Tag, bis es jemand merkt | behoben: beim Fensterprüflauf wird erkannt, dass noch erfasste Werte offen sind, und zurückgesetzt |
+| S2 | `_react_to_grid_import` gab auf, wenn der Planer nichts geliefert hatte | Bei unlesbarem Ladestand setzte der Anschlussschutz zwischen zwei Polls (900 s) aus | behoben: der geschriebene Sollwert ist dann die Referenz, weiterhin nur abwärts |
+| S3 | `_set_ac_charge_limit_w` meldete nicht, ob wirklich geschrieben wurde | Ein fehlgeschlagener Schutz-Schreibvorgang galt als erfolgt; alle Folgevergleiche („nur tiefer schreiben") unterdrückten jeden Wiederholversuch | behoben: Rückgabewert, und nur bei Erfolg wird die Referenz gesetzt |
+| S4 | `float(state.state)` statt `_as_float` auf den Steuerpfaden | Ein `nan`-Ladestand macht „Ziel erreicht" unerreichbar → **Netzladung stoppt nie**; ein `nan` als erfasster Original-Min-SOC wird am Fensterende auf den Wechselrichter geschrieben | behoben: nicht-endliche Werte gelten überall wie „nicht verfügbar" |
+| S5 | `_enforce_grid_limit_now` ohne Notstrom-Prüfung | Schreibzugriff im Inselbetrieb | behoben |
+| S6 | Die 400-V-Korrektur galt nur dreiphasig | 1 Phase + 400 V (Tippfehler) vergrößerte das Budget um 74 % | behoben: außerhalb 100–300 V gilt der Standardwert |
+| S7 | Ohne Messsensor wurde der volle Sollwert als Eigenverbrauch gutgeschrieben | Fremdlast wird unterschätzt, solange der Speicher dem Sollwert nicht folgt | gemildert: die Gutschrift ist auf den gemessenen Netzbezug gedeckelt, und das Log nennt den fehlenden Sensor. Ganz auflösbar ist es nur mit der Messung |
+| S8 | Der Schreibpfad schrieb rohe Watt auf eine Entität ohne Einheit | Eine kW-Entität bekäme 5000 statt 5 → der Wechselrichter klemmt auf sein Maximum: aus der Schutzgrenze wird Volllast | behoben: das `max`-Attribut der Entität entscheidet die Skala; ist auch das unbekannt und der Wert unzulässig, wird nicht geschrieben |
+| S9 | Der „Neustart im Fenster"-Zweig hing nur an `original_min_soc` | Ein neues Fenster übernahm das Ziel der Vornacht | behoben: der Fensterstart wird mitpersistiert und ein altes Ziel verworfen |
+| S10 | `_reset_ac_charge_limit` ließ die Referenz stehen | Der erste begrenzende Schreibvorgang des nächsten Fensters konnte an der 100-W-Schwelle scheitern | behoben |
+| S11 | `or float(max)` behandelte einen geschriebenen Sollwert von 0 W als „nicht gesetzt" | Der Effizienz-Pfad hätte gegen das Maximum statt gegen 0 verglichen | behoben |
+| S12 | Das Poll-Sicherheitsnetz beendete das Fenster ohne `scheduled=True` | Eine verpasste Endauslösung verbrauchte keine Schnee-Nacht | behoben |
+
+Die Regressionstests dazu stehen in `tests/test_electrical_safety.py` und prüfen durchgehend
+dieselbe Eigenschaft: **Ist etwas unbekannt, unlesbar oder fehlgeschlagen, muss weniger Strom
+fließen, nie mehr** — und nichts, was die Integration am Wechselrichter gesetzt hat, darf sein
+Fenster überleben.
+
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 
 - **010 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des Config-Entrys, tägliche Neubestimmung.

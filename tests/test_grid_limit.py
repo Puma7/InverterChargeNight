@@ -123,9 +123,20 @@ def test_a_line_to_line_voltage_does_not_widen_the_three_phase_budget():
     assert at_400 < at_230 * 1.05
 
 
-def test_a_line_to_line_voltage_is_only_corrected_for_three_phases():
-    """On one phase 400 V is a real (if unusual) phase voltage."""
-    assert grid_budget_w(63, 1, 400, 80, None) == pytest.approx(400 * 63 * 0.8)
+def test_a_voltage_that_is_no_phase_voltage_falls_back_to_the_default():
+    """400 V on one phase is not a house connection, whatever was meant.
+
+    Taking it at face value would hand the battery a budget 74 % too large, so
+    the documented default is used instead - the only answer that can make the
+    budget smaller rather than larger.
+    """
+    assert grid_budget_w(63, 1, 400, 80, None) == pytest.approx(
+        DEFAULT_GRID_VOLTAGE_V * 63 * 0.8
+    )
+    # Same for a value far below anything a grid does
+    assert grid_budget_w(63, 3, 12, 80, None) == pytest.approx(
+        3 * DEFAULT_GRID_VOLTAGE_V * 63 * 0.8
+    )
 
 
 def test_budget_rejects_non_finite_inputs():

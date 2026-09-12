@@ -405,6 +405,7 @@ def test_persist_state_round_trip_next_to_auto_efficiency_data(mock_hass):
         "original_ac_charge_power": 6000.0,
         "original_discharge_limit": None,
         "window_floor_soc": None,
+        "window_started_at": None,
         "original_discharge_block": None,
         "original_absolute_charge_power": None,
         "pending_reset": True,

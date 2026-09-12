@@ -37,6 +37,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entity names and the error messages, checked against `strings.json` by a test so it cannot
   fall behind.
 
+### Fixed — electrical safety review
+
+A review pass over the whole change set, asking only where the integration could draw more
+current than the connection carries or leave a setting on the inverter. Twelve findings, all
+fixed; regression tests in `tests/test_electrical_safety.py`.
+
+- **A restart past the window end left grid charging on and the raised min SOC stranded** —
+  Home Assistant updating overnight meant the battery was bought full from the grid in
+  daylight, every day, until somebody noticed. Settings still captured outside a window are now
+  restored at the next window check.
+- **A `nan` sensor reading disabled stop conditions** — it parses as a float and then makes
+  every comparison false, so "target reached" could never happen and grid charging never
+  stopped. A `nan` could also be captured as the inverter's original min SOC and written back
+  at the window end. Non-finite values are now treated like "unavailable" everywhere.
+- **A failed protective write was believed to have happened**, which suppressed every retry for
+  the rest of the window.
+- **Writing watts to a charge limit entity without a unit**: a kW entity receives 5000 instead
+  of 5 and clamps to its maximum, turning a protective limit into full power. The entity's own
+  maximum now decides the scale, and an impossible value is not written at all.
+- **The house connection limit stopped reacting** between polls when the planner had produced
+  no setpoint (unreadable battery SOC, almost no window left).
+- 400 V was only corrected as a line-to-line voltage on three phases; on one phase it inflated
+  the budget by 74 %. Any voltage outside 100–300 V now falls back to the documented default.
+- Our own charge power can no longer be credited as more than the whole measured grid import.
+- The limit no longer writes to the inverter while backup/island mode owns it.
+- A target from a window that is long over is no longer reused for tonight.
+- A window ended by the polling safety net now counts as a completed night (snow nights).
+
 ### Changed
 
 - **The efficiency search now measures what it claims to measure.** It waits out the ramp to a
