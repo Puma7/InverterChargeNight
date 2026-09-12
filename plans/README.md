@@ -146,6 +146,33 @@ Status-Werte: TODO | IN PROGRESS | DONE | BLOCKED (mit Grund) | REJECTED (mit Be
 
 Umsetzung 001–007 am 2026-09-11 auf dem Branch `fix/code-review-followups` (PR #2). Offene Entscheidungen für den Planer v2 stehen in `plans/006-DECISIONS.md`; der Standardmodus bleibt `headroom`, bis der Eigentümer auf `bridge` umschaltet.
 
+Am 2026-09-12 folgte eine Prüfung auf Lauffähigkeit mit dem aktuellen Home Assistant, Codequalität, Bugs und Randfälle. Ergebnis: 29 Befunde, davon 22 behoben (siehe Abschnitt 2.4). Getestet wird jetzt gegen HA 2025.2.0 (Mindestversion), 2026.2.3 und 2026.9.2 (aktuell), zusätzlich mit einem End-to-End-Test gegen einen echten HA-Kern (`scripts/smoke_real_ha.py`).
+
+### 2.4 Nachtrag 2026-09-12: Kompatibilität, Bugs, Randfälle
+
+| Befund | Wirkung | Status |
+|---|---|---|
+| HA ab 2026.5 verlangt Python 3.14; die CI-Matrix testete 3.12/3.13 | Das aktuelle HA war in der CI nicht installierbar | behoben: Matrix 3.13 (Mindest-HA) und 3.14 (aktuelles HA) |
+| Deklarierte Mindestversion 2024.4.0 zu niedrig (`runtime_data`, Reconfigure-Flow) | Installation auf zu alten Versionen schlägt erst zur Laufzeit fehl | behoben: 2025.2.0, gegen die APIs belegt |
+| `_on_window_end` ohne `is_active`-Prüfung | Der End-Trigger schrieb jede Nacht den Standard-Min-SOC, auch bei deaktivierter Integration; bei nicht erreichbarer Entität endlose Wiederholungskette | behoben |
+| Moduswechsel über den Optionsdialog ohne Teardown | Netzladung an, während Zwangsentladung noch an ist | behoben |
+| `snow_nights` zählte bei jedem Fensterende herunter | Übersprungene Nächte verbrauchten Schnee-Nächte | behoben |
+| Fehlgeschlagener Reset auf den Pfaden Unload, Ausschalten, Moduswechsel | Netzladung blieb an, ohne Wiederholung | behoben |
+| Absolute Ladeleistungsgrenze nicht persistiert, Original bei Fehler verworfen | Grenze blieb dauerhaft am Wechselrichter | behoben |
+| Bridge-Planer nutzte `next_rising` auch für Fenster nach Sonnenaufgang | Überbrückung über 24 h, Ziel immer Maximum | behoben |
+| Nebenläufiger Fenster-Check während des Resets | Konnte Listener neu setzen und das Nachtziel zurückschreiben | behoben |
+| Nicht-endliche Sensorwerte (`nan`) | Zielerkennung blockiert, Netzladung stoppt nie | behoben |
+| Reconfigure/Optionen ohne Eindeutigkeitsprüfung | Zwei Einträge auf einem Wechselrichter | behoben |
+| Optionsdialog überschrieb Laufzeitänderungen | Z. B. Effizienz-Finder wurde wieder eingeschaltet | behoben |
+| Diagnose schwärzte zwei Entitäts-IDs nicht | Entitäts-IDs im Diagnose-Download | behoben |
+| `manifest.json` mit unbekanntem Schlüssel `diagnostics` | Wirkungslos, von hassfest abgelehnt | behoben |
+| `icons.json` mit toten Einträgen, `_attr_icon` überstimmt es | Icon-Übersetzungen unwirksam | teilweise: `icons.json` korrigiert, `_attr_icon` in vier Dateien noch offen |
+| DST-Faltung in `_window_end_datetime` | Theoretisch falsche Restdauer in der Wiederholungsstunde | offen, dokumentiert: die eigentliche Folge (unendliche Sollleistung) ist über eine Mindestdauer abgefangen |
+| Koordinator weiterhin ~2700 Zeilen | Wartbarkeit | offen: Schnitte benannt (Limits, Effizienzsuche, Zeitplan) |
+| `PlanInput` trägt zwei ungenutzte Felder | Irreführend | offen |
+| 11 veraltete Audit-Dateien im Wurzelverzeichnis | Widersprechen dem Code | offen, Backlog 012 |
+
+
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 
 - **008 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des Config-Entrys, tägliche Neubestimmung.
