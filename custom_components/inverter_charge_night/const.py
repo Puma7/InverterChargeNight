@@ -208,3 +208,19 @@ BACKUP_INACTIVE_STATES: frozenset[str] = frozenset(
         "batterydischarging",
     }
 )
+
+# Settings and stored data of earlier versions. Installations that have been
+# through several releases carry keys nobody reads any more; one real entry
+# held 500 dead measurement records, about a hundred kilobytes that Home
+# Assistant loads and rewrites on every change.
+LEGACY_HOUSE_LOAD_ENERGY_ENTITY = "home_consumption_energy_entity"  # -> house_load_entity
+LEGACY_UNUSED_DATA_KEYS: tuple[str, ...] = (
+    "battery_charge_energy_entity",  # kWh counter of grid energy into the battery
+    "grid_import_energy_entity",  # kWh counter of the grid import
+)
+LEGACY_UNUSED_OPTION_KEYS: tuple[str, ...] = ("charge_session_data",)
+# What the efficiency search itself stores; everything else in that option is
+# from a version that no longer exists and is dropped on setup.
+AUTO_EFFICIENCY_KEYS: frozenset[str] = frozenset(
+    {"history", "best_power_w", "best_loss", "range_min_w", "range_max_w", "failed", "bounds_w"}
+)

@@ -103,6 +103,10 @@ from .const import (
     DISCHARGE_BLOCK_VIA_MIN_SOC,
     MODE_MORNING_DISCHARGE,
     DOMAIN,
+    AUTO_EFFICIENCY_KEYS,
+    LEGACY_HOUSE_LOAD_ENERGY_ENTITY,
+    LEGACY_UNUSED_DATA_KEYS,
+    LEGACY_UNUSED_OPTION_KEYS,
     # House connection limit (plan 008)
     CONF_GRID_IMPORT_ENTITY,
     CONF_MAIN_FUSE_A,
@@ -160,8 +164,93 @@ MIN_PLAN_HOURS_REMAINING = 1.0 / 60.0  # one minute
 SUN_ENTITY_ID = "sun.sun"
 
 
+def _clear_stale_entity_issues(hass: HomeAssistant) -> None:
+    """Drop "entity not available" issues that nobody can act on any more.
+
+    The issue is not fixable from the repairs page, so one raised for an entity
+    that has since been renamed - or replaced when the inverter integration
+    changed - would stay red for ever, with no way for the user to clear it.
+    An issue is dropped once its entity exists again, or once no configuration
+    entry of this integration names it any more.
+    """
+    registry = ir.async_get(hass)
+    configured: set[str] = set()
+    for other in hass.config_entries.async_entries(DOMAIN):
+        configured.update(
+            str(value)
+            for value in {**other.data, **other.options}.values()
+            if isinstance(value, str) and "." in value
+        )
+    prefix = "entity_not_available_"
+    for (domain, issue_id) in list(registry.issues):
+        if domain != DOMAIN or not issue_id.startswith(prefix):
+            continue
+        entity_id = issue_id[len(prefix):]
+        if entity_id not in configured or hass.states.get(entity_id) is not None:
+            _LOGGER.debug("Clearing the stale repair issue for %s", entity_id)
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+
+def _migrate_entry_data(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> None:
+    """Carry settings of earlier versions over, and drop what nobody reads.
+
+    Two things accumulate in a config entry over the life of an integration:
+    settings whose key has been renamed, and data written by a version that no
+    longer exists. The second kind is not harmless - one installation carried
+    500 dead measurement records, a hundred kilobytes that Home Assistant
+    loads, writes back and stores with every single change.
+    """
+    data = dict(entry.data)
+    options = dict(entry.options)
+    changed = False
+
+    legacy_load_meter = data.pop(LEGACY_HOUSE_LOAD_ENERGY_ENTITY, None)
+    if legacy_load_meter and not data.get(CONF_HOUSE_LOAD_ENTITY):
+        # Same quantity under a new name: a cumulative kWh meter of the house.
+        data[CONF_HOUSE_LOAD_ENTITY] = legacy_load_meter
+        _LOGGER.info(
+            "Carried the house consumption meter %s over from an earlier version",
+            legacy_load_meter,
+        )
+    changed = changed or legacy_load_meter is not None
+
+    for key in LEGACY_UNUSED_DATA_KEYS:
+        if key in data:
+            value = data.pop(key)
+            changed = True
+            if value:
+                _LOGGER.info(
+                    "The setting %r from an earlier version is no longer used. Its entity "
+                    "%s is a good choice for the efficiency search's energy meters in the "
+                    "options",
+                    key,
+                    value,
+                )
+
+    for key in LEGACY_UNUSED_OPTION_KEYS:
+        if key in options:
+            options.pop(key)
+            changed = True
+
+    efficiency = options.get(CONF_AUTO_EFFICIENCY_DATA)
+    if isinstance(efficiency, dict):
+        kept = {k: v for k, v in efficiency.items() if k in AUTO_EFFICIENCY_KEYS}
+        if kept != efficiency:
+            dropped = sorted(set(efficiency) - set(kept))
+            _LOGGER.info(
+                "Dropping efficiency data of an earlier version from the configuration: %s",
+                ", ".join(dropped),
+            )
+            options[CONF_AUTO_EFFICIENCY_DATA] = kept
+            changed = True
+
+    if changed:
+        hass.config_entries.async_update_entry(entry, data=data, options=options)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> bool:
     """Set up Inverter Charge Night from a config entry."""
+    _migrate_entry_data(hass, entry)
     # Test-before-setup: verify critical entities are available
     required_entities = [
         entry.data.get(key)
@@ -182,10 +271,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
             raise ConfigEntryNotReady(
                 f"Required entity {entity_id} is not yet available"
             )
-    # All required entities are known: clear issues from earlier failed attempts
-    for entity_id in required_entities:
-        if entity_id:
-            ir.async_delete_issue(hass, DOMAIN, f"entity_not_available_{entity_id}")
+    # All required entities are known: clear issues from earlier failed attempts,
+    # including ones left behind by entities that are no longer configured.
+    _clear_stale_entity_issues(hass)
 
     coordinator = InverterChargeNightCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()

@@ -41,7 +41,9 @@ async def _setup(mock_hass, entry) -> InverterChargeNightCoordinator:
     # coordinator picks its config entry up from it.
     token = current_entry.set(entry)
     try:
-        with patch("custom_components.inverter_charge_night.ir.async_delete_issue"):
+        with patch("custom_components.inverter_charge_night.ir.async_delete_issue"
+    ), patch(
+        "custom_components.inverter_charge_night.ir.async_get"):
             assert await async_setup_entry(mock_hass, entry) is True
     finally:
         current_entry.reset(token)
