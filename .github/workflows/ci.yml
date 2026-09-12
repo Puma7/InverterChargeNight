@@ -24,6 +24,7 @@ jobs:
       - run: pytest
       - run: mypy custom_components/inverter_charge_night/
       - run: pyright
+      - run: python scripts/smoke_real_ha.py
   hassfest:
     runs-on: ubuntu-latest
     steps:
