@@ -5,6 +5,39 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **House connection limit** - with a grid import sensor and the main fuse size (or a maximum
+  continuous power) configured, the battery charge power is held so that the total grid import
+  stays inside a continuous-load budget. Meant for the cheap-tariff window, where wallboxes,
+  heat pump and battery run for hours at once and the meter terminals are the weak point. New
+  sensor `grid_charge_headroom` shows what is left for the battery. The limit applies in both
+  planner modes, never engages outside a window, and every failure path charges *less*.
+- **Discharge block with a fallback that always works** - the battery no longer discharges into
+  the house during the window. The integration uses the inverter's block switch if there is one,
+  otherwise a discharge power limit, otherwise it raises the min SOC to the charge level the
+  window started at and restores it at the window end. The last way needs no vendor feature at
+  all. New `discharge_block_switch` and `discharge_block_mode` settings, new `inverter_floor_soc`
+  and `discharge_block` attributes on `calculated_soc`.
+- **Snow override** - `number.inverter_charge_night_snow_nights` charges the next N nights to the
+  maximum SOC, for when snow on the modules makes the PV forecast wrong.
+- **Planner v2** (bridge mode): the target SOC bridges from the window end until PV covers the
+  house load, and leaves headroom for the next day's forecast.
+- Config wizard with explanations and a reconfigure flow, repair issues on a broken setup, state
+  that survives a restart, and a CI matrix testing the minimum and the current Home Assistant
+  plus an end-to-end test against a real HA core.
+
+### Changed
+
+- The efficiency finder is subordinate to the house connection limit: it does not start a test
+  the connection cannot carry, and a running test is abandoned when the house load rises.
+- The min SOC written to the inverter and the charge target are now two separate values. With
+  the min SOC discharge block in use the inverter shows the higher floor during the window; it
+  is restored at the window end.
+- Minimum supported Home Assistant version raised to 2025.2.0 (`runtime_data`, reconfigure flow).
+
 ## [2.0.0] - 2026-02-28
 
 ### Added

@@ -322,9 +322,15 @@ def _validate_user_input(
     pct = user_input.get(CONF_GRID_CONTINUOUS_PCT)
     if pct is not None and not 0 < pct <= 100:
         errors[CONF_GRID_CONTINUOUS_PCT] = "invalid_soc"
-    if user_input.get(CONF_GRID_IMPORT_ENTITY) and grid_max_w is None and fuse_a is None:
-        # Without a budget the entity would be read but never act.
-        errors[CONF_MAIN_FUSE_A] = "required_value"
+    if user_input.get(CONF_GRID_IMPORT_ENTITY):
+        if grid_max_w is None and fuse_a is None:
+            # Without a budget the entity would be read but never act.
+            errors[CONF_MAIN_FUSE_A] = "required_value"
+        if not user_input.get(CONF_CHARGE_POWER_ENTITY):
+            # The limit works by writing a lower charge setpoint. Without that
+            # entity there is nothing to write to and the protection would be
+            # configured but inert - which is worse than not offering it.
+            errors[CONF_CHARGE_POWER_ENTITY] = "required_entity"
 
     prices_set = [key for key in _PRICE_KEYS if user_input.get(key) is not None]
     if prices_set and len(prices_set) != len(_PRICE_KEYS):

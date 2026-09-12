@@ -68,7 +68,7 @@ class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):
 
         _LOGGER.info("Disabling Inverter Charge Night")
         self.coordinator.is_enabled = False
-        
+
         try:
             await self.coordinator._reset_settings()
         except Exception as e:
@@ -79,6 +79,7 @@ class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):
         self.coordinator.minimum_calculated_soc = None
         self.coordinator._remove_battery_soc_listener()
         self.coordinator._remove_inverter_min_soc_listener()
+        self.coordinator._remove_grid_import_listener()
         await self.coordinator._stop_periodic_verification()
         self.coordinator._persist_state()
         self.async_write_ha_state()
