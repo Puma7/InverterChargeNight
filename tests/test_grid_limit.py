@@ -906,6 +906,56 @@ async def test_the_limit_stays_on_the_inverter_after_the_target_is_reached(
 
 
 @pytest.mark.asyncio
+async def test_a_cap_on_a_battery_that_draws_nothing_is_not_subtracted(
+    mock_hass, limited
+):
+    """After the target the written limit caps nothing, so it is not our load.
+
+    Subtracting it would hide that much of the house load and leave the
+    connection carrying more than the budget.
+    """
+    await _start_with_target(limited, 100.0)
+    await limited._async_update_data()
+    assert limited._planned_setpoint_written_w is not None
+    limited.target_reached = True
+
+    assert limited._own_charge_draw_w() == 0.0
+
+    _set_import(mock_hass, "34600")
+    mock_hass.services.async_call.reset_mock()
+    with patch(NOW, return_value=LATER):
+        await limited._react_to_grid_import()
+
+    assert _ac_writes(mock_hass) == [0.0]
+
+
+@pytest.mark.asyncio
+async def test_holding_the_cap_does_not_write_on_every_reading(mock_hass, limited):
+    """A power sensor reports every few seconds; the inverter must not follow."""
+    await _start_with_target(limited, 100.0)
+    await limited._async_update_data()
+    limited.target_reached = True
+    mock_hass.services.async_call.reset_mock()
+
+    _set_import(mock_hass, "34000")
+    with patch(NOW, return_value=LATER):
+        await limited._react_to_grid_import()
+    first = _ac_writes(mock_hass)
+    assert len(first) == 1
+
+    # Two more readings inside the debounce, and one with the same load after it
+    for offset in (2, 4):
+        _set_import(mock_hass, "34000")
+        with patch(NOW, return_value=LATER + timedelta(seconds=offset)):
+            await limited._react_to_grid_import()
+    assert _ac_writes(mock_hass) == first
+
+    with patch(NOW, return_value=LATER + timedelta(minutes=5)):
+        await limited._react_to_grid_import()
+    assert _ac_writes(mock_hass) == first, "an unchanged load needs no second write"
+
+
+@pytest.mark.asyncio
 async def test_stopping_grid_charging_keeps_the_limit_while_the_window_runs(
     mock_hass, limited
 ):

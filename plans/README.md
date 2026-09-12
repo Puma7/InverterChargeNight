@@ -193,6 +193,12 @@ zehn Befunde; alle sind behoben:
 | Der Boden folgte der eigenen Netzladung | Rückkopplung: Boden → Ladung → höherer Boden, bis zum Nutzermaximum | behoben: der Boden folgt nur Anstiegen, die nicht von uns kommen |
 | Effizienztest lief unbegrenzt weiter, wenn die Wallboxen mittendrin starteten, und buchte den Verlust auf die angeforderte Leistung | Anschlussüberlastung und eine falsche Effizienzhistorie | behoben: kein Test ohne Platz, laufender Test wird abgebrochen |
 
+Die Nachprüfung der Korrekturen fand zwei weitere Punkte, beide behoben: die neuen Schreibpfade
+umgingen die Entprellung (ein Leistungssensor meldet im Sekundentakt, der Wechselrichter hätte
+jede Meldung mitbekommen), und der geschriebene Sollwert wurde auch dann als Eigenverbrauch
+abgezogen, wenn das Ladeziel längst erreicht war — dann begrenzt er einen Speicher, der nichts
+zieht, und hätte genau diese Leistung an Hauslast verdeckt.
+
 Ein Test fährt beide Funktionen in einem Fenster:
 `tests/test_grid_limit.py::test_the_connection_limit_and_the_discharge_block_run_together`.
 
