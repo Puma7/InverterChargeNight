@@ -4,11 +4,11 @@
   "version": "2.0.0",
   "documentation": "https://github.com/puma7/inverterchargenight",
   "issue_tracker": "https://github.com/puma7/inverterchargenight/issues",
-  "codeowners": ["@puma7"],
-  "diagnostics": true,
+  "codeowners": [
+    "@puma7"
+  ],
   "config_flow": true,
   "dependencies": [],
   "requirements": [],
   "iot_class": "local_polling"
 }
-
