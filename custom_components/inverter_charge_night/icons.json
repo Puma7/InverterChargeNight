@@ -12,6 +12,9 @@
       },
       "grid_charge_headroom": {
         "default": "mdi:transmission-tower"
+      },
+      "efficiency_search": {
+        "default": "mdi:magnify-scan"
       }
     },
     "switch": {

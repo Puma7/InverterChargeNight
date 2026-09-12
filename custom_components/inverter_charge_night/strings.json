@@ -56,9 +56,11 @@
           "absolute_max_charge_power_w": "Battery Charge Max (AC+DC) (optional)",
           "absolute_max_charge_power_entity": "Battery Charge Max Entity (AC+DC) (optional)",
           "charge_power_entity": "Battery Max AC Charge Limit Entity (optional)",
-          "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
-          "charge_power_received_entity": "Charge Power Received by Battery (optional)",
-          "auto_efficient_charge": "Auto Efficient Charge Finder",
+          "charge_power_sent_entity": "Charge power drawn for charging (optional)",
+          "charge_power_received_entity": "Charge power arriving in the battery (optional)",
+          "charge_energy_sent_entity": "Energy meter: drawn for charging (optional)",
+          "charge_energy_received_entity": "Energy meter: stored in the battery (optional)",
+          "auto_efficient_charge": "Efficiency search",
           "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)",
           "discharge_limit_entity": "Discharge Power Limit Entity (optional)",
           "grid_import_entity": "Grid Import Power (optional)",
@@ -77,9 +79,11 @@
           "absolute_max_charge_power_w": "Absolute max charge power (AC+DC). Applied during AC charging and reset afterward. Optional if you use the AC limit entity; requires the entity below when set.",
           "absolute_max_charge_power_entity": "Optional: number entity to set absolute max charge power (AC+DC). Requires the value above when set.",
           "charge_power_entity": "Optional: number entity used to set the max AC charge limit (W or kW). Use this OR the AC+DC max entity.",
-          "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
-          "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
-          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found. Requires the AC charge limit entity and both charge power sensors.",
+          "charge_power_sent_entity": "Optional: power the charger takes in, on the AC side, in W or kW. Needed for the efficiency search.",
+          "charge_power_received_entity": "Optional: power arriving in the battery, on the DC side, in W or kW. The difference to the value above is the loss the search is looking for, so the two must measure different sides.",
+          "charge_energy_sent_entity": "Optional but better: a kWh meter of the energy the charger takes in. With both meters the efficiency search measures the energy that really flowed instead of integrating a power reading.",
+          "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
+          "auto_efficient_charge": "Searches for the charge power with the smallest loss between the grid and the battery and switches itself off when it has found the optimum. It takes several measurements per window, each only counted when the inverter really charged at the power under test. Needs the AC charge limit entity and both charge power sensors; energy meters make it exact. Follow it on the “Efficiency search” sensor.",
           "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached.",
           "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
@@ -182,9 +186,11 @@
           "absolute_max_charge_power_w": "Battery Charge Max (AC+DC) (optional)",
           "absolute_max_charge_power_entity": "Battery Charge Max Entity (AC+DC) (optional)",
           "charge_power_entity": "Battery Max AC Charge Limit Entity (optional)",
-          "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
-          "charge_power_received_entity": "Charge Power Received by Battery (optional)",
-          "auto_efficient_charge": "Auto Efficient Charge Finder",
+          "charge_power_sent_entity": "Charge power drawn for charging (optional)",
+          "charge_power_received_entity": "Charge power arriving in the battery (optional)",
+          "charge_energy_sent_entity": "Energy meter: drawn for charging (optional)",
+          "charge_energy_received_entity": "Energy meter: stored in the battery (optional)",
+          "auto_efficient_charge": "Efficiency search",
           "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)",
           "discharge_limit_entity": "Discharge Power Limit Entity (optional)",
           "grid_import_entity": "Grid Import Power (optional)",
@@ -203,9 +209,11 @@
           "absolute_max_charge_power_w": "Absolute max charge power (AC+DC). Applied during AC charging and reset afterward. Optional if you use the AC limit entity; requires the entity below when set.",
           "absolute_max_charge_power_entity": "Optional: number entity to set absolute max charge power (AC+DC). Requires the value above when set.",
           "charge_power_entity": "Optional: number entity used to set the max AC charge limit (W or kW). Use this OR the AC+DC max entity.",
-          "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
-          "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
-          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found. Requires the AC charge limit entity and both charge power sensors.",
+          "charge_power_sent_entity": "Optional: power the charger takes in, on the AC side, in W or kW. Needed for the efficiency search.",
+          "charge_power_received_entity": "Optional: power arriving in the battery, on the DC side, in W or kW. The difference to the value above is the loss the search is looking for, so the two must measure different sides.",
+          "charge_energy_sent_entity": "Optional but better: a kWh meter of the energy the charger takes in. With both meters the efficiency search measures the energy that really flowed instead of integrating a power reading.",
+          "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
+          "auto_efficient_charge": "Searches for the charge power with the smallest loss between the grid and the battery and switches itself off when it has found the optimum. It takes several measurements per window, each only counted when the inverter really charged at the power under test. Needs the AC charge limit entity and both charge power sensors; energy meters make it exact. Follow it on the “Efficiency search” sensor.",
           "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached.",
           "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
@@ -336,9 +344,11 @@
           "absolute_max_charge_power_w": "Battery Charge Max (AC+DC) (optional)",
           "absolute_max_charge_power_entity": "Battery Charge Max Entity (AC+DC) (optional)",
           "charge_power_entity": "Battery Max AC Charge Limit Entity (optional)",
-          "charge_power_sent_entity": "Charge Power Sent to Battery (optional)",
-          "charge_power_received_entity": "Charge Power Received by Battery (optional)",
-          "auto_efficient_charge": "Auto Efficient Charge Finder",
+          "charge_power_sent_entity": "Charge power drawn for charging (optional)",
+          "charge_power_received_entity": "Charge power arriving in the battery (optional)",
+          "charge_energy_sent_entity": "Energy meter: drawn for charging (optional)",
+          "charge_energy_received_entity": "Energy meter: stored in the battery (optional)",
+          "auto_efficient_charge": "Efficiency search",
           "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)",
           "discharge_limit_entity": "Discharge Power Limit Entity (optional)",
           "grid_import_entity": "Grid Import Power (optional)",
@@ -357,9 +367,11 @@
           "absolute_max_charge_power_w": "Absolute max charge power (AC+DC). Applied during AC charging and reset afterward. Optional if you use the AC limit entity; requires the entity below when set.",
           "absolute_max_charge_power_entity": "Optional: number entity to set absolute max charge power (AC+DC). Requires the value above when set.",
           "charge_power_entity": "Optional: number entity used to set the max AC charge limit (W or kW). Use this OR the AC+DC max entity.",
-          "charge_power_sent_entity": "Optional: sensor with power sent to battery (W or kW).",
-          "charge_power_received_entity": "Optional: sensor with power received by battery (W or kW).",
-          "auto_efficient_charge": "If enabled, integration searches for the most efficient charge power between min and max and stops when found. Requires the AC charge limit entity and both charge power sensors.",
+          "charge_power_sent_entity": "Optional: power the charger takes in, on the AC side, in W or kW. Needed for the efficiency search.",
+          "charge_power_received_entity": "Optional: power arriving in the battery, on the DC side, in W or kW. The difference to the value above is the loss the search is looking for, so the two must measure different sides.",
+          "charge_energy_sent_entity": "Optional but better: a kWh meter of the energy the charger takes in. With both meters the efficiency search measures the energy that really flowed instead of integrating a power reading.",
+          "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
+          "auto_efficient_charge": "Searches for the charge power with the smallest loss between the grid and the battery and switches itself off when it has found the optimum. It takes several measurements per window, each only counted when the inverter really charged at the power under test. Needs the AC charge limit entity and both charge power sensors; energy meters make it exact. Follow it on the “Efficiency search” sensor.",
           "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached.",
           "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
@@ -451,27 +463,37 @@
   "entity": {
     "sensor": {
       "calculated_soc": {
-        "name": "Calculated SOC"
+        "name": "Target SOC"
       },
       "best_charge_power": {
-        "name": "Best Charge Power"
+        "name": "Most efficient charge power"
       },
       "planned_charge_power": {
-        "name": "Planned Charge Power"
+        "name": "Planned charge power"
       },
       "grid_charge_headroom": {
-        "name": "Grid Charge Headroom"
+        "name": "Charge power left by the house connection"
+      },
+      "efficiency_search": {
+        "name": "Efficiency search",
+        "state": {
+          "idle": "Off",
+          "waiting": "Waiting for charging",
+          "settling": "Settling",
+          "measuring": "Measuring",
+          "finished": "Finished"
+        }
       }
     },
     "switch": {
       "enabled": {
-        "name": "Inverter Charge Night"
+        "name": "Automation"
       },
       "auto_efficient_charge_finder": {
-        "name": "Auto Efficient Charge Finder"
+        "name": "Efficiency search"
       },
       "skip_next": {
-        "name": "Skip Next (24h Override)"
+        "name": "Skip the next window (24 h)"
       }
     },
     "select": {
@@ -485,15 +507,15 @@
     },
     "binary_sensor": {
       "active": {
-        "name": "Night Charge Active"
+        "name": "Window active"
       }
     },
     "number": {
       "min_soc_override": {
-        "name": "Min SOC Override"
+        "name": "Target SOC override"
       },
       "snow_nights": {
-        "name": "Snow nights (charge to max)"
+        "name": "Snow nights"
       }
     }
   },

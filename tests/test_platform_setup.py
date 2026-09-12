@@ -27,6 +27,7 @@ from custom_components.inverter_charge_night.sensor import (
     BestChargePowerSensor,
     CalculatedSOCSensor,
     PlannedChargePowerSensor,
+    EfficiencySearchSensor,
     GridChargeHeadroomSensor,
 )
 from custom_components.inverter_charge_night.switch import (
@@ -47,6 +48,7 @@ PLATFORM_ENTITIES = {
             (BestChargePowerSensor, "best_charge_power"),
             (PlannedChargePowerSensor, "planned_charge_power"),
             (GridChargeHeadroomSensor, "grid_charge_headroom"),
+            (EfficiencySearchSensor, "efficiency_search"),
         ],
     ),
     "number": (

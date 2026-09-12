@@ -94,7 +94,11 @@ def test_accumulate_auto_energy_updates_totals(mock_hass):
         },
     )
     coordinator._auto_test_active = True
+    coordinator._auto_test_start = now - timedelta(hours=2)
+    coordinator._auto_measure_start = now - timedelta(hours=1)
     coordinator._auto_last_sample_time = now - timedelta(hours=1)
+    coordinator._auto_last_sent_w = 1000.0
+    coordinator._auto_last_received_w = 900.0
     coordinator._auto_energy_sent_wh = 0.0
     coordinator._auto_energy_received_wh = 0.0
     coordinator._get_power_w = MagicMock(side_effect=[1000, 900])
@@ -111,9 +115,10 @@ def test_finalize_auto_test_records_best(mock_hass):
     coordinator = _make_coordinator(mock_hass, {})
     coordinator._auto_test_active = True
     coordinator._auto_test_start = now - timedelta(hours=2)
+    coordinator._auto_measure_start = now - timedelta(hours=1)
     coordinator._auto_test_power_w = 5000
-    coordinator._auto_energy_sent_wh = 1000.0
-    coordinator._auto_energy_received_wh = 900.0
+    coordinator._auto_energy_sent_wh = 5000.0
+    coordinator._auto_energy_received_wh = 4500.0
     coordinator.get_auto_efficiency_data = MagicMock(return_value={})
     coordinator._save_auto_efficiency_data = MagicMock()
 

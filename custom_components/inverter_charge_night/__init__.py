@@ -34,6 +34,19 @@ from .const import (
     CONF_MIN_CHARGE_POWER_W,
     CONF_MAX_CHARGE_POWER_W,
     CONF_CHARGE_POWER_ENTITY,
+    AUTO_TEST_MAX_ATTEMPTS,
+    AUTO_TEST_MAX_PLAUSIBLE_LOSS,
+    AUTO_TEST_MIN_DURATION_S,
+    AUTO_TEST_MIN_ENERGY_WH,
+    AUTO_TEST_MIN_FOLLOW_RATIO,
+    AUTO_TEST_SETTLE_S,
+    AUTO_TEST_STATE_FINISHED,
+    AUTO_TEST_STATE_IDLE,
+    AUTO_TEST_STATE_MEASURING,
+    AUTO_TEST_STATE_SETTLING,
+    AUTO_TEST_STATE_WAITING,
+    CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
+    CONF_CHARGE_ENERGY_SENT_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
     CONF_AUTO_EFFICIENT_CHARGE,
@@ -287,6 +300,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConf
         coordinator._remove_battery_soc_listener()
         coordinator._remove_inverter_min_soc_listener()
         coordinator._remove_grid_import_listener()
+        coordinator._remove_auto_sample_listener()
         coordinator._remove_backup_mode_listener()
         await coordinator._stop_periodic_verification()
         coordinator._cancel_skip_next_expiry()
@@ -394,6 +408,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.auto_efficient_charge = entry.data.get(CONF_AUTO_EFFICIENT_CHARGE, False)
         self._auto_test_active = False
         self._auto_test_power_w: int | None = None
+        # The measurement proper starts only after the inverter has settled on
+        # the new setpoint; everything before that is ramp, not steady state.
+        self._auto_measure_start: datetime | None = None
+        self._auto_last_sent_w: float | None = None
+        self._auto_last_received_w: float | None = None
+        self._auto_meter_start: tuple[float, float] | None = None
+        self._auto_sample_listener: CALLBACK_TYPE | None = None
+        self._auto_last_result: dict[str, Any] | None = None
         self._auto_test_start: datetime | None = None
         self._auto_last_sample_time: datetime | None = None
         self._auto_energy_sent_wh = 0.0
@@ -1659,9 +1681,27 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return True
 
     def get_auto_efficiency_data(self) -> dict[str, Any]:
-        """Load persisted auto efficiency data from entry options."""
+        """Load persisted auto efficiency data from entry options.
+
+        Samples are dropped when the configured charge power range has changed
+        since they were taken: the search narrows a range, and a range that
+        moved makes the stored bounds - and with them the conclusions drawn
+        from the old samples - meaningless.
+        """
         data = dict(self.entry.options.get(CONF_AUTO_EFFICIENCY_DATA, {}))
         data.setdefault("history", {})
+        bounds = data.get("bounds_w")
+        current = [
+            int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000)),
+            int(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000)),
+        ]
+        if isinstance(bounds, list) and [int(b) for b in bounds] != current:
+            _LOGGER.info(
+                "Charge power range changed from %s to %s - starting the efficiency search over",
+                bounds,
+                current,
+            )
+            data = {"history": {}, "bounds_w": current}
         return data
 
     def _save_auto_efficiency_data(self, data: dict[str, Any]) -> None:
@@ -1684,6 +1724,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         step_w = 100  # 0.1 kW precision
         data = self.get_auto_efficiency_data()
         history = {int(k): v for k, v in data.get("history", {}).items()}
+        failed = {int(k): int(v) for k, v in dict(data.get("failed", {})).items()}
+        # A power that could not be measured repeatedly counts as done, so the
+        # search moves on instead of asking for the same sample every night.
+        unmeasurable = {p for p, n in failed.items() if n >= AUTO_TEST_MAX_ATTEMPTS}
         range_min = int(data.get("range_min_w", min_w))
         range_max = int(data.get("range_max_w", max_w))
         range_min = max(min_w, range_min)
@@ -1708,18 +1752,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 data["range_max_w"] = range_max
                 self._save_auto_efficiency_data(data)
                 continue
-            if c not in history:
+            if c not in history and c not in unmeasurable:
                 return c
-            if d not in history:
+            if d not in history and d not in unmeasurable:
                 return d
+            if c in unmeasurable or d in unmeasurable:
+                # Nothing more to learn between these two points
+                return None
         return None
 
     def _reset_auto_test_state(self) -> None:
         """Reset current auto test state."""
+        self._remove_auto_sample_listener()
         self._auto_test_active = False
         self._auto_test_power_w = None
         self._auto_test_start = None
+        self._auto_measure_start = None
         self._auto_last_sample_time = None
+        self._auto_last_sent_w = None
+        self._auto_last_received_w = None
+        self._auto_meter_start = None
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
 
@@ -1778,14 +1830,127 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_test_active = True
         self._auto_test_power_w = power_w
         self._auto_test_start = dt_util.now()
-        self._auto_last_sample_time = self._auto_test_start
+        self._auto_measure_start = None
+        self._auto_last_sample_time = None
+        self._auto_last_sent_w = None
+        self._auto_last_received_w = None
+        self._auto_meter_start = None
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
-        _LOGGER.info("Auto efficiency test started at %d W", power_w)
+        self._setup_auto_sample_listener()
+        _LOGGER.info(
+            "Efficiency test started at %d W (%d s to settle, then at least %d s and %.1f kWh)",
+            power_w,
+            AUTO_TEST_SETTLE_S,
+            AUTO_TEST_MIN_DURATION_S,
+            AUTO_TEST_MIN_ENERGY_WH / 1000.0,
+        )
+
+    @property
+    def auto_test_state(self) -> str:
+        """What the efficiency finder is doing, for the sensor."""
+        if self._auto_test_active:
+            if self._auto_measure_start is None:
+                return AUTO_TEST_STATE_SETTLING
+            return AUTO_TEST_STATE_MEASURING
+        if not self.auto_efficient_charge:
+            data = self.get_auto_efficiency_data()
+            if data.get("best_power_w") is not None:
+                return AUTO_TEST_STATE_FINISHED
+            return AUTO_TEST_STATE_IDLE
+        if self.is_active:
+            return AUTO_TEST_STATE_WAITING
+        return AUTO_TEST_STATE_IDLE
+
+    def auto_test_attributes(self) -> dict[str, Any]:
+        """Everything needed to judge the search from the frontend."""
+        data = self.get_auto_efficiency_data()
+        history = {k: round(float(v) * 100.0, 2) for k, v in dict(data.get("history", {})).items()}
+        attributes: dict[str, Any] = {
+            "test_power_w": self._auto_test_power_w,
+            "best_power_w": data.get("best_power_w"),
+            "best_loss_pct": (
+                round(float(data["best_loss"]) * 100.0, 2) if data.get("best_loss") is not None else None
+            ),
+            "loss_by_power_pct": history,
+            "search_range_w": [data.get("range_min_w"), data.get("range_max_w")],
+            "measured_energy_kwh": round(self._auto_energy_sent_wh / 1000.0, 3),
+            "last_result": self._auto_last_result,
+            "measurement_source": "energy meters" if self._energy_meter_entities() else "power sensors",
+        }
+        if self._auto_measure_start is not None:
+            attributes["measuring_for_min"] = round(
+                (dt_util.now() - self._auto_measure_start).total_seconds() / 60.0, 1
+            )
+        return attributes
+
+    def _energy_meter_entities(self) -> tuple[str, str] | None:
+        """The pair of kWh meters, when both are configured.
+
+        Meters beat power sensors for this measurement: the difference between
+        two readings is the energy that actually flowed, with no assumption
+        about what the power did in between.
+        """
+        sent = self.config.get(CONF_CHARGE_ENERGY_SENT_ENTITY)
+        received = self.config.get(CONF_CHARGE_ENERGY_RECEIVED_ENTITY)
+        if sent and received:
+            return str(sent), str(received)
+        return None
+
+    def _read_energy_wh(self, entity_id: str) -> float | None:
+        """Read a cumulative energy meter in Wh, understanding kWh, Wh and MWh."""
+        state = self.hass.states.get(entity_id)
+        if not state or state.state in ("unknown", "unavailable", None):
+            return None
+        value = _as_float(state.state)
+        if value is None:
+            return None
+        unit = _unit_of(state)
+        if unit in ("kwh", "kilowatt_hour", "kilowatt-hour", "kilowatthours"):
+            return value * 1000.0
+        if unit in ("wh", "watt_hour", "watt-hour", "watthours"):
+            return value
+        if unit in ("mwh", "megawatt_hour"):
+            return value * 1_000_000.0
+        _LOGGER.debug("Energy meter %s reports the unusable unit %r", entity_id, unit or "(none)")
+        return None
+
+    def _begin_auto_measurement(self, now: datetime) -> None:
+        """Start counting: the inverter has had its settling time."""
+        self._auto_measure_start = now
+        self._auto_last_sample_time = now
+        self._auto_energy_sent_wh = 0.0
+        self._auto_energy_received_wh = 0.0
+        self._auto_last_sent_w = None
+        self._auto_last_received_w = None
+        meters = self._energy_meter_entities()
+        if meters is not None:
+            start_sent = self._read_energy_wh(meters[0])
+            start_received = self._read_energy_wh(meters[1])
+            if start_sent is not None and start_received is not None:
+                self._auto_meter_start = (start_sent, start_received)
+        _LOGGER.debug(
+            "Efficiency test at %s W settled, measuring from now (%s)",
+            self._auto_test_power_w,
+            "energy meters" if self._auto_meter_start else "power sensors",
+        )
 
     def _accumulate_auto_energy(self) -> None:
-        """Accumulate sent/received energy for auto test."""
-        if not self._auto_test_active or not self._auto_last_sample_time:
+        """Integrate the charge power into energy, trapezoidally.
+
+        Called on every reading of the power sensor, not only on the polling
+        interval: a rectangle over fifteen minutes, valued at whatever the
+        sensor happened to show at its end, is not a measurement of anything.
+        Samples before the settling time are dropped, because the ramp to the
+        new setpoint belongs to no power in particular.
+        """
+        if not self._auto_test_active or self._auto_test_start is None:
+            return
+        now = dt_util.now()
+        if self._auto_measure_start is None:
+            if (now - self._auto_test_start).total_seconds() < AUTO_TEST_SETTLE_S:
+                return
+            self._begin_auto_measurement(now)
             return
         sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
         received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
@@ -1793,50 +1958,228 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         received_w = self._get_power_w(received_entity)
         if sent_w is None or received_w is None:
             return
-        now = dt_util.now()
-        delta_h = (now - self._auto_last_sample_time).total_seconds() / 3600.0
+        last_time = self._auto_last_sample_time
+        if last_time is None:
+            self._auto_last_sample_time = now
+            self._auto_last_sent_w = sent_w
+            self._auto_last_received_w = received_w
+            return
+        delta_h = (now - last_time).total_seconds() / 3600.0
         if delta_h <= 0:
             return
-        self._auto_energy_sent_wh += sent_w * delta_h
-        self._auto_energy_received_wh += received_w * delta_h
+        previous_sent = self._auto_last_sent_w
+        previous_received = self._auto_last_received_w
+        mean_sent = sent_w if previous_sent is None else (previous_sent + sent_w) / 2.0
+        mean_received = (
+            received_w if previous_received is None else (previous_received + received_w) / 2.0
+        )
+        self._auto_energy_sent_wh += mean_sent * delta_h
+        self._auto_energy_received_wh += mean_received * delta_h
         self._auto_last_sample_time = now
+        self._auto_last_sent_w = sent_w
+        self._auto_last_received_w = received_w
+
+    def _setup_auto_sample_listener(self) -> None:
+        """Sample the charge power whenever the sensor reports, not every poll."""
+        self._remove_auto_sample_listener()
+        sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
+        received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
+        if not sent_entity or not received_entity:
+            return
+
+        async def _on_charge_power_change(event: Event[EventStateChangedData]) -> None:
+            try:
+                self._accumulate_auto_energy()
+            except Exception as e:  # pylint: disable=broad-except
+                _LOGGER.error("Unexpected error while sampling the charge power: %s", e)
+
+        self._auto_sample_listener = async_track_state_change_event(
+            self.hass,
+            [str(sent_entity), str(received_entity)],
+            _on_charge_power_change,
+        )
+
+    def _remove_auto_sample_listener(self) -> None:
+        """Remove the charge power sampling listener."""
+        if self._auto_sample_listener:
+            self._auto_sample_listener()
+            self._auto_sample_listener = None
+
+    def _auto_measurement_is_complete(self) -> bool:
+        """True once the running measurement has enough time and energy behind it."""
+        if not self._auto_test_active or self._auto_measure_start is None:
+            return False
+        duration = (dt_util.now() - self._auto_measure_start).total_seconds()
+        if duration < AUTO_TEST_MIN_DURATION_S:
+            return False
+        measured = self._measured_energy_wh()
+        if measured is None:
+            return False
+        return measured[0] >= AUTO_TEST_MIN_ENERGY_WH
+
+    def _measured_energy_wh(self) -> tuple[float, float] | None:
+        """The energy of the current measurement as (sent, received) in Wh.
+
+        From the kWh meters when they are configured, otherwise from the
+        integrated power. A meter that has been reset (or replaced) during the
+        measurement reads lower than at the start; that is not a measurement.
+        """
+        meters = self._energy_meter_entities()
+        start = self._auto_meter_start
+        if meters is not None and start is not None:
+            end_sent = self._read_energy_wh(meters[0])
+            end_received = self._read_energy_wh(meters[1])
+            if end_sent is None or end_received is None:
+                return None
+            sent = end_sent - start[0]
+            received = end_received - start[1]
+            if sent < 0 or received < 0:
+                _LOGGER.info("Efficiency test discarded: an energy meter went backwards")
+                return None
+            return sent, received
+        return self._auto_energy_sent_wh, self._auto_energy_received_wh
+
+    def _discard_auto_test(self, reason: str, *args: Any) -> None:
+        """Drop the running measurement and say why, once, in plain words."""
+        power = self._auto_test_power_w
+        self._auto_last_result = {
+            "power_w": power,
+            "loss": None,
+            "discarded": reason % args if args else reason,
+        }
+        _LOGGER.info(
+            "Efficiency test at %s W discarded: " + reason,
+            power,
+            *args,
+        )
+        self._reset_auto_test_state()
+
+    def _record_failed_attempt(self, power_w: int, too_short: bool) -> None:
+        """Remember that this power could not be measured.
+
+        A power the battery cannot absorb for long enough - because it is full
+        before the measurement is over - is not going to become measurable on
+        the next night either. After a few attempts the search stops offering
+        it, instead of asking for the same impossible sample for ever.
+        """
+        data = self.get_auto_efficiency_data()
+        failed = {int(k): int(v) for k, v in dict(data.get("failed", {})).items()}
+        attempts = failed.get(power_w, 0) + 1
+        failed[power_w] = attempts
+        data["failed"] = {str(k): v for k, v in failed.items()}
+        if too_short and attempts >= AUTO_TEST_MAX_ATTEMPTS:
+            # Too high for the energy the window has left: lower the ceiling.
+            range_max = int(data.get("range_max_w", power_w))
+            new_max = max(int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000)), power_w - 100)
+            if new_max < range_max:
+                data["range_max_w"] = new_max
+                _LOGGER.info(
+                    "Efficiency search: %d W could not be measured %d times - the battery is "
+                    "full before a measurement completes, so the search now stops at %d W",
+                    power_w,
+                    attempts,
+                    new_max,
+                )
+        self._save_auto_efficiency_data(data)
 
     def _finalize_auto_test(self) -> None:
-        """Finalize auto test and persist efficiency result."""
-        if not self._auto_test_active or not self._auto_test_start or self._auto_test_power_w is None:
+        """Turn the running measurement into a sample, or discard it.
+
+        A sample is only worth keeping if it was really measured at the power
+        it is filed under: long enough, with enough energy, with the inverter
+        actually following the setpoint, and with a loss that a charger can
+        physically have. Everything else would steer every later night wrong.
+        """
+        if not self._auto_test_active or self._auto_test_start is None or self._auto_test_power_w is None:
             self._reset_auto_test_state()
             return
-
-        duration = (dt_util.now() - self._auto_test_start).total_seconds()
-        if duration < 1800 or self._auto_energy_sent_wh <= 0:
-            _LOGGER.info("Auto efficiency test discarded (duration < 30 min)")
-            self._reset_auto_test_state()
+        power_w = self._auto_test_power_w
+        if self._auto_measure_start is None:
+            self._discard_auto_test("it never got past the %d s settling time", AUTO_TEST_SETTLE_S)
             return
 
-        loss = 1.0 - (self._auto_energy_received_wh / self._auto_energy_sent_wh)
-        loss = max(0.0, min(loss, 1.0))
+        duration = (dt_util.now() - self._auto_measure_start).total_seconds()
+        measured = self._measured_energy_wh()
+        if measured is None:
+            self._reset_auto_test_state()
+            return
+        sent_wh, received_wh = measured
+        if duration < AUTO_TEST_MIN_DURATION_S or sent_wh < AUTO_TEST_MIN_ENERGY_WH:
+            self._discard_auto_test(
+                "only %.0f s and %.2f kWh (needs %d s and %.1f kWh)",
+                duration,
+                sent_wh / 1000.0,
+                AUTO_TEST_MIN_DURATION_S,
+                AUTO_TEST_MIN_ENERGY_WH / 1000.0,
+            )
+            self._record_failed_attempt(power_w, too_short=True)
+            return
+
+        average_w = sent_wh / (duration / 3600.0)
+        if average_w < AUTO_TEST_MIN_FOLLOW_RATIO * power_w:
+            # The inverter charged at something else - a full battery, the BMS
+            # tapering near the top, or another limit. Filing this under the
+            # test power would compare two different things.
+            self._discard_auto_test(
+                "the inverter drew %.0f W on average, not the %d W it was set to",
+                average_w,
+                power_w,
+            )
+            self._record_failed_attempt(power_w, too_short=False)
+            return
+
+        loss = 1.0 - (received_wh / sent_wh)
+        if loss < 0 or loss > AUTO_TEST_MAX_PLAUSIBLE_LOSS:
+            # Negative means the battery received more than was sent, which no
+            # charger does: the two sensors measure the same side, or the wrong
+            # ones are configured. Recording it would make this power win the
+            # search for ever, because the loss is clamped at zero.
+            self._discard_auto_test(
+                "a loss of %.1f %% is not physical - check that 'sent' is the AC side and "
+                "'received' the battery side",
+                loss * 100.0,
+            )
+            return
 
         data = self.get_auto_efficiency_data()
         history = dict(data.get("history", {}))
-        history[str(self._auto_test_power_w)] = loss
+        history[str(power_w)] = loss
         data["history"] = history
+        data["bounds_w"] = [
+            int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000)),
+            int(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000)),
+        ]
 
         best_loss = data.get("best_loss")
         if best_loss is None or loss < best_loss:
             data["best_loss"] = loss
-            data["best_power_w"] = self._auto_test_power_w
+            data["best_power_w"] = power_w
             _LOGGER.info(
-                "New best auto efficiency: %.4f loss at %d W",
-                loss,
-                self._auto_test_power_w,
+                "New best charge power: %.2f %% loss at %d W (%.2f kWh in, %.2f kWh into the "
+                "battery, over %.0f min)",
+                loss * 100.0,
+                power_w,
+                sent_wh / 1000.0,
+                received_wh / 1000.0,
+                duration / 60.0,
             )
         else:
             _LOGGER.info(
-                "Auto efficiency recorded: %.4f loss at %d W",
-                loss,
-                self._auto_test_power_w,
+                "Charge power measured: %.2f %% loss at %d W (best so far %.2f %% at %s W)",
+                loss * 100.0,
+                power_w,
+                float(best_loss) * 100.0,
+                data.get("best_power_w"),
             )
 
+        self._auto_last_result = {
+            "power_w": power_w,
+            "loss": round(loss, 4),
+            "energy_sent_kwh": round(sent_wh / 1000.0, 3),
+            "energy_received_kwh": round(received_wh / 1000.0, 3),
+            "minutes": round(duration / 60.0, 1),
+            "source": "meters" if self._auto_meter_start else "power sensors",
+        }
         self._save_auto_efficiency_data(data)
         self._reset_auto_test_state()
 
@@ -1880,7 +2223,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if self._auto_test_active:
             self._accumulate_auto_energy()
-            return
+            if not self._auto_measurement_is_complete():
+                return
+            # Enough time and energy at this power: record it and spend the
+            # rest of the window on the next candidate. A search that took one
+            # sample per night needed a week and a half of nights; this way it
+            # usually finishes inside one window.
+            self._finalize_auto_test()
 
         candidate = self._select_next_auto_test_power_w()
         if candidate is None:
