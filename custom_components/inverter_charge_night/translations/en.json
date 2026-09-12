@@ -67,7 +67,9 @@
           "grid_voltage_v": "Phase Voltage",
           "grid_continuous_pct": "Continuous Load Share",
           "grid_max_continuous_w": "Max Continuous Grid Power (optional)",
-          "grid_headroom_w": "Safety Margin"
+          "grid_headroom_w": "Safety Margin",
+          "discharge_block_switch": "Block Discharge Switch (optional)",
+          "discharge_block_mode": "Discharge Block"
         },
         "data_description": {
           "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
@@ -86,7 +88,9 @@
           "grid_voltage_v": "Phase voltage of your grid, 230 V in Germany. Used together with the fuse size to work out the nominal power.",
           "grid_continuous_pct": "Share of the nominal power that may be drawn for hours on end. 80 % leaves room for the heating of meter and terminal contacts; pick a lower value for an older meter.",
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
-          "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit."
+          "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
+          "discharge_block_switch": "Optional: switch entity of the inverter that blocks battery discharge (Kostal calls it \"battery discharge lock\"). Preferred over every other way; turned on at the window start and put back to its previous state at the window end.",
+          "discharge_block_mode": "Blocks the battery from discharging into the house during the window, so stored energy is kept for the day. A switch of the inverter is preferred; if there is none, the integration raises the min SOC instead and resets it at the window end."
         }
       },
       "advanced": {
@@ -189,7 +193,9 @@
           "grid_voltage_v": "Phase Voltage",
           "grid_continuous_pct": "Continuous Load Share",
           "grid_max_continuous_w": "Max Continuous Grid Power (optional)",
-          "grid_headroom_w": "Safety Margin"
+          "grid_headroom_w": "Safety Margin",
+          "discharge_block_switch": "Block Discharge Switch (optional)",
+          "discharge_block_mode": "Discharge Block"
         },
         "data_description": {
           "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
@@ -208,7 +214,9 @@
           "grid_voltage_v": "Phase voltage of your grid, 230 V in Germany. Used together with the fuse size to work out the nominal power.",
           "grid_continuous_pct": "Share of the nominal power that may be drawn for hours on end. 80 % leaves room for the heating of meter and terminal contacts; pick a lower value for an older meter.",
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
-          "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit."
+          "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
+          "discharge_block_switch": "Optional: switch entity of the inverter that blocks battery discharge (Kostal calls it \"battery discharge lock\"). Preferred over every other way; turned on at the window start and put back to its previous state at the window end.",
+          "discharge_block_mode": "Blocks the battery from discharging into the house during the window, so stored energy is kept for the day. A switch of the inverter is preferred; if there is none, the integration raises the min SOC instead and resets it at the window end."
         }
       },
       "reconfigure_advanced": {
@@ -339,7 +347,9 @@
           "grid_voltage_v": "Phase Voltage",
           "grid_continuous_pct": "Continuous Load Share",
           "grid_max_continuous_w": "Max Continuous Grid Power (optional)",
-          "grid_headroom_w": "Safety Margin"
+          "grid_headroom_w": "Safety Margin",
+          "discharge_block_switch": "Block Discharge Switch (optional)",
+          "discharge_block_mode": "Discharge Block"
         },
         "data_description": {
           "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
@@ -358,7 +368,9 @@
           "grid_voltage_v": "Phase voltage of your grid, 230 V in Germany. Used together with the fuse size to work out the nominal power.",
           "grid_continuous_pct": "Share of the nominal power that may be drawn for hours on end. 80 % leaves room for the heating of meter and terminal contacts; pick a lower value for an older meter.",
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
-          "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit."
+          "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
+          "discharge_block_switch": "Optional: switch entity of the inverter that blocks battery discharge (Kostal calls it \"battery discharge lock\"). Preferred over every other way; turned on at the window start and put back to its previous state at the window end.",
+          "discharge_block_mode": "Blocks the battery from discharging into the house during the window, so stored energy is kept for the day. A switch of the inverter is preferred; if there is none, the integration raises the min SOC instead and resets it at the window end."
         }
       },
       "advanced": {
@@ -427,6 +439,12 @@
       "options": {
         "headroom": "Headroom (forecast only)",
         "bridge": "Bridge (load until PV crossover)"
+      }
+    },
+    "discharge_block_mode": {
+      "options": {
+        "auto": "Automatic (switch, else power limit, else min SOC)",
+        "off": "Off (the battery may discharge)"
       }
     }
   },

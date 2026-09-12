@@ -99,3 +99,19 @@ DEFAULT_GRID_CONTINUOUS_PCT = 80
 DEFAULT_GRID_HEADROOM_W = 500
 GRID_LIMIT_STALE_AFTER_S = 300  # after this the grid import counts as unknown
 GRID_LIMIT_MIN_WRITE_INTERVAL_S = 30  # debounce for the grid import listener
+# Discharge block in the window (plan 009). Cheap grid energy at night is worth
+# less than stored PV is during the day, so the battery must not run the house
+# while the window is open. Three ways are tried in this order: a vendor switch,
+# the discharge power limit, and finally the inverter's min SOC - a battery does
+# not discharge below its min SOC, and that entity is the one this integration
+# controls anyway, so the last way works on every inverter.
+CONF_DISCHARGE_BLOCK_SWITCH = "discharge_block_switch"  # switch: "block battery discharge", optional
+CONF_DISCHARGE_BLOCK_MODE = "discharge_block_mode"  # "auto" | "off"
+DISCHARGE_BLOCK_OFF = "off"  # let the battery discharge, as before plan 006
+DISCHARGE_BLOCK_AUTO = "auto"  # pick the best way the configuration offers
+DISCHARGE_BLOCK_VIA_SWITCH = "switch"
+DISCHARGE_BLOCK_VIA_LIMIT = "limit"
+DISCHARGE_BLOCK_VIA_MIN_SOC = "min_soc"
+DEFAULT_DISCHARGE_BLOCK_MODE = DISCHARGE_BLOCK_AUTO
+ATTR_INVERTER_FLOOR_SOC = "inverter_floor_soc"  # what is written to the min SOC entity
+ATTR_DISCHARGE_BLOCK = "discharge_block"  # switch | limit | min_soc | off

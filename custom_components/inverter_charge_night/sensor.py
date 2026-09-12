@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 from .entity import InverterChargeNightEntity
-from .const import ATTR_SNOW_NIGHTS
+from .const import ATTR_DISCHARGE_BLOCK, ATTR_INVERTER_FLOOR_SOC, ATTR_SNOW_NIGHTS
 
 PARALLEL_UPDATES = 0
 
@@ -69,6 +69,10 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
             "upper_bound_soc": data.get("upper_bound_soc"),
             "pv_crossover": data.get("pv_crossover"),
             ATTR_SNOW_NIGHTS: self.coordinator.snow_nights,
+            # Plan 009: why the inverter may show a higher min SOC than the
+            # charge target while the window is open.
+            ATTR_INVERTER_FLOOR_SOC: self.coordinator.inverter_floor_soc(),
+            ATTR_DISCHARGE_BLOCK: self.coordinator.discharge_block_state(),
         }
 
 
