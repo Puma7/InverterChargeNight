@@ -80,7 +80,7 @@ Alle Punkte wurden im Code nachgelesen, nicht nur vom Audit gemeldet.
 |---|---|---|---|
 | L1 | **Zielformel kennt keinen Verbrauch und keinen Sonnenaufgang.** `Ziel = (Kapazität − Forecast·(1+Marge)) / Kapazität`. | `calculation.py:8-14, 73-94` | An einem sonnigen Tag mit 20 kWh Forecast und 10 kWh Speicher wird auf `user_min_soc` (8 %) geladen. Von 05:00 bis PV > Verbrauch kauft das Haus zum Tagestarif. Im Winter landet das Ziel nur zufällig bei 100 %. |
 | L2 | **Kein Sonnenstand.** `sun.sun` mit `next_rising` liegt in jeder HA-Installation vor, wird nicht genutzt. | kein `sun` im Paket | 21. Dezember und 5. Oktober bekommen bei gleichem Forecast dasselbe Ziel. |
-| L3 | **Entladung im Fenster nicht gesperrt.** Ist der Akku beim Fensterstart über dem Ziel, entlädt er sich bis zum Ziel ins Haus, obwohl Netzstrom gerade billig ist. | `__init__.py:1380-1386`, `:1467-1479` | Gespeicherte PV wird nachts zu 14 ct "verbraucht", fehlt tagsüber bei 30 ct. Nach L1 der größte Euro-Posten. |
+| L3 | **Entladung im Fenster nicht gesperrt.** (Plan 009 löst das ohne Herstellerfunktion über den Min-SOC.) Ist der Akku beim Fensterstart über dem Ziel, entlädt er sich bis zum Ziel ins Haus, obwohl Netzstrom gerade billig ist. | `__init__.py:1380-1386`, `:1467-1479` | Gespeicherte PV wird nachts zu 14 ct "verbraucht", fehlt tagsüber bei 30 ct. Nach L1 der größte Euro-Posten. |
 | L4 | **Ladeleistung nicht auf das Fenster geplant.** Die Effizienzsuche minimiert nur Wandlungsverluste, kennt die Fensterlänge nicht. | `__init__.py:569-607`, `:659` | Effizienzoptimum liegt meist bei kleiner Leistung, die das Ziel in 6 h nicht erreicht; kleine Nachladungen laufen mit Vollgas und maximalem Verlust. |
 | L5 | **Ein Fenster, fest im Jahr.** Nur ein Start/Ende-Paar, ein optionaler Datumsbereich, kein Kalender pro Quartal, kein Preissignal. | `__init__.py:775-787`, `:403-426`; keine Preis-Keys | Avacon-Zeitfenster pro Quartal müssen manuell umgestellt werden. |
 | L6 | **Plan wird beim Fensterstart eingefroren**, obwohl Solcast nachts mehrfach aktualisiert. Forecast-Tagwahl hängt an `now.hour < 12`, nicht am Fensterende. | `__init__.py:255-275`, `:1191-1207` | Falscher Solartag bei Fenstern, die nicht über Mitternacht gehen; kein Nachjustieren bei geändertem Forecast. |
@@ -141,6 +141,8 @@ vorliegt; bis dahin bleibt der Kostal-Pfad, aber ohne Markennamen in Keys und La
 | 005 | Rücksetz-Robustheit und Persistenz über Neustarts | P1 | L | 003, 004 | DONE |
 | 006 | Planer v2 (Design und Prototyp): Überbrückung, Sonnenaufgang, Verbrauch, Entladesperre, Ladeleistung | P2 | L | 001–005 | DONE |
 | 007 | Schnee-Override: Zahl-Entität "Schnee-Nächte", lädt die nächsten N Nächte auf das Maximum und zählt herunter | P2 | S | 004, 005 | DONE |
+| 008 | Ladeleistung gegen den Hausanschluss begrenzen (Dauerlast, Sicherungsgröße, Netzbezug) | P1 | M | 006 | TODO |
+| 009 | Entladung im Fenster sperren: Schalter, sonst Leistungsgrenze, sonst Min-SOC anheben | P1 | M | 004, 005, 006 | TODO |
 
 Status-Werte: TODO | IN PROGRESS | DONE | BLOCKED (mit Grund) | REJECTED (mit Begründung)
 
@@ -175,11 +177,11 @@ Am 2026-09-12 folgte eine Prüfung auf Lauffähigkeit mit dem aktuellen Home Ass
 
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 
-- **008 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des Config-Entrys, tägliche Neubestimmung.
-- **009 Wechselrichter-Profile** (L8): erst Spike gegen die realen Entitäten der Fronius- und SMA-Integrationen, dann Fähigkeitsschnittstelle; Umbenennung `kostal_*` → `min_soc_entity` / `grid_charge_switch` mit `async_migrate_entry`.
-- **010 Morning-Discharge entscheiden** (L9): entweder als "dynamischer Tarif"-Funktion dokumentieren oder zum Überbrückungsmodus umbauen. Bis dahin mindestens Override-Pfad korrigieren (in 004 enthalten).
-- **011 Preissignal** (L5): Tibber/aWATTar/EPEX-Sensor als Eingang, ersetzt den festen Zeitplan durch Kostenoptimierung.
-- **012 Doku-Bereinigung**: README auf 2.0 und 28 Felder bringen (Forecast-Entität für MORGEN, nicht heute), Platzhalter-URLs, elf Audit-Dateien im Wurzelverzeichnis nach `docs/history/`, `de.json` anlegen.
+- **010 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des Config-Entrys, tägliche Neubestimmung.
+- **011 Wechselrichter-Profile** (L8): erst Spike gegen die realen Entitäten der Fronius- und SMA-Integrationen, dann Fähigkeitsschnittstelle; Umbenennung `kostal_*` → `min_soc_entity` / `grid_charge_switch` mit `async_migrate_entry`.
+- **012 Morning-Discharge entscheiden** (L9): entweder als "dynamischer Tarif"-Funktion dokumentieren oder zum Überbrückungsmodus umbauen. Bis dahin mindestens Override-Pfad korrigieren (in 004 enthalten).
+- **013 Preissignal** (L5): Tibber/aWATTar/EPEX-Sensor als Eingang, ersetzt den festen Zeitplan durch Kostenoptimierung.
+- **014 Doku-Bereinigung**: README auf 2.0 und 28 Felder bringen (Forecast-Entität für MORGEN, nicht heute), Platzhalter-URLs, elf Audit-Dateien im Wurzelverzeichnis nach `docs/history/`, `de.json` anlegen.
 
 ### Abhängigkeiten
 
@@ -187,6 +189,8 @@ Am 2026-09-12 folgte eine Prüfung auf Lauffähigkeit mit dem aktuellen Home Ass
 - 004 und 005 brauchen 003, weil der Coordinator sonst ohne Coverage und ohne echten Test-Hass umgebaut würde.
 - 006 braucht 005, weil ein Planer, der die Entladung sperrt, einen zuverlässigen Reset voraussetzt.
 - 007 braucht 004 (eine Zielquelle) und 005 (der Schneezähler muss einen Neustart überleben).
+- 008 braucht 006, weil dort die Ladeleistungsplanung sitzt, in die die Grenze eingreift.
+- 009 braucht 004, weil es das Ladeziel vom geschriebenen Min-SOC trennt.
 
 ### Geprüft und verworfen
 
