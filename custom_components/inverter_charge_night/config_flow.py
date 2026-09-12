@@ -560,6 +560,18 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
 # ---------------------------------------------------------------------------
 
 
+def _entry_using_min_soc_entity(
+    hass: HomeAssistant, entity_id: str, except_entry_id: str | None = None
+) -> ConfigEntry | None:
+    """Return a configured entry other than ``except_entry_id`` driving this inverter."""
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.entry_id == except_entry_id:
+            continue
+        if entity_id in (entry.unique_id, entry.data.get(CONF_KOSTAL_MIN_SOC_ENTITY)):
+            return entry
+    return None
+
+
 class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Inverter Charge Night."""
 
@@ -683,12 +695,24 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _async_reconfigure_finish(self) -> ConfigFlowResult:
         data = _finalize_data(self._data)
-        # The min SOC entity identifies the inverter. Without this check the
-        # reconfigure flow could point this entry at an inverter that another
-        # entry already drives, leaving two coordinators fighting over it.
-        await self.async_set_unique_id(data[CONF_KOSTAL_MIN_SOC_ENTITY])
-        self._abort_if_unique_id_mismatch()
-        return self.async_update_reload_and_abort(self._get_reconfigure_entry(), data=data)
+        entry = self._get_reconfigure_entry()
+        # The min SOC entity identifies the inverter. Pointing this entry at an
+        # inverter another entry already drives would leave two coordinators
+        # fighting over it, so refuse that - but changing to a free inverter
+        # (a replaced device, a renamed entity) must stay possible, which is
+        # why this is not _abort_if_unique_id_mismatch: that one compares
+        # against this entry's own id and would refuse every change.
+        min_soc_entity = data[CONF_KOSTAL_MIN_SOC_ENTITY]
+        if _entry_using_min_soc_entity(self.hass, min_soc_entity, entry.entry_id):
+            return self.async_show_form(
+                step_id="reconfigure",
+                data_schema=_schema_entities(self._data),
+                errors={CONF_KOSTAL_MIN_SOC_ENTITY: "entity_used_by_other_entry"},
+            )
+        # The unique id follows the inverter, so a later entry for the old
+        # entity is not blocked and a later one for the new entity is.
+        await self.async_set_unique_id(min_soc_entity)
+        return self.async_update_reload_and_abort(entry, data=data)
 
     @staticmethod
     @callback
@@ -766,15 +790,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             "advanced", STEP_ADVANCED_KEYS, _schema_advanced, user_input, self._async_save
         )
 
-    def _entry_using_min_soc_entity(self, entity_id: str) -> ConfigEntry | None:
-        """Return another configured entry that already drives this inverter."""
-        for entry in self.hass.config_entries.async_entries(DOMAIN):
-            if entry.entry_id == self._config_entry.entry_id:
-                continue
-            if entity_id in (entry.unique_id, entry.data.get(CONF_KOSTAL_MIN_SOC_ENTITY)):
-                return entry
-        return None
-
     def _merged_data(self) -> dict[str, Any]:
         """Merge the collected values over the *current* entry.data.
 
@@ -800,7 +815,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     async def _async_save(self) -> ConfigFlowResult:
         min_soc_entity = self._data.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-        if min_soc_entity and self._entry_using_min_soc_entity(min_soc_entity):
+        if min_soc_entity and _entry_using_min_soc_entity(
+            self.hass, min_soc_entity, self._config_entry.entry_id
+        ):
             return self.async_show_form(
                 step_id="init",
                 data_schema=_schema_entities(self._data),
@@ -808,5 +825,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             )
         # The settings live in entry.data (unchanged for existing installations);
         # entry.options only holds the auto-efficiency history, which is preserved.
-        self.hass.config_entries.async_update_entry(self._config_entry, data=self._merged_data())
+        data = self._merged_data()
+        # Keep the unique id on the inverter this entry now drives; otherwise a
+        # second entry could be created for the new entity without being caught.
+        unique_id = data.get(CONF_KOSTAL_MIN_SOC_ENTITY, self._config_entry.unique_id)
+        self.hass.config_entries.async_update_entry(
+            self._config_entry, data=data, unique_id=unique_id
+        )
         return self.async_create_entry(title="", data=dict(self._config_entry.options))

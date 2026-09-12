@@ -469,6 +469,9 @@ async def test_window_end_waits_for_running_verification_before_reset(mock_hass)
     await asyncio.wait_for(entered.wait(), 1)
     task = coordinator._verification_task
     assert task is not None and not task.done()
+    # A window that ran has captured the inverter's original floor; without one
+    # the reset deliberately leaves the min SOC alone (it never changed it).
+    coordinator.original_min_soc = DEFAULT_MIN
 
     await coordinator._on_window_end(WINDOW_END)
 
@@ -1648,3 +1651,61 @@ async def test_options_flow_mode_change_ends_the_running_window(mock_hass):
         ]
     finally:
         await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_mode_switch_does_not_re_enter_itself(mock_hass):
+    """Persisting state re-enters the entry update listener while the teardown awaits.
+
+    Without the guard the second run passes both the config comparison and the
+    mode comparison, and tears the window down a second time.
+    """
+    _register_inverter(mock_hass, grid="on")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.is_active = True
+    coordinator.original_min_soc = DEFAULT_MIN
+    runs: list[str] = []
+    real_reset = coordinator._reset_settings
+
+    async def _reset_and_re_enter() -> bool:
+        runs.append("reset")
+        # what _persist_state triggers in production: the update listener runs
+        await coordinator.async_apply_operation_mode(MODE_MORNING_DISCHARGE)
+        return await real_reset()
+
+    coordinator._reset_settings = _reset_and_re_enter
+
+    await coordinator.async_apply_operation_mode(MODE_MORNING_DISCHARGE)
+
+    assert runs == ["reset"], "the teardown ran more than once"
+    assert coordinator.operation_mode == MODE_MORNING_DISCHARGE
+    assert coordinator._switching_mode is False
+
+
+@pytest.mark.asyncio
+async def test_mode_switch_blocks_verification_during_the_reset(mock_hass):
+    """The window is over before the first await, so nothing writes the old target back."""
+    _register_inverter(mock_hass, grid="on")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.is_active = True
+    coordinator.initial_calculated_soc = 65.0
+    coordinator.original_min_soc = DEFAULT_MIN
+    seen: list[bool] = []
+    real_reset = coordinator._reset_settings
+
+    async def _reset_and_verify() -> bool:
+        # a verification run that yielded into the middle of the reset
+        seen.append(coordinator.is_active or coordinator._ending)
+        await coordinator._verify_and_restore_min_soc()
+        return await real_reset()
+
+    coordinator._reset_settings = _reset_and_verify
+
+    await coordinator.async_apply_operation_mode(MODE_MORNING_DISCHARGE)
+
+    assert seen == [True], "the ending guard was not set during the reset"
+    # the verification must not have written the window target back
+    assert not any(
+        c.args[:2] == ("number", "set_value") and c.args[2]["value"] == 65.0
+        for c in mock_hass.services.async_call.await_args_list
+    )

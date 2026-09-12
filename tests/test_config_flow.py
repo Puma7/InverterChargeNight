@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME
 from homeassistant.data_entry_flow import AbortFlow, FlowResultType
 from homeassistant.helpers import entity_registry as er
@@ -298,27 +299,55 @@ async def test_reconfigure_flow_updates_entry(mock_hass, mock_config_entry, enti
 
 
 @pytest.mark.asyncio
-async def test_reconfigure_flow_rejects_another_inverter(
+async def test_reconfigure_flow_rejects_an_inverter_another_entry_drives(
     mock_hass, mock_config_entry, entity_registry
 ):
-    """Pointing this entry at an inverter that belongs elsewhere must not be stored.
-
-    Without the unique-id check two coordinators would drive the same min SOC
-    entity towards opposite targets.
-    """
+    """Two entries must never drive the same min SOC entity towards opposite targets."""
+    other = MagicMock(spec=ConfigEntry)
+    other.entry_id = "other_entry"
+    other.unique_id = ENTITIES_INPUT[CONF_KOSTAL_MIN_SOC_ENTITY]
+    other.data = {CONF_KOSTAL_MIN_SOC_ENTITY: ENTITIES_INPUT[CONF_KOSTAL_MIN_SOC_ENTITY]}
+    mock_hass.config_entries.async_entries.return_value = [mock_config_entry, other]
     mock_hass.config_entries.async_get_known_entry.return_value = mock_config_entry
     flow = _config_flow(
         mock_hass, source=config_entries.SOURCE_RECONFIGURE, entry_id=mock_config_entry.entry_id
     )
 
-    await flow.async_step_reconfigure(ENTITIES_INPUT)  # a different min SOC entity
+    await flow.async_step_reconfigure(ENTITIES_INPUT)
     await flow.async_step_reconfigure_time_soc(TIME_SOC_INPUT)
     await flow.async_step_reconfigure_power(POWER_INPUT)
-    with pytest.raises(AbortFlow) as abort:
-        await flow.async_step_reconfigure_advanced(ADVANCED_INPUT)
+    result = await flow.async_step_reconfigure_advanced(ADVANCED_INPUT)
 
-    assert abort.value.reason == "unique_id_mismatch"
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {CONF_KOSTAL_MIN_SOC_ENTITY: "entity_used_by_other_entry"}
     mock_hass.config_entries.async_update_entry.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_flow_accepts_a_free_inverter(
+    mock_hass, mock_config_entry, entity_registry
+):
+    """Replacing the inverter (new device, renamed entity) must stay possible.
+
+    _abort_if_unique_id_mismatch would refuse this, because it compares against
+    this entry's own id rather than against the other entries.
+    """
+    mock_hass.config_entries.async_entries.return_value = [mock_config_entry]
+    mock_hass.config_entries.async_get_known_entry.return_value = mock_config_entry
+    flow = _config_flow(
+        mock_hass, source=config_entries.SOURCE_RECONFIGURE, entry_id=mock_config_entry.entry_id
+    )
+
+    await flow.async_step_reconfigure(ENTITIES_INPUT)  # a different, unused entity
+    await flow.async_step_reconfigure_time_soc(TIME_SOC_INPUT)
+    await flow.async_step_reconfigure_power(POWER_INPUT)
+    result = await flow.async_step_reconfigure_advanced(ADVANCED_INPUT)
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    stored = mock_hass.config_entries.async_update_entry.call_args.kwargs["data"]
+    assert stored[CONF_KOSTAL_MIN_SOC_ENTITY] == ENTITIES_INPUT[CONF_KOSTAL_MIN_SOC_ENTITY]
+
 
 # --- options -----------------------------------------------------------------
 

@@ -25,6 +25,12 @@ def _real_mode_switch(coordinator) -> None:
     The teardown moved into ``async_apply_operation_mode`` so the options flow
     goes through the same code (finding Q2); the select entity only calls it.
     """
+    # Every attribute of a MagicMock is truthy, which the re-entrancy guard
+    # would read as "a mode switch is already running".
+    coordinator._switching_mode = False
+    coordinator._ending = False
+    coordinator.last_plan = None
+    coordinator.planned_charge_power_w = None
     coordinator.async_apply_operation_mode = partial(
         InverterChargeNightCoordinator.async_apply_operation_mode, coordinator
     )
