@@ -3667,6 +3667,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if self.is_discharge_mode:
             return
+        if self._is_backup_active():
+            # Off the grid there is no import to limit, and backup mode owns the
+            # inverter until it ends.
+            return
         if self.target_reached:
             # The window is not over: the raised floor can still draw power, so
             # the limit is kept current instead of being abandoned here.
