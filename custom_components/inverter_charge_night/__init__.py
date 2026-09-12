@@ -1999,18 +1999,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Error retrying reset: %s", e, exc_info=True)
             self._mark_reset_pending(False)
 
-    def _has_captured_settings(self) -> bool:
-        """Whether anything was captured that a reset would have to restore."""
-        return any(
-            value is not None
-            for value in (
-                self.original_min_soc,
-                self._original_ac_charge_power,
-                self._original_discharge_limit,
-                self._original_absolute_charge_power,
-            )
-        )
-
     async def _reset_settings(self) -> bool:
         """Reset the inverter to its original settings.
 
@@ -2023,13 +2011,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # CRITICAL: Use stored original value if available, otherwise use configured default
         reset_min_soc = self.original_min_soc if self.original_min_soc is not None else float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
         kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-        if kostal_min_soc_entity and not self._has_captured_settings():
-            # Nothing was captured, so this integration never changed the floor:
-            # writing the configured default would clobber a min SOC the user set
-            # by hand (reachable by disabling the integration outside a window).
-            # Switching grid charge and force discharge off below stays safe.
-            _LOGGER.debug("Min SOC restore skipped - no original value was captured")
+        if kostal_min_soc_entity and self.original_min_soc is None:
+            # No floor was captured, so this integration never changed it:
+            # writing the configured default would clobber a min SOC the user
+            # set by hand (reachable by disabling the integration outside a
+            # window, or when the entity was unavailable at window start).
+            # Switching grid charge and force discharge off below stays safe,
+            # as do the limit restores, which carry their own captures.
+            _LOGGER.debug(
+                "Min SOC restore skipped for %s - no original value was captured",
+                kostal_min_soc_entity,
+            )
             kostal_min_soc_entity = None
+            restore_min_soc = False
+        else:
+            restore_min_soc = kostal_min_soc_entity is not None
         kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
 
         ok = True
@@ -2055,7 +2051,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as e:
                 _LOGGER.error("Error resetting min SOC: %s", e, exc_info=True)
                 ok = False
-        else:
+        elif not restore_min_soc and self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY) is None:
             _LOGGER.warning("No min SOC entity configured - cannot reset")
 
         # Turn off grid charge

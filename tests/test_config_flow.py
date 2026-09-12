@@ -345,8 +345,12 @@ async def test_reconfigure_flow_accepts_a_free_inverter(
 
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    stored = mock_hass.config_entries.async_update_entry.call_args.kwargs["data"]
-    assert stored[CONF_KOSTAL_MIN_SOC_ENTITY] == ENTITIES_INPUT[CONF_KOSTAL_MIN_SOC_ENTITY]
+    kwargs = mock_hass.config_entries.async_update_entry.call_args.kwargs
+    assert kwargs["data"][CONF_KOSTAL_MIN_SOC_ENTITY] == ENTITIES_INPUT[CONF_KOSTAL_MIN_SOC_ENTITY]
+    # The unique id has to follow the inverter, otherwise a second entry for the
+    # new entity is not caught and the freed old one is wrongly blocked.
+    # async_set_unique_id alone only writes the flow context, not the entry.
+    assert kwargs["unique_id"] == ENTITIES_INPUT[CONF_KOSTAL_MIN_SOC_ENTITY]
 
 
 # --- options -----------------------------------------------------------------
