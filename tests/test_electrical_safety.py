@@ -412,3 +412,187 @@ async def test_our_own_share_can_never_exceed_the_whole_import(mock_hass):
     assert coordinator.grid_charge_headroom_w == pytest.approx(BUDGET_W - 500)
     assert coordinator.grid_limit_attributes()["other_load_w"] == 0.0
     await coordinator._stop_periodic_verification()
+
+
+# --- 6. Backup / island operation -------------------------------------------
+#
+# The house runs on the battery. There is no grid to charge from, and a raised
+# min SOC would stop the battery from supplying the house - in a power cut, of
+# all moments. The integration has to recognise this and let go of the
+# inverter, whatever the entity happens to call the state.
+
+
+def _backup(hass, state, *, entity=BACKUP, states=None):
+    hass.states.async_set(entity, state)
+    config = {**CONFIG, CONF_BACKUP_MODE_ENTITY: entity}
+    if states is not None:
+        config["backup_mode_states"] = states
+    return _make(hass, config)
+
+
+@pytest.mark.parametrize(
+    "state",
+    ["on", "true", "ESB", "esb", "Inselbetrieb", "Notstrom", "off_grid", "island", "GridSwitchOff"],
+)
+def test_the_states_that_mean_island_operation_are_recognised(mock_hass, state):
+    """Kostal says ESB, others say island, off-grid or Inselbetrieb."""
+    _register(mock_hass)
+    assert _backup(mock_hass, state)._is_backup_active() is True
+
+
+@pytest.mark.parametrize(
+    "state", ["off", "false", "grid", "FeedIn", "Standby", "BatteryCharging", "Netzbetrieb"]
+)
+def test_normal_grid_operation_is_not_mistaken_for_island(mock_hass, state):
+    """The integration must not block itself on a normal inverter state."""
+    _register(mock_hass)
+    assert _backup(mock_hass, state)._is_backup_active() is False
+
+
+def test_declared_states_decide_on_their_own(mock_hass):
+    """A manufacturer nobody has seen: the user names the state."""
+    _register(mock_hass)
+    coordinator = _backup(mock_hass, "17", entity="sensor.inverter_state", states="17, ESB")
+    assert coordinator._is_backup_active() is True
+
+    mock_hass.states.async_set("sensor.inverter_state", "6")
+    assert coordinator._is_backup_active() is False
+
+    # ... and the built-in vocabulary no longer applies once states are declared
+    mock_hass.states.async_set("sensor.inverter_state", "island")
+    assert coordinator._is_backup_active() is False
+
+
+def test_an_unexpected_state_on_a_switch_counts_as_backup(mock_hass, caplog):
+    """A binary entity has no third meaning, so anything else is not "off"."""
+    caplog.set_level(logging.WARNING)
+    _register(mock_hass)
+    coordinator = _backup(mock_hass, "weird", entity="switch.backup")
+    assert coordinator._is_backup_active() is True
+    assert "treating it as backup mode" in caplog.text
+
+
+def test_an_unknown_sensor_state_is_reported_once(mock_hass, caplog):
+    """Guessing either way is wrong; say so with the remedy, once."""
+    caplog.set_level(logging.WARNING)
+    _register(mock_hass)
+    coordinator = _backup(mock_hass, "Wintermodus", entity="sensor.inverter_state")
+
+    assert coordinator._is_backup_active() is False
+    assert "add it to 'Backup mode states'" in caplog.text
+    caplog.clear()
+    assert coordinator._is_backup_active() is False
+    assert caplog.text == ""
+
+
+@pytest.mark.asyncio
+async def test_island_operation_gives_the_battery_back_to_the_house(mock_hass, caplog):
+    """The case this exists for: the lights must not go out.
+
+    A window raised the min SOC to keep stored energy for the day. Then the
+    grid fails and the house is switched to the battery - against that floor
+    the battery would refuse to discharge, and the house would go dark with a
+    full battery.
+    """
+    _register(mock_hass, battery="70")
+    mock_hass.states.async_set(BACKUP, "off")
+    coordinator = _make(mock_hass, {**CONFIG, CONF_BACKUP_MODE_ENTITY: BACKUP})
+    await coordinator._on_window_start(WINDOW_START)
+    assert coordinator.is_active is True
+    assert coordinator.original_min_soc == 8.0
+    assert coordinator._window_floor_soc == 70.0
+    mock_hass.services.async_call.reset_mock()
+
+    # The power cut: the transfer switch goes to island, the inverter says ESB
+    mock_hass.states.async_set(BACKUP, "ESB")
+    await coordinator._check_current_window()
+
+    assert coordinator.is_active is False
+    min_soc_writes = [
+        c.args[2]["value"]
+        for c in mock_hass.services.async_call.await_args_list
+        if c.args[0] == "number" and c.args[2].get("entity_id") == MIN_SOC
+    ]
+    assert min_soc_writes and min_soc_writes[-1] == 8.0, "the floor has to come off at once"
+    assert coordinator._window_floor_soc is None
+    await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_a_window_does_not_start_during_island_operation(mock_hass):
+    _register(mock_hass)
+    mock_hass.states.async_set(BACKUP, "ESB")
+    coordinator = _make(mock_hass, {**CONFIG, CONF_BACKUP_MODE_ENTITY: BACKUP})
+
+    await coordinator._on_window_start(WINDOW_START)
+
+    assert coordinator.is_active is False
+    assert coordinator.original_min_soc is None
+    await coordinator._stop_periodic_verification()
+
+
+def test_feeding_in_is_not_a_negative_grid_import(mock_hass):
+    """A negative meter reading would hand the battery more than is free."""
+    _register(mock_hass)
+    coordinator = _make(mock_hass)
+    coordinator.is_active = True
+    mock_hass.states.async_set(GRID_IMPORT, "-4000", {"unit_of_measurement": "W"})
+    state = mock_hass.states.get(GRID_IMPORT)
+    state.last_reported = INSIDE
+    state.last_updated = state.last_reported
+    state.last_changed = state.last_reported
+
+    coordinator._grid_limited_setpoint(20000.0)
+
+    assert coordinator.grid_limit_attributes()["grid_import_w"] == 0.0
+    assert coordinator.grid_charge_headroom_w == pytest.approx(BUDGET_W - 500)
+
+
+# --- 7. A limit is only in force when the inverter holds it ------------------
+
+
+@pytest.mark.asyncio
+async def test_a_charge_limit_the_inverter_dropped_is_written_again(mock_hass, caplog):
+    """A service call that returns is not proof that anything happened.
+
+    An inverter integration can accept the call and drop it - the Kostal one
+    does exactly that when the inverter is not in external-control mode, and
+    logs it on its own side where this integration never sees it. Believing
+    the limit is in force is the failure the connection protection must not
+    have.
+    """
+    caplog.set_level(logging.WARNING)
+    _register(mock_hass)
+    coordinator = _make(mock_hass)
+    await coordinator._on_window_start(WINDOW_START)
+    coordinator.initial_calculated_soc = 100.0
+    await coordinator._async_update_data()
+    written = coordinator._planned_setpoint_written_w
+    assert written is not None
+
+    # The inverter is back at its own, much higher limit
+    mock_hass.states.async_set(AC_LIMIT, "20000", {"unit_of_measurement": "W"})
+    mock_hass.services.async_call.reset_mock()
+
+    await coordinator._verify_ac_charge_limit()
+
+    assert _ac_writes(mock_hass) == [pytest.approx(written)]
+    assert "not accepting external control" in caplog.text
+    await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_a_lower_limit_than_we_asked_for_is_left_alone(mock_hass):
+    """Less charging is never the dangerous direction."""
+    _register(mock_hass)
+    coordinator = _make(mock_hass)
+    await coordinator._on_window_start(WINDOW_START)
+    coordinator.initial_calculated_soc = 100.0
+    await coordinator._async_update_data()
+    mock_hass.states.async_set(AC_LIMIT, "500", {"unit_of_measurement": "W"})
+    mock_hass.services.async_call.reset_mock()
+
+    await coordinator._verify_ac_charge_limit()
+
+    assert _ac_writes(mock_hass) == []
+    await coordinator._stop_periodic_verification()

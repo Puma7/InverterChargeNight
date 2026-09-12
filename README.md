@@ -507,6 +507,29 @@ Snow nights beat everything, then the manual override, then the planner:
 3. the SOC the planner calculated at the window start (re-planned during the window, but in
    Night Charge mode the target never drops below what was already reached)
 
+### Backup and island operation
+
+A power cut is the one situation in which this integration must let go of the inverter
+completely. There is no grid to charge from, and — far more important — the raised min SOC of a
+running window would stop the battery from supplying the house: the lights would go out with a
+full battery.
+
+Configure **Backup / island mode entity** in step 4 with whatever your installation offers:
+
+- a switch or binary sensor: `on` means island operation;
+- a state sensor: add the states that mean island operation under **Backup mode states**, comma
+  separated. A Kostal inverter reports `ESB` (Ersatzstrombetrieb) in its inverter state;
+- **a manual transfer switch the inverter does not report**: create an `input_boolean`, select
+  it here, and flip it when you switch over. Works with any inverter and any transfer box.
+
+The moment the state appears, the integration ends the running window, restores the inverter's
+own min SOC, switches grid charging off and starts nothing new until grid operation is back. A
+state that is neither recognised nor declared is reported in the log once, with the remedy —
+on a switch or binary sensor it counts as island operation, because a binary entity has no
+third meaning.
+
+Inverter-specific notes for Kostal are in [docs/kostal-kore.md](docs/kostal-kore.md).
+
 ### Efficiency search
 
 Cheap energy is only cheap if it arrives in the battery. A charger that loses 25 % at 2 kW
