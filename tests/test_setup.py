@@ -49,7 +49,9 @@ async def test_async_setup_entry_registers_coordinator(mock_hass, mock_config_en
     with patch(
         "custom_components.inverter_charge_night.InverterChargeNightCoordinator",
         return_value=coordinator,
-    ), patch("custom_components.inverter_charge_night.ir.async_delete_issue"):
+    ), patch(
+        "custom_components.inverter_charge_night.ir.async_delete_issue"
+    ), patch("custom_components.inverter_charge_night.ir.async_get"):
         result = await async_setup_entry(mock_hass, mock_config_entry)
 
     assert result is True
@@ -121,6 +123,8 @@ async def test_async_setup_entry_missing_entity_creates_issue_and_raises(mock_ha
         "custom_components.inverter_charge_night.ir.async_create_issue"
     ) as create_issue, patch(
         "custom_components.inverter_charge_night.ir.async_delete_issue"
+    ), patch(
+        "custom_components.inverter_charge_night.ir.async_get"
     ) as delete_issue:
         with pytest.raises(ConfigEntryNotReady, match=missing):
             await async_setup_entry(mock_hass, mock_config_entry)
@@ -149,6 +153,19 @@ async def test_async_setup_entry_all_entities_present_clears_issues(mock_hass, m
     mock_config_entry.async_on_unload = MagicMock()
     mock_hass.config_entries.async_forward_entry_setups = AsyncMock()
 
+    # One issue for an entity that is available again, one left behind by an
+    # entity nobody configures any more (renamed, or a different inverter
+    # integration). Neither can be dismissed from the repairs page, so both
+    # have to go by themselves.
+    configured = mock_config_entry.data[REQUIRED_ENTITY_KEYS[0]]
+    registry = MagicMock()
+    registry.issues = {
+        (DOMAIN, f"entity_not_available_{configured}"): MagicMock(),
+        (DOMAIN, "entity_not_available_sensor.gone_for_good"): MagicMock(),
+        ("other_domain", "entity_not_available_sensor.not_ours"): MagicMock(),
+    }
+    mock_hass.config_entries.async_entries = MagicMock(return_value=[mock_config_entry])
+
     with patch(
         "custom_components.inverter_charge_night.InverterChargeNightCoordinator",
         return_value=coordinator,
@@ -156,14 +173,16 @@ async def test_async_setup_entry_all_entities_present_clears_issues(mock_hass, m
         "custom_components.inverter_charge_night.ir.async_create_issue"
     ) as create_issue, patch(
         "custom_components.inverter_charge_night.ir.async_delete_issue"
-    ) as delete_issue:
+    ) as delete_issue, patch(
+        "custom_components.inverter_charge_night.ir.async_get", return_value=registry
+    ):
         result = await async_setup_entry(mock_hass, mock_config_entry)
 
     assert result is True
     create_issue.assert_not_called()
-    assert delete_issue.call_count == 3
-    assert [c.args for c in delete_issue.call_args_list] == [
-        (mock_hass, DOMAIN, f"entity_not_available_{mock_config_entry.data[key]}")
-        for key in REQUIRED_ENTITY_KEYS
-    ]
+    cleared = {c.args[2] for c in delete_issue.call_args_list}
+    assert cleared == {
+        f"entity_not_available_{configured}",
+        "entity_not_available_sensor.gone_for_good",
+    }, "an issue of another integration must be left alone"
     assert mock_config_entry.runtime_data is coordinator

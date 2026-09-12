@@ -16,15 +16,19 @@ cost real money if you get them wrong.
 | **PV forecast** (required) | — | Comes from Solcast or another forecast integration, not from the inverter. |
 | **AC charge limit entity** | `Battery Max Charge Limit (Modbus)` (register 1038) or `Battery Max Charge Power (G3)` (register 1280) | See the traps below — this is the entity the house connection limit writes to. |
 | **Charge power arriving in the battery** | `Battery Power` (`devices:local:battery` → `P`, DC side) | |
-| **Charge power drawn for charging** | no direct AC-side sensor | `Home Power from Grid` is the *house* consumption from the grid, not the charger's intake. Use the energy meters below instead. |
+| **Charge power drawn for charging** | **`Grid2Bat_P`** (`devices:local`) | Power flowing from the grid into the battery — exactly the AC-side intake the efficiency search needs. Confirmed present on a PLENTICORE L G3 with firmware 3.07. |
 | **Energy meter: drawn for charging** | `Battery Charge from Grid Total` (kWh) | Exactly the right quantity: grid energy that went into the battery. |
 | **Energy meter: stored in the battery** | not exported as an entity today | KOSTAL KORE reads Modbus `total_dc_charge` (1046) but does not create a sensor for it. Without it the efficiency search falls back to the power sensors. |
 | **Discharge power limit entity** | `Battery Max Discharge Limit (Modbus)` (1040) or `Battery Max Discharge Power (G3)` (1282) | |
 | **Block discharge switch** | `Battery Disable Discharge` (`EnergyMgmt:BatCtrl:DisabelDischarge`) | This is the vendor switch the discharge block prefers over every other way. Hidden by default in KOSTAL KORE. |
-| **Grid import power** | a **meter** entity (KSEM / Power Meter), not `Home Power from Grid` | See the traps. |
-| **Backup / island mode entity** | `Inverter State` with **Backup mode states** set to `ESB` | Kostal reports `ESB` (Ersatzstrombetrieb) in its inverter state. There is no dedicated "island active" entity. |
+| **Grid import power** | `devices:local:powermeter` → **`P`** (the meter's total power), not `Home Power from Grid` | See the traps. The same module also exposes `L1_I` / `L2_I` / `L3_I`, the per-phase currents at the meter — the most direct measure of what the connection carries. |
+| **Backup / island mode entity** | `Inverter:State` with **Backup mode states** set to `ESB` | Kostal reports `ESB` (Ersatzstrombetrieb) in its inverter state; `devices:local` also carries `WorkTimeESB`, the hours spent in island operation, which is a second way to confirm it. There is no dedicated "island active" entity. |
 | **House consumption energy meter** | `Home Consumption Total` (`Statistic:EnergyHome:Total`) | For the bridge planner's load profile. |
 | **Absolute max charge power (AC+DC)** | `Battery Max Charge Power (G3)` (1280) | |
+
+The process data above was read from a real diagnostics download of a PLENTICORE L G3
+(firmware MC 07.00.09358, `pykoplenti` API 0.2.0), so these names exist on that hardware rather
+than being inferred from the code.
 
 ## Traps
 
