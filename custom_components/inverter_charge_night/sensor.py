@@ -28,6 +28,7 @@ async def async_setup_entry(
             CalculatedSOCSensor(coordinator, entry),
             BestChargePowerSensor(coordinator, entry),
             PlannedChargePowerSensor(coordinator, entry),
+            GridChargeHeadroomSensor(coordinator, entry),
         ]
     )
 
@@ -112,3 +113,33 @@ class PlannedChargePowerSensor(InverterChargeNightEntity, SensorEntity):
         """Return the planned setpoint, or None outside a night charge window."""
         value = self.coordinator.planned_charge_power_w
         return float(value) if value is not None else None
+
+
+class GridChargeHeadroomSensor(InverterChargeNightEntity, SensorEntity):
+    """What the house connection still allows the battery (plan 008).
+
+    ``None`` outside a window or without a configured connection limit: the
+    integration is not holding the battery back then, and a number would
+    suggest a limit that is not being applied.
+    """
+
+    _attr_translation_key = "grid_charge_headroom"
+    _attr_native_unit_of_measurement = "W"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "grid_charge_headroom")
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the power the connection still has room for."""
+        value = self.coordinator.grid_charge_headroom_w
+        return float(value) if value is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Show whether the house connection limit is currently braking."""
+        return self.coordinator.grid_limit_attributes()

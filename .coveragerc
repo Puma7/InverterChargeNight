@@ -1,4 +1,4 @@
 [report]
 # Ratchet: measured total over the whole package (no omit), rounded down.
 # May only go up - whoever adds tests raises it. See AGENTS.md "Running tests".
-fail_under = 92
+fail_under = 93

@@ -80,3 +80,22 @@ PLANNED_POWER_WRITE_THRESHOLD_W = 100  # write the charge setpoint only when it 
 # Attributes
 ATTR_SNOW_NIGHTS = "snow_nights"  # nights left in snow mode (charge to user max)
 
+
+# House connection limit (plan 008). Two wallboxes and the battery can run at
+# the same time for the whole six-hour window; that continuous load is what
+# heats meter terminals and fuse contacts. The battery is the only load this
+# integration controls, so it is the one that gives way. Safety feature, not an
+# optimisation: it applies in both planner modes.
+CONF_GRID_IMPORT_ENTITY = "grid_import_entity"  # current grid import in W (or kW)
+CONF_MAIN_FUSE_A = "main_fuse_a"  # main fuse per phase, A
+CONF_GRID_PHASES = "grid_phases"  # 1 or 3
+CONF_GRID_VOLTAGE_V = "grid_voltage_v"  # phase voltage, default 230
+CONF_GRID_CONTINUOUS_PCT = "grid_continuous_pct"  # continuous share of the rating, default 80
+CONF_GRID_MAX_CONTINUOUS_W = "grid_max_continuous_w"  # alternative: the budget directly, in W
+CONF_GRID_HEADROOM_W = "grid_headroom_w"  # safety margin below the budget, default 500
+DEFAULT_GRID_PHASES = 3
+DEFAULT_GRID_VOLTAGE_V = 230
+DEFAULT_GRID_CONTINUOUS_PCT = 80
+DEFAULT_GRID_HEADROOM_W = 500
+GRID_LIMIT_STALE_AFTER_S = 300  # after this the grid import counts as unknown
+GRID_LIMIT_MIN_WRITE_INTERVAL_S = 30  # debounce for the grid import listener
