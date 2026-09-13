@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 from homeassistant.const import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -62,26 +63,11 @@ class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn off the integration and reset settings."""
+        """Turn off the integration and hand the inverter back."""
         if not self.coordinator.is_enabled:
             return
 
-        _LOGGER.info("Disabling Inverter Charge Night")
-        self.coordinator.is_enabled = False
-
-        try:
-            await self.coordinator._reset_settings()
-        except Exception as e:
-            _LOGGER.error("Error resetting settings while disabling: %s", e, exc_info=True)
-        self.coordinator.is_active = False
-        self.coordinator.override_soc = None
-        self.coordinator.initial_calculated_soc = None
-        self.coordinator.minimum_calculated_soc = None
-        self.coordinator._remove_battery_soc_listener()
-        self.coordinator._remove_inverter_min_soc_listener()
-        self.coordinator._remove_grid_import_listener()
-        await self.coordinator._stop_periodic_verification()
-        self.coordinator._persist_state()
+        await self.coordinator.async_disable()
         self.async_write_ha_state()
 
 
@@ -112,7 +98,6 @@ class SkipNextSwitch(InverterChargeNightEntity, SwitchEntity):
 
         if self.coordinator.is_active:
             _LOGGER.info("Currently active - ending window due to skip next")
-            from homeassistant.util import dt as dt_util
             await self.coordinator._on_window_end(dt_util.now())
 
         self.async_write_ha_state()

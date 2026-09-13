@@ -480,8 +480,15 @@ async def test_set_ac_charge_limit_skips_write_without_readable_original(mock_ha
 
 
 @pytest.mark.asyncio
-async def test_finder_completion_keeps_best_power(mock_hass):
-    """The finder's final best value stays on the inverter; only test values are restored."""
+async def test_finder_completion_writes_the_best_power_and_keeps_the_original(mock_hass):
+    """The result is written, and the user's own limit stays recoverable.
+
+    It used to be dropped ("the best value is meant to stay on the inverter"),
+    which had a nasty consequence: that final write goes through the house
+    connection limit like every other one, so a wallbox running at the wrong
+    moment left a throttled value on the inverter for good - with the user's
+    own value gone. The result now lives on as the planner's ceiling instead.
+    """
     mock_hass.states.async_set(GRID, "on")
     mock_hass.states.async_set(AC_LIMIT, "8000", {"unit_of_measurement": "W"})
     coordinator = _make_coordinator(
@@ -503,9 +510,14 @@ async def test_finder_completion_keeps_best_power(mock_hass):
         "number", "set_value", {"entity_id": AC_LIMIT, "value": 6000.0}
     )
     assert coordinator.auto_efficient_charge is False
-    assert coordinator._original_ac_charge_power is None
+    assert coordinator._original_ac_charge_power == 8000.0, "the user's value is still known"
+
+    # ... and the window end really puts it back
     assert await coordinator._reset_ac_charge_limit() is True
-    mock_hass.services.async_call.assert_awaited_once()
+    assert mock_hass.services.async_call.await_args.args[2] == {
+        "entity_id": AC_LIMIT,
+        "value": 8000.0,
+    }
 
 
 # Absolute charge power and self-marking resets (findings B3, B4, B5, B11) ------

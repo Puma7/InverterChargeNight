@@ -265,6 +265,9 @@ async def test_schedule_skip_next_expiry_persists_deadline_and_expiry(mock_hass,
 
     mock_hass.config_entries.async_update_entry = MagicMock(side_effect=_update)
     coord = InverterChargeNightCoordinator(mock_hass, mock_config_entry)
+    # The timer is armed in the constructor and has to survive a setup that
+    # fails after it, so the expiry only acts for the entry's live coordinator.
+    mock_config_entry.runtime_data = coord
     coord._check_current_window = AsyncMock()
     now = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
     deadline = now + timedelta(hours=24)
@@ -288,3 +291,30 @@ async def test_schedule_skip_next_expiry_persists_deadline_and_expiry(mock_hass,
     assert coord._skip_next_unsub is None
     assert mock_config_entry.options[CONF_RUNTIME_STATE]["skip_next_until"] is None
     coord._check_current_window.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_skip_next_expiry_does_nothing_on_a_discarded_coordinator(
+    mock_hass, mock_config_entry
+):
+    """A 24-hour timer outlives a setup that failed after the constructor.
+
+    ConfigEntryNotReady retries for as long as the entity is missing, so the
+    timer can fire on a coordinator the entry never adopted - it must not then
+    write the options of an entry that is not loaded.
+    """
+    mock_hass.config_entries.async_update_entry = MagicMock()
+    coord = InverterChargeNightCoordinator(mock_hass, mock_config_entry)
+    coord._check_current_window = AsyncMock()
+    coord.skip_next = True
+    mock_config_entry.runtime_data = object()  # another coordinator took over
+
+    with patch(CALL_LATER, return_value=MagicMock()) as later:
+        coord._schedule_skip_next_expiry()
+    mock_hass.config_entries.async_update_entry.reset_mock()
+
+    await later.call_args.args[2](datetime(2026, 1, 16, 12, 0, tzinfo=timezone.utc))
+
+    assert coord.skip_next is True
+    coord._check_current_window.assert_not_awaited()
+    mock_hass.config_entries.async_update_entry.assert_not_called()

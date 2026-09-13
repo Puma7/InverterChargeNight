@@ -235,10 +235,7 @@ async def test_snow_nights_number_zero_clears_snow_mode_and_clamps_negative():
 async def test_inverter_charge_night_switch_on_off():
     coordinator = MagicMock()
     coordinator.is_enabled = False
-    coordinator._reset_settings = AsyncMock()
-    coordinator._remove_battery_soc_listener = MagicMock()
-    coordinator._remove_inverter_min_soc_listener = MagicMock()
-    coordinator._stop_periodic_verification = AsyncMock()
+    coordinator.async_disable = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
     entry = _make_entry()
     switch = InverterChargeNightSwitch(coordinator, entry)
@@ -249,14 +246,10 @@ async def test_inverter_charge_night_switch_on_off():
     assert coordinator.is_enabled is True
     coordinator.async_request_refresh.assert_awaited()
 
+    # The teardown itself lives in the coordinator, so the switch and the
+    # window end cannot drift apart (see test_disable_tears_the_window_down).
     await switch.async_turn_off()
-    coordinator._reset_settings.assert_awaited()
-    coordinator._remove_battery_soc_listener.assert_called_once()
-    coordinator._remove_inverter_min_soc_listener.assert_called_once()
-    # The grid import listener would otherwise keep writing charge limits after
-    # the user has switched the integration off.
-    coordinator._remove_grid_import_listener.assert_called_once()
-    coordinator._stop_periodic_verification.assert_awaited_once()
+    coordinator.async_disable.assert_awaited_once()
 
     await switch.async_turn_on()
     await switch.async_turn_on()
@@ -278,21 +271,25 @@ async def test_inverter_charge_night_switch_turn_off_when_disabled():
 
 
 @pytest.mark.asyncio
-async def test_inverter_charge_night_switch_reset_error_handled():
-    coordinator = MagicMock()
-    coordinator.is_enabled = True
-    coordinator._reset_settings = AsyncMock(side_effect=Exception("boom"))
-    coordinator._remove_battery_soc_listener = MagicMock()
-    coordinator._remove_inverter_min_soc_listener = MagicMock()
-    coordinator._stop_periodic_verification = AsyncMock()
+async def test_inverter_charge_night_switch_reset_error_handled(mock_hass):
+    """A failed reset must still leave the integration switched off."""
+    from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+
+    mock_hass.states.async_set("number.min_soc", "8")
     entry = _make_entry()
+    entry.data = {"kostal_min_soc_entity": "number.min_soc"}
+    entry.options = {}
+    coordinator = InverterChargeNightCoordinator(mock_hass, entry)
+    coordinator.original_min_soc = 8.0
+    coordinator._reset_settings = AsyncMock(side_effect=Exception("boom"))
     switch = InverterChargeNightSwitch(coordinator, entry)
-    switch.hass = MagicMock()
+    switch.hass = mock_hass
     switch.async_write_ha_state = MagicMock()
 
     await switch.async_turn_off()
 
     assert coordinator.is_enabled is False
+    assert coordinator._ending is False, "a failed reset must not leave the coordinator ending"
 
 
 @pytest.mark.asyncio

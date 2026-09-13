@@ -293,6 +293,75 @@ def test_the_search_skips_a_power_it_cannot_measure(mock_hass, finder):
     assert candidate not in (8300, 12700)
 
 
+def test_an_unmeasurable_power_narrows_the_interval_instead_of_ending_the_search(
+    mock_hass, finder
+):
+    """Ending there would keep a far-from-optimal best for good.
+
+    Both golden-section points being unmeasurable used to mean "done", with
+    large unexplored stretches left in the interval and whatever had been
+    measured so far written to the inverter as the optimum.
+    """
+    options = dict(finder.entry.options)
+    options[CONF_AUTO_EFFICIENCY_DATA] = {
+        "history": {},
+        "failed": {str(c): AUTO_TEST_MAX_ATTEMPTS for c in (8300, 12700)},
+    }
+    finder.entry.options = options
+
+    candidate = finder._select_next_auto_test_power_w()
+
+    assert candidate is not None, "the search must carry on"
+    assert candidate not in (8300, 12700)
+    # ... and the interval really moved, so the next round asks something new
+    narrowed = finder.get_auto_efficiency_data()
+    assert narrowed["range_min_w"] > 1000 or narrowed["range_max_w"] < 20000
+
+
+def test_the_search_ends_only_when_the_interval_is_exhausted(mock_hass, finder):
+    options = dict(finder.entry.options)
+    options[CONF_AUTO_EFFICIENCY_DATA] = {
+        "history": {},
+        "range_min_w": 9000,
+        "range_max_w": 9050,
+    }
+    finder.entry.options = options
+
+    assert finder._select_next_auto_test_power_w() is None
+
+
+def test_many_measured_points_do_not_end_the_search_early(mock_hass, finder):
+    """The old five-round cap could report "done" with the interval still open."""
+    options = dict(finder.entry.options)
+    options[CONF_AUTO_EFFICIENCY_DATA] = {
+        # A dense history: every round finds both points measured and narrows
+        "history": {str(p): 0.1 + (p - 1000) / 200000 for p in range(1000, 20001, 100)},
+    }
+    finder.entry.options = options
+
+    candidate = finder._select_next_auto_test_power_w()
+    data = finder.get_auto_efficiency_data()
+
+    assert candidate is None
+    # Narrowed until the two golden-section points sit on the interval bounds
+    assert data["range_max_w"] - data["range_min_w"] <= 200
+
+
+def test_an_impossible_power_range_is_reported_once(mock_hass, caplog):
+    caplog.set_level(logging.WARNING)
+    _power(mock_hass, 0, 0)
+    mock_hass.states.async_set(AC_LIMIT, "6000", {"unit_of_measurement": "W"})
+    coordinator = _make(
+        mock_hass, {**CONFIG, CONF_MIN_CHARGE_POWER_W: 9000, CONF_MAX_CHARGE_POWER_W: 9000}
+    )
+
+    assert coordinator._select_next_auto_test_power_w() is None
+    assert "nothing to search" in caplog.text
+    caplog.clear()
+    assert coordinator._select_next_auto_test_power_w() is None
+    assert caplog.text == ""
+
+
 # --- 4. Energy meters --------------------------------------------------------
 
 

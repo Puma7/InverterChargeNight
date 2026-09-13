@@ -224,3 +224,16 @@ LEGACY_UNUSED_OPTION_KEYS: tuple[str, ...] = ("charge_session_data",)
 AUTO_EFFICIENCY_KEYS: frozenset[str] = frozenset(
     {"history", "best_power_w", "best_loss", "range_min_w", "range_max_w", "failed", "bounds_w"}
 )
+
+
+# Units this integration accepts on an energy sensor. One list, because two
+# that disagree silently change which sensors work where.
+ENERGY_UNITS_KWH: frozenset[str] = frozenset(
+    {"kwh", "kilowatthour", "kilowatthours", "kilowatt_hour", "kilowatt-hour"}
+)
+ENERGY_UNITS_WH: frozenset[str] = frozenset(
+    {"wh", "watthour", "watthours", "watt_hour", "watt-hour"}
+)
+ENERGY_UNITS_MWH: frozenset[str] = frozenset(
+    {"mwh", "megawatthour", "megawatthours", "megawatt_hour", "megawatt-hour"}
+)

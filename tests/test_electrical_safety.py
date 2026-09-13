@@ -596,3 +596,59 @@ async def test_a_lower_limit_than_we_asked_for_is_left_alone(mock_hass):
 
     assert _ac_writes(mock_hass) == []
     await coordinator._stop_periodic_verification()
+
+
+# --- 8. Switching the integration off ---------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_disable_tears_the_window_down(mock_hass):
+    """Switching off has to undo everything a window set up.
+
+    The switch used to repeat part of the window-end teardown and miss the
+    rest: the efficiency sampler kept its listener and went on integrating
+    into a measurement nobody would ever finish, and the raised min SOC floor
+    stayed in memory - where the next window would have picked it up as its
+    own starting floor.
+    """
+    _register(mock_hass, battery="70")
+    mock_hass.states.async_set(SENT := "sensor.charge_sent", "0", {"unit_of_measurement": "W"})
+    mock_hass.states.async_set(RECEIVED := "sensor.charge_recv", "0", {"unit_of_measurement": "W"})
+    coordinator = _make(
+        mock_hass,
+        {
+            **CONFIG,
+            "charge_power_sent_entity": SENT,
+            "charge_power_received_entity": RECEIVED,
+        },
+    )
+    await coordinator._on_window_start(WINDOW_START)
+    coordinator.initial_calculated_soc = 60.0
+    await coordinator._start_auto_test(5000)
+    assert coordinator._auto_test_active is True
+    assert coordinator._auto_sample_listener is not None
+    assert coordinator._window_floor_soc == 70.0
+
+    await coordinator.async_disable()
+
+    assert coordinator.is_enabled is False
+    assert coordinator.is_active is False
+    assert coordinator._auto_test_active is False
+    assert coordinator._auto_sample_listener is None, "the sampler would keep integrating"
+    assert coordinator._window_floor_soc is None, "the next window must start its own floor"
+    assert coordinator._window_started_at is None
+    assert coordinator.target_reached is False
+    assert coordinator.original_min_soc is None, "the inverter got its own value back"
+    assert coordinator._ending is False
+
+
+@pytest.mark.asyncio
+async def test_disabling_twice_changes_nothing(mock_hass):
+    _register(mock_hass)
+    coordinator = _make(mock_hass)
+    await coordinator.async_disable()
+    mock_hass.services.async_call.reset_mock()
+
+    await coordinator.async_disable()
+
+    assert mock_hass.services.async_call.await_count == 0

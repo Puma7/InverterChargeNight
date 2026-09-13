@@ -880,3 +880,65 @@ async def test_unload_during_the_window_drops_the_raised_floor(mock_hass, coordi
     assert _min_soc_writes(mock_hass) == [DEFAULT_MIN]
     assert coordinator._window_floor_soc is None
     assert _runtime_state(coordinator)["window_floor_soc"] is None
+
+
+# 9. The floor and what the user asks for -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_lowering_the_override_frees_the_floor(mock_hass, coordinator):
+    """Otherwise the battery stays blocked at the old level until the window ends.
+
+    The floor rises on its own to keep the charge the window bought, but the
+    user lowering the target by hand is asking for the opposite - and nothing
+    in the UI would explain why the battery still refuses to discharge.
+    """
+    from custom_components.inverter_charge_night.number import MinSOCOverrideNumber
+
+    await coordinator._on_window_start(WINDOW_START)
+    assert coordinator._window_floor_soc == ABOVE_TARGET
+
+    number = MinSOCOverrideNumber(coordinator, coordinator.entry)
+    number.hass = mock_hass
+    number.async_write_ha_state = MagicMock()
+    await number.async_set_native_value(30.0)
+
+    assert coordinator._window_floor_soc == 30.0
+    assert coordinator.inverter_floor_soc() == 30.0
+
+
+@pytest.mark.asyncio
+async def test_raising_the_override_leaves_the_floor_alone(mock_hass, coordinator):
+    """Only a lowering frees it; upwards the charge target does the work."""
+    from custom_components.inverter_charge_night.number import MinSOCOverrideNumber
+
+    await coordinator._on_window_start(WINDOW_START)
+    number = MinSOCOverrideNumber(coordinator, coordinator.entry)
+    number.hass = mock_hass
+    number.async_write_ha_state = MagicMock()
+
+    await number.async_set_native_value(90.0)
+
+    assert coordinator._window_floor_soc == ABOVE_TARGET
+    assert coordinator.inverter_floor_soc() == 90.0
+
+
+@pytest.mark.asyncio
+async def test_calling_off_snow_mode_frees_the_floor(mock_hass, coordinator):
+    """Snow mode charges to the maximum and the floor follows it up."""
+    from custom_components.inverter_charge_night.number import SnowNightsNumber
+
+    await coordinator._on_window_start(WINDOW_START)
+    coordinator.snow_nights = 2
+    mock_hass.states.async_set(BATTERY, "100")
+    coordinator.target_reached = True  # charging is over, so the floor may follow
+    coordinator._update_window_floor()
+    assert coordinator._window_floor_soc == 100.0
+
+    number = SnowNightsNumber(coordinator, coordinator.entry)
+    number.hass = mock_hass
+    number.async_write_ha_state = MagicMock()
+    await number.async_set_native_value(0)
+
+    assert coordinator._window_floor_soc == coordinator.current_target_soc()
+    assert coordinator._window_floor_soc < 100.0
