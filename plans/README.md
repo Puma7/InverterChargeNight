@@ -273,6 +273,53 @@ von KostalKore mehrere Besitzer (Grid-Feed-In-Optimizer, SoC-Controller, Ladespe
 die sich mit uns überschreiben würden; und `Home Power from Grid` ist der Hausverbrauch aus dem
 Netz, **nicht** der Bezug am Hausanschluss — für die Anschlussgrenze muss der Zähler (KSEM) her.
 
+### 2.9 Nachtrag 2026-09-13: Externer Review — geprüft, widerlegt, behoben
+
+Ein externer Bericht (13 Befunde: M1–M6, L1–L14) wurde Punkt für Punkt am Code nachgeprüft.
+**Elf Befunde waren valide und sind behoben**, zwei Aussagen waren falsch, drei bleiben bewusst
+offen.
+
+| Befund | Prüfung | Status |
+|---|---|---|
+| M1 toter Re-Arm-Pfad für den Ladestands-Listener | **bestätigt**: `async_update_entry` tauscht `coordinator.config` **vor** `update_time_triggers`, also ist `old == new` immer. Bei Entitätswechsel im laufenden Fenster lauscht der Listener bis zum Fensterende auf die alte Entität | behoben: der alte Wert wird vor dem Tausch erfasst und übergeben |
+| M2 Ausschalter räumt den Effizienztest nicht auf | **bestätigt**, und schwerer als beschrieben: auch `_window_floor_soc` blieb stehen und wäre vom nächsten Fenster als eigener Startboden übernommen worden | behoben: `async_disable()` im Coordinator, ein Teardown für Schalter und Fensterende |
+| M3 Effizienzsuche endet zu früh und lässt einen Zufallswert stehen | **bestätigt** in allen vier Punkten. Am schwersten: der Abschluss-Schreibvorgang läuft durch die Anschlussgrenze, und weil danach der Originalwert verworfen wurde, blieb ein zufällig gedrosselter Wert dauerhaft am Wechselrichter — der Nutzerwert war weg | behoben: unmessbare Punkte verengen das Intervall, die Suche endet erst bei Erschöpfung, der Originalwert bleibt erhalten (das Ergebnis wirkt über den Planer-Deckel), Fehlkonfiguration warnt einmal |
+| M4 Datumsbereich schneidet Fenster / verliert die erste Nacht | **bestätigt** für den Start (die Nacht vor dem Startdatum verliert alles nach Mitternacht, weil es keinen Trigger gibt). Die Kappung am Ende ist dagegen **richtig**: ein Tarifzeitraum endet um 00:00 | behoben: Prüfung an der Datumsgrenze, wenn ein Bereich konfiguriert ist — beide Richtungen jetzt punktgenau statt bis zu 15 min verspätet |
+| M5 Floor-Write ohne Fehlerbehandlung im Entlademodus | **bestätigt**: der einzige ungeschützte Service-Call; ein Fehlschlag riss „Netzladung aus" und „Zwangsentladung an" mit | behoben |
+| M6 Monotoner Boden ignoriert eine Senkung durch den Nutzer | **bestätigt**: Override runter oder Schnee-Nächte auf 0 ließen den Boden oben; der Speicher blieb bis Fensterende blockiert | behoben: `release_window_floor_to()`, von beiden Zahl-Entitäten aufgerufen |
+| L1 Einheitenlisten inkonsistent | bestätigt | behoben: eine gemeinsame Liste in `const.py` |
+| L4 `device_class BATTERY` für einen Ziel-SOC | bestätigt | behoben |
+| L5 `"23:59:99"` galt als gültig | bestätigt | behoben |
+| L6 Docstring beschrieb die Zeitarithmetik falsch | bestätigt | behoben |
+| L7 Import mitten in einer Methode | bestätigt | behoben |
+| L8 Skip-Timer feuert auf verworfenem Coordinator | bestätigt (eng, aber real) | behoben |
+| L9 `command_delay` außerhalb des try | bestätigt | behoben |
+| L11 Dev-Abhängigkeit erlaubte HA 2024.4 | bestätigt | behoben: auf 2025.2.0 angehoben |
+| L13 Gedrosselter Testpfad schrieb jeden Poll denselben Wert | bestätigt | behoben |
+| L14 Verifikationsintervall wurde nur einmal gelesen | bestätigt | behoben |
+
+**Falsifiziert:**
+
+- „`_enforce_grid_limit_now` komplett ungetestet (Backup-Guard, Debounce-Return, Write-Pfad)" —
+  nachweislich falsch. Ungedeckt sind vier defensive `return`-Zeilen; Backup-Guard und Write-Pfad
+  sind durch `test_backup_mode_stops_the_limit_from_writing_after_the_target` und
+  `test_the_limit_stays_on_the_inverter_after_the_target_is_reached` abgedeckt.
+- „Lokal getestet mit HA 2025.1.4" — das liegt **unter** der deklarierten Mindestversion 2025.2.0
+  (`hacs.json`). Ein grüner Lauf dort belegt nichts über die unterstützten Versionen.
+
+**Bewusst offen:**
+
+- L2 (Options-Dialog: ein Feld auf den Öffnungswert zurückzusetzen gilt als „nicht angefasst") —
+  ohne Dirty-Tracking pro Feld nicht unterscheidbar; der Bericht sagt das selbst.
+- L3 (Entprellung koppelt an jeden Schreibvorgang) — bei sekündlich meldenden Zählern ohne
+  Wirkung; eine getrennte Entprellung wäre mehr Zustand für weniger Sicherheit.
+- L10 (unbekannter Zustand eines Sensors gilt als Netzbetrieb) — dokumentierte Entscheidung:
+  anders herum würde ein einziger unbekannter Zustand die Integration dauerhaft lahmlegen.
+
+Bei der Umsetzung fiel ein eigener Fehler auf: `_as_float(wert) or default` verwirft eine
+konfigurierte **0** (Befehlsverzögerung, Abfrageintervall). Der Testlauf hat ihn sofort gefangen;
+beide Stellen prüfen jetzt explizit auf `None`.
+
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 
 - **010 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des Config-Entrys, tägliche Neubestimmung.

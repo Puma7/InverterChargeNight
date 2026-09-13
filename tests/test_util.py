@@ -18,3 +18,12 @@ def test_parse_time_str_accepts_seconds():
     assert parse_time_str("22:30:15") == (22, 30)
     assert parse_time_str("12") is None
     assert parse_time_str("1:2:3:4") is None
+
+
+def test_an_impossible_seconds_value_makes_the_time_invalid():
+    """Dropping the seconds must not turn a corrupt value into a valid time."""
+    from custom_components.inverter_charge_night.util import parse_time_str
+
+    assert parse_time_str("23:59:59") == (23, 59)
+    assert parse_time_str("23:59:99") is None
+    assert parse_time_str("23:59:-1") is None

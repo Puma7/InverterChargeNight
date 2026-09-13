@@ -81,6 +81,9 @@ class MinSOCOverrideNumber(InverterChargeNightEntity, NumberEntity):
         value = clamped_value
         self.coordinator.override_soc = value
         self.coordinator.target_reached = False
+        # Lowering the target by hand has to free the discharge-block floor too,
+        # or the battery stays blocked at the old level until the window ends.
+        self.coordinator.release_window_floor_to(value)
         
         if self.coordinator.minimum_calculated_soc is None or value < self.coordinator.minimum_calculated_soc:
             self.coordinator.minimum_calculated_soc = value
@@ -126,6 +129,11 @@ class SnowNightsNumber(InverterChargeNightEntity, NumberEntity):
         if nights > 0:
             # The target moved up: let the update loop charge again
             self.coordinator.target_reached = False
+        else:
+            # Snow mode charged to the maximum and the floor followed. Calling
+            # it off has to free that floor, or the battery stays blocked near
+            # full until the window ends.
+            self.coordinator.release_window_floor_to(self.coordinator.current_target_soc())
         self.coordinator._persist_state()
         self.async_write_ha_state()
 

@@ -48,7 +48,9 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
 
     _attr_translation_key = "calculated_soc"
     _attr_native_unit_of_measurement = "%"
-    _attr_device_class = SensorDeviceClass.BATTERY
+    # Deliberately no BATTERY device class: this is the level the planner is
+    # aiming for, not the level of a battery. Declared as one it would show up
+    # in battery cards and low-battery automations as if it were a reading.
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:

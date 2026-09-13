@@ -28,6 +28,7 @@ from .const import (
     CONF_OPERATION_MODE,
     CONF_UPDATE_INTERVAL,
     CONF_COMMAND_DELAY,
+    DEFAULT_COMMAND_DELAY,
     BACKUP_ACTIVE_STATES,
     BACKUP_INACTIVE_STATES,
     CONF_BACKUP_MODE_ENTITY,
@@ -104,6 +105,9 @@ from .const import (
     MODE_MORNING_DISCHARGE,
     DOMAIN,
     AUTO_EFFICIENCY_KEYS,
+    ENERGY_UNITS_KWH,
+    ENERGY_UNITS_MWH,
+    ENERGY_UNITS_WH,
     LEGACY_HOUSE_LOAD_ENERGY_ENTITY,
     LEGACY_UNUSED_DATA_KEYS,
     LEGACY_UNUSED_OPTION_KEYS,
@@ -319,6 +323,9 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     # Store old window times before update for comparison
     old_start_time = coordinator.config.get(CONF_START_TIME, DEFAULT_START_TIME)
     old_end_time = coordinator.config.get(CONF_END_TIME, DEFAULT_END_TIME)
+    # Captured before the swap below: afterwards it is the new value, and the
+    # listener that watches the old entity would never be re-armed.
+    old_battery_soc_entity = coordinator.config.get(CONF_BATTERY_SOC_ENTITY)
     
     # The mode owns the window: a window still running in the old mode has to be
     # torn down before the new mode takes over, otherwise the options dialog
@@ -342,7 +349,7 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     
     # Update time triggers with new configuration
     try:
-        coordinator.update_time_triggers()
+        coordinator.update_time_triggers(previous_soc_entity=old_battery_soc_entity)
         coordinator._setup_backup_mode_listener()
     except Exception as e:
         _LOGGER.error("Error updating time triggers: %s", e, exc_info=True)
@@ -472,6 +479,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _grid_stale_logged: bool = False
     _grid_own_draw_logged: bool = False
     _backup_unreadable_logged: bool = False
+    _auto_range_warned: bool = False
     _grid_plan_request_w: float | None = None
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -548,6 +556,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_stale_logged = False
         self._grid_own_draw_logged = False
         self._backup_unreadable_logged = False
+        self._auto_range_warned = False
         self._backup_unknown_logged: set[str] = set()
         self._grid_plan_request_w = None
         # Discharge block (plan 009). The floor is the highest battery SOC seen
@@ -761,6 +770,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._skip_next_until = until
 
         async def _expire_skip_next(_now: datetime) -> None:
+            if self._unloading or not self._is_the_live_coordinator():
+                # Armed in the constructor, so it survives a setup that failed
+                # afterwards. Writing the options of an entry that never loaded
+                # helps nobody.
+                _LOGGER.debug("Skip next expired on a coordinator that is no longer in use")
+                return
             _LOGGER.info("Skip next expired")
             self.skip_next = False
             self._skip_next_until = None
@@ -792,11 +807,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         The end minute itself still belongs to the window (``_is_time_between``
         is inclusive), so an end time equal to the current minute is today's.
 
-        The result carries ``now``'s own tzinfo, so subtracting the two is
-        wall-clock arithmetic and the remaining window stays inside
-        [0 h, 24 h) across a DST change as well. What it cannot express is the
-        repeated hour of a fall-back, where the end minute occurs twice;
-        ``_plan_charge_power`` guards the resulting near-zero remainder.
+        The result carries ``now``'s own tzinfo, so subtracting the two gives
+        the time that will really pass - one hour less across a spring-forward,
+        one hour more across a fall-back - which is what the charge power has
+        to be planned against. What it cannot express is the repeated hour of a
+        fall-back, where the end minute occurs twice; ``_plan_charge_power``
+        guards the resulting near-zero remainder.
         """
         _, end = self._window_times()
         end_dt = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
@@ -849,11 +865,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             value = _as_float(state.state)
             if value is not None:
                 unit = _unit_of(state)  # unit rules are described in the docstring
-                if unit in ("wh", "watthour", "watthours"):
+                if unit in ENERGY_UNITS_WH:
                     energy = value / 1000.0
-                elif unit in ("kwh", "kilowatthour", "kilowatthours"):
+                elif unit in ENERGY_UNITS_KWH:
                     energy = value
-                elif unit in ("mwh", "megawatthour", "megawatthours"):
+                elif unit in ENERGY_UNITS_MWH:
                     energy = value * 1000.0
                 elif unit:
                     # Not an energy unit we understand (e.g. W, kW): do not guess,
@@ -1345,6 +1361,27 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return not self.target_reached
         state = self.hass.states.get(str(switch))
         return state is not None and state.state == "on"
+
+    def release_window_floor_to(self, target_soc: float | None) -> None:
+        """Let the discharge-block floor follow a target the user lowered.
+
+        The floor only ever rises on its own - that is what keeps the charge
+        the window bought. But when the user lowers the target by hand, they
+        are asking for the opposite, and a floor left above it would hold the
+        battery blocked until the window ends with no way to tell why.
+        """
+        if target_soc is None or self._window_floor_soc is None:
+            return
+        if self._window_floor_soc <= target_soc:
+            return
+        _LOGGER.info(
+            "Lowering the discharge-block floor from %.1f%% to %.1f%%: the target was "
+            "lowered by hand",
+            self._window_floor_soc,
+            target_soc,
+        )
+        self._window_floor_soc = target_soc
+        self._persist_state()
 
     def _discharge_block_switch_target(self) -> tuple[str, str] | None:
         """Return (entity_id, domain) of the discharge block switch, or None."""
@@ -1954,10 +1991,27 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return int(round(value_w / step_w) * step_w)
 
     def _select_next_auto_test_power_w(self) -> int | None:
-        """Select next power setpoint for auto efficiency testing."""
+        """The next charge power to measure, or None when the search is over.
+
+        Golden-section search over [range_min, range_max]. None means one thing
+        only: there is nothing left to learn, because the interval is down to
+        one step. A point that cannot be measured - the battery is full before
+        the measurement completes, or the inverter never followed the setpoint -
+        narrows the interval like a measured one instead of ending the search,
+        which would otherwise stop with large unexplored stretches and keep a
+        far-from-optimal "best" for good.
+        """
         min_w = int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000))
         max_w = int(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000))
         if min_w >= max_w:
+            if not self._auto_range_warned:
+                _LOGGER.warning(
+                    "The efficiency search has nothing to search: minimum charge power "
+                    "(%d W) is not below the maximum (%d W)",
+                    min_w,
+                    max_w,
+                )
+                self._auto_range_warned = True
             return None
 
         step_w = 100  # 0.1 kW precision
@@ -1975,29 +2029,56 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
 
         phi = (math.sqrt(5) - 1) / 2  # golden ratio
-        for _ in range(5):
+        # Each round removes at least one step from the interval, so this
+        # terminates; the bound is only a guard against a mistake in the
+        # arithmetic above.
+        for _ in range((max_w - min_w) // step_w + 2):
+            if range_max - range_min < step_w:
+                return None
             c = self._round_power_step(range_max - phi * (range_max - range_min), step_w)
             d = self._round_power_step(range_min + phi * (range_max - range_min), step_w)
             c = max(range_min, min(range_max, c))
             d = max(range_min, min(range_max, d))
             if c == d:
                 d = min(range_max, c + step_w)
+
+            def _narrow(new_min: int, new_max: int) -> bool:
+                """Store the new interval; False when it did not actually shrink."""
+                if (new_min, new_max) == (
+                    int(data.get("range_min_w", min_w)),
+                    int(data.get("range_max_w", max_w)),
+                ):
+                    return False
+                data["range_min_w"] = new_min
+                data["range_max_w"] = new_max
+                self._save_auto_efficiency_data(data)
+                return True
+
+            if c in unmeasurable:
+                # Not measurable here, and it will not become measurable on
+                # another night: take it out of the interval and carry on.
+                range_min = min(c + step_w, range_max)
+                if not _narrow(range_min, range_max):
+                    return None
+                continue
+            if d in unmeasurable:
+                range_max = max(d - step_w, range_min)
+                if not _narrow(range_min, range_max):
+                    return None
+                continue
             if c in history and d in history:
                 if history[c] <= history[d]:
                     range_max = d
                 else:
                     range_min = c
-                data["range_min_w"] = range_min
-                data["range_max_w"] = range_max
-                self._save_auto_efficiency_data(data)
+                if not _narrow(range_min, range_max):
+                    # The two points have converged on the interval bounds:
+                    # there is no third point between them left to ask for.
+                    return None
                 continue
-            if c not in history and c not in unmeasurable:
+            if c not in history:
                 return c
-            if d not in history and d not in unmeasurable:
-                return d
-            if c in unmeasurable or d in unmeasurable:
-                # Nothing more to learn between these two points
-                return None
+            return d
         return None
 
     def _reset_auto_test_state(self) -> None:
@@ -2060,13 +2141,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._grid_limit_configured():
             allowed = self._grid_limited_setpoint(float(power_w))
             if allowed < power_w - PLANNED_POWER_WRITE_THRESHOLD_W:
+                written = self._planned_setpoint_written_w
+                if written is not None and abs(written - allowed) <= PLANNED_POWER_WRITE_THRESHOLD_W:
+                    # Already capped at this value: writing it again every poll
+                    # is a Modbus write and a log line for nothing.
+                    return
                 _LOGGER.info(
                     "Not testing the efficiency at %d W: the house connection carries "
                     "only %d W right now",
                     power_w,
                     int(allowed),
                 )
-                await self._set_ac_charge_limit_w(int(allowed))
+                if await self._set_ac_charge_limit_w(int(allowed)):
+                    self._planned_setpoint_written_w = allowed
                 return
         await self._set_ac_charge_limit_w(power_w)
         self._auto_test_active = True
@@ -2148,12 +2235,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if value is None:
             return None
         unit = _unit_of(state)
-        if unit in ("kwh", "kilowatt_hour", "kilowatt-hour", "kilowatthours"):
+        if unit in ENERGY_UNITS_KWH:
             return value * 1000.0
-        if unit in ("wh", "watt_hour", "watt-hour", "watthours"):
+        if unit in ENERGY_UNITS_WH:
             return value
-        if unit in ("mwh", "megawatt_hour"):
+        if unit in ENERGY_UNITS_MWH:
             return value * 1_000_000.0
+        # No fallback for a missing unit here, unlike the forecast parser: a
+        # meter reading is a running total, so guessing its scale would put the
+        # measurement out by a factor of a thousand without anything looking odd.
         _LOGGER.debug("Energy meter %s reports the unusable unit %r", entity_id, unit or "(none)")
         return None
 
@@ -2478,10 +2568,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             data = self.get_auto_efficiency_data()
             best_power = data.get("best_power_w")
             if isinstance(best_power, int):
+                # Written like every other setpoint, which means the house
+                # connection limit may cap it. That cap belongs to this moment,
+                # not to the result, so the user's own value stays on record and
+                # the window end restores it. What carries the result forward is
+                # best_power_w: the planner uses it as its ceiling from now on.
                 await self._set_ac_charge_limit_w(best_power)
-                # The best value is the finder's result and is meant to stay on
-                # the inverter, so it is not restored at window end.
-                self._original_ac_charge_power = None
                 self._persist_state()
                 if self.auto_efficient_charge:
                     self.auto_efficient_charge = False
@@ -2542,6 +2634,27 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
                     )
 
+            if self._parse_date_optional(
+                self.config.get(CONF_ACTIVE_START_DATE, DEFAULT_ACTIVE_START_DATE)
+            ) or self._parse_date_optional(
+                self.config.get(CONF_ACTIVE_END_DATE, DEFAULT_ACTIVE_END_DATE)
+            ):
+                # The active date range is a calendar-day bound, so it changes at
+                # midnight - in the middle of an overnight window. Without a
+                # check there, the first night of the range loses everything
+                # after midnight (the start trigger fired while still outside
+                # the range), and the last night runs on up to a whole polling
+                # interval past the end date.
+                self._time_triggers.append(
+                    async_track_time_change(
+                        self.hass,
+                        self._on_date_boundary,
+                        hour=0,
+                        minute=0,
+                        second=5,
+                    )
+                )
+
             # Check if we're already in the active window. The handle is kept so
             # the unload can cancel a check that has not run yet.
             self._cancel_window_check()
@@ -2567,12 +2680,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if task is not None and not task.done():
             task.cancel()
 
-    def update_time_triggers(self) -> None:
-        """Update time triggers when configuration changes."""
+    def update_time_triggers(self, previous_soc_entity: str | None = None) -> None:
+        """Update time triggers when configuration changes.
+
+        ``previous_soc_entity`` is the battery SOC entity as it was *before* the
+        caller swapped in the new configuration. Reading it from ``self.config``
+        here cannot work: by the time this runs, that is already the new value,
+        so the comparison below would never find a change and a running window
+        would keep listening to an entity nobody configures any more.
+        """
         _LOGGER.info("Updating time triggers with new configuration")
 
-        # Store old battery SOC entity to check if it changed
-        old_battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
+        old_battery_soc_entity = (
+            previous_soc_entity
+            if previous_soc_entity is not None
+            else self.config.get(CONF_BATTERY_SOC_ENTITY)
+        )
 
         # Note: config reference is updated in async_update_entry before calling this
         # So self.config should already be updated, but ensure it's synced
@@ -2868,6 +2991,63 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.operation_mode = mode
         finally:
             self._switching_mode = False
+
+    async def async_disable(self) -> None:
+        """Switch the integration off and hand the inverter back.
+
+        The same teardown as a window end, minus the bookkeeping that belongs
+        to a night that actually ran: no snow night is used up, and no reset is
+        scheduled for later, because the user is switching this off now.
+        Doing it in one place is the point - the switch entity used to repeat
+        part of this list and left the efficiency sampler running, so its
+        listener kept integrating into a measurement nobody would ever finish.
+        """
+        if not self.is_enabled:
+            return
+        _LOGGER.info("Disabling Inverter Charge Night")
+        self.is_enabled = False
+        self.is_active = False
+        self._ending = True
+        try:
+            self._remove_battery_soc_listener()
+            self._remove_inverter_min_soc_listener()
+            self._remove_grid_import_listener()
+            self._reset_auto_test_state()
+            await self._stop_periodic_verification()
+            try:
+                await self._reset_settings()
+            except Exception as e:
+                _LOGGER.error("Error resetting settings while disabling: %s", e, exc_info=True)
+        finally:
+            self._ending = False
+        self.target_reached = False
+        self.override_soc = None
+        self.initial_calculated_soc = None
+        self.minimum_calculated_soc = None
+        self.last_plan = None
+        self.planned_charge_power_w = None
+        self._planned_setpoint_written_w = None
+        self._grid_plan_request_w = None
+        self._window_floor_soc = None
+        self._window_started_at = None
+        self._discharge_block_logged = None
+        self._persist_state()
+
+    def _is_the_live_coordinator(self) -> bool:
+        """False once this instance is not the entry's coordinator any more.
+
+        A timer armed in the constructor outlives a setup that failed after it
+        (``ConfigEntryNotReady`` retries for as long as the entity is missing),
+        and would then write the options of an entry that is not loaded.
+        """
+        return getattr(self.entry, "runtime_data", None) is self
+
+    async def _on_date_boundary(self, now: datetime) -> None:
+        """Re-evaluate the window when the calendar day - and the range - changes."""
+        if not self.is_enabled:
+            return
+        _LOGGER.debug("Date boundary reached, re-evaluating the active date range")
+        await self._check_current_window()
 
     async def _on_scheduled_window_end(self, now: datetime) -> None:
         """Time-trigger entry point: the window reached its configured end time.
@@ -3513,7 +3693,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Immediately send grid charge command (configurable delay) so inverter processes both together
             if min_soc_set and kostal_grid_charge_switch and not should_skip_charging:
-                command_delay = float(self.config.get(CONF_COMMAND_DELAY, 0.1))
+                delay = _as_float(self.config.get(CONF_COMMAND_DELAY))
+                # A configured 0 is a valid answer ("no delay"), so it must not
+                # fall through to the default the way a falsy check would.
+                command_delay = max(0.0, delay) if delay is not None else DEFAULT_COMMAND_DELAY
                 await asyncio.sleep(command_delay)  # Configurable delay
                 
                 try:
@@ -3642,13 +3825,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.error("Error preparing min SOC for discharge: %s", e, exc_info=True)
 
         if need_to_set_min_soc and kostal_min_soc_entity:
-            await self.hass.services.async_call(
-                "number",
-                "set_value",
-                {"entity_id": kostal_min_soc_entity, "value": target_soc},
-            )
-            self._last_soc_set = target_soc
-            _LOGGER.info("Set min SOC to %.1f%% for discharge (floor)", target_soc)
+            try:
+                await self.hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": kostal_min_soc_entity, "value": target_soc},
+                )
+            except Exception as e:
+                # Every other call in this method is wrapped; this one was not,
+                # so a failed write took the two blocks below with it - and one
+                # of them is what switches grid charging off. Forcing a
+                # discharge against an unknown floor is not safe either, so the
+                # floor counts as unavailable from here on.
+                _LOGGER.error("Error setting min SOC for discharge: %s", e, exc_info=True)
+                min_soc_available = False
+            else:
+                self._last_soc_set = target_soc
+                _LOGGER.info("Set min SOC to %.1f%% for discharge (floor)", target_soc)
 
         # Ensure grid charging is OFF during discharge
         if kostal_grid_charge_switch:
@@ -3856,9 +4049,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         async def _periodic_verification_loop() -> None:
             """Periodic verification loop."""
-            update_interval = float(self.config.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
             while self.is_active and self.is_enabled:
                 try:
+                    # Read each round: a changed update interval takes effect
+                    # in the running window, not only in the next one.
+                    configured = _as_float(self.config.get(CONF_UPDATE_INTERVAL))
+                    update_interval = (
+                        max(0.0, configured) if configured is not None else DEFAULT_UPDATE_INTERVAL
+                    )
                     await asyncio.sleep(update_interval)
                     if self.is_active and self.is_enabled:
                         await self._verify_and_restore_min_soc()
