@@ -275,9 +275,9 @@ Netz, **nicht** der Bezug am Hausanschluss — für die Anschlussgrenze muss der
 
 ### 2.9 Nachtrag 2026-09-13: Externer Review — geprüft, widerlegt, behoben
 
-Ein externer Bericht (13 Befunde: M1–M6, L1–L14) wurde Punkt für Punkt am Code nachgeprüft.
-**Elf Befunde waren valide und sind behoben**, zwei Aussagen waren falsch, drei bleiben bewusst
-offen.
+Ein externer Bericht (20 Befunde: M1–M6, L1–L14) wurde Punkt für Punkt am Code nachgeprüft.
+**16 Befunde waren valide und sind behoben**, zwei Aussagen waren nachweislich falsch, drei
+bleiben bewusst offen.
 
 | Befund | Prüfung | Status |
 |---|---|---|
