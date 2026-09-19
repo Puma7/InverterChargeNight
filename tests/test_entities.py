@@ -273,7 +273,9 @@ async def test_inverter_charge_night_switch_turn_off_when_disabled():
 @pytest.mark.asyncio
 async def test_inverter_charge_night_switch_reset_error_handled(mock_hass):
     """A failed reset must still leave the integration switched off."""
-    from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+    from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 
     mock_hass.states.async_set("number.min_soc", "8")
     entry = _make_entry()

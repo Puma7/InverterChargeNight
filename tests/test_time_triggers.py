@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_END_TIME,
@@ -61,7 +63,7 @@ def test_is_within_date_range_before_start(mock_hass):
         mock_hass, {CONF_ACTIVE_START_DATE: "2025-12-31"}
     )
     with patch(
-        "custom_components.inverter_charge_night.dt_util.now",
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
         return_value=datetime(2025, 1, 1),
     ):
         assert coordinator._is_within_date_range() is False
@@ -92,7 +94,7 @@ def test_setup_and_remove_time_triggers(mock_hass):
     trigger = MagicMock()
 
     with patch(
-        "custom_components.inverter_charge_night.async_track_time_change",
+        "custom_components.inverter_charge_night.coordinator.async_track_time_change",
         return_value=trigger,
     ):
         coordinator.setup_time_triggers()
@@ -139,7 +141,7 @@ def test_setup_time_triggers_equal_times_registers_no_triggers(mock_hass, caplog
     )
 
     with patch(
-        "custom_components.inverter_charge_night.async_track_time_change"
+        "custom_components.inverter_charge_night.coordinator.async_track_time_change"
     ) as track_time_change:
         coordinator.setup_time_triggers()
 
@@ -156,7 +158,7 @@ def test_update_time_triggers_schedules_single_window_check(mock_hass):
     )
 
     with patch(
-        "custom_components.inverter_charge_night.async_track_time_change",
+        "custom_components.inverter_charge_night.coordinator.async_track_time_change",
         return_value=MagicMock(),
     ):
         coordinator.update_time_triggers()
@@ -172,7 +174,7 @@ def test_update_time_triggers_schedules_single_window_check(mock_hass):
 # The active date range is a calendar-day bound in the middle of the night -----
 
 
-TRACK_TIME_CHANGE = "custom_components.inverter_charge_night.async_track_time_change"
+TRACK_TIME_CHANGE = "custom_components.inverter_charge_night.coordinator.async_track_time_change"
 
 
 def _date_range_coordinator(mock_hass, start=None, end=None):

@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from custom_components.inverter_charge_night import (
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
     RESET_RETRY_DELAYS,
     RESET_RETRY_INTERVAL,
-    InverterChargeNightCoordinator,
 )
 from custom_components.inverter_charge_night.const import (
     CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
@@ -63,7 +63,7 @@ WINDOW_CONFIG = {
     CONF_START_TIME: "00:00",
     CONF_END_TIME: "05:59",
 }
-CALL_LATER = "custom_components.inverter_charge_night.async_call_later"
+CALL_LATER = "custom_components.inverter_charge_night.coordinator.async_call_later"
 
 
 def _make_coordinator(hass, data, options=None):
@@ -323,7 +323,7 @@ async def test_window_start_during_pending_reset_keeps_original(mock_hass):
     coordinator._reset_retry_unsub = unsub
     try:
         with patch(
-            "custom_components.inverter_charge_night.dt_util.now", return_value=INSIDE_WINDOW
+            "custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=INSIDE_WINDOW
         ):
             await coordinator._on_window_start(INSIDE_WINDOW)
             # The window supersedes the pending retry

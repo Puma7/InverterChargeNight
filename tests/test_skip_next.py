@@ -7,7 +7,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from homeassistant.util import dt as dt_util
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.switch import SkipNextSwitch
 from custom_components.inverter_charge_night.const import (
     CONF_OPERATION_MODE,
@@ -16,7 +18,7 @@ from custom_components.inverter_charge_night.const import (
     MODE_NIGHT_CHARGE,
 )
 
-CALL_LATER = "custom_components.inverter_charge_night.async_call_later"
+CALL_LATER = "custom_components.inverter_charge_night.coordinator.async_call_later"
 
 
 def _make_coordinator(mock_hass, mock_config_entry):
@@ -84,7 +86,7 @@ async def test_schedule_and_cancel_skip_next_expiry(mock_hass, mock_config_entry
     coord = _make_coordinator(mock_hass, mock_config_entry)
 
     mock_unsub = MagicMock()
-    with patch("custom_components.inverter_charge_night.async_call_later", return_value=mock_unsub) as mock_call_later:
+    with patch("custom_components.inverter_charge_night.coordinator.async_call_later", return_value=mock_unsub) as mock_call_later:
         coord._schedule_skip_next_expiry()
         mock_call_later.assert_called_once()
         assert coord._skip_next_unsub is mock_unsub
@@ -272,7 +274,7 @@ async def test_schedule_skip_next_expiry_persists_deadline_and_expiry(mock_hass,
     now = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
     deadline = now + timedelta(hours=24)
 
-    with patch("custom_components.inverter_charge_night.dt_util.now", return_value=now), patch(
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=now), patch(
         CALL_LATER, return_value=MagicMock()
     ) as later:
         coord.skip_next = True

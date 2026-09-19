@@ -7,10 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.inverter_charge_night import (
-    InverterChargeNightCoordinator,
-    _as_float,
     async_unload_entry,
     async_update_entry,
+)
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+    _as_float,
 )
 from custom_components.inverter_charge_night.const import (
     CONF_AUTO_EFFICIENCY_DATA,
@@ -53,7 +55,7 @@ def test_is_within_date_range_true(mock_hass):
         },
     )
     with patch(
-        "custom_components.inverter_charge_night.dt_util.now",
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
         return_value=datetime(2025, 6, 1),
     ):
         assert coordinator._is_within_date_range() is True
@@ -68,7 +70,7 @@ def test_is_within_date_range_false(mock_hass):
         },
     )
     with patch(
-        "custom_components.inverter_charge_night.dt_util.now",
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
         return_value=datetime(2025, 5, 1),
     ):
         assert coordinator._is_within_date_range() is False
@@ -103,7 +105,7 @@ def test_accumulate_auto_energy_updates_totals(mock_hass):
     coordinator._auto_energy_received_wh = 0.0
     coordinator._get_power_w = MagicMock(side_effect=[1000, 900])
 
-    with patch("custom_components.inverter_charge_night.dt_util.now", return_value=now):
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=now):
         coordinator._accumulate_auto_energy()
 
     assert coordinator._auto_energy_sent_wh == 1000.0
@@ -122,7 +124,7 @@ def test_finalize_auto_test_records_best(mock_hass):
     coordinator.get_auto_efficiency_data = MagicMock(return_value={})
     coordinator._save_auto_efficiency_data = MagicMock()
 
-    with patch("custom_components.inverter_charge_night.dt_util.now", return_value=now):
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=now):
         coordinator._finalize_auto_test()
 
     saved = coordinator._save_auto_efficiency_data.call_args.args[0]
@@ -142,7 +144,7 @@ def test_finalize_auto_test_discards_short_duration(mock_hass):
     coordinator._auto_energy_received_wh = 900.0
     coordinator._save_auto_efficiency_data = MagicMock()
 
-    with patch("custom_components.inverter_charge_night.dt_util.now", return_value=now):
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=now):
         coordinator._finalize_auto_test()
 
     assert coordinator._auto_test_active is False
@@ -281,7 +283,7 @@ async def test_calculate_initial_soc_ignores_live_value_without_persisted_state(
             CONF_FORECAST_ERROR_MARGIN: 10.0,
         },
     )
-    with patch("custom_components.inverter_charge_night.asyncio.sleep", new=AsyncMock()) as sleep:
+    with patch("custom_components.inverter_charge_night.coordinator.asyncio.sleep", new=AsyncMock()) as sleep:
         await coordinator._calculate_initial_soc()
 
     sleep.assert_not_awaited()
@@ -339,7 +341,7 @@ async def test_verify_and_restore_min_soc_sets_value(mock_hass):
 
 # Runtime state persistence (plan 005, finding F5) ----------------------------
 
-CALL_LATER = "custom_components.inverter_charge_night.async_call_later"
+CALL_LATER = "custom_components.inverter_charge_night.coordinator.async_call_later"
 
 
 def _persisting_hass(mock_hass):

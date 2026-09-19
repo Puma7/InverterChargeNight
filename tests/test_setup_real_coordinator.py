@@ -11,8 +11,10 @@ from homeassistant.config_entries import ConfigEntryState, current_entry
 
 from custom_components.inverter_charge_night import (
     PLATFORMS,
-    InverterChargeNightCoordinator,
     async_setup_entry,
+)
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
 )
 from custom_components.inverter_charge_night.const import (
     CONF_BACKUP_MODE_ENTITY,

@@ -10,7 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
@@ -194,7 +196,7 @@ async def test_verification_applies_target_once_min_soc_entity_appears(mock_hass
     coordinator.async_request_refresh = AsyncMock()
     try:
         with patch(
-            "custom_components.inverter_charge_night.dt_util.now", return_value=INSIDE_WINDOW
+            "custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=INSIDE_WINDOW
         ):
             await coordinator._on_window_start(INSIDE_WINDOW)
             assert coordinator.is_active is True

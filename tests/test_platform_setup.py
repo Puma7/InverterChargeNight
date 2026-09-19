@@ -10,13 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.inverter_charge_night import (
-    binary_sensor,
-    number,
-    select,
-    sensor,
-    switch,
-)
+from custom_components.inverter_charge_night import binary_sensor, number, select, sensor, switch
 from custom_components.inverter_charge_night.binary_sensor import ActiveWindowBinarySensor
 from custom_components.inverter_charge_night.number import (
     MinSOCOverrideNumber,

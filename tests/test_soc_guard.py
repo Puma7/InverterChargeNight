@@ -2,7 +2,9 @@
 
 import pytest
 from unittest.mock import Mock, AsyncMock
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 
 
 @pytest.mark.asyncio

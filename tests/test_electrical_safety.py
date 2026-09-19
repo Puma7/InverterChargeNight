@@ -15,7 +15,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.const import (
     CONF_BACKUP_MODE_ENTITY,
     CONF_BATTERY_CAPACITY,
@@ -54,7 +56,7 @@ BACKUP = "binary_sensor.backup"
 WINDOW_START = datetime(2026, 1, 15, 0, 0)
 INSIDE = datetime(2026, 1, 15, 1, 59)
 AFTER_WINDOW = datetime(2026, 1, 15, 9, 0)
-NOW = "custom_components.inverter_charge_night.dt_util.now"
+NOW = "custom_components.inverter_charge_night.coordinator.dt_util.now"
 
 CONFIG = {
     CONF_KOSTAL_MIN_SOC_ENTITY: MIN_SOC,

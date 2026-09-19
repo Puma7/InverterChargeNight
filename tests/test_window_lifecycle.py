@@ -29,7 +29,9 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 import pytest_asyncio
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.calculation import calculate_required_soc
 from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_CAPACITY,
@@ -94,7 +96,7 @@ EXPECTED_TARGET = calculate_required_soc(
 def _inside_window():
     """Pin the clock inside the window: the polling update ends a window it finds itself outside of."""
     with patch(
-        "custom_components.inverter_charge_night.dt_util.now", return_value=INSIDE_WINDOW
+        "custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=INSIDE_WINDOW
     ):
         yield
 
@@ -501,7 +503,10 @@ from datetime import timedelta, timezone
 from homeassistant.helpers.recorder import DATA_INSTANCE
 import homeassistant.util.dt as dt_util
 
-from custom_components.inverter_charge_night import async_unload_entry, async_update_entry
+from custom_components.inverter_charge_night import (
+    async_unload_entry,
+    async_update_entry,
+)
 from custom_components.inverter_charge_night.const import (
     CONF_AUTO_EFFICIENCY_DATA,
     CONF_AVG_HOUSE_LOAD_KW,
@@ -525,7 +530,7 @@ from custom_components.inverter_charge_night.planner import (
     REASON_CONFLICT_HEADROOM_WINS,
 )
 
-CALL_LATER = "custom_components.inverter_charge_night.async_call_later"
+CALL_LATER = "custom_components.inverter_charge_night.coordinator.async_call_later"
 SUN = "sun.sun"
 DISCHARGE_LIMIT = "number.discharge_limit"
 AC_LIMIT = "number.ac_limit"
@@ -1160,7 +1165,7 @@ BEST_3000 = {
     CONF_AUTO_EFFICIENCY_DATA: {"history": {"3000": 0.05}, "best_power_w": 3000, "best_loss": 0.05}
 }
 FOUR_HOURS_LEFT = datetime(2026, 1, 15, 1, 59)
-NOW = "custom_components.inverter_charge_night.dt_util.now"
+NOW = "custom_components.inverter_charge_night.coordinator.dt_util.now"
 
 
 @pytest_asyncio.fixture

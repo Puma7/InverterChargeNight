@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.const import CONF_BACKUP_MODE_ENTITY
 
 
@@ -32,7 +34,7 @@ async def test_backup_mode_listener_triggers_window_check(mock_hass):
         return MagicMock()
 
     with patch(
-        "custom_components.inverter_charge_night.async_track_state_change_event",
+        "custom_components.inverter_charge_night.coordinator.async_track_state_change_event",
         side_effect=_capture,
     ):
         coordinator._setup_backup_mode_listener()
