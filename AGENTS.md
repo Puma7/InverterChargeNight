@@ -9,11 +9,27 @@ This is a **Home Assistant custom integration** (`custom_components/inverter_cha
 ### Running tests
 
 ```bash
-pytest -v            # all 113 tests, includes coverage (100% required, excluding __init__.py and config_flow.py)
+pip install -r requirements-dev.txt   # Home Assistant, pytest, pytest-cov, pytest-asyncio, mypy, pyright, pyyaml
+pytest -v            # full suite, includes coverage of the whole package (see ratchet below)
 pytest --no-cov      # skip coverage check for faster iteration
 ```
 
-`pytest-asyncio` is required — many tests are async and use `@pytest.mark.asyncio`.
+`pytest-asyncio` is required — many tests are async and use `@pytest.mark.asyncio`
+(tests mark themselves explicitly; `asyncio_mode = auto` is deliberately not set).
+
+**Coverage gate is a ratchet.** `.coveragerc` covers the whole package (no `omit`) and its
+`fail_under` is the last measured total, rounded down. The value may only go up: whoever adds
+tests raises `fail_under` to the new measurement in the same change. Never lower it.
+
+**Strict test hass.** The `mock_hass` fixture in `tests/conftest.py` returns `None` from
+`hass.states.get` for every entity a test has not registered with
+`mock_hass.states.async_set(entity_id, state, attributes)`. Register every entity the code under
+test reads; do not rely on `MagicMock` states. Assert positively on `hass.services.async_call`
+(`assert_awaited_with`, `await_args_list`), not only "was not called".
+
+The same commands run in CI (`.github/workflows/ci.yml`) against the oldest supported Home
+Assistant (the floor from `hacs.json`, on Python 3.13) and the newest release (on Python 3.14),
+together with `hassfest` and the HACS action.
 
 ### Type checking
 
@@ -22,12 +38,17 @@ mypy custom_components/inverter_charge_night/
 pyright
 ```
 
-Both `mypy` and `pyright` are configured in strict mode and must pass with **0 errors**. The `__init__.py` and `config_flow.py` files are excluded from type checking (see `mypy.ini` / `pyrightconfig.json`). The `reportIncompatibleVariableOverride` rule is disabled in pyright because HA's `CoordinatorEntity` and entity base classes have a framework-level conflict on the `available` property.
+Both `mypy` and `pyright` are configured in strict mode and must pass with **0 errors**. Both check
+with `python_version` / `pythonVersion` 3.13 because current Home Assistant releases use 3.13 syntax;
+the integration itself stays compatible with 3.12. Nothing is excluded from either checker: both
+cover the whole package, `config_flow.py` included (plan 001 landed its rewrite). The
+`reportIncompatibleVariableOverride` rule is disabled in pyright because HA's `CoordinatorEntity`
+and entity base classes have a framework-level conflict on the `available` property.
 
 ### Key gotchas
 
 - The `~/.local/bin` directory must be on `PATH` for `pytest`, `mypy`, and `pyright` to be found (they are pip-installed with `--user`).
-- There is no `requirements.txt` or `pyproject.toml`. Dependencies are: `homeassistant`, `pytest`, `pytest-cov`, `pytest-asyncio`, `mypy`, `pyright`.
-- The `.coveragerc` sets `fail_under = 100` but omits `__init__.py` and `config_flow.py`.
+- Dependencies are pinned as minimum versions in `requirements-dev.txt`; there is no `pyproject.toml`.
+- The `.coveragerc` `fail_under` is a ratchet over the whole package (see "Running tests").
 - Entity platform files use `CoordinatorEntity[InverterChargeNightCoordinator]` generic to properly type `self.coordinator`. Importing the coordinator from `.__init__` is safe (no circular imports).
 - This is not a runnable standalone application. To test end-to-end beyond unit tests, you would need a full Home Assistant instance with Kostal and Solcast integrations — not feasible in this environment. Unit tests with full mocking are the primary validation method.

@@ -7,32 +7,47 @@
       "best_charge_power": {
         "default": "mdi:flash"
       },
-      "charging_efficiency": {
-        "default": "mdi:lightning-bolt-circle"
+      "planned_charge_power": {
+        "default": "mdi:battery-clock"
       },
-      "auto_test_status": {
-        "default": "mdi:test-tube"
+      "grid_charge_headroom": {
+        "default": "mdi:transmission-tower"
+      },
+      "efficiency_search": {
+        "default": "mdi:magnify-scan"
       }
     },
     "switch": {
       "enabled": {
-        "default": "mdi:power-plug",
+        "default": "mdi:battery-charging-wireless",
         "state": {
           "on": "mdi:power-plug",
           "off": "mdi:power-plug-off"
         }
       },
       "auto_efficient_charge_finder": {
-        "default": "mdi:auto-fix",
+        "default": "mdi:flash-auto",
         "state": {
           "on": "mdi:auto-fix",
           "off": "mdi:auto-fix"
         }
+      },
+      "skip_next": {
+        "default": "mdi:debug-step-over",
+        "state": {
+          "on": "mdi:debug-step-over",
+          "off": "mdi:play"
+        }
+      }
+    },
+    "select": {
+      "operation_mode": {
+        "default": "mdi:swap-horizontal"
       }
     },
     "binary_sensor": {
       "active": {
-        "default": "mdi:weather-night",
+        "default": "mdi:clock-time-four",
         "state": {
           "on": "mdi:weather-night",
           "off": "mdi:weather-sunny"
@@ -42,6 +57,9 @@
     "number": {
       "min_soc_override": {
         "default": "mdi:battery-arrow-up"
+      },
+      "snow_nights": {
+        "default": "mdi:snowflake"
       }
     }
   }

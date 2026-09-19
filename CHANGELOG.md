@@ -5,6 +5,96 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-09-19
+
+The release that makes this integration inverter-agnostic, safe around a house connection,
+and honest about what it measures. **Read "Changed" before updating**: two defaults change
+behaviour on an existing installation.
+
+### Added
+
+- **House connection limit** - with a grid import sensor and the main fuse size (or a maximum
+  continuous power) configured, the battery charge power is held so that the total grid import
+  stays inside a continuous-load budget. Meant for the cheap-tariff window, where wallboxes,
+  heat pump and battery run for hours at once and the meter terminals are the weak point. New
+  sensor `grid_charge_headroom` shows what is left for the battery. The limit applies in both
+  planner modes, never engages outside a window, and every failure path charges *less*.
+- **Discharge block with a fallback that always works** - the battery no longer discharges into
+  the house during the window. The integration uses the inverter's block switch if there is one,
+  otherwise a discharge power limit, otherwise it raises the min SOC to the charge level the
+  window started at and restores it at the window end. The last way needs no vendor feature at
+  all. New `discharge_block_switch` and `discharge_block_mode` settings, new `inverter_floor_soc`
+  and `discharge_block` attributes on `calculated_soc`.
+- **Snow override** - `number.inverter_charge_night_snow_nights` charges the next N nights to the
+  maximum SOC, for when snow on the modules makes the PV forecast wrong.
+- **Efficiency search sensor** (`sensor.…_efficiency_search`) - what the search is doing, the
+  whole series of measured losses, the search range, and why the last measurement was discarded.
+- **Optional energy meters for the efficiency search** (`charge_energy_sent_entity`,
+  `charge_energy_received_entity`) - two kWh meters measure the charging loss exactly.
+- **Planner v2** (bridge mode): the target SOC bridges from the window end until PV covers the
+  house load, and leaves headroom for the next day's forecast.
+- Config wizard with explanations and a reconfigure flow, repair issues on a broken setup, state
+  that survives a restart, and a CI matrix testing the minimum and the current Home Assistant
+  plus an end-to-end test against a real HA core.
+
+- **German translation** (`translations/de.json`) — the wizard, every field description, the
+  entity names and the error messages, checked against `strings.json` by a test so it cannot
+  fall behind.
+
+### Fixed — electrical safety review
+
+A review pass over the whole change set, asking only where the integration could draw more
+current than the connection carries or leave a setting on the inverter. Twelve findings, all
+fixed; regression tests in `tests/test_electrical_safety.py`.
+
+- **A restart past the window end left grid charging on and the raised min SOC stranded** —
+  Home Assistant updating overnight meant the battery was bought full from the grid in
+  daylight, every day, until somebody noticed. Settings still captured outside a window are now
+  restored at the next window check.
+- **A `nan` sensor reading disabled stop conditions** — it parses as a float and then makes
+  every comparison false, so "target reached" could never happen and grid charging never
+  stopped. A `nan` could also be captured as the inverter's original min SOC and written back
+  at the window end. Non-finite values are now treated like "unavailable" everywhere.
+- **A failed protective write was believed to have happened**, which suppressed every retry for
+  the rest of the window.
+- **Writing watts to a charge limit entity without a unit**: a kW entity receives 5000 instead
+  of 5 and clamps to its maximum, turning a protective limit into full power. The entity's own
+  maximum now decides the scale, and an impossible value is not written at all.
+- **The house connection limit stopped reacting** between polls when the planner had produced
+  no setpoint (unreadable battery SOC, almost no window left).
+- 400 V was only corrected as a line-to-line voltage on three phases; on one phase it inflated
+  the budget by 74 %. Any voltage outside 100–300 V now falls back to the documented default.
+- Our own charge power can no longer be credited as more than the whole measured grid import.
+- The limit no longer writes to the inverter while backup/island mode owns it.
+- A target from a window that is long over is no longer reused for tonight.
+- A window ended by the polling safety net now counts as a completed night (snow nights).
+- The AC charge limit is read back on every verification run: an inverter integration can accept
+  a write and drop it, and a protective limit that is believed but not in force is the failure
+  this feature must not have.
+- Feeding into the grid is no longer read as a negative house load, which would have widened the
+  house connection budget.
+
+### Changed
+
+- **The efficiency search now measures what it claims to measure.** It waits out the ramp to a
+  new setpoint, integrates the charge power between sensor readings instead of once per poll,
+  and can use two kWh meters instead of the power sensors. A measurement is only recorded when
+  the inverter really charged at the power under test, long enough, with enough energy, and
+  with a loss a charger can physically have — a loss at or below zero used to be clamped to
+  zero, which made a pair of sensors on the same side of the charger win the search for good.
+  It also takes several measurements per window instead of one per night, so the search
+  usually finishes inside a single window.
+- **Entity names.** The operation mode select and the skip switch had no translated name, so
+  Home Assistant showed them — next to the main switch — as three entries all called "Inverter
+  Charge Night". They are now Automation, Efficiency search, Skip the next window, Target SOC
+  override, Window active and Target SOC.
+- The efficiency finder is subordinate to the house connection limit: it does not start a test
+  the connection cannot carry, and a running test is abandoned when the house load rises.
+- The min SOC written to the inverter and the charge target are now two separate values. With
+  the min SOC discharge block in use the inverter shows the higher floor during the window; it
+  is restored at the window end.
+- Minimum supported Home Assistant version raised to 2025.2.0 (`runtime_data`, reconfigure flow).
+
 ## [2.0.0] - 2026-02-28
 
 ### Added

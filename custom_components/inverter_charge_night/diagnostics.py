@@ -4,13 +4,15 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from . import InverterChargeNightCoordinator
-from .const import DOMAIN
+from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 
+# Every config key that names an entity of the user's system. The test
+# ``test_every_entity_config_key_is_redacted`` derives the expected set from
+# ``const.py``, so a newly added ``*_entity`` / ``*_switch`` key cannot be
+# forgotten here.
 REDACT_KEYS = {
     "pv_forecast_entity",
     "battery_soc_entity",
@@ -19,24 +21,30 @@ REDACT_KEYS = {
     "charge_power_entity",
     "charge_power_sent_entity",
     "charge_power_received_entity",
+    "charge_energy_sent_entity",
+    "charge_energy_received_entity",
     "absolute_max_charge_power_entity",
     "backup_mode_entity",
     "pv_forecast_today_entity",
     "force_discharge_switch",
+    "discharge_limit_entity",
+    "house_load_entity",
+    "grid_import_entity",
+    "discharge_block_switch",
 }
 
 
 async def async_get_config_entry_diagnostics(
-    hass: HomeAssistant, entry: ConfigEntry
+    hass: HomeAssistant, entry: InverterChargeNightConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
-    coordinator: InverterChargeNightCoordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    coordinator: InverterChargeNightCoordinator | None = getattr(entry, "runtime_data", None)
     data: dict[str, Any] = {
         "entry": async_redact_data(dict(entry.data), REDACT_KEYS),
         "options": async_redact_data(dict(entry.options), REDACT_KEYS),
     }
     if coordinator:
-        auto_data = coordinator.auto_efficiency_data
+        auto_data = coordinator.get_auto_efficiency_data()
         auto_test_duration_s: int | None = None
         if coordinator._auto_test_active and coordinator._auto_test_start:
             auto_test_duration_s = int(

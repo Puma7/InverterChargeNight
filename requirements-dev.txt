@@ -1,0 +1,8 @@
+# Keep in step with hacs.json: below this the integration does not run.
+homeassistant>=2025.2.0
+pytest>=8
+pytest-cov>=5
+pytest-asyncio>=0.23
+mypy>=1.10
+pyright>=1.1.380
+pyyaml

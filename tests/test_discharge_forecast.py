@@ -45,6 +45,7 @@ def _make_coordinator(mock_hass, mock_config_entry, mode=MODE_MORNING_DISCHARGE,
         coord.operation_mode = mode
         coord.skip_next = False
         coord._skip_next_unsub = None
+        coord._skip_next_until = None
         coord.original_min_soc = None
         coord.is_active = True
         coord.is_enabled = True
@@ -56,6 +57,11 @@ def _make_coordinator(mock_hass, mock_config_entry, mode=MODE_MORNING_DISCHARGE,
         coord._last_soc_set = None
         coord.override_soc = None
         coord._original_absolute_charge_power = None
+        coord._original_ac_charge_power = None
+        coord._pending_reset = False
+        coord.snow_nights = 0
+        coord._reset_retry_unsub = None
+        coord._reset_retry_count = 0
         coord._battery_soc_listener = None
         coord._inverter_min_soc_listener = None
         coord._verification_task = None
@@ -282,3 +288,53 @@ async def test_reset_settings_turns_off_force_discharge(mock_hass, mock_config_e
     force_off_calls = [c for c in calls if c[0][2].get("entity_id") == "switch.force_discharge"]
     assert len(force_off_calls) == 1
     assert force_off_calls[0][0][1] == "turn_off"
+
+
+# --- Plan 006: the solar day is the calendar day of the window end -----------
+
+
+def test_forecast_entity_window_not_over_midnight_uses_today_after_noon(mock_hass, mock_config_entry):
+    """Window 22:00-23:30 at 22:30: the window ends today, so today's entity is used (was: tomorrow)."""
+    coord = _make_coordinator(
+        mock_hass, mock_config_entry, mode=MODE_NIGHT_CHARGE,
+        extra_config={
+            CONF_PV_FORECAST_TODAY_ENTITY: "sensor.solcast_today",
+            CONF_START_TIME: "22:00",
+            CONF_END_TIME: "23:30",
+        },
+    )
+    with patch("custom_components.inverter_charge_night.dt_util") as mock_dt:
+        mock_dt.now.return_value = datetime(2025, 12, 15, 22, 30)
+        assert coord._get_active_forecast_entity() == "sensor.solcast_today"
+
+
+def test_forecast_entity_window_over_midnight_uses_tomorrow_in_evening(mock_hass, mock_config_entry):
+    """Window 22:00-05:59 at 23:00: the window ends tomorrow."""
+    coord = _make_coordinator(
+        mock_hass, mock_config_entry, mode=MODE_NIGHT_CHARGE,
+        extra_config={
+            CONF_PV_FORECAST_TODAY_ENTITY: "sensor.solcast_today",
+            CONF_START_TIME: "22:00",
+            CONF_END_TIME: "05:59",
+        },
+    )
+    with patch("custom_components.inverter_charge_night.dt_util") as mock_dt:
+        mock_dt.now.return_value = datetime(2025, 12, 15, 23, 0)
+        assert coord._get_active_forecast_entity() == "sensor.pv_forecast"
+        # In the end minute the window is still today's
+        mock_dt.now.return_value = datetime(2025, 12, 16, 5, 59, 30)
+        assert coord._get_active_forecast_entity() == "sensor.solcast_today"
+
+
+def test_forecast_entity_morning_discharge_window_uses_today(mock_hass, mock_config_entry):
+    coord = _make_coordinator(
+        mock_hass, mock_config_entry,
+        extra_config={
+            CONF_PV_FORECAST_TODAY_ENTITY: "sensor.solcast_today",
+            CONF_START_TIME: "06:00",
+            CONF_END_TIME: "08:00",
+        },
+    )
+    with patch("custom_components.inverter_charge_night.dt_util") as mock_dt:
+        mock_dt.now.return_value = datetime(2025, 6, 15, 6, 0)
+        assert coord._get_active_forecast_entity() == "sensor.solcast_today"

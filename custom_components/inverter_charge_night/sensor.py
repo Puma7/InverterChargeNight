@@ -7,50 +7,55 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, Sen
 from homeassistant.const import EntityCategory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import InverterChargeNightCoordinator
-from .const import DOMAIN
+from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
+from .entity import InverterChargeNightEntity
+from .const import (
+    ATTR_DISCHARGE_BLOCK,
+    ATTR_INVERTER_FLOOR_SOC,
+    ATTR_SNOW_NIGHTS,
+    AUTO_TEST_STATE_FINISHED,
+    AUTO_TEST_STATE_IDLE,
+    AUTO_TEST_STATE_MEASURING,
+    AUTO_TEST_STATE_SETTLING,
+    AUTO_TEST_STATE_WAITING,
+)
+
+PARALLEL_UPDATES = 0
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: InverterChargeNightConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor platform."""
-    coordinator: InverterChargeNightCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     async_add_entities(
         [
             CalculatedSOCSensor(coordinator, entry),
             BestChargePowerSensor(coordinator, entry),
+            PlannedChargePowerSensor(coordinator, entry),
+            GridChargeHeadroomSensor(coordinator, entry),
+            EfficiencySearchSensor(coordinator, entry),
         ]
     )
 
 
-class CalculatedSOCSensor(CoordinatorEntity[InverterChargeNightCoordinator], SensorEntity):
+class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
     """Sensor for calculated SOC."""
 
     _attr_translation_key = "calculated_soc"
-    _attr_has_entity_name = True
     _attr_native_unit_of_measurement = "%"
-    _attr_device_class = SensorDeviceClass.BATTERY
+    # Deliberately no BATTERY device class: this is the level the planner is
+    # aiming for, not the level of a battery. Declared as one it would show up
+    # in battery cards and low-battery automations as if it were a reading.
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:battery-charging"
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_calculated_soc"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title or "Inverter Charge Night",
-            manufacturer="Custom Integration",
-            model="Inverter Charge Night",
-        )
+        super().__init__(coordinator, entry, "calculated_soc")
 
     @property
     def native_value(self) -> float | None:
@@ -68,37 +73,123 @@ class CalculatedSOCSensor(CoordinatorEntity[InverterChargeNightCoordinator], Sen
             "current_soc": data.get("current_soc"),
             "operation_mode": data.get("operation_mode"),
             "skip_next": data.get("skip_next", False),
+            # Planner v2 (plan 006): only present while a bridge plan exists
+            "plan_reason": data.get("plan_reason"),
+            "bridge_kwh": data.get("bridge_kwh"),
+            "surplus_kwh": data.get("surplus_kwh"),
+            "lower_bound_soc": data.get("lower_bound_soc"),
+            "upper_bound_soc": data.get("upper_bound_soc"),
+            "pv_crossover": data.get("pv_crossover"),
+            ATTR_SNOW_NIGHTS: self.coordinator.snow_nights,
+            # Plan 009: why the inverter may show a higher min SOC than the
+            # charge target while the window is open.
+            ATTR_INVERTER_FLOOR_SOC: self.coordinator.inverter_floor_soc(),
+            ATTR_DISCHARGE_BLOCK: self.coordinator.discharge_block_state(),
         }
 
 
-class BestChargePowerSensor(CoordinatorEntity[InverterChargeNightCoordinator], SensorEntity):
+class BestChargePowerSensor(InverterChargeNightEntity, SensorEntity):
     """Sensor for best charge power found by auto efficient charge."""
 
     _attr_translation_key = "best_charge_power"
-    _attr_has_entity_name = True
     _attr_native_unit_of_measurement = "W"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:flash"
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_best_charge_power"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title or "Inverter Charge Night",
-            manufacturer="Custom Integration",
-            model="Inverter Charge Night",
-        )
+        super().__init__(coordinator, entry, "best_charge_power")
 
     @property
     def native_value(self) -> float | None:
         """Return the best charge power if available."""
-        data = self.coordinator.auto_efficiency_data
+        data = self.coordinator.get_auto_efficiency_data()
         best_power = data.get("best_power_w")
         if isinstance(best_power, int):
             return float(best_power)
         return None
+
+
+class PlannedChargePowerSensor(InverterChargeNightEntity, SensorEntity):
+    """The AC charge power planned for the remaining window (plan 006, step 6)."""
+
+    _attr_translation_key = "planned_charge_power"
+    _attr_native_unit_of_measurement = "W"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "planned_charge_power")
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the planned setpoint, or None outside a night charge window."""
+        value = self.coordinator.planned_charge_power_w
+        return float(value) if value is not None else None
+
+
+class GridChargeHeadroomSensor(InverterChargeNightEntity, SensorEntity):
+    """What the house connection still allows the battery (plan 008).
+
+    ``None`` outside a window or without a configured connection limit: the
+    integration is not holding the battery back then, and a number would
+    suggest a limit that is not being applied.
+    """
+
+    _attr_translation_key = "grid_charge_headroom"
+    _attr_native_unit_of_measurement = "W"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "grid_charge_headroom")
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the power the connection still has room for."""
+        value = self.coordinator.grid_charge_headroom_w
+        return float(value) if value is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Show whether the house connection limit is currently braking."""
+        return self.coordinator.grid_limit_attributes()
+
+
+class EfficiencySearchSensor(InverterChargeNightEntity, SensorEntity):
+    """What the efficiency search is doing, and what it has found so far.
+
+    The search takes one measurement per night and needs several nights, so
+    without this sensor there is no way to tell a search that is working from
+    one that is quietly discarding every sample.
+    """
+
+    _attr_translation_key = "efficiency_search"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_options = [
+        AUTO_TEST_STATE_IDLE,
+        AUTO_TEST_STATE_WAITING,
+        AUTO_TEST_STATE_SETTLING,
+        AUTO_TEST_STATE_MEASURING,
+        AUTO_TEST_STATE_FINISHED,
+    ]
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "efficiency_search")
+
+    @property
+    def native_value(self) -> str:
+        """Return the state of the search."""
+        return str(self.coordinator.auto_test_state)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the measurements, the search range and the last result."""
+        return self.coordinator.auto_test_attributes()

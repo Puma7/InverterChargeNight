@@ -1,10 +1,12 @@
 """Tests for select platform (OperationModeSelect)."""
 from __future__ import annotations
 
+from functools import partial
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.inverter_charge_night import InverterChargeNightCoordinator
 from custom_components.inverter_charge_night.select import (
     OperationModeSelect,
     async_setup_entry,
@@ -17,10 +19,27 @@ from custom_components.inverter_charge_night.const import (
 )
 
 
+def _real_mode_switch(coordinator) -> None:
+    """Let the mock run the coordinator's real teardown for a mode change.
+
+    The teardown moved into ``async_apply_operation_mode`` so the options flow
+    goes through the same code (finding Q2); the select entity only calls it.
+    """
+    # Every attribute of a MagicMock is truthy, which the re-entrancy guard
+    # would read as "a mode switch is already running".
+    coordinator._switching_mode = False
+    coordinator._ending = False
+    coordinator.last_plan = None
+    coordinator.planned_charge_power_w = None
+    coordinator.async_apply_operation_mode = partial(
+        InverterChargeNightCoordinator.async_apply_operation_mode, coordinator
+    )
+
+
 @pytest.mark.asyncio
 async def test_select_async_setup_entry(mock_hass, mock_config_entry, mock_coordinator):
     """Test select platform setup creates OperationModeSelect."""
-    mock_hass.data = {DOMAIN: {mock_config_entry.entry_id: mock_coordinator}}
+    mock_config_entry.runtime_data = mock_coordinator
     mock_coordinator.operation_mode = MODE_NIGHT_CHARGE
     added = []
     await async_setup_entry(mock_hass, mock_config_entry, lambda entities: added.extend(entities))
@@ -50,8 +69,9 @@ async def test_operation_mode_select_option_change(mock_config_entry, mock_coord
     mock_coordinator.override_soc = 50.0
     mock_coordinator._remove_battery_soc_listener = MagicMock()
     mock_coordinator._remove_inverter_min_soc_listener = MagicMock()
-    mock_coordinator._stop_periodic_verification = MagicMock()
+    mock_coordinator._stop_periodic_verification = AsyncMock()
     mock_coordinator._check_current_window = AsyncMock()
+    _real_mode_switch(mock_coordinator)
 
     select = OperationModeSelect(mock_coordinator, mock_config_entry)
     select.hass = MagicMock()
@@ -106,8 +126,9 @@ async def test_operation_mode_select_reset_error_handled(mock_config_entry, mock
     mock_coordinator._reset_settings = AsyncMock(side_effect=Exception("reset failed"))
     mock_coordinator._remove_battery_soc_listener = MagicMock()
     mock_coordinator._remove_inverter_min_soc_listener = MagicMock()
-    mock_coordinator._stop_periodic_verification = MagicMock()
+    mock_coordinator._stop_periodic_verification = AsyncMock()
     mock_coordinator._check_current_window = AsyncMock()
+    _real_mode_switch(mock_coordinator)
 
     select = OperationModeSelect(mock_coordinator, mock_config_entry)
     select.hass = MagicMock()

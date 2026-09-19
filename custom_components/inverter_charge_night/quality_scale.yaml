@@ -1,28 +1,216 @@
+# Home Assistant's integration quality scale, all 54 rules, measured honestly.
+#
+# A custom integration installed through HACS is classified as "Custom" and
+# cannot hold a Bronze/Silver/Gold/Platinum tier - that grade is awarded by the
+# Home Assistant core team when an integration is accepted into Core. The rules
+# are a useful yardstick regardless, so every one of them is answered here, and
+# what is not done says so.
 rules:
   # Bronze
-  config_flow: done
-  diagnostics: done
-  docs_high_level_description: done
-  docs_installation: done
-  docs_configuration: done
-  docs_entities: done
-  docs_troubleshooting: done
-  docs_removal: done
-  tests: done
-  runtime_data: done
-  unique_config_entry: done
-  test_before_setup: done
-  brands: done
-  reauthentication:
+  action-setup:
     status: exempt
-    comment: No authentication is used by this integration.
+    comment: The integration registers no service actions; everything is controlled through entities.
+  appropriate-polling:
+    status: done
+    comment: |
+      A DataUpdateCoordinator polls every 15 minutes by default (configurable).
+      Everything that has to be fast - battery SOC, the inverter's min SOC, the
+      grid import - is event driven through state change listeners instead.
+  brands:
+    status: exempt
+    comment: |
+      The brands repository only accepts integrations that are part of Home
+      Assistant Core. The integration ships its own icon.svg for HACS.
+  common-modules:
+    status: todo
+    comment: |
+      entity.py holds the shared base entity, but the coordinator still lives in
+      __init__.py instead of coordinator.py. Splitting it is tracked as backlog
+      item 016 in plans/README.md.
+  config-flow-test-coverage:
+    status: todo
+    comment: config_flow.py is at 94 % line coverage; the rule asks for 100 %.
+  config-flow:
+    status: done
+    comment: |
+      A four-step wizard with selectors and data_description on every field,
+      used identically for setup, reconfigure and options.
+  dependency-transparency:
+    status: exempt
+    comment: No third-party requirements; the integration only uses Home Assistant helpers.
+  docs-actions:
+    status: exempt
+    comment: No service actions are registered.
+  docs-conditions:
+    status: exempt
+    comment: No conditions are provided.
+  docs-high-level-description:
+    status: done
+    comment: README.md opens with what the integration does and what it is not.
+  docs-installation-instructions:
+    status: done
+    comment: README.md, "Installation" - HACS and manual.
+  docs-removal-instructions:
+    status: done
+    comment: README.md, "Installation - Removing it".
+  docs-triggers:
+    status: exempt
+    comment: No triggers are provided.
+  entity-event-setup:
+    status: exempt
+    comment: |
+      Entities subscribe to nothing of their own; the coordinator owns every
+      listener and removes it on window end, disable and unload.
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data:
+    status: done
+    comment: entry.runtime_data holds the coordinator; hass.data is not used.
+  test-before-configure:
+    status: done
+    comment: |
+      The config flow refuses entities Home Assistant does not know, a min SOC
+      entity that another entry already drives, and inconsistent combinations
+      (a grid import sensor without the charge power entity the limit writes to).
+  test-before-setup:
+    status: done
+    comment: |
+      Setup raises ConfigEntryNotReady when a required entity is missing and
+      files a repair issue naming it.
+  unique-config-entry:
+    status: done
+    comment: The min SOC entity is the unique id, so one inverter cannot be driven by two entries.
+
   # Silver
-  parallel_updates: done
-  integration_owner: done
+  action-exceptions:
+    status: exempt
+    comment: No service actions are registered.
+  config-entry-unloading:
+    status: done
+    comment: |
+      Unload removes every listener and trigger, stops the verification task and
+      restores the inverter if a window is still running.
+  docs-configuration-parameters:
+    status: done
+    comment: |
+      Every field carries a description in the UI (strings.json, English and
+      German); README.md, "Configuration" repeats them with context.
+  docs-installation-parameters:
+    status: done
+    comment: README.md, "Configuration - Step 1/2".
+  entity-unavailable:
+    status: done
+    comment: |
+      CoordinatorEntity reports unavailable while the coordinator fails, and the
+      sensors that describe a window return None outside one instead of a stale
+      number.
+  integration-owner: done
+  log-when-unavailable:
+    status: done
+    comment: |
+      Every recurring condition logs once and then stays quiet: a stale grid
+      import, missing efficiency entities, an unreadable backup state, an
+      unrecognised backup state (once per state).
+  parallel-updates:
+    status: done
+    comment: PARALLEL_UPDATES = 0 on all five platforms; the coordinator owns the I/O.
+  reauthentication-flow:
+    status: exempt
+    comment: No authentication - the integration only talks to local entities.
+  test-coverage:
+    status: todo
+    comment: |
+      93 % enforced in CI against a 95 % bar. The gap is defensive error paths;
+      the control loop, planner, limits and flows are covered.
+
   # Gold
-  icon_translations: done
-  reconfiguration_flow: done
-  exception_translations: done
-  repair_issues: done
+  devices:
+    status: done
+    comment: One device per config entry, carrying every entity.
+  diagnostics:
+    status: done
+    comment: diagnostics.py, with every entity id redacted (enforced by a test).
+  discovery-update-info:
+    status: exempt
+    comment: Nothing to discover - the integration drives entities of other integrations.
+  discovery:
+    status: exempt
+    comment: |
+      Which inverter entities to drive cannot be discovered; they differ per
+      installation and picking the wrong one would write to the wrong device.
+  docs-data-update:
+    status: done
+    comment: README.md, "How It Works - Operation Flow" describes the polling and the listeners.
+  docs-examples:
+    status: done
+    comment: README.md, "Example Automations", "Dashboard Examples", "Configuration Examples".
+  docs-known-limitations:
+    status: done
+    comment: |
+      README.md states that the integration controls only the battery (not
+      wallboxes), that the inverter shows a raised min SOC during the window,
+      and what the house connection limit cannot see.
+  docs-supported-devices:
+    status: done
+    comment: |
+      README.md, "What this is - and what it is not": any inverter whose
+      integration exposes a min SOC number, a grid charge switch and an SOC
+      sensor. docs/kostal-kore.md maps one real inverter entity by entity.
+  docs-supported-functions:
+    status: done
+    comment: README.md, "Features" and "Entity List".
+  docs-troubleshooting:
+    status: done
+    comment: README.md, "Troubleshooting".
+  docs-use-cases:
+    status: done
+    comment: README.md, "Why §14a EnWG" and "Use Cases".
+  dynamic-devices:
+    status: exempt
+    comment: One static device per entry; nothing appears at runtime.
+  entity-category:
+    status: done
+    comment: Configuration entities are CONFIG, the diagnostic sensors are DIAGNOSTIC.
+  entity-device-class:
+    status: done
+    comment: |
+      Device classes where they are true (power, energy, enum). Deliberately not
+      on the target SOC: it is a plan, not a battery reading.
+  entity-disabled-by-default:
+    status: exempt
+    comment: All entities are either controls the user needs or the few diagnostics that explain a night.
+  entity-translations: done
+  exception-translations:
+    status: todo
+    comment: |
+      No translated HomeAssistantError is raised yet; ConfigEntryNotReady carries
+      a plain message. The repair issues and the config flow errors are translated.
+  icon-translations:
+    status: done
+    comment: icons.json for every entity; no hardcoded _attr_icon.
+  reconfiguration-flow:
+    status: done
+    comment: |
+      Reconfigure covers all four steps and accepts a new min SOC entity, so a
+      replaced inverter does not need a new entry.
+  repair-issues:
+    status: done
+    comment: |
+      A missing required entity, and a discharge block that could keep the
+      battery from supplying the house during a power cut. Both clear themselves.
+  stale-devices:
+    status: exempt
+    comment: One static device per entry.
+
   # Platinum
-  strict_typing: done
+  async-dependency:
+    status: exempt
+    comment: No dependency at all; everything is Home Assistant's own async API.
+  inject-websession:
+    status: exempt
+    comment: No HTTP client - the integration makes no network calls of its own.
+  strict-typing:
+    status: done
+    comment: |
+      mypy --strict and pyright in strict mode over the whole package, no
+      exclusions, enforced in CI.

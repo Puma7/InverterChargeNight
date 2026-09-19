@@ -1,14 +1,15 @@
 """Fixtures for Inverter Charge Night tests."""
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import time
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import frame
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_registry import EntityRegistry
-from homeassistant.setup import async_setup_component
 
 from custom_components.inverter_charge_night.const import (
     DOMAIN,
@@ -26,12 +27,32 @@ from custom_components.inverter_charge_night.const import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_frame_report():
+    """Silence HA's frame helper, which the MagicMock hass never sets up.
+
+    Recent Home Assistant versions call ``frame.report_usage`` from the
+    DataUpdateCoordinator constructor and raise if the helper is missing.
+    Older versions do not have the function, so only patch it when present.
+    """
+    if hasattr(frame, "report_usage"):
+        with patch.object(frame, "report_usage", lambda *args, **kwargs: None):
+            yield
+    else:
+        yield
+
+
 @pytest.fixture
 def mock_config_entry() -> ConfigEntry:
     """Create a mock config entry."""
     entry = MagicMock(spec=ConfigEntry)
+    # update_listeners is an instance attribute, so spec= does not provide it.
+    # HA 2026.9's async_update_reload_and_abort reads it.
+    entry.update_listeners = []
     entry.entry_id = "test_entry_id"
     entry.title = "Inverter Charge Night"
+    # The min SOC entity identifies the inverter and is the entry's unique id.
+    entry.unique_id = "number.kostal_min_soc"
     entry.data = {
         CONF_KOSTAL_MIN_SOC_ENTITY: "number.kostal_min_soc",
         CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.kostal_grid_charge",
@@ -51,13 +72,36 @@ def mock_config_entry() -> ConfigEntry:
 
 @pytest.fixture
 def mock_hass() -> HomeAssistant:
-    """Create a mock Home Assistant instance."""
+    """Create a strict mock Home Assistant instance.
+
+    ``hass.states.get`` returns ``None`` for every entity that a test has not
+    registered via ``hass.states.async_set(entity_id, state, attributes)``.
+    A plain ``MagicMock`` state would let ``float(state.state)`` raise a
+    ``TypeError`` that product code swallows, making a broken test look green.
+    Tests may still override ``hass.states.get.side_effect`` for special cases.
+    """
     hass = MagicMock(spec=HomeAssistant)
     hass.data = {}
+    states: dict[str, Any] = {}
     hass.states = MagicMock()
+    hass.states.get = MagicMock(side_effect=states.get)
+    hass.states.async_set = MagicMock(
+        side_effect=lambda eid, st, attributes=None: states.__setitem__(
+            eid, create_mock_state(eid, str(st), attributes)
+        )
+    )
     hass.services = MagicMock()
-    hass.async_create_task = MagicMock()
+    hass.services.async_call = AsyncMock()
+    hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
     hass.config_entries = MagicMock()
+    # No other entry is configured unless a test says so; the config and options
+    # flows iterate this to detect a second entry pointed at the same inverter.
+    hass.config_entries.async_entries.return_value = []
+    # ``bus`` and ``loop`` are instance attributes of HomeAssistant, so the spec
+    # does not provide them. HA's event helpers (async_track_state_change_event,
+    # async_track_time_change) need both and then return real unsubscribe callables.
+    hass.bus = MagicMock()
+    hass.loop = MagicMock()
     return hass
 
 

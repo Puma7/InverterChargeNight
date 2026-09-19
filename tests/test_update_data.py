@@ -1,4 +1,5 @@
 """Tests for _async_update_data behavior."""
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,12 +9,34 @@ from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEFAULT_MIN_SOC,
+    CONF_END_TIME,
     CONF_FORECAST_ERROR_MARGIN,
+    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_KOSTAL_MIN_SOC_ENTITY,
     CONF_PV_FORECAST_ENTITY,
+    CONF_START_TIME,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
     DEFAULT_SAFE_FALLBACK_SOC,
 )
+from tests.conftest import create_mock_state
+
+
+INSIDE_DEFAULT_WINDOW = datetime(2026, 1, 15, 2, 0)
+
+
+@pytest.fixture(autouse=True)
+def _inside_window():
+    """Pin the clock inside the default 00:00-05:59 window.
+
+    The polling update ends a window it finds itself outside of, so tests that
+    exercise the update body must not depend on the wall clock.
+    """
+    with patch(
+        "custom_components.inverter_charge_night.dt_util.now",
+        return_value=INSIDE_DEFAULT_WINDOW,
+    ):
+        yield
 
 
 def _make_coordinator(hass, data):
@@ -30,7 +53,6 @@ async def test_async_update_data_disabled(mock_hass):
     coordinator = _make_coordinator(mock_hass, {})
     coordinator.is_enabled = False
     coordinator.is_active = True
-    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
     data = await coordinator._async_update_data()
     assert data["is_active"] is False
     assert data["calculated_soc"] is None
@@ -58,10 +80,57 @@ async def test_async_update_data_outside_date_range_triggers_end(mock_hass):
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=False)
     coordinator._on_window_end = AsyncMock()
-    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
     data = await coordinator._async_update_data()
     coordinator._on_window_end.assert_awaited()
     assert data["is_active"] is False
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_ends_window_when_end_trigger_was_missed(mock_hass, caplog):
+    """A poll outside the window ends it even though no end trigger fired (finding F9)."""
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_START_TIME: "23:00", CONF_END_TIME: "05:00"}
+    )
+    coordinator.is_enabled = True
+    coordinator.is_active = True
+    coordinator._is_backup_active = MagicMock(return_value=False)
+    coordinator._is_within_date_range = MagicMock(return_value=True)
+    coordinator._on_window_end = AsyncMock()
+
+    with patch(
+        "custom_components.inverter_charge_night.dt_util.now",
+        return_value=datetime(2026, 1, 15, 7, 0),
+    ):
+        data = await coordinator._async_update_data()
+
+    coordinator._on_window_end.assert_awaited_once()
+    assert data["is_active"] is False
+    assert "Window end was missed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_keeps_overnight_window_when_inside(mock_hass):
+    """A poll inside an overnight window (after midnight) does not end it."""
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_START_TIME: "23:00", CONF_END_TIME: "05:00"}
+    )
+    coordinator.is_enabled = True
+    coordinator.is_active = True
+    coordinator.initial_calculated_soc = 40.0
+    coordinator._is_backup_active = MagicMock(return_value=False)
+    coordinator._is_within_date_range = MagicMock(return_value=True)
+    coordinator._on_window_end = AsyncMock()
+    coordinator._handle_auto_charge = AsyncMock()
+
+    with patch(
+        "custom_components.inverter_charge_night.dt_util.now",
+        return_value=datetime(2026, 1, 15, 1, 0),
+    ):
+        data = await coordinator._async_update_data()
+
+    coordinator._on_window_end.assert_not_awaited()
+    assert data["is_active"] is True
+    assert data["calculated_soc"] == 40.0
 
 
 @pytest.mark.asyncio
@@ -124,6 +193,7 @@ async def test_async_update_data_uses_initial_soc(mock_hass):
     coordinator._is_within_date_range = MagicMock(return_value=True)
     coordinator._control_kostal = AsyncMock()
     coordinator._handle_auto_charge = AsyncMock()
+    coordinator._parse_forecast_energy = MagicMock()
 
     mock_hass.states.get.side_effect = lambda entity_id: {
         "sensor.pv": pv_state,
@@ -133,6 +203,8 @@ async def test_async_update_data_uses_initial_soc(mock_hass):
     data = await coordinator._async_update_data()
 
     assert data["calculated_soc"] == 40.0
+    # The stored initial SOC is used, so the forecast is not parsed on this poll
+    coordinator._parse_forecast_energy.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -277,3 +349,104 @@ async def test_async_update_data_stops_when_already_at_target(mock_hass):
 
     coordinator._stop_grid_charging.assert_awaited()
     assert data["target_reached"] is True
+
+
+@pytest.mark.parametrize(
+    "state,unit,expected_kwh",
+    [
+        ("2000", "Wh", 2.0),
+        ("5", "kWh", 5.0),
+        ("0.012", "MWh", 12.0),
+        ("2000", None, 2.0),  # no unit: values above 1000 are assumed to be Wh
+        ("5", None, 5.0),
+    ],
+)
+def test_parse_forecast_energy_units(mock_hass, state, unit, expected_kwh):
+    attributes = {"unit_of_measurement": unit} if unit else {}
+    mock_hass.states.async_set("sensor.pv", state, attributes)
+    coordinator = _make_coordinator(mock_hass, {})
+
+    energy, available = coordinator._parse_forecast_energy("sensor.pv")
+
+    assert energy == pytest.approx(expected_kwh)
+    assert available is True
+
+
+def test_parse_forecast_energy_unsupported_unit_is_unavailable(mock_hass, caplog):
+    mock_hass.states.async_set("sensor.pv", "3500", {"unit_of_measurement": "W"})
+    coordinator = _make_coordinator(mock_hass, {})
+
+    assert coordinator._parse_forecast_energy("sensor.pv") == (0.0, False)
+    assert "unsupported unit_of_measurement" in caplog.text
+
+
+def test_parse_forecast_energy_all_malformed_list_is_unavailable(mock_hass):
+    mock_hass.states.async_set(
+        "sensor.pv", "unavailable", {"forecast": [{"wh": "n/a"}, "junk"]}
+    )
+    coordinator = _make_coordinator(mock_hass, {})
+
+    assert coordinator._parse_forecast_energy("sensor.pv") == (0.0, False)
+
+
+def test_parse_forecast_energy_partially_malformed_list(mock_hass, caplog):
+    mock_hass.states.async_set(
+        "sensor.pv", "unavailable", {"forecast": [{"wh": 1000}, {"wh": "n/a"}]}
+    )
+    coordinator = _make_coordinator(mock_hass, {})
+
+    energy, available = coordinator._parse_forecast_energy("sensor.pv")
+
+    assert energy == pytest.approx(1.0)
+    assert available is True
+    assert "Skipped 1 malformed item(s)" in caplog.text
+
+
+
+# Window aborts from the polling update (findings B1, B2) ----------------------
+
+
+@pytest.mark.asyncio
+async def test_backup_abort_from_the_update_keeps_the_snow_night(mock_hass):
+    """Backup mode ends the window early - that is not a night that was used up."""
+    mock_hass.states.async_set("number.min_soc", "45")
+    mock_hass.states.async_set("switch.grid", "on")
+    coordinator = _make_coordinator(
+        mock_hass,
+        {
+            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_DEFAULT_MIN_SOC: 8.0,
+        },
+    )
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.is_active = True
+    coordinator.snow_nights = 2
+    coordinator._is_backup_active = MagicMock(return_value=True)
+
+    data = await coordinator._async_update_data()
+
+    assert data["is_active"] is False
+    assert coordinator.is_active is False
+    assert coordinator.snow_nights == 2
+
+
+@pytest.mark.asyncio
+async def test_update_outside_a_window_never_resets_the_inverter(mock_hass):
+    """The polling update leaves an inverter the integration does not own alone."""
+    mock_hass.states.async_set("number.min_soc", "42")
+    mock_hass.states.async_set("switch.grid", "off")
+    coordinator = _make_coordinator(
+        mock_hass,
+        {
+            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_DEFAULT_MIN_SOC: 8.0,
+        },
+    )
+    coordinator.is_active = False
+
+    data = await coordinator._async_update_data()
+
+    assert data["is_active"] is False
+    mock_hass.services.async_call.assert_not_awaited()

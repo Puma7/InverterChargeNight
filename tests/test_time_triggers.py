@@ -90,7 +90,6 @@ def test_setup_and_remove_time_triggers(mock_hass):
         mock_hass, {CONF_START_TIME: "00:00", CONF_END_TIME: "05:59"}
     )
     trigger = MagicMock()
-    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
 
     with patch(
         "custom_components.inverter_charge_night.async_track_time_change",
@@ -114,10 +113,7 @@ def test_update_time_triggers_updates_listener(mock_hass):
     )
     coordinator.is_active = True
     coordinator._setup_battery_soc_listener = MagicMock()
-    coordinator.remove_time_triggers = MagicMock()
     coordinator.setup_time_triggers = MagicMock()
-    coordinator._check_current_window = AsyncMock()
-    mock_hass.async_create_task = MagicMock(side_effect=lambda coro: coro.close())
 
     coordinator.entry.data = {
         CONF_START_TIME: "01:00",
@@ -127,5 +123,113 @@ def test_update_time_triggers_updates_listener(mock_hass):
 
     coordinator.update_time_triggers()
 
+    coordinator.setup_time_triggers.assert_called_once()
     coordinator._setup_battery_soc_listener.assert_called_once()
+
+
+def test_is_time_between_equal_times_never_active(mock_hass):
+    coordinator = _make_coordinator(mock_hass, {})
+    assert coordinator._is_time_between(time(22, 0), time(22, 0), time(22, 0)) is False
+    assert coordinator._is_time_between(time(3, 0), time(22, 0), time(22, 0)) is False
+
+
+def test_setup_time_triggers_equal_times_registers_no_triggers(mock_hass, caplog):
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_START_TIME: "22:00", CONF_END_TIME: "22:00"}
+    )
+
+    with patch(
+        "custom_components.inverter_charge_night.async_track_time_change"
+    ) as track_time_change:
+        coordinator.setup_time_triggers()
+
+    track_time_change.assert_not_called()
+    assert coordinator._time_triggers == []
+    assert "will never activate" in caplog.text
+    # The window check still runs so an active window gets ended
     mock_hass.async_create_task.assert_called_once()
+
+
+def test_update_time_triggers_schedules_single_window_check(mock_hass):
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_START_TIME: "00:00", CONF_END_TIME: "05:59"}
+    )
+
+    with patch(
+        "custom_components.inverter_charge_night.async_track_time_change",
+        return_value=MagicMock(),
+    ):
+        coordinator.update_time_triggers()
+
+    assert len(coordinator._time_triggers) == 2
+    mock_hass.async_create_task.assert_called_once()
+    assert (
+        mock_hass.async_create_task.call_args.kwargs["name"]
+        == "inverter_charge_night_check_window"
+    )
+
+
+# The active date range is a calendar-day bound in the middle of the night -----
+
+
+TRACK_TIME_CHANGE = "custom_components.inverter_charge_night.async_track_time_change"
+
+
+def _date_range_coordinator(mock_hass, start=None, end=None):
+    config = {
+        CONF_START_TIME: "23:01",
+        CONF_END_TIME: "04:58",
+    }
+    if start:
+        config[CONF_ACTIVE_START_DATE] = start
+    if end:
+        config[CONF_ACTIVE_END_DATE] = end
+    return _make_coordinator(mock_hass, config)
+
+
+def test_a_date_range_registers_a_midnight_check(mock_hass):
+    """An overnight window crosses the range boundary in its own middle.
+
+    Without this the first night of the range loses everything after midnight
+    (the start trigger fired while still outside it), and the last night runs
+    on until the next poll notices.
+    """
+    coordinator = _date_range_coordinator(mock_hass, start="2026-10-01", end="2027-03-31")
+    with patch(TRACK_TIME_CHANGE) as track:
+        coordinator.setup_time_triggers()
+
+    hours = [c.kwargs.get("hour") for c in track.call_args_list]
+    assert 0 in hours, "no check at the date boundary"
+    assert len(track.call_args_list) == 3  # start, end, date boundary
+    coordinator.remove_time_triggers()
+
+
+def test_without_a_date_range_there_is_no_extra_trigger(mock_hass):
+    coordinator = _date_range_coordinator(mock_hass)
+    with patch(TRACK_TIME_CHANGE) as track:
+        coordinator.setup_time_triggers()
+
+    assert len(track.call_args_list) == 2
+    coordinator.remove_time_triggers()
+
+
+@pytest.mark.asyncio
+async def test_the_midnight_check_starts_the_first_night_of_the_range(mock_hass):
+    """23:01 on 30 September is outside the range; 00:05 on 1 October is not."""
+    coordinator = _date_range_coordinator(mock_hass, start="2026-10-01")
+    coordinator._check_current_window = AsyncMock()
+
+    await coordinator._on_date_boundary(datetime(2026, 10, 1, 0, 0, 5))
+
+    coordinator._check_current_window.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_the_midnight_check_does_nothing_while_disabled(mock_hass):
+    coordinator = _date_range_coordinator(mock_hass, start="2026-10-01")
+    coordinator.is_enabled = False
+    coordinator._check_current_window = AsyncMock()
+
+    await coordinator._on_date_boundary(datetime(2026, 10, 1, 0, 0, 5))
+
+    coordinator._check_current_window.assert_not_awaited()
