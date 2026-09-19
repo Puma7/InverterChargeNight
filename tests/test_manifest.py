@@ -76,3 +76,10 @@ def test_the_manifest_version_has_a_changelog_entry():
     assert f"## [{version}]" in changelog, (
         f"CHANGELOG.md has no '## [{version}]' section for the manifest version"
     )
+
+
+def test_manifest_keys_are_sorted_the_way_hassfest_wants():
+    """hassfest: domain, name, then alphabetical - and it fails the build otherwise."""
+    keys = list(_manifest())
+    assert keys[:2] == ["domain", "name"]
+    assert keys[2:] == sorted(keys[2:])
