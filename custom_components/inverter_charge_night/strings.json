@@ -534,6 +534,10 @@
     "entity_not_available": {
       "title": "Required entity {entity_id} is missing",
       "description": "Inverter Charge Night needs the entity {entity_id}, but Home Assistant does not know it. Check the entity ID in the integration's settings (Reconfigure) or restore the entity in its own integration."
+    },
+    "discharge_block_without_backup": {
+      "title": "{name}: the battery cannot supply the house during a power cut",
+      "description": "To keep the energy it bought, this integration raises the inverter's minimum SOC while the window is open - and a battery does not discharge below its minimum SOC. If the power fails during the window and your house switches to the battery, the battery will refuse to supply it, however full it is.\n\nTwo ways out, either is enough:\n\n1. Set **Backup / island mode entity** in the integration options (step 4). Any entity that says the house is running on the battery: the inverter's state sensor (a Kostal reports `ESB` - add it under **Backup mode states**), a binary sensor, or an `input_boolean` you flip yourself when you operate a manual transfer switch. The integration then hands the inverter back within seconds.\n\n2. Set **Discharge block** to `Off` in step 3. The battery may then run the house at night, which costs the difference between the window tariff and the day tariff.\n\nThis message disappears once either is done."
     }
   }
 }

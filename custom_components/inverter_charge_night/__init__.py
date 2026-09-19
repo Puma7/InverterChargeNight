@@ -280,6 +280,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
     _clear_stale_entity_issues(hass)
 
     coordinator = InverterChargeNightCoordinator(hass, entry)
+    coordinator.review_discharge_block_risk()
     await coordinator.async_config_entry_first_refresh()
     
     entry.runtime_data = coordinator
@@ -338,6 +339,7 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
 
     # Update coordinator config reference
     coordinator.config = entry.data
+    coordinator.review_discharge_block_risk()
     coordinator.auto_efficient_charge = entry.data.get(CONF_AUTO_EFFICIENT_CHARGE, False)
     coordinator._auto_missing_entities_logged = False
     coordinator._house_load_cache = None  # the meter or the average may have changed
@@ -1361,6 +1363,35 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return not self.target_reached
         state = self.hass.states.get(str(switch))
         return state is not None and state.state == "on"
+
+    def review_discharge_block_risk(self) -> None:
+        """Warn when blocking the discharge could leave the house dark.
+
+        Raising the min SOC is the fallback that works on every inverter, and
+        it has one failure mode that is not the integration's to fix: during a
+        power cut the house runs on the battery, and a battery does not
+        discharge below its min SOC. Without an entity that reports island
+        operation, this integration cannot know to get out of the way - so it
+        says so where the user will see it, once, rather than in a log line
+        nobody reads at three in the morning.
+        """
+        issue_id = f"discharge_block_without_backup_{self.entry.entry_id}"
+        at_risk = self._discharge_block_method() == DISCHARGE_BLOCK_VIA_MIN_SOC and not (
+            self.config.get(CONF_BACKUP_MODE_ENTITY)
+        )
+        if not at_risk:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            issue_domain=DOMAIN,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="discharge_block_without_backup",
+            translation_placeholders={"name": str(self.entry.title)},
+        )
 
     def release_window_floor_to(self, target_soc: float | None) -> None:
         """Let the discharge-block floor follow a target the user lowered.

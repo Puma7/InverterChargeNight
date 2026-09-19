@@ -942,3 +942,60 @@ async def test_calling_off_snow_mode_frees_the_floor(mock_hass, coordinator):
 
     assert coordinator._window_floor_soc == coordinator.current_target_soc()
     assert coordinator._window_floor_soc < 100.0
+
+
+# 10. The one failure the min SOC fallback cannot fix by itself ---------------
+
+
+def test_the_min_soc_block_without_an_island_entity_is_flagged(mock_hass):
+    """A battery does not discharge below its min SOC - not even in a power cut.
+
+    The integration cannot tell it is happening unless something reports island
+    operation, so it says so where the user will see it rather than in a log
+    line at three in the morning.
+    """
+    import custom_components.inverter_charge_night as icn
+
+    _register(mock_hass, battery=str(ABOVE_TARGET))
+    made = _make(mock_hass, {k: v for k, v in CONFIG.items() if k != CONF_DISCHARGE_BLOCK_MODE})
+    created: list[str] = []
+    deleted: list[str] = []
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(icn.ir, "async_create_issue", lambda *a, **k: created.append(a[2]))
+        mp.setattr(icn.ir, "async_delete_issue", lambda *a, **k: deleted.append(a[2]))
+        made.review_discharge_block_risk()
+
+    assert created and created[0].startswith("discharge_block_without_backup")
+    assert not deleted
+
+
+def test_an_island_entity_clears_the_flag(mock_hass):
+    import custom_components.inverter_charge_night as icn
+    from custom_components.inverter_charge_night.const import CONF_BACKUP_MODE_ENTITY
+
+    _register(mock_hass, battery=str(ABOVE_TARGET))
+    made = _make(mock_hass, {**CONFIG, CONF_BACKUP_MODE_ENTITY: "sensor.inverter_state"})
+    created: list[str] = []
+    deleted: list[str] = []
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(icn.ir, "async_create_issue", lambda *a, **k: created.append(a[2]))
+        mp.setattr(icn.ir, "async_delete_issue", lambda *a, **k: deleted.append(a[2]))
+        made.review_discharge_block_risk()
+
+    assert not created
+    assert deleted and deleted[0].startswith("discharge_block_without_backup")
+
+
+def test_a_vendor_switch_needs_no_flag(mock_hass):
+    """Only the min SOC fallback has this failure mode."""
+    import custom_components.inverter_charge_night as icn
+
+    _register(mock_hass, battery=str(ABOVE_TARGET))
+    made = _make(mock_hass, {**CONFIG, CONF_DISCHARGE_BLOCK_SWITCH: BLOCK_SWITCH})
+    created: list[str] = []
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(icn.ir, "async_create_issue", lambda *a, **k: created.append(a[2]))
+        mp.setattr(icn.ir, "async_delete_issue", lambda *a, **k: None)
+        made.review_discharge_block_risk()
+
+    assert not created
