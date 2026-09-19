@@ -27,6 +27,7 @@ class InverterChargeNightEntity(CoordinatorEntity[InverterChargeNightCoordinator
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title or "Inverter Charge Night",
-            manufacturer="Custom Integration",
-            model="Inverter Charge Night",
+            manufacturer="Inverter Charge Night",
+            model="Charge window scheduler",
+            configuration_url="https://github.com/Puma7/InverterChargeNight",
         )

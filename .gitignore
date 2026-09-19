@@ -3,3 +3,7 @@
 .pytest_cache/
 .venv/
 __pycache__/
+
+# Local run artefacts
+artifacts/
+.coverage.*

@@ -1,14 +1,15 @@
 {
   "domain": "inverter_charge_night",
   "name": "Inverter Charge Night",
-  "version": "2.0.0",
-  "documentation": "https://github.com/puma7/inverterchargenight",
-  "issue_tracker": "https://github.com/puma7/inverterchargenight/issues",
+  "version": "3.0.0",
+  "documentation": "https://github.com/Puma7/InverterChargeNight",
+  "issue_tracker": "https://github.com/Puma7/InverterChargeNight/issues",
   "codeowners": [
     "@puma7"
   ],
   "config_flow": true,
   "dependencies": [],
   "requirements": [],
-  "iot_class": "local_polling"
+  "iot_class": "local_polling",
+  "integration_type": "service"
 }
