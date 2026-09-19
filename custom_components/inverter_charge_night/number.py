@@ -65,10 +65,10 @@ class MinSOCOverrideNumber(InverterChargeNightEntity, NumberEntity):
         """Set the override value."""
         user_min_soc = float(self.coordinator.config.get(CONF_USER_MIN_SOC, 8.0))
         user_max_soc = float(self.coordinator.config.get(CONF_USER_MAX_SOC, 100.0))
-        
+
         rounded_value = float(int(round(value)))
         clamped_value = max(user_min_soc, min(rounded_value, user_max_soc))
-        
+
         if clamped_value != value:
             _LOGGER.warning(
                 "Override value %.1f%% clamped to %.1f%% to respect user bounds [%.1f%%, %.1f%%]",
@@ -77,20 +77,20 @@ class MinSOCOverrideNumber(InverterChargeNightEntity, NumberEntity):
                 user_min_soc,
                 user_max_soc,
             )
-        
+
         value = clamped_value
         self.coordinator.override_soc = value
         self.coordinator.target_reached = False
         # Lowering the target by hand has to free the discharge-block floor too,
         # or the battery stays blocked at the old level until the window ends.
         self.coordinator.release_window_floor_to(value)
-        
+
         if self.coordinator.minimum_calculated_soc is None or value < self.coordinator.minimum_calculated_soc:
             self.coordinator.minimum_calculated_soc = value
 
         self.coordinator._persist_state()
         self.async_write_ha_state()
-        
+
         if self.coordinator.is_active and self.coordinator.is_enabled:
             # The refresh applies the override through the mode-correct control
             # path (charge or discharge); calling the charge path here directly

@@ -1,7 +1,7 @@
 {
   "domain": "inverter_charge_night",
   "name": "Inverter Charge Night",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "documentation": "https://github.com/Puma7/InverterChargeNight",
   "issue_tracker": "https://github.com/Puma7/InverterChargeNight/issues",
   "codeowners": [

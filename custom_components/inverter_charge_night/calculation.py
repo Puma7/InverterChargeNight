@@ -53,7 +53,7 @@ def calculate_required_soc(
     except (TypeError, ValueError):
         _LOGGER.error("All numeric parameters must be numbers")
         return None
-        
+
     if not 0 <= user_min_soc < user_max_soc <= 100:
         _LOGGER.error(
             "Invalid SOC range: min_soc (%.1f) must be less than max_soc (%.1f) and both between 0-100",
@@ -61,21 +61,21 @@ def calculate_required_soc(
             user_max_soc,
         )
         return None
-        
+
     if error_margin < 0 or error_margin > 100:
         _LOGGER.error("Error margin must be between 0 and 100")
         return None
-    
+
     # Ensure forecast_energy is non-negative
     forecast_energy = max(0.0, float(forecast_energy))
-    
+
     # Apply error margin to forecast (add buffer for uncertainty)
     forecast_with_margin = forecast_energy * (1 + error_margin / 100.0)
-    
+
     # Calculate required SOC: (capacity - forecast) / capacity * 100
     # This gives us the SOC we need to have enough space for the forecast
     remaining_capacity = battery_capacity - forecast_with_margin
-    
+
     if remaining_capacity < 0:
         # If forecast exceeds capacity, we need to be at minimum SOC
         calculated_soc = user_min_soc
@@ -89,10 +89,10 @@ def calculate_required_soc(
     else:
         # Calculate SOC percentage: what SOC we need to have enough space
         calculated_soc = (remaining_capacity / battery_capacity) * 100.0
-    
+
     # Clamp to user-defined limits
     calculated_soc = max(user_min_soc, min(calculated_soc, user_max_soc))
-    
+
     _LOGGER.debug(
         "SOC calculation: forecast=%.2f kWh (with margin: %.2f kWh), "
         "capacity=%.2f kWh, remaining=%.2f kWh, calculated=%.2f%%",
@@ -102,6 +102,6 @@ def calculate_required_soc(
         remaining_capacity,
         calculated_soc,
     )
-    
+
     return round(calculated_soc, 1)
 

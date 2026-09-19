@@ -171,12 +171,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
     coordinator = InverterChargeNightCoordinator(hass, entry)
     coordinator.review_discharge_block_risk()
     await coordinator.async_config_entry_first_refresh()
-    
+
     entry.runtime_data = coordinator
-    
+
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    
+
     # Set up time-based triggers
     coordinator.setup_time_triggers()
     # Set up optional backup mode listener
@@ -189,7 +189,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
     entry.async_on_unload(
         entry.add_update_listener(async_update_entry)
     )
-    
+
     return True
 
 
@@ -216,7 +216,7 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     # Captured before the swap below: afterwards it is the new value, and the
     # listener that watches the old entity would never be re-armed.
     old_battery_soc_entity = coordinator.config.get(CONF_BATTERY_SOC_ENTITY)
-    
+
     # The mode owns the window: a window still running in the old mode has to be
     # torn down before the new mode takes over, otherwise the options dialog
     # would leave force discharge on while grid charge is switched back on. The
@@ -232,12 +232,12 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     coordinator.auto_efficient_charge = entry.data.get(CONF_AUTO_EFFICIENT_CHARGE, False)
     coordinator._auto_missing_entities_logged = False
     coordinator._house_load_cache = None  # the meter or the average may have changed
-    
+
     # Update coordinator polling interval
     coordinator.update_interval = timedelta(
         seconds=entry.data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
     )
-    
+
     # Update time triggers with new configuration
     try:
         coordinator.update_time_triggers(previous_soc_entity=old_battery_soc_entity)
@@ -247,11 +247,11 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
         # Restore old config if update failed
         coordinator.config = entry.data  # Still use new data, but log error
         return
-    
+
     # Check if window changed and we need to adjust state
     new_start_time = entry.data.get(CONF_START_TIME, DEFAULT_START_TIME)
     new_end_time = entry.data.get(CONF_END_TIME, DEFAULT_END_TIME)
-    
+
     # If window times changed, check if we need to reset or start
     if old_start_time != new_start_time or old_end_time != new_end_time:
         _LOGGER.info(
@@ -262,7 +262,7 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
             new_end_time,
         )
         # _check_current_window will handle state adjustment
-    
+
     # Request refresh to recalculate with new settings
     await coordinator.async_request_refresh()
 
