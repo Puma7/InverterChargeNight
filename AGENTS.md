@@ -38,9 +38,13 @@ mypy custom_components/inverter_charge_night/
 pyright
 ```
 
-Both `mypy` and `pyright` are configured in strict mode and must pass with **0 errors**. Both check
-with `python_version` / `pythonVersion` 3.13 because current Home Assistant releases use 3.13 syntax;
-the integration itself stays compatible with 3.12. Nothing is excluded from either checker: both
+Both `mypy` and `pyright` are configured in strict mode and must pass with **0 errors**. The config
+files set `python_version` / `pythonVersion` 3.13, which suits a 3.13 environment; the integration
+itself stays compatible with 3.12. Both checkers also parse Home Assistant's own sources, so the
+setting has to match the interpreter in use: Home Assistant 2026.9 on Python 3.14 uses 3.14-only
+syntax that a checker pinned to 3.13 rejects before it reaches this package. CI therefore passes
+`mypy --python-version <matrix version>` and `pyright --pythonversion <matrix version>`; do the same
+when checking against a 3.14 environment. Nothing is excluded from either checker: both
 cover the whole package, `config_flow.py` included (plan 001 landed its rewrite). The
 `reportIncompatibleVariableOverride` rule is disabled in pyright because HA's `CoordinatorEntity`
 and entity base classes have a framework-level conflict on the `available` property.

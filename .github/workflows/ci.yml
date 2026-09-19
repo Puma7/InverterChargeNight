@@ -25,8 +25,11 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: pip install "homeassistant${{ matrix.homeassistant }}"
       - run: pytest
-      - run: mypy custom_components/inverter_charge_night/
-      - run: pyright
+      # Both checkers parse Home Assistant's own sources too, so they have to
+      # assume the version this job runs: the newest HA uses 3.14-only syntax
+      # that a checker pinned to 3.13 rejects before it looks at our code.
+      - run: mypy --python-version ${{ matrix.python-version }} custom_components/inverter_charge_night/
+      - run: pyright --pythonversion ${{ matrix.python-version }}
       - run: python scripts/smoke_real_ha.py
   hassfest:
     runs-on: ubuntu-latest
