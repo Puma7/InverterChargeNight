@@ -22,8 +22,19 @@ A maintenance release: no new settings, no changed behaviour on the inverter.
   `custom_components.inverter_charge_night` still covers it; a filter matching the logger name
   exactly does not.
 
+### Fixed
+
+- **CI never ran the tests.** `actions/setup-python` was told to cache pip but this repository
+  has no `requirements.txt` or `pyproject.toml`, so the job failed at the cache step before
+  installing anything. It now caches against `requirements-dev.txt`.
+- **hassfest**: the integration reads the recorder (for the house load profile) without
+  declaring it. `recorder` is now listed in `after_dependencies`, where an optional
+  integration belongs.
+
 ### Internal
 
+- Brand assets (`brand/icon.png`, `brand/logo.png` and their @2x variants) so HACS does not
+  have to fall back to the Home Assistant brands repository.
 - All 54 rules of Home Assistant's integration quality scale are met or documented as not
   applicable; `quality_scale.yaml` carries the reason for each one.
 - 627 tests, 95 % coverage over the whole package (100 % on the config flow), enforced in CI.

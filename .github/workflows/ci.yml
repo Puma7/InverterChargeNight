@@ -19,6 +19,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          # There is no requirements.txt or pyproject.toml; without this the
+          # cache step fails and the job never reaches the tests.
+          cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - run: pip install "homeassistant${{ matrix.homeassistant }}"
       - run: pytest
