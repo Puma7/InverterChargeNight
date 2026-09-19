@@ -125,8 +125,8 @@ async def test_reaching_the_target_stops_grid_charging_once(mock_hass, coordinat
         mock_hass.services.async_call.await_args_list
     )
 
-    # A second update with the target still reached must not write again
-    mock_hass.states.async_set(GRID, "off")
+    # A second update must not write again - with the switch still on, a
+    # repeated stop would show up here.
     mock_hass.services.async_call.reset_mock()
     await coordinator._async_update_data()
     assert mock_hass.services.async_call.await_args_list == []
@@ -194,7 +194,7 @@ def test_an_unreadable_backup_entity_warns_once(mock_hass, caplog):
         assert coordinator._is_backup_active() is False
         assert coordinator._is_backup_active() is False
 
-    assert sum("is unavailable" in r.message for r in caplog.records) == 1
+    assert sum("is unavailable" in r.getMessage() for r in caplog.records) == 1
 
     # Once it answers again the next outage is reported afresh
     mock_hass.states.async_set(BACKUP, "off")
@@ -221,16 +221,27 @@ def _discharge_coordinator(mock_hass, *, min_soc_state="8"):
 
 
 @pytest.mark.asyncio
+async def test_discharge_with_a_usable_floor_starts_the_force_discharge(mock_hass):
+    """The control case for the two tests below: this is what success looks like."""
+    coordinator = _discharge_coordinator(mock_hass)
+
+    await coordinator._control_discharge(35.0)
+
+    assert mock_hass.services.async_call.await_args_list == [
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 35.0}),
+        call("switch", "turn_on", {"entity_id": FORCE}),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_discharge_waits_when_the_floor_entity_is_unavailable(mock_hass):
     """Discharging against an unknown floor could empty the battery past the user minimum."""
     coordinator = _discharge_coordinator(mock_hass, min_soc_state="unavailable")
 
     await coordinator._control_discharge(35.0)
 
-    assert (
-        call("switch", "turn_on", {"entity_id": FORCE})
-        not in mock_hass.services.async_call.await_args_list
-    )
+    # Neither the floor nor the force discharge: nothing is written at all
+    assert mock_hass.services.async_call.await_args_list == []
 
 
 @pytest.mark.asyncio
@@ -246,10 +257,10 @@ async def test_discharge_waits_when_the_floor_cannot_be_written(mock_hass):
 
     await coordinator._control_discharge(35.0)
 
-    assert (
-        call("switch", "turn_on", {"entity_id": FORCE})
-        not in mock_hass.services.async_call.await_args_list
-    )
+    # The floor write was attempted and failed, so the discharge does not start
+    assert mock_hass.services.async_call.await_args_list == [
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 35.0}),
+    ]
 
 
 # --- the target is crossed while we are writing -------------------------------

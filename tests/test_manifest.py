@@ -67,3 +67,12 @@ def test_every_entity_translation_key_has_a_name():
         used |= set(re.findall(r'_attr_translation_key = "([^"]+)"', module.read_text()))
     assert used, "no entity translation keys found"
     assert used <= declared
+
+
+def test_the_manifest_version_has_a_changelog_entry():
+    """A release without a changelog entry is a release nobody can read."""
+    version = _manifest()["version"]
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"## [{version}]" in changelog, (
+        f"CHANGELOG.md has no '## [{version}]' section for the manifest version"
+    )

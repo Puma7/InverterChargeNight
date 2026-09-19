@@ -17,12 +17,16 @@ A maintenance release: no new settings, no changed behaviour on the inverter.
   (templates and custom code should use `custom_components.inverter_charge_night.coordinator`).
 - "Required entity … is not yet available" is now a translated message rather than English
   text, so it reads the same as the repair issue shown next to it.
+- As a consequence of the move, the control loop logs under
+  `custom_components.inverter_charge_night.coordinator`. A `logger:` setting for
+  `custom_components.inverter_charge_night` still covers it; a filter matching the logger name
+  exactly does not.
 
 ### Internal
 
 - All 54 rules of Home Assistant's integration quality scale are met or documented as not
   applicable; `quality_scale.yaml` carries the reason for each one.
-- 625 tests, 95 % coverage over the whole package (100 % on the config flow), enforced in CI.
+- 627 tests, 95 % coverage over the whole package (100 % on the config flow), enforced in CI.
 
 ## [3.0.0] - 2026-09-19
 
