@@ -22,14 +22,13 @@ rules:
       The brands repository only accepts integrations that are part of Home
       Assistant Core. The integration ships its own icon.svg for HACS.
   common-modules:
-    status: todo
+    status: done
     comment: |
-      entity.py holds the shared base entity, but the coordinator still lives in
-      __init__.py instead of coordinator.py. Splitting it is tracked as backlog
-      item 016 in plans/README.md.
+      coordinator.py holds the coordinator, entity.py the shared base entity;
+      __init__.py is the setup, update and unload shim only.
   config-flow-test-coverage:
-    status: todo
-    comment: config_flow.py is at 94 % line coverage; the rule asks for 100 %.
+    status: done
+    comment: config_flow.py is at 100 % line coverage.
   config-flow:
     status: done
     comment: |
@@ -118,10 +117,10 @@ rules:
     status: exempt
     comment: No authentication - the integration only talks to local entities.
   test-coverage:
-    status: todo
+    status: done
     comment: |
-      93 % enforced in CI against a 95 % bar. The gap is defensive error paths;
-      the control loop, planner, limits and flows are covered.
+      95 % over the whole package, enforced in CI by the .coveragerc ratchet
+      against the 95 % bar.
 
   # Gold
   devices:
@@ -181,10 +180,11 @@ rules:
     comment: All entities are either controls the user needs or the few diagnostics that explain a night.
   entity-translations: done
   exception-translations:
-    status: todo
+    status: done
     comment: |
-      No translated HomeAssistantError is raised yet; ConfigEntryNotReady carries
-      a plain message. The repair issues and the config flow errors are translated.
+      The one exception shown to the user, ConfigEntryNotReady for a required
+      entity that is not available yet, carries translation_key and placeholders.
+      The repair issues and the config flow errors are translated as well.
   icon-translations:
     status: done
     comment: icons.json for every entity; no hardcoded _attr_icon.

@@ -326,9 +326,10 @@ beide Stellen prüfen jetzt explizit auf `None`.
 - **011 Wechselrichter-Profile** (L8): erst Spike gegen die realen Entitäten der Fronius- und SMA-Integrationen, dann Fähigkeitsschnittstelle; Umbenennung `kostal_*` → `min_soc_entity` / `grid_charge_switch` mit `async_migrate_entry`.
 - **012 Morning-Discharge entscheiden** (L9): entweder als "dynamischer Tarif"-Funktion dokumentieren oder zum Überbrückungsmodus umbauen. Bis dahin mindestens Override-Pfad korrigieren (in 004 enthalten).
 - **013 Preissignal** (L5): Tibber/aWATTar/EPEX-Sensor als Eingang, ersetzt den festen Zeitplan durch Kostenoptimierung.
-- **016 Coordinator aufteilen** (`common-modules`): Der Coordinator liegt in `__init__.py`
-  (~4400 Zeilen). Home Assistants Regel `common-modules` will ihn in `coordinator.py`. Schnitte
-  sind benannt: Limits, Effizienzsuche, Zeitplan, Persistenz.
+- ~~**016 Coordinator aufteilen** (`common-modules`)~~ — erledigt: der Coordinator liegt in
+  `coordinator.py`, `__init__.py` ist nur noch Setup, Update und Unload. Eine feinere Aufteilung
+  (Limits, Effizienzsuche, Zeitplan, Persistenz) bleibt möglich, ist aber von keiner Regel
+  gefordert.
 - **015 Effizienz je Ladestandsband**: Verluste hängen auch vom SOC ab; die Suche bucht heute nur
   auf die Leistung. Wer das verfeinern will, misst pro SOC-Band (Plan 010, Wartungshinweise).
 - **014 Doku-Bereinigung**: README auf 2.0 und 28 Felder bringen (Forecast-Entität für MORGEN, nicht heute), Platzhalter-URLs, elf Audit-Dateien im Wurzelverzeichnis nach `docs/history/`, `de.json` anlegen.

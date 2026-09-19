@@ -158,8 +158,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
                 translation_key="entity_not_available",
                 translation_placeholders={"entity_id": entity_id},
             )
+            # Translated, so the message in the UI matches the repair issue above
             raise ConfigEntryNotReady(
-                f"Required entity {entity_id} is not yet available"
+                translation_domain=DOMAIN,
+                translation_key="entity_not_available",
+                translation_placeholders={"entity_id": entity_id},
             )
     # All required entities are known: clear issues from earlier failed attempts,
     # including ones left behind by entities that are no longer configured.

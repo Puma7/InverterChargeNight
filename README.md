@@ -881,12 +881,12 @@ What it currently meets:
 | Code | `runtime_data` instead of `hass.data`, `PARALLEL_UPDATES` on every platform, fully async, no third-party dependencies |
 | Typing | `mypy --strict` and `pyright` strict over the whole package, no exclusions |
 | Entities | unique ids, `has_entity_name`, entity categories, translated names and states, icon translations |
-| Tests | 584 tests, 93 % coverage enforced in CI, plus an end-to-end test against a real Home Assistant core |
+| Tests | 625 tests, 95 % coverage enforced in CI, 100 % on the config flow, plus an end-to-end test against a real Home Assistant core |
 | Docs | this file, in English, with a German UI translation shipped in the integration |
 
-Known gaps are listed in the same file — the honest ones are `common-modules` (the coordinator
-still lives in `__init__.py` rather than `coordinator.py`) and `test-coverage` (95 % is the bar,
-this is at 93 %).
+All 54 rules are currently met: 34 are implemented and 16 do not apply to an integration that
+talks to other integrations' entities rather than to a device or a cloud service (no polling
+protocol, no discovery, no authentication). The file names the reason for each exemption.
 
 ## Technical Details
 
@@ -909,7 +909,8 @@ The integration uses Home Assistant's standard patterns:
 
 ```
 custom_components/inverter_charge_night/
-├── __init__.py              # Integration setup and the coordinator (control loop)
+├── __init__.py              # Integration setup, update and unload
+├── coordinator.py           # The control loop: window, planner, writes, verification
 ├── manifest.json            # Integration metadata
 ├── config_flow.py           # Four-step setup, reconfigure and options flows
 ├── const.py                 # Constants and configuration keys
@@ -1068,7 +1069,7 @@ pass:
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                                        # 584 tests, 93 % coverage gate
+pytest                                        # 625 tests, 95 % coverage gate
 mypy custom_components/inverter_charge_night  # strict
 pyright                                       # strict
 python scripts/smoke_real_ha.py               # end-to-end against a real HA core

@@ -50,5 +50,5 @@ and entity base classes have a framework-level conflict on the `available` prope
 - The `~/.local/bin` directory must be on `PATH` for `pytest`, `mypy`, and `pyright` to be found (they are pip-installed with `--user`).
 - Dependencies are pinned as minimum versions in `requirements-dev.txt`; there is no `pyproject.toml`.
 - The `.coveragerc` `fail_under` is a ratchet over the whole package (see "Running tests").
-- Entity platform files use `CoordinatorEntity[InverterChargeNightCoordinator]` generic to properly type `self.coordinator`. Importing the coordinator from `.__init__` is safe (no circular imports).
+- Entity platform files use `CoordinatorEntity[InverterChargeNightCoordinator]` generic to properly type `self.coordinator`. The coordinator and the `InverterChargeNightConfigEntry` alias live in `coordinator.py`; `__init__.py` only holds setup, update and unload. Import them from `.coordinator`, not from the package root.
 - This is not a runnable standalone application. To test end-to-end beyond unit tests, you would need a full Home Assistant instance with Kostal and Solcast integrations — not feasible in this environment. Unit tests with full mocking are the primary validation method.
