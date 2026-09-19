@@ -1640,6 +1640,8 @@ async def test_options_flow_mode_change_ends_the_running_window(mock_hass):
     coordinator.entry.runtime_data = coordinator
     coordinator.update_time_triggers = MagicMock()
     coordinator._setup_backup_mode_listener = MagicMock()
+    # The repair issue needs a real issue registry, which the mock hass has not
+    coordinator.review_discharge_block_risk = MagicMock()
     try:
         await _start_and_apply(mock_hass, coordinator)
         assert coordinator.is_active is True

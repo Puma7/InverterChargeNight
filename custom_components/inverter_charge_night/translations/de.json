@@ -531,6 +531,10 @@
     }
   },
   "issues": {
+    "discharge_block_without_backup": {
+      "title": "{name}: Der Speicher kann das Haus bei Stromausfall nicht versorgen",
+      "description": "Damit die im Fenster gekaufte Energie liegen bleibt, hebt diese Integration den Mindestladestand des Wechselrichters an, solange das Fenster läuft — und ein Speicher entlädt nicht unter seinen Mindestladestand. Fällt während des Fensters der Strom aus und dein Haus schaltet auf den Speicher um, verweigert er die Versorgung, egal wie voll er ist.\n\nZwei Wege, einer genügt:\n\n1. Trag unter **Entität für Notstrom-/Inselbetrieb** (Schritt 4) eine Entität ein, die den Inselbetrieb anzeigt: den Zustandssensor des Wechselrichters (ein Kostal meldet `ESB` — dann zusätzlich unter **Zustände für Notstrombetrieb** eintragen), einen binären Sensor, oder ein `input_boolean`, das du bei einer manuellen Umschaltbox selbst umlegst. Die Integration gibt den Wechselrichter dann innerhalb von Sekunden frei.\n\n2. Stell **Entladesperre** in Schritt 3 auf `Aus`. Dann darf der Speicher nachts das Haus versorgen; das kostet die Differenz zwischen Fenster- und Tagespreis.\n\nDiese Meldung verschwindet, sobald eines von beidem erledigt ist."
+    },
     "entity_not_available": {
       "title": "Die benötigte Entität {entity_id} fehlt",
       "description": "Inverter Charge Night braucht die Entität {entity_id}, aber Home Assistant kennt sie nicht. Prüfe die Entitäts-ID in den Einstellungen der Integration (Neu konfigurieren) oder stelle die Entität in ihrer eigenen Integration wieder her."
