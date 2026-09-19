@@ -1,0 +1,63 @@
+name: Bug report
+description: Something the integration did that it should not have done
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. This integration writes to an inverter, so the
+        most useful report says **what it wrote, and what you expected instead**.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did the integration do, and what did you expect?
+      placeholder: |
+        At 23:01 the window started and the min SOC went to 70 %, but my target was 45 %.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log
+      description: |
+        Settings → System → Logs, or add this to configuration.yaml and restart:
+
+        ```yaml
+        logger:
+          logs:
+            custom_components.inverter_charge_night: debug
+        ```
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Settings → Devices & Services → Inverter Charge Night → three-dot menu →
+        Download diagnostics. Entity ids are redacted automatically. Drag the file in here.
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version of this integration
+      placeholder: "2.0.0"
+    validations:
+      required: true
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.9.1"
+    validations:
+      required: true
+  - type: input
+    id: inverter
+    attributes:
+      label: Inverter and the integration that exposes it
+      placeholder: "Kostal PLENTICORE L G3 via KOSTAL KORE 3.0.0"
+    validations:
+      required: true
