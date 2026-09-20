@@ -1022,3 +1022,47 @@ async def test_an_unparsable_soc_during_verification_is_ignored(mock_hass):
 
     assert coordinator.target_reached is False
     assert coordinator._verifying_min_soc is False
+
+
+@pytest.mark.asyncio
+async def test_a_plan_whose_write_fails_is_not_marked_applied(mock_hass):
+    """The sensor must not call a plan an order when nothing reached the inverter.
+
+    _set_ac_charge_limit_w returns False for a failed service call and for a
+    limit it could not read first. Either way the number on the sensor is what
+    the window would need, not what the inverter was told.
+    """
+    ac_limit = "number.ac_charge_limit"
+    coordinator = _bridge_coordinator(mock_hass, charge_power_entity=ac_limit)
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=False)
+    try:
+        await coordinator._on_window_start(WINDOW_START)
+        await coordinator._async_update_data()
+
+        assert coordinator.planned_charge_power_w is not None
+        assert coordinator.planned_power_is_applied is False
+        assert coordinator._planned_setpoint_written_w is None
+        coordinator._set_ac_charge_limit_w.assert_awaited()
+    finally:
+        await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_a_plan_too_close_to_what_stands_there_is_still_applied(mock_hass):
+    """No write needed: the value already on the inverter is the one in force."""
+    ac_limit = "number.ac_charge_limit"
+    coordinator = _bridge_coordinator(mock_hass, charge_power_entity=ac_limit)
+    try:
+        await coordinator._on_window_start(WINDOW_START)
+        await coordinator._async_update_data()
+        planned = coordinator.planned_charge_power_w
+        assert planned is not None and coordinator.planned_power_is_applied is True
+
+        # Second round, nothing moved: no further write, still applied
+        coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
+        await coordinator._async_update_data()
+
+        coordinator._set_ac_charge_limit_w.assert_not_awaited()
+        assert coordinator.planned_power_is_applied is True
+    finally:
+        await coordinator._stop_periodic_verification()

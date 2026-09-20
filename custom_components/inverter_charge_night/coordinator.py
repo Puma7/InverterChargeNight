@@ -1009,11 +1009,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Bridge mode without a charge limit entity: the plan is computed and
             # shown, but there is nothing to write it to.
             return
-        # From here the setpoint is ours to order, whether or not this round
-        # moves it far enough to be worth a write.
-        self.planned_power_is_applied = True
         written = self._planned_setpoint_written_w
         if written is not None and abs(setpoint - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
+            # Near enough to what already stands on the inverter: that value is
+            # in force, so the plan is applied without another write.
+            self.planned_power_is_applied = True
             return
         _LOGGER.info(
             "Planned charge power %.0f W (%.2f kWh missing in %.2f h, required %.0f W)",
@@ -1022,8 +1022,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             hours_remaining,
             required,
         )
+        # Only a write that reached the inverter counts. _set_ac_charge_limit_w
+        # returns False when the service call failed or when the current limit
+        # could not be read - and then the number on the sensor is a plan, not
+        # an order, which is the whole point of the attribute.
         if await self._set_ac_charge_limit_w(int(setpoint)):
             self._planned_setpoint_written_w = setpoint
+            self.planned_power_is_applied = True
 
     # Discharge block (plan 006, step 5) --------------------------------------
 
