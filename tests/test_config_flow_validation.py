@@ -19,6 +19,10 @@ from custom_components.inverter_charge_night.config_flow import (
 )
 from custom_components.inverter_charge_night.const import (
     CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
+    CONF_FORCE_DISCHARGE_SWITCH,
+    CONF_OPERATION_MODE,
+    MODE_MORNING_DISCHARGE,
+    MODE_NIGHT_CHARGE,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
     CONF_ACTIVE_END_DATE,
     CONF_ACTIVE_START_DATE,
@@ -165,6 +169,33 @@ def test_all_three_prices_together_pass(mock_hass):
         )
         == {}
     )
+
+
+# --- the discharge mode needs the switch that discharges ----------------------
+
+
+def test_discharge_mode_without_its_switch_is_rejected(mock_hass):
+    """Without it the mode raises the floor, stops charging and never discharges."""
+    errors = _errors(mock_hass, **{CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE})
+    assert errors[CONF_FORCE_DISCHARGE_SWITCH] == "required_for_discharge_mode"
+
+
+def test_discharge_mode_with_its_switch_passes(mock_hass):
+    assert (
+        _errors(
+            mock_hass,
+            **{
+                CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE,
+                CONF_FORCE_DISCHARGE_SWITCH: "switch.force_discharge",
+            },
+        )
+        == {}
+    )
+
+
+def test_night_charge_does_not_need_the_discharge_switch(mock_hass):
+    """The switch is genuinely optional in the mode that never discharges."""
+    assert _errors(mock_hass, **{CONF_OPERATION_MODE: MODE_NIGHT_CHARGE}) == {}
 
 
 # --- options flow wiring -----------------------------------------------------

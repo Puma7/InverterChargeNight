@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
 import pytest_asyncio
@@ -19,7 +19,9 @@ import pytest_asyncio
 from custom_components.inverter_charge_night.coordinator import (
     InverterChargeNightCoordinator,
 )
+from custom_components.inverter_charge_night.sensor import PlannedChargePowerSensor
 from custom_components.inverter_charge_night.const import (
+    CONF_AVG_HOUSE_LOAD_KW,
     CONF_BACKUP_MODE_ENTITY,
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
@@ -29,8 +31,13 @@ from custom_components.inverter_charge_night.const import (
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_FORECAST_ERROR_MARGIN,
     CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_CHARGE_POWER_ENTITY,
     CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_MAX_CHARGE_POWER_W,
+    CONF_MIN_CHARGE_POWER_W,
     CONF_OPERATION_MODE,
+    CONF_PLANNER_MODE,
+    PLANNER_MODE_BRIDGE,
     CONF_PV_FORECAST_ENTITY,
     CONF_START_TIME,
     CONF_USER_MAX_SOC,
@@ -409,3 +416,97 @@ async def test_a_charge_limit_that_matches_is_left_alone(mock_hass):
     await coordinator._verify_ac_charge_limit()
 
     mock_hass.services.async_call.assert_not_awaited()
+
+
+# --- a plan the inverter never receives ---------------------------------------
+
+BRIDGE_CONFIG = dict(CONFIG) | {
+    CONF_PLANNER_MODE: PLANNER_MODE_BRIDGE,
+    CONF_AVG_HOUSE_LOAD_KW: 0.5,
+    CONF_MIN_CHARGE_POWER_W: 1000,
+    CONF_MAX_CHARGE_POWER_W: 10000,
+}
+
+
+def _bridge_coordinator(mock_hass, *, charge_power_entity: str | None = None):
+    config = dict(BRIDGE_CONFIG)
+    if charge_power_entity:
+        config[CONF_CHARGE_POWER_ENTITY] = charge_power_entity
+        mock_hass.states.async_set(charge_power_entity, "10000", {"unit_of_measurement": "W"})
+    mock_hass.async_create_background_task = MagicMock(
+        side_effect=lambda coro, name=None, **kwargs: asyncio.ensure_future(coro)
+    )
+    mock_hass.states.async_set(MIN_SOC, "8")
+    mock_hass.states.async_set(GRID, "off")
+    mock_hass.states.async_set(BATTERY, "10")
+    mock_hass.states.async_set(PV, "5", {"unit_of_measurement": "kWh"})
+    mock_hass.states.async_set(
+        "sun.sun",
+        "below_horizon",
+        {
+            "next_rising": "2026-01-15T07:30:00+00:00",
+            "next_setting": "2026-01-15T17:00:00+00:00",
+        },
+    )
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator.async_request_refresh = AsyncMock()
+    return coordinator
+
+
+@pytest.mark.asyncio
+async def test_a_plan_without_a_charge_limit_entity_is_not_marked_applied(mock_hass):
+    """Bridge mode plans a charge power even with nothing to write it to.
+
+    The number is worth showing - it is what the window would need - but the
+    sensor has to say that the inverter is not being told, or the user reads a
+    plan as a command.
+    """
+    coordinator = _bridge_coordinator(mock_hass)
+    try:
+        await coordinator._on_window_start(WINDOW_START)
+        await coordinator._async_update_data()
+
+        assert coordinator.planned_charge_power_w is not None
+        assert coordinator.planned_charge_power_w > 0
+        assert coordinator.planned_power_is_applied is False
+        # Nothing was written to a number entity: only the min SOC and the switch
+        assert [
+            c for c in mock_hass.services.async_call.await_args_list if c.args[0] == "number"
+        ] == [call("number", "set_value", {"entity_id": MIN_SOC, "value": ANY})]
+    finally:
+        await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_a_plan_with_a_charge_limit_entity_is_written_and_marked_applied(mock_hass):
+    """The control case: with somewhere to write, the same plan reaches the inverter."""
+    ac_limit = "number.ac_charge_limit"
+    coordinator = _bridge_coordinator(mock_hass, charge_power_entity=ac_limit)
+    try:
+        await coordinator._on_window_start(WINDOW_START)
+        await coordinator._async_update_data()
+
+        planned = coordinator.planned_charge_power_w
+        assert planned is not None
+        assert coordinator.planned_power_is_applied is True
+        assert (
+            call("number", "set_value", {"entity_id": ac_limit, "value": int(planned)})
+            in mock_hass.services.async_call.await_args_list
+        )
+    finally:
+        await coordinator._stop_periodic_verification()
+
+
+def test_the_planned_power_sensor_publishes_whether_it_is_applied(mock_hass):
+    """The flag has to be visible in Home Assistant, not just on the coordinator."""
+    coordinator = _make_coordinator(mock_hass)
+    entry = coordinator.entry
+    sensor = PlannedChargePowerSensor(coordinator, entry)
+
+    coordinator.planned_charge_power_w = 4500.0
+    coordinator.planned_power_is_applied = False
+    assert sensor.native_value == 4500.0
+    assert sensor.extra_state_attributes == {"applied": False}
+
+    coordinator.planned_power_is_applied = True
+    assert sensor.extra_state_attributes == {"applied": True}

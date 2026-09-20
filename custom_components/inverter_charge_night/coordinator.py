@@ -290,6 +290,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Planner v2 (plan 006)
         self.last_plan: PlanResult | None = None  # result of the last bridge plan this window
         self.planned_charge_power_w: float | None = None  # setpoint for the remaining window
+        # Whether that setpoint is also ordered from the inverter. The plan is
+        # worth showing in every mode, but a number that looks like a command
+        # and is not would be the worse kind of wrong (see the sensor).
+        self.planned_power_is_applied = False
         self._pv_crossover: datetime | None = None
         self._original_discharge_limit: float | None = None  # raw value in the entity's unit
         self._planned_setpoint_written_w: float | None = None
@@ -954,6 +958,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         setpoint from ever exceeding what the connection can carry.
         """
         self.planned_charge_power_w = None
+        self.planned_power_is_applied = False
         if self.target_reached:
             self.planned_charge_power_w = 0.0
             return
@@ -1001,7 +1006,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # connection limit is a protection and must not depend on the mode.
             return
         if self._ac_charge_limit_target() is None:
+            # Bridge mode without a charge limit entity: the plan is computed and
+            # shown, but there is nothing to write it to.
             return
+        # From here the setpoint is ours to order, whether or not this round
+        # moves it far enough to be worth a write.
+        self.planned_power_is_applied = True
         written = self._planned_setpoint_written_w
         if written is not None and abs(setpoint - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
             return
@@ -4184,6 +4194,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # an unchanged load does not write the same value over and over.
         self._planned_setpoint_written_w = allowed
         self.planned_charge_power_w = allowed
+        self.planned_power_is_applied = True
 
     def _grid_write_is_debounced(self) -> bool:
         """True while the last charge-limit write is too recent to follow up.
@@ -4382,3 +4393,4 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._planned_setpoint_written_w = limited
         self.planned_charge_power_w = limited
+        self.planned_power_is_applied = True

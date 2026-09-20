@@ -312,6 +312,15 @@ def _validate_user_input(
         )
         errors[missing] = "required_entity"
 
+    # Morning discharge only discharges through this switch. Without it the mode
+    # raises the min SOC floor and turns grid charging off - and then waits, night
+    # after night, for a discharge that cannot start. The switch is genuinely
+    # optional in night charge mode, so the requirement is tied to the mode.
+    if user_input.get(CONF_OPERATION_MODE) == MODE_MORNING_DISCHARGE and not user_input.get(
+        CONF_FORCE_DISCHARGE_SWITCH
+    ):
+        errors[CONF_FORCE_DISCHARGE_SWITCH] = "required_for_discharge_mode"
+
     if user_input.get(CONF_AUTO_EFFICIENT_CHARGE):
         if not user_input.get(CONF_CHARGE_POWER_ENTITY):
             errors[CONF_CHARGE_POWER_ENTITY] = "required_entity"

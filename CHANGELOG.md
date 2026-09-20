@@ -5,12 +5,26 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.1] - 2026-09-19
+## [3.0.1] - 2026-09-20
 
-A maintenance release: no new settings, no changed behaviour on the inverter.
+Mostly a maintenance release. One setting changes: Morning discharge now insists on the switch
+that performs the discharge. Nothing about what the integration writes to the inverter changes.
+
+### Added
+
+- `sensor.…_planned_charge_power` gained an `applied` attribute. The plan is computed in every
+  mode, but it is only written to the inverter in bridge mode or behind a house connection
+  limit, and only with an AC charge limit entity configured. The attribute says which of the
+  two it is, so a plan that reaches nothing is not read as a command.
 
 ### Changed
 
+- **Morning discharge now requires the force discharge switch.** It is the only thing that
+  actually discharges the battery; without it the mode raised the min SOC floor, turned grid
+  charging off and then waited for a discharge that could never start. The field said
+  "optional" while the grid charge switch, which that mode only ever turns off, was demanded.
+  Existing entries keep working until the settings are saved again, which is where the
+  requirement is now enforced.
 - The coordinator moved from `__init__.py` into `coordinator.py`. `__init__.py` is now the
   setup, update and unload shim it is supposed to be. The moved code is unchanged line for
   line; only the import paths differ, which matters for anyone importing from this package
@@ -37,7 +51,8 @@ A maintenance release: no new settings, no changed behaviour on the inverter.
   have to fall back to the Home Assistant brands repository.
 - All 54 rules of Home Assistant's integration quality scale are met or documented as not
   applicable; `quality_scale.yaml` carries the reason for each one.
-- 627 tests, 95 % coverage over the whole package (100 % on the config flow), enforced in CI.
+- 95 % coverage over the whole package (100 % on the config flow), enforced in CI by the
+  `.coveragerc` ratchet.
 
 ## [3.0.0] - 2026-09-19
 

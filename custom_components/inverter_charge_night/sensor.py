@@ -112,7 +112,15 @@ class BestChargePowerSensor(InverterChargeNightEntity, SensorEntity):
 
 
 class PlannedChargePowerSensor(InverterChargeNightEntity, SensorEntity):
-    """The AC charge power planned for the remaining window (plan 006, step 6)."""
+    """The AC charge power planned for the remaining window (plan 006, step 6).
+
+    The plan is shown in every mode, because what the window would need is
+    worth knowing on its own. Whether it is also ordered from the inverter
+    depends on the configuration - the planner only owns the setpoint in
+    bridge mode or behind a house connection limit, and only with an AC charge
+    limit entity to write to. ``applied`` says which of the two this is, so a
+    plan that reaches nothing cannot be read as a command.
+    """
 
     _attr_translation_key = "planned_charge_power"
     _attr_native_unit_of_measurement = "W"
@@ -129,6 +137,11 @@ class PlannedChargePowerSensor(InverterChargeNightEntity, SensorEntity):
         """Return the planned setpoint, or None outside a night charge window."""
         value = self.coordinator.planned_charge_power_w
         return float(value) if value is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Say whether this number is reaching the inverter."""
+        return {"applied": self.coordinator.planned_power_is_applied}
 
 
 class GridChargeHeadroomSensor(InverterChargeNightEntity, SensorEntity):
