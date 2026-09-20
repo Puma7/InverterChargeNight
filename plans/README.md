@@ -147,6 +147,7 @@ vorliegt; bis dahin bleibt der Kostal-Pfad, aber ohne Markennamen in Keys und La
 | 011 | Tarifzeitfenster (Perioden, Saison, Jahreswechsel) und Abendreserve für die Hochpreiszone | P1 | M | 006 | TODO (Entwurf) |
 | 012 | Masterplan: allgemeine Lade-/Entladesteuerung — Services, Tarifkalender, Preissignal, Regeln als Subentries | P1 | L | 006 | Stufen 1–2 DONE (3.1.0, 3.2.0), 3–4 TODO |
 | 013 | Abendrettung und das Ad-hoc-Fenster, das sie braucht | P1 | L | 009, 011 | DONE (3.4.0 + 3.5.0) |
+| 014 | Abregelung: die PV-Ladung so legen, dass die Mittagsspitze hineinpasst | P1 | L | 013, 011 | TODO (Entwurf) |
 
 Status-Werte: TODO | IN PROGRESS | DONE | BLOCKED (mit Grund) | REJECTED (mit Begründung)
 
@@ -345,6 +346,11 @@ beide Stellen prüfen jetzt explizit auf `None`.
   und ausdrücklich **experimentell**; so ist er jetzt auch in der Oberfläche benannt und in
   `docs/morning-discharge.md` beschrieben. Der Zwangsentlade-Schalter ist seit 3.0.2 Pflicht für
   den Modus.
+- ~~**017 PV-Ladung über den Tag strecken (Abregelung vermeiden)**~~ — hat jetzt einen eigenen
+  Plan: `plans/014-abregelung-pv-ladung-strecken.md`. Dort steht auch die **Korrektur der
+  Richtung**: gedrosselt gehört der *Vormittag*, nicht die Mittagszeit — während der Abregelung
+  ist der Speicher die einzige Senke, die noch bleibt. Ursprünglicher Eintrag:
+
 - **017 PV-Ladung über den Tag strecken (Abregelung vermeiden)**: Pascal am 20.09. — wenn
   mittags das Netz voll ist, darf nicht mehr eingespeist werden. Ein Speicher, der um zwölf Uhr
   schon voll ist, kann dann nichts mehr aufnehmen und die Anlage wird abgeregelt. Beispiel:
