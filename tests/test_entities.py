@@ -399,3 +399,52 @@ def test_calculated_soc_sensor_exposes_plan_attributes():
     attrs = CalculatedSOCSensor(coordinator, entry).extra_state_attributes
     assert attrs["plan_reason"] is None
     assert attrs["bridge_kwh"] is None
+
+
+# --- which entities a new install starts with --------------------------------
+
+
+def test_only_the_efficiency_search_entities_are_disabled_by_default():
+    """A new install shows everything except the two that report on a feature it is not running.
+
+    Pinned as a test because the decision is easy to undo by accident: adding
+    a diagnostic sensor without thinking about it lands it on every user's
+    device page, and hiding one of the house connection sensors would hide a
+    protection indicator.
+
+    The value has to be read off an instance: Home Assistant's entity
+    metaclass turns a ``_attr_…`` class attribute into a property, so reading
+    it off the class hands back the property object rather than True or False.
+    """
+    from custom_components.inverter_charge_night import (
+        binary_sensor,
+        number,
+        select,
+        sensor,
+        switch,
+    )
+    from custom_components.inverter_charge_night.entity import InverterChargeNightEntity
+
+    coordinator = MagicMock()
+    coordinator.config = {}
+    entry = _make_entry()
+
+    disabled: set[str] = set()
+    enabled: set[str] = set()
+    for module in (sensor, binary_sensor, switch, number, select):
+        for name in dir(module):
+            cls = getattr(module, name)
+            if not isinstance(cls, type) or not issubclass(cls, InverterChargeNightEntity):
+                continue
+            if cls.__module__ != module.__name__:
+                continue  # imported here, defined elsewhere
+            entity = cls(coordinator, entry)
+            if entity.translation_key is None:
+                continue
+            target = enabled if entity.entity_registry_enabled_default else disabled
+            target.add(entity.translation_key)
+
+    assert disabled == {"best_charge_power", "efficiency_search"}
+    assert {"calculated_soc", "active", "enabled", "operation_mode"} <= enabled
+    # The house connection limit stays visible: it is a protection, not a detail
+    assert {"grid_charge_headroom", "planned_charge_power"} <= enabled

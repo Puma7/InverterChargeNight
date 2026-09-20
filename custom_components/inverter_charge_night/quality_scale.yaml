@@ -17,13 +17,18 @@ rules:
       Everything that has to be fast - battery SOC, the inverter's min SOC, the
       grid import - is event driven through state change listeners instead.
   brands:
-    status: todo
+    status: done
     comment: |
-      The integration ships brand/icon.png, logo.png and their @2x variants, which
-      is what the HACS check looks for first and what it now passes on. The rule
-      itself asks for an entry in the home-assistant/brands repository, which does
-      accept custom integrations under custom_integrations/; that pull request has
-      not been made.
+      The integration ships brand/icon.png (256x256) and brand/icon@2x.png
+      (512x512): PNG, square, transparent and trimmed, per the image
+      specification in the home-assistant/brands README. No logo files, because
+      the same square image serves as both and that README says to add only the
+      icon then.
+
+      It is deliberately not a pull request against that repository: its README
+      marks custom_integrations/ as a legacy folder and states that since Home
+      Assistant 2026.3.0 custom components include their brand icons directly.
+      The HACS brands check looks for exactly this path and passes on it.
   common-modules:
     status: done
     comment: |
@@ -179,8 +184,15 @@ rules:
       Device classes where they are true (power, energy, enum). Deliberately not
       on the target SOC: it is a plan, not a battery reading.
   entity-disabled-by-default:
-    status: exempt
-    comment: All entities are either controls the user needs or the few diagnostics that explain a night.
+    status: done
+    comment: |
+      best_charge_power and efficiency_search are disabled by default: both
+      belong to the efficiency search, which is off unless the user turns it
+      on, and the second carries the whole measurement series in its
+      attributes. Everything else is either a control the user needs or a
+      diagnostic that explains a night, including the two that report the
+      house connection limit - hiding a protection indicator by default would
+      be the worse trade.
   entity-translations: done
   exception-translations:
     status: done

@@ -21,15 +21,19 @@ from custom_components.inverter_charge_night.coordinator import (
 )
 from custom_components.inverter_charge_night.sensor import PlannedChargePowerSensor
 from custom_components.inverter_charge_night.const import (
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
     CONF_AVG_HOUSE_LOAD_KW,
     CONF_BACKUP_MODE_ENTITY,
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_COMMAND_DELAY,
     CONF_DEFAULT_MIN_SOC,
+    CONF_DISCHARGE_LIMIT_ENTITY,
     CONF_END_TIME,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_FORECAST_ERROR_MARGIN,
+    CONF_GRID_IMPORT_ENTITY,
     CONF_KOSTAL_GRID_CHARGE_SWITCH,
     CONF_CHARGE_POWER_ENTITY,
     CONF_KOSTAL_MIN_SOC_ENTITY,
@@ -510,3 +514,511 @@ def test_the_planned_power_sensor_publishes_whether_it_is_applied(mock_hass):
 
     coordinator.planned_power_is_applied = True
     assert sensor.extra_state_attributes == {"applied": True}
+
+
+# --- the reset has to admit it failed ----------------------------------------
+#
+# _reset_settings returning True while a write failed is the worst outcome the
+# integration has: the retry chain never arms, and the raised min SOC floor
+# stays on the inverter until somebody notices by hand.
+
+
+@pytest.mark.asyncio
+async def test_a_failing_grid_charge_write_makes_the_reset_report_failure(mock_hass):
+    coordinator = _make_coordinator(mock_hass)
+    coordinator.original_min_soc = 8.0
+    mock_hass.states.async_set(MIN_SOC, "45")
+    mock_hass.states.async_set(GRID, "on")
+
+    async def _fail(domain, service, data, *args, **kwargs):
+        if domain == "switch":
+            raise RuntimeError("inverter refused the switch")
+
+    mock_hass.services.async_call = AsyncMock(side_effect=_fail)
+
+    assert await coordinator._reset_settings() is False
+
+
+@pytest.mark.asyncio
+async def test_a_failing_force_discharge_write_makes_the_reset_report_failure(mock_hass):
+    config = dict(CONFIG) | {CONF_FORCE_DISCHARGE_SWITCH: FORCE}
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator.original_min_soc = 8.0
+    mock_hass.states.async_set(MIN_SOC, "45")
+    mock_hass.states.async_set(GRID, "off")
+    mock_hass.states.async_set(FORCE, "on")
+
+    async def _fail(domain, service, data, *args, **kwargs):
+        if data.get("entity_id") == FORCE:
+            raise RuntimeError("inverter refused the switch")
+
+    mock_hass.services.async_call = AsyncMock(side_effect=_fail)
+
+    assert await coordinator._reset_settings() is False
+
+
+@pytest.mark.asyncio
+async def test_an_unavailable_force_discharge_switch_makes_the_reset_report_failure(mock_hass):
+    """Unreadable is not "already off": the switch may still be discharging."""
+    config = dict(CONFIG) | {CONF_FORCE_DISCHARGE_SWITCH: FORCE}
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator.original_min_soc = 8.0
+    mock_hass.states.async_set(MIN_SOC, "45")
+    mock_hass.states.async_set(GRID, "off")
+    mock_hass.states.async_set(FORCE, "unavailable")
+
+    assert await coordinator._reset_settings() is False
+
+
+@pytest.mark.asyncio
+async def test_a_clean_reset_reports_success(mock_hass):
+    """The control case, so the three above cannot pass for the wrong reason."""
+    config = dict(CONFIG) | {CONF_FORCE_DISCHARGE_SWITCH: FORCE}
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator.original_min_soc = 8.0
+    mock_hass.states.async_set(MIN_SOC, "45")
+    mock_hass.states.async_set(GRID, "on")
+    mock_hass.states.async_set(FORCE, "on")
+
+    assert await coordinator._reset_settings() is True
+    assert call("switch", "turn_off", {"entity_id": GRID}) in (
+        mock_hass.services.async_call.await_args_list
+    )
+    assert call("switch", "turn_off", {"entity_id": FORCE}) in (
+        mock_hass.services.async_call.await_args_list
+    )
+
+
+# --- the house connection limit never assumes a write landed ------------------
+
+
+@pytest.mark.asyncio
+async def test_a_failed_limit_write_does_not_move_the_reference(mock_hass):
+    """The reference is what stands on the inverter. A failed write changed nothing.
+
+    Moving it anyway would make the next reading believe the battery is already
+    capped, and the limit would stop writing while the load is still there.
+    """
+    coordinator = _make_coordinator(mock_hass)
+    coordinator.is_active = True
+    coordinator._ending = False
+    coordinator._unloading = False
+    coordinator._planned_setpoint_written_w = 6000.0
+    coordinator._grid_budget = MagicMock(return_value=8000.0)
+    coordinator.config = dict(CONFIG) | {CONF_GRID_IMPORT_ENTITY: "sensor.grid_import"}
+    coordinator._grid_limited_setpoint = MagicMock(return_value=2000.0)
+    coordinator._grid_write_is_debounced = MagicMock(return_value=False)
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=False)
+
+    await coordinator._enforce_grid_limit_now()
+
+    coordinator._set_ac_charge_limit_w.assert_awaited_once_with(2000)
+    assert coordinator._planned_setpoint_written_w == 6000.0
+    assert coordinator.planned_power_is_applied is False
+
+
+@pytest.mark.asyncio
+async def test_a_successful_limit_write_moves_the_reference(mock_hass):
+    coordinator = _make_coordinator(mock_hass)
+    coordinator.is_active = True
+    coordinator._ending = False
+    coordinator._unloading = False
+    coordinator._planned_setpoint_written_w = 6000.0
+    coordinator._grid_budget = MagicMock(return_value=8000.0)
+    coordinator.config = dict(CONFIG) | {CONF_GRID_IMPORT_ENTITY: "sensor.grid_import"}
+    coordinator._grid_limited_setpoint = MagicMock(return_value=2000.0)
+    coordinator._grid_write_is_debounced = MagicMock(return_value=False)
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
+
+    await coordinator._enforce_grid_limit_now()
+
+    assert coordinator._planned_setpoint_written_w == 2000.0
+    assert coordinator.planned_power_is_applied is True
+
+
+@pytest.mark.parametrize(
+    "state,reason",
+    [
+        ("ending", "a window that is being torn down"),
+        ("unloading", "an entry that is going away"),
+        ("debounced", "a write that is too recent"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_the_limit_does_not_write_while_it_must_not(mock_hass, state, reason):
+    coordinator = _make_coordinator(mock_hass)
+    coordinator.is_active = True
+    coordinator._ending = state == "ending"
+    coordinator._unloading = state == "unloading"
+    coordinator._planned_setpoint_written_w = 6000.0
+    coordinator._grid_budget = MagicMock(return_value=8000.0)
+    coordinator.config = dict(CONFIG) | {CONF_GRID_IMPORT_ENTITY: "sensor.grid_import"}
+    coordinator._grid_limited_setpoint = MagicMock(return_value=2000.0)
+    coordinator._grid_write_is_debounced = MagicMock(return_value=state == "debounced")
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
+
+    await coordinator._enforce_grid_limit_now()
+
+    coordinator._set_ac_charge_limit_w.assert_not_awaited()
+
+
+# --- the absolute charge power limit -----------------------------------------
+
+
+@pytest.mark.parametrize("limit", ["not a number", 0, -500])
+@pytest.mark.asyncio
+async def test_an_unusable_absolute_limit_is_not_written(mock_hass, limit):
+    """Writing 0 or a garbage value would order "charge with at most nothing"."""
+    config = dict(CONFIG) | {
+        CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY: "number.absolute_max",
+        CONF_ABSOLUTE_MAX_CHARGE_POWER_W: limit,
+    }
+    coordinator = _make_coordinator(mock_hass, config)
+    mock_hass.states.async_set("number.absolute_max", "10000", {"unit_of_measurement": "W"})
+
+    await coordinator._apply_absolute_charge_power_limit()
+
+    mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_absolute_limit_write_is_survived(mock_hass):
+    """It is a cap, not the charge command: a failure must not take the window down."""
+    config = dict(CONFIG) | {
+        CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY: "number.absolute_max",
+        CONF_ABSOLUTE_MAX_CHARGE_POWER_W: 7000,
+    }
+    coordinator = _make_coordinator(mock_hass, config)
+    mock_hass.states.async_set("number.absolute_max", "10000", {"unit_of_measurement": "W"})
+    mock_hass.services.async_call = AsyncMock(side_effect=RuntimeError("inverter refused"))
+
+    await coordinator._apply_absolute_charge_power_limit()  # does not raise
+
+    assert coordinator._original_absolute_charge_power == 10000.0
+
+
+@pytest.mark.asyncio
+async def test_stopping_grid_charging_survives_a_failing_switch(mock_hass):
+    coordinator = _make_coordinator(mock_hass)
+    mock_hass.states.async_set(GRID, "on")
+    mock_hass.services.async_call = AsyncMock(side_effect=RuntimeError("inverter refused"))
+
+    await coordinator._stop_grid_charging()  # does not raise
+
+
+@pytest.mark.asyncio
+async def test_a_charge_limit_entity_without_unit_or_maximum_is_written_as_watts(mock_hass):
+    """Stated in the log, because the scale is an assumption at that point."""
+    coordinator = _make_coordinator(mock_hass)
+    mock_hass.states.async_set("number.ac_limit", "5000", {})
+
+    assert await coordinator._write_ac_charge_limit("number.ac_limit", "number", 4000.0, "test")
+    assert mock_hass.services.async_call.await_args_list == [
+        call("number", "set_value", {"entity_id": "number.ac_limit", "value": 4000.0})
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_limit_stays_out_of_it_without_a_grid_import_entity(mock_hass):
+    """No entity, no budget, no business writing a charge limit."""
+    coordinator = _make_coordinator(mock_hass)
+    coordinator.is_active = True
+    coordinator._ending = False
+    coordinator._unloading = False
+    coordinator._planned_setpoint_written_w = 6000.0
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
+
+    await coordinator._enforce_grid_limit_now()
+
+    coordinator._set_ac_charge_limit_w.assert_not_awaited()
+
+
+# --- entities pointed at the wrong kind of thing ------------------------------
+
+
+@pytest.mark.parametrize("entity_id", ["switch.discharge_limit", "sensor.discharge_limit"])
+def test_a_discharge_limit_in_the_wrong_domain_is_refused(mock_hass, entity_id):
+    """set_value on a switch does nothing; the block would be configured and inert."""
+    config = dict(CONFIG) | {CONF_DISCHARGE_LIMIT_ENTITY: entity_id}
+    coordinator = _make_coordinator(mock_hass, config)
+
+    assert coordinator._discharge_limit_target() is None
+
+
+def test_a_discharge_limit_number_is_accepted(mock_hass):
+    config = dict(CONFIG) | {CONF_DISCHARGE_LIMIT_ENTITY: "number.discharge_limit"}
+    coordinator = _make_coordinator(mock_hass, config)
+
+    assert coordinator._discharge_limit_target() == ("number.discharge_limit", "number")
+
+
+@pytest.mark.asyncio
+async def test_an_unavailable_charge_limit_entity_fails_the_reset(mock_hass):
+    """Reporting success would drop the captured original and leave the cap on."""
+    config = dict(CONFIG) | {CONF_CHARGE_POWER_ENTITY: "number.ac_limit"}
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator._original_ac_charge_power = 10000.0
+    mock_hass.states.async_set("number.ac_limit", "unavailable")
+
+    assert await coordinator._reset_ac_charge_limit() is False
+    # The capture survives, so the retry can still put it back
+    assert coordinator._original_ac_charge_power == 10000.0
+
+
+@pytest.mark.asyncio
+async def test_stopping_force_discharge_survives_a_failing_switch(mock_hass):
+    config = dict(CONFIG) | {CONF_FORCE_DISCHARGE_SWITCH: FORCE}
+    coordinator = _make_coordinator(mock_hass, config)
+    mock_hass.states.async_set(FORCE, "on")
+    mock_hass.services.async_call = AsyncMock(side_effect=RuntimeError("inverter refused"))
+
+    await coordinator._stop_force_discharge()  # does not raise
+
+
+@pytest.mark.asyncio
+async def test_a_retry_that_raises_is_recorded_as_another_failure(mock_hass):
+    """Otherwise the retry chain ends on the one attempt that threw."""
+    coordinator = _make_coordinator(mock_hass)
+    coordinator._reset_settings = AsyncMock(side_effect=RuntimeError("inverter offline"))
+    coordinator._record_reset_outcome = MagicMock()
+    coordinator._pending_reset = True
+
+    await coordinator._retry_reset()
+
+    coordinator._record_reset_outcome.assert_called_once_with(False)
+
+
+def test_no_discharge_limit_entity_means_no_target(mock_hass):
+    coordinator = _make_coordinator(mock_hass)
+    assert coordinator._discharge_limit_target() is None
+
+
+@pytest.mark.asyncio
+async def test_a_refused_charge_limit_write_fails_the_reset(mock_hass):
+    """Dropping the capture on a refused write would leave the cap on for good."""
+    config = dict(CONFIG) | {CONF_CHARGE_POWER_ENTITY: "number.ac_limit"}
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator._original_ac_charge_power = 10000.0
+    mock_hass.states.async_set("number.ac_limit", "5000", {"unit_of_measurement": "W"})
+    coordinator._write_ac_charge_limit = AsyncMock(return_value=False)
+
+    assert await coordinator._reset_ac_charge_limit() is False
+    assert coordinator._original_ac_charge_power == 10000.0
+
+
+@pytest.mark.asyncio
+async def test_the_grid_import_reaction_stays_out_of_discharge_mode(mock_hass):
+    """Discharging exports; there is no charge setpoint of ours to lower."""
+    config = dict(CONFIG) | {
+        CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE,
+        CONF_GRID_IMPORT_ENTITY: "sensor.grid_import",
+    }
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator.is_active = True
+    coordinator.is_enabled = True
+    coordinator._ending = False
+    coordinator._unloading = False
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
+
+    await coordinator._react_to_grid_import()
+
+    coordinator._set_ac_charge_limit_w.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_lowering_write_leaves_the_reference_alone(mock_hass):
+    config = dict(CONFIG) | {CONF_GRID_IMPORT_ENTITY: "sensor.grid_import"}
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator.is_active = True
+    coordinator.is_enabled = True
+    coordinator._ending = False
+    coordinator._unloading = False
+    coordinator._planned_setpoint_written_w = 6000.0
+    coordinator.planned_charge_power_w = 6000.0
+    coordinator._grid_limited_setpoint = MagicMock(return_value=1500.0)
+    coordinator._grid_write_is_debounced = MagicMock(return_value=False)
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=False)
+
+    await coordinator._react_to_grid_import()
+
+    coordinator._set_ac_charge_limit_w.assert_awaited_once_with(1500)
+    assert coordinator._planned_setpoint_written_w == 6000.0
+
+
+@pytest.mark.asyncio
+async def test_a_backup_state_change_is_ignored_while_the_integration_is_off(mock_hass):
+    config = dict(CONFIG) | {CONF_BACKUP_MODE_ENTITY: BACKUP}
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator.is_enabled = False
+    coordinator._check_current_window = AsyncMock()
+    coordinator.async_request_refresh = AsyncMock()
+
+    captured = {}
+    with patch(
+        "custom_components.inverter_charge_night.coordinator.async_track_state_change_event",
+        side_effect=lambda hass, entity_id, cb: captured.setdefault("cb", cb) and MagicMock(),
+    ):
+        coordinator._setup_backup_mode_listener()
+
+    await captured["cb"](MagicMock(data={"new_state": MagicMock(state="on")}))
+
+    coordinator._check_current_window.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_verification_without_a_floor_writes_nothing(mock_hass):
+    coordinator = _armed_for_verification(mock_hass)
+    coordinator.inverter_floor_soc = MagicMock(return_value=None)
+    mock_hass.states.async_set(MIN_SOC, "8")
+
+    await coordinator._verify_and_restore_min_soc()
+
+    mock_hass.services.async_call.assert_not_awaited()
+    assert coordinator._verifying_min_soc is False
+
+
+@pytest.mark.asyncio
+async def test_a_verification_that_raises_still_releases_its_flag(mock_hass):
+    """A stuck flag would make every later verification a no-op for the entry's life."""
+    coordinator = _armed_for_verification(mock_hass)
+    coordinator._apply_discharge_block = AsyncMock(side_effect=RuntimeError("inverter offline"))
+    mock_hass.states.async_set(MIN_SOC, "8")
+
+    await coordinator._verify_and_restore_min_soc()  # does not raise
+
+    assert coordinator._verifying_min_soc is False
+
+
+# --- every service call in the discharge path is survivable -------------------
+#
+# None of these five handlers may let an exception out: _control_discharge runs
+# from the polling update, and a raise there would take the whole window down
+# with it - including the parts that still worked.
+
+
+@pytest.mark.asyncio
+async def test_an_unparsable_battery_soc_does_not_stop_the_discharge_control(mock_hass):
+    coordinator = _discharge_coordinator(mock_hass)
+    mock_hass.states.async_set(BATTERY, "n/a")
+
+    await coordinator._control_discharge(35.0)
+
+    # Unreadable is not "already at target": the floor is still written
+    assert call("number", "set_value", {"entity_id": MIN_SOC, "value": 35.0}) in (
+        mock_hass.services.async_call.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failing_stop_of_force_discharge_is_survived(mock_hass):
+    """The target is already reached; turning the switch off fails."""
+    coordinator = _discharge_coordinator(mock_hass)
+    mock_hass.states.async_set(BATTERY, "20")  # at or below the 35 % target
+    mock_hass.states.async_set(FORCE, "on")
+    mock_hass.services.async_call = AsyncMock(side_effect=RuntimeError("inverter refused"))
+
+    await coordinator._control_discharge(35.0)  # does not raise
+
+
+@pytest.mark.asyncio
+async def test_a_failing_min_soc_preparation_is_survived(mock_hass):
+    coordinator = _discharge_coordinator(mock_hass)
+    coordinator._capture_original_min_soc = MagicMock(side_effect=RuntimeError("registry gone"))
+
+    await coordinator._control_discharge(35.0)  # does not raise
+
+    # The floor could not be prepared, so the discharge does not start
+    assert (
+        call("switch", "turn_on", {"entity_id": FORCE})
+        not in mock_hass.services.async_call.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failing_grid_charge_turn_off_does_not_stop_the_discharge(mock_hass):
+    coordinator = _discharge_coordinator(mock_hass)
+    mock_hass.states.async_set(GRID, "on")
+
+    async def _fail(domain, service, data, *args, **kwargs):
+        if data.get("entity_id") == GRID:
+            raise RuntimeError("inverter refused")
+
+    mock_hass.services.async_call = AsyncMock(side_effect=_fail)
+
+    await coordinator._control_discharge(35.0)
+
+    assert call("switch", "turn_on", {"entity_id": FORCE}) in (
+        mock_hass.services.async_call.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failing_force_discharge_turn_on_is_survived(mock_hass):
+    coordinator = _discharge_coordinator(mock_hass)
+
+    async def _fail(domain, service, data, *args, **kwargs):
+        if data.get("entity_id") == FORCE:
+            raise RuntimeError("inverter refused")
+
+    mock_hass.services.async_call = AsyncMock(side_effect=_fail)
+
+    await coordinator._control_discharge(35.0)  # does not raise
+
+
+# --- the connection limit and the efficiency finder ---------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_finder_is_not_limited_without_a_connection_limit(mock_hass):
+    coordinator = _make_coordinator(mock_hass)
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
+
+    await coordinator._limit_the_efficiency_finder()
+
+    coordinator._set_ac_charge_limit_w.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_without_a_running_test_the_finder_limit_uses_what_was_written(mock_hass):
+    config = dict(CONFIG) | {CONF_GRID_IMPORT_ENTITY: "sensor.grid_import"}
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator._grid_limit_configured = MagicMock(return_value=True)
+    coordinator._auto_test_active = False
+    coordinator._planned_setpoint_written_w = 6000.0
+    coordinator._grid_limited_setpoint = MagicMock(return_value=1500.0)
+    coordinator._grid_write_is_debounced = MagicMock(return_value=False)
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
+
+    await coordinator._limit_the_efficiency_finder()
+
+    coordinator._grid_limited_setpoint.assert_called_once_with(6000.0)
+    coordinator._set_ac_charge_limit_w.assert_awaited_once_with(1500)
+
+
+@pytest.mark.asyncio
+async def test_a_debounced_write_does_not_touch_the_finder(mock_hass):
+    config = dict(CONFIG) | {CONF_GRID_IMPORT_ENTITY: "sensor.grid_import"}
+    coordinator = _make_coordinator(mock_hass, config)
+    coordinator._grid_limit_configured = MagicMock(return_value=True)
+    coordinator._auto_test_active = True
+    coordinator._auto_test_power_w = 6000
+    coordinator._grid_limited_setpoint = MagicMock(return_value=1500.0)
+    coordinator._grid_write_is_debounced = MagicMock(return_value=True)
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
+
+    await coordinator._limit_the_efficiency_finder()
+
+    coordinator._set_ac_charge_limit_w.assert_not_awaited()
+    assert coordinator._auto_test_active is True
+
+
+@pytest.mark.asyncio
+async def test_an_unparsable_soc_during_verification_is_ignored(mock_hass):
+    coordinator = _armed_for_verification(mock_hass)
+    mock_hass.states.async_set(MIN_SOC, "45")
+    mock_hass.states.async_set(BATTERY, "n/a")
+
+    await coordinator._verify_and_restore_min_soc()  # does not raise
+
+    assert coordinator.target_reached is False
+    assert coordinator._verifying_min_soc is False

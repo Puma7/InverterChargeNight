@@ -19,6 +19,10 @@ that performs the discharge. Nothing about what the integration writes to the in
 
 ### Changed
 
+- **`best_charge_power` and `efficiency_search` are disabled by default.** Both report on the
+  efficiency search, which is off unless it is switched on, and the second carries the whole
+  measurement series in its attributes. Existing installations are unaffected — the entities
+  are already registered there; new ones enable them from the device page if they run a search.
 - **Morning discharge now requires the force discharge switch.** It is the only thing that
   actually discharges the battery; without it the mode raised the min SOC floor, turned grid
   charging off and then waited for a discharge that could never start. The field said
@@ -38,6 +42,11 @@ that performs the discharge. Nothing about what the integration writes to the in
 
 ### Fixed
 
+- **Morning discharge could start against an unknown floor.** If reading and capturing the
+  inverter's min SOC failed, the error was logged and the forced discharge was switched on
+  anyway — with no idea where the battery's floor was, which is how a discharge runs past the
+  user minimum. The failed *write* of the floor already blocked the discharge for exactly that
+  reason; the failed *read* now does too.
 - **CI never ran the tests.** `actions/setup-python` was told to cache pip but this repository
   has no `requirements.txt` or `pyproject.toml`, so the job failed at the cache step before
   installing anything. It now caches against `requirements-dev.txt`.

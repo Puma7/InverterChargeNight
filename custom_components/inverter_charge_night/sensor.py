@@ -89,13 +89,19 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
 
 
 class BestChargePowerSensor(InverterChargeNightEntity, SensorEntity):
-    """Sensor for best charge power found by auto efficient charge."""
+    """Sensor for best charge power found by auto efficient charge.
+
+    Disabled by default: it belongs to the efficiency search, which is off
+    unless the user turns it on, and reports nothing until that search has
+    finished. Whoever runs the search enables it from the device page.
+    """
 
     _attr_translation_key = "best_charge_power"
     _attr_native_unit_of_measurement = "W"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor."""
@@ -180,11 +186,16 @@ class EfficiencySearchSensor(InverterChargeNightEntity, SensorEntity):
     The search takes one measurement per night and needs several nights, so
     without this sensor there is no way to tell a search that is working from
     one that is quietly discarding every sample.
+
+    Disabled by default for the same reason as the sensor above, and because
+    its attributes carry the whole measurement series: state that the recorder
+    would keep for every user, including the ones who never run a search.
     """
 
     _attr_translation_key = "efficiency_search"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_options = [
         AUTO_TEST_STATE_IDLE,
         AUTO_TEST_STATE_WAITING,

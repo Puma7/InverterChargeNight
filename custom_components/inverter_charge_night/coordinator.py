@@ -3611,7 +3611,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     else:
                         self._last_soc_set = target_soc
             except Exception as e:
+                # Same reasoning as the failed write below: preparation is where
+                # the floor is read and captured, so after a failure here nobody
+                # knows what the inverter's floor is - and a forced discharge
+                # against an unknown floor can run the battery past the user
+                # minimum. Without this the discharge started anyway, because
+                # nothing had set the flag.
                 _LOGGER.error("Error preparing min SOC for discharge: %s", e, exc_info=True)
+                min_soc_available = False
 
         if need_to_set_min_soc and kostal_min_soc_entity:
             try:

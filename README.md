@@ -881,18 +881,27 @@ What it currently meets:
 | Code | `runtime_data` instead of `hass.data`, `PARALLEL_UPDATES` on every platform, fully async, no third-party dependencies |
 | Typing | `mypy --strict` and `pyright` strict over the whole package, no exclusions |
 | Entities | unique ids, `has_entity_name`, entity categories, translated names and states, icon translations |
-| Tests | 95 % coverage over the whole package enforced in CI, 100 % on the config flow, plus an end-to-end test against a real Home Assistant core |
+| Tests | 96 % coverage over the whole package enforced in CI, 100 % on the config flow, plus an end-to-end test against a real Home Assistant core |
 | Docs | this file, in English, with a German UI translation shipped in the integration |
 
-Measured against all 54 rules: 38 are implemented, 15 do not apply to an integration that talks
-to other integrations' entities rather than to a device or a cloud service (no polling protocol,
-no discovery, no authentication), and one is open — `brands` asks for an entry in the
-home-assistant/brands repository, which has not been submitted. The file names the reason for
+Measured against all 54 rules: 39 are implemented and 15 do not apply to an integration that
+talks to other integrations' entities rather than to a device or a cloud service (no polling
+protocol, no discovery, no authentication). Nothing is left open. The file names the reason for
 each exemption.
 
-By tier, using Home Assistant's own grouping: Bronze 13 done / 5 not applicable, Silver 8 / 2,
-Gold 16 / 5, Platinum 1 / 2 (`strict-typing` is the one that applies, and it passes; the other
-two are about an external dependency this integration does not have).
+| Tier | Implemented | Not applicable |
+|---|---|---|
+| 🥉 Bronze | 14 | 4 |
+| 🥈 Silver | 8 | 2 |
+| 🥇 Gold | 16 | 7 |
+| 🏆 Platinum | 1 | 2 |
+
+Platinum has three rules. `strict-typing` is the one that applies here, and it passes over the
+whole package with both checkers; the other two are about an external dependency and a shared
+HTTP session, neither of which this integration has. That still does not make it a Platinum
+integration: Home Assistant reports `custom` for every integration it did not ship itself
+(`homeassistant/loader.py`, `Integration.quality_scale`), so the tiers are for Core
+integrations only. The rules are a useful yardstick either way.
 
 ## Technical Details
 
@@ -1075,7 +1084,7 @@ pass:
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                                        # full suite, 95 % coverage gate
+pytest                                        # full suite, 96 % coverage gate
 mypy custom_components/inverter_charge_night  # strict
 pyright                                       # strict
 python scripts/smoke_real_ha.py               # end-to-end against a real HA core
