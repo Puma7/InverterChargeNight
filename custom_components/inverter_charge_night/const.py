@@ -18,6 +18,10 @@ DEFAULT_COMMAND_DELAY = 0.1  # 0.1 seconds
 DEFAULT_SAFE_FALLBACK_SOC = 50.0  # Safe fallback SOC when forecast unavailable (prevents charging to 100%)
 DEFAULT_ACTIVE_START_DATE = ""  # Optional YYYY-MM-DD
 DEFAULT_ACTIVE_END_DATE = ""  # Optional YYYY-MM-DD
+# A tariff season is written in a price sheet and holds until further notice, so
+# a range entered once is meant to come back every year. Existing entries keep
+# the old absolute meaning; the migration sets the flag for them (F-011).
+DEFAULT_ACTIVE_RANGE_YEARLY = True
 DEFAULT_MIN_CHARGE_POWER_W = 1000  # Default min charge power (W)
 DEFAULT_MAX_CHARGE_POWER_W = 10000  # Default max charge power (W)
 
@@ -41,6 +45,7 @@ CONF_UPDATE_INTERVAL = "update_interval"
 CONF_COMMAND_DELAY = "command_delay"
 CONF_ACTIVE_START_DATE = "active_start_date"
 CONF_ACTIVE_END_DATE = "active_end_date"
+CONF_ACTIVE_RANGE_YEARLY = "active_range_yearly"
 CONF_BACKUP_MODE_ENTITY = "backup_mode_entity"
 CONF_MIN_CHARGE_POWER_W = "min_charge_power_w"
 CONF_MAX_CHARGE_POWER_W = "max_charge_power_w"

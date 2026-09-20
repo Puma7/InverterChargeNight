@@ -19,6 +19,9 @@ from custom_components.inverter_charge_night import (
     _migrate_entry_data,
 )
 from custom_components.inverter_charge_night.const import (
+    CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_RANGE_YEARLY,
+    CONF_ACTIVE_START_DATE,
     CONF_AUTO_EFFICIENCY_DATA,
     CONF_GRID_CHARGE_SWITCH,
     CONF_HOUSE_LOAD_ENTITY,
@@ -109,7 +112,11 @@ def test_measurements_of_a_version_that_is_gone_are_dropped(caplog):
 def test_a_current_entry_is_not_written_at_all():
     """No pointless write, and no reload loop it could trigger."""
     entry = _entry(
-        {"battery_soc_entity": "sensor.soc", CONF_HOUSE_LOAD_ENTITY: "sensor.house"},
+        {
+            "battery_soc_entity": "sensor.soc",
+            CONF_HOUSE_LOAD_ENTITY: "sensor.house",
+            CONF_ACTIVE_RANGE_YEARLY: True,
+        },
         {CONF_AUTO_EFFICIENCY_DATA: {"history": {}}},
     )
     hass = _hass_that_stores(entry)
@@ -218,10 +225,43 @@ def test_a_value_already_under_the_new_key_wins():
 
 
 def test_an_entry_without_the_old_keys_is_left_alone():
+    entry = _entry(
+        {CONF_MIN_SOC_ENTITY: "number.min_soc", CONF_ACTIVE_RANGE_YEARLY: True}, {}
+    )
+    hass = _hass_that_stores(entry)
+
+    _migrate_entry_data(hass, entry)
+
+    assert entry.data == {
+        CONF_MIN_SOC_ENTITY: "number.min_soc",
+        CONF_ACTIVE_RANGE_YEARLY: True,
+    }
+    hass.config_entries.async_update_entry.assert_not_called()
+
+
+def test_an_entry_with_dates_keeps_them_absolute():
+    """A range nobody re-enters must not come back next winter on its own."""
+    entry = _entry(
+        {
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_ACTIVE_START_DATE: "2026-11-01",
+            CONF_ACTIVE_END_DATE: "2027-03-31",
+        },
+        {},
+    )
+    hass = _hass_that_stores(entry)
+
+    _migrate_entry_data(hass, entry)
+
+    assert entry.data[CONF_ACTIVE_RANGE_YEARLY] is False
+
+
+def test_an_entry_without_dates_gets_the_new_default():
+    """Nothing is restricted, so nothing changes - but a range entered later
+    behaves the way the field describes it."""
     entry = _entry({CONF_MIN_SOC_ENTITY: "number.min_soc"}, {})
     hass = _hass_that_stores(entry)
 
     _migrate_entry_data(hass, entry)
 
-    assert entry.data == {CONF_MIN_SOC_ENTITY: "number.min_soc"}
-    hass.config_entries.async_update_entry.assert_not_called()
+    assert entry.data[CONF_ACTIVE_RANGE_YEARLY] is True

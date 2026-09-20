@@ -13,7 +13,11 @@ from custom_components.inverter_charge_night.const import (
     CONF_START_TIME,
     CONF_ACTIVE_START_DATE,
     CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_RANGE_YEARLY,
 )
+
+
+COORDINATOR = "custom_components.inverter_charge_night.coordinator"
 
 
 def _make_coordinator(hass, data):
@@ -50,23 +54,111 @@ def test_parse_date_optional_invalid_and_range(mock_hass):
     assert coordinator._parse_date_optional("") is None
 
 
-def test_is_within_date_range_invalid_range_returns_true(mock_hass):
+def _at(coordinator, when):
+    """Ask the date-range check as if today were ``when``."""
+    with patch(
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
+        return_value=when,
+    ):
+        return coordinator._is_within_date_range()
+
+
+def test_a_reversed_range_within_one_year_is_a_season(mock_hass):
+    """31 December to 1 January cannot be meant absolutely, only as a season.
+
+    Read absolutely it contains no day at all. It used to be logged as invalid
+    and the restriction then dropped entirely, which is the opposite of what
+    the user asked for: the window ran all year.
+    """
     coordinator = _make_coordinator(
         mock_hass,
-        {CONF_ACTIVE_START_DATE: "2025-12-31", CONF_ACTIVE_END_DATE: "2025-01-01"},
+        {CONF_ACTIVE_START_DATE: "2025-12-31", CONF_ACTIVE_END_DATE: "2026-01-01"},
     )
-    assert coordinator._is_within_date_range() is True
+    assert _at(coordinator, datetime(2027, 12, 31)) is True
+    assert _at(coordinator, datetime(2027, 1, 1)) is True
+    assert _at(coordinator, datetime(2027, 6, 15)) is False
+
+
+def test_a_winter_season_holds_every_year(mock_hass):
+    """The case the old code got wrong: 1 November to 31 March."""
+    coordinator = _make_coordinator(
+        mock_hass,
+        {CONF_ACTIVE_START_DATE: "2026-11-01", CONF_ACTIVE_END_DATE: "2027-03-31"},
+    )
+    for inside in (datetime(2029, 11, 1), datetime(2029, 12, 24), datetime(2030, 3, 31)):
+        assert _at(coordinator, inside) is True, inside
+    for outside in (datetime(2029, 10, 31), datetime(2030, 4, 1), datetime(2030, 7, 1)):
+        assert _at(coordinator, outside) is False, outside
+
+
+def test_a_summer_season_repeats_when_asked_to(mock_hass):
+    coordinator = _make_coordinator(
+        mock_hass,
+        {
+            CONF_ACTIVE_START_DATE: "2026-04-01",
+            CONF_ACTIVE_END_DATE: "2026-09-30",
+            CONF_ACTIVE_RANGE_YEARLY: True,
+        },
+    )
+    assert _at(coordinator, datetime(2031, 6, 1)) is True
+    assert _at(coordinator, datetime(2031, 10, 1)) is False
+
+
+def test_an_absolute_range_still_expires(mock_hass):
+    """Off means off: the years count, and the range is over when it is over.
+
+    And when it is, the user is told: an integration that stops for good one
+    morning with nothing anywhere saying why is the worst of both worlds.
+    """
+    coordinator = _make_coordinator(
+        mock_hass,
+        {
+            CONF_ACTIVE_START_DATE: "2026-04-01",
+            CONF_ACTIVE_END_DATE: "2026-09-30",
+            CONF_ACTIVE_RANGE_YEARLY: False,
+        },
+    )
+    with patch(f"{COORDINATOR}.ir.async_create_issue") as create, patch(
+        f"{COORDINATOR}.ir.async_delete_issue"
+    ) as delete:
+        assert _at(coordinator, datetime(2026, 6, 1)) is True
+        create.assert_not_called()
+
+        assert _at(coordinator, datetime(2027, 6, 1)) is False
+        assert create.call_args.kwargs["translation_key"] == "active_range_expired"
+        assert create.call_args.kwargs["translation_placeholders"]["end_date"] == "2026-09-30"
+
+        # Checked on every poll, but the registry is only written when it changes
+        create.reset_mock()
+        assert _at(coordinator, datetime(2027, 6, 2)) is False
+        create.assert_not_called()
+
+        # ... and cleared as soon as the range covers today again
+        assert _at(coordinator, datetime(2026, 6, 1)) is True
+        assert delete.called
+
+
+def test_a_february_29_boundary_survives_a_common_year(mock_hass):
+    """Comparing month and day avoids building 29 February 2027."""
+    coordinator = _make_coordinator(
+        mock_hass,
+        {CONF_ACTIVE_START_DATE: "2024-02-29", CONF_ACTIVE_END_DATE: "2024-03-31"},
+    )
+    assert _at(coordinator, datetime(2027, 3, 1)) is True
+    assert _at(coordinator, datetime(2027, 2, 28)) is False
 
 
 def test_is_within_date_range_before_start(mock_hass):
     coordinator = _make_coordinator(
-        mock_hass, {CONF_ACTIVE_START_DATE: "2025-12-31"}
+        mock_hass, {CONF_ACTIVE_START_DATE: "2025-12-31", CONF_ACTIVE_RANGE_YEARLY: False}
     )
-    with patch(
-        "custom_components.inverter_charge_night.coordinator.dt_util.now",
-        return_value=datetime(2025, 1, 1),
-    ):
-        assert coordinator._is_within_date_range() is False
+    assert _at(coordinator, datetime(2025, 1, 1)) is False
+
+
+def test_a_one_sided_season_runs_to_the_end_of_the_year(mock_hass):
+    coordinator = _make_coordinator(mock_hass, {CONF_ACTIVE_START_DATE: "2025-11-01"})
+    assert _at(coordinator, datetime(2030, 12, 5)) is True
+    assert _at(coordinator, datetime(2030, 1, 5)) is False
 
 
 def test_is_time_between_normal_range(mock_hass):

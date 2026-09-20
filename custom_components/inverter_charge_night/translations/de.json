@@ -105,6 +105,7 @@
           "command_delay": "Befehlsverzögerung",
           "active_start_date": "Beginn des aktiven Zeitraums (optional)",
           "active_end_date": "Ende des aktiven Zeitraums (optional)",
+          "active_range_yearly": "Datumsbereich jährlich wiederholen",
           "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb (optional)",
           "backup_mode_states": "Zustände für Notstrombetrieb (optional)",
           "house_load_entity": "Energiezähler des Hausverbrauchs (optional)",
@@ -121,6 +122,7 @@
           "command_delay": "Pause zwischen dem Schreiben des Min-SOC und dem Einschalten der Netzladung (Sekunden).",
           "active_start_date": "Optional: nur zwischen diesem und dem Enddatum arbeiten (JJJJ-MM-TT). Leer lassen für das ganze Jahr — für §14a-Fenster, die nur im Winterhalbjahr gelten, hier den Zeitraum eintragen.",
           "active_end_date": "Optional: nur zwischen dem Startdatum und diesem Datum arbeiten (JJJJ-MM-TT).",
+          "active_range_yearly": "Ein (empfohlen): Es zählen nur Tag und Monat der beiden Daten oben, der Bereich kommt also jedes Jahr wieder — eine Tarifsaison steht im Preisblatt und gilt bis auf Weiteres. Aus: Die Jahreszahlen zählen mit, und die Integration hört nach dem Enddatum endgültig auf. Ein Bereich über den Jahreswechsel (Beginn nach Ende, z. B. 1. November bis 31. März) wird immer als Saison gelesen — absolut gelesen könnte er keinen einzigen Tag enthalten.",
           "backup_mode_entity": "Optional, aber wichtig: eine Entität, die anzeigt, ob das Haus gerade aus dem Speicher statt aus dem Netz läuft. Solange das so ist, ändert die Integration nichts am Wechselrichter — es gibt nichts zu laden, und ein angehobener Min-SOC würde den Speicher daran hindern, das Haus zu versorgen. Ein Schalter, ein binärer Sensor oder ein Zustandssensor (siehe unten). Bei einer manuellen Umschaltbox tut es auch ein input_boolean, den du selbst umlegst.",
           "backup_mode_states": "Nur nötig, wenn die Entität oben ein normaler Sensor ist und kein Schalter: die Zustände, die „Haus läuft aus dem Speicher“ bedeuten, durch Komma getrennt. Ein Kostal meldet im Wechselrichterzustand „ESB“ (Ersatzstrombetrieb). Bei einem Schalter oder binären Sensor leer lassen — dort bedeutet „an“ bereits Notstrom.",
           "house_load_entity": "Optional: kWh-Zähler des Hausverbrauchs. Der Überbrückungs-Planer lernt daraus aus den letzten 14 Tagen ein Tagesprofil; ohne ihn gilt der Mittelwert darunter.",
@@ -237,6 +239,7 @@
           "command_delay": "Befehlsverzögerung",
           "active_start_date": "Beginn des aktiven Zeitraums (optional)",
           "active_end_date": "Ende des aktiven Zeitraums (optional)",
+          "active_range_yearly": "Datumsbereich jährlich wiederholen",
           "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb (optional)",
           "backup_mode_states": "Zustände für Notstrombetrieb (optional)",
           "house_load_entity": "Energiezähler des Hausverbrauchs (optional)",
@@ -253,6 +256,7 @@
           "command_delay": "Pause zwischen dem Schreiben des Min-SOC und dem Einschalten der Netzladung (Sekunden).",
           "active_start_date": "Optional: nur zwischen diesem und dem Enddatum arbeiten (JJJJ-MM-TT). Leer lassen für das ganze Jahr — für §14a-Fenster, die nur im Winterhalbjahr gelten, hier den Zeitraum eintragen.",
           "active_end_date": "Optional: nur zwischen dem Startdatum und diesem Datum arbeiten (JJJJ-MM-TT).",
+          "active_range_yearly": "Ein (empfohlen): Es zählen nur Tag und Monat der beiden Daten oben, der Bereich kommt also jedes Jahr wieder — eine Tarifsaison steht im Preisblatt und gilt bis auf Weiteres. Aus: Die Jahreszahlen zählen mit, und die Integration hört nach dem Enddatum endgültig auf. Ein Bereich über den Jahreswechsel (Beginn nach Ende, z. B. 1. November bis 31. März) wird immer als Saison gelesen — absolut gelesen könnte er keinen einzigen Tag enthalten.",
           "backup_mode_entity": "Optional, aber wichtig: eine Entität, die anzeigt, ob das Haus gerade aus dem Speicher statt aus dem Netz läuft. Solange das so ist, ändert die Integration nichts am Wechselrichter — es gibt nichts zu laden, und ein angehobener Min-SOC würde den Speicher daran hindern, das Haus zu versorgen. Ein Schalter, ein binärer Sensor oder ein Zustandssensor (siehe unten). Bei einer manuellen Umschaltbox tut es auch ein input_boolean, den du selbst umlegst.",
           "backup_mode_states": "Nur nötig, wenn die Entität oben ein normaler Sensor ist und kein Schalter: die Zustände, die „Haus läuft aus dem Speicher“ bedeuten, durch Komma getrennt. Ein Kostal meldet im Wechselrichterzustand „ESB“ (Ersatzstrombetrieb). Bei einem Schalter oder binären Sensor leer lassen — dort bedeutet „an“ bereits Notstrom.",
           "house_load_entity": "Optional: kWh-Zähler des Hausverbrauchs. Der Überbrückungs-Planer lernt daraus aus den letzten 14 Tagen ein Tagesprofil; ohne ihn gilt der Mittelwert darunter.",
@@ -398,6 +402,7 @@
           "command_delay": "Befehlsverzögerung",
           "active_start_date": "Beginn des aktiven Zeitraums (optional)",
           "active_end_date": "Ende des aktiven Zeitraums (optional)",
+          "active_range_yearly": "Datumsbereich jährlich wiederholen",
           "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb (optional)",
           "backup_mode_states": "Zustände für Notstrombetrieb (optional)",
           "house_load_entity": "Energiezähler des Hausverbrauchs (optional)",
@@ -414,6 +419,7 @@
           "command_delay": "Pause zwischen dem Schreiben des Min-SOC und dem Einschalten der Netzladung (Sekunden).",
           "active_start_date": "Optional: nur zwischen diesem und dem Enddatum arbeiten (JJJJ-MM-TT). Leer lassen für das ganze Jahr — für §14a-Fenster, die nur im Winterhalbjahr gelten, hier den Zeitraum eintragen.",
           "active_end_date": "Optional: nur zwischen dem Startdatum und diesem Datum arbeiten (JJJJ-MM-TT).",
+          "active_range_yearly": "Ein (empfohlen): Es zählen nur Tag und Monat der beiden Daten oben, der Bereich kommt also jedes Jahr wieder — eine Tarifsaison steht im Preisblatt und gilt bis auf Weiteres. Aus: Die Jahreszahlen zählen mit, und die Integration hört nach dem Enddatum endgültig auf. Ein Bereich über den Jahreswechsel (Beginn nach Ende, z. B. 1. November bis 31. März) wird immer als Saison gelesen — absolut gelesen könnte er keinen einzigen Tag enthalten.",
           "backup_mode_entity": "Optional, aber wichtig: eine Entität, die anzeigt, ob das Haus gerade aus dem Speicher statt aus dem Netz läuft. Solange das so ist, ändert die Integration nichts am Wechselrichter — es gibt nichts zu laden, und ein angehobener Min-SOC würde den Speicher daran hindern, das Haus zu versorgen. Ein Schalter, ein binärer Sensor oder ein Zustandssensor (siehe unten). Bei einer manuellen Umschaltbox tut es auch ein input_boolean, den du selbst umlegst.",
           "backup_mode_states": "Nur nötig, wenn die Entität oben ein normaler Sensor ist und kein Schalter: die Zustände, die „Haus läuft aus dem Speicher“ bedeuten, durch Komma getrennt. Ein Kostal meldet im Wechselrichterzustand „ESB“ (Ersatzstrombetrieb). Bei einem Schalter oder binären Sensor leer lassen — dort bedeutet „an“ bereits Notstrom.",
           "house_load_entity": "Optional: kWh-Zähler des Hausverbrauchs. Der Überbrückungs-Planer lernt daraus aus den letzten 14 Tagen ein Tagesprofil; ohne ihn gilt der Mittelwert darunter.",
@@ -555,6 +561,10 @@
     "entity_not_available": {
       "title": "Die benötigte Entität {entity_id} fehlt",
       "description": "Inverter Charge Night braucht die Entität {entity_id}, aber Home Assistant kennt sie nicht. Prüfe die Entitäts-ID in den Einstellungen der Integration (Neu konfigurieren) oder stelle die Entität in ihrer eigenen Integration wieder her."
+    },
+    "active_range_expired": {
+      "title": "{name}: Der aktive Datumsbereich endete am {end_date}",
+      "description": "Die Integration ist so eingestellt, dass sie nur bis {end_date} läuft, und dieses Datum ist vorbei — sie lädt also nicht mehr und fängt von selbst auch nicht wieder an.\n\nDrei Wege hinaus, je nachdem was passt:\n\n1. **Datumsbereich jährlich wiederholen** in den Optionen einschalten (Schritt 4). Dann zählen nur Tag und Monat, und der Bereich kommt jedes Jahr wieder — genau das ist eine Tarifsaison normalerweise.\n2. Ein neues Enddatum eintragen.\n3. Beide Daten leeren, dann läuft sie ganzjährig.\n\nDiese Meldung verschwindet, sobald eines davon erledigt ist."
     }
   },
   "services": {

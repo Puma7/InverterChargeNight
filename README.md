@@ -222,6 +222,10 @@ To find entities:
    - **Update Interval**: How often the coordinator refreshes (default `900` s)
    - **Command Delay**: Delay between the min SOC and the grid charge command (default `0.1` s)
    - **Active Start Date** / **Active End Date** (optional): Restrict the integration to a season
+   - **Repeat the date range every year** (default on): only the day and month of the two dates
+     count, so the season comes back every year. Switch it off to mean the years literally — the
+     integration then stops for good once the end date has passed, and says so in the repairs
+     page. A range crossing the new year (1 November to 31 March) is always read as a season.
    - **Backup Mode Entity** (optional): While it is active, nothing is written to the inverter
    - **House Consumption Energy Meter** (optional): Cumulative kWh meter; the Bridge planner
      learns an hourly load profile from the last 14 days of recorder statistics
@@ -874,11 +878,10 @@ The integration updates every **15 minutes** (900 seconds) by default. This is d
   `binary_sensor.…_active` is `off` and nothing is written to the inverter — that is the normal
   state for most of the day.
 - **Active start/end date** (step 4) is empty by default, which means the window runs all year.
-  It takes one fixed stretch of calendar, not a season that repeats: the dates are absolute, so a
-  range ending in March 2027 stops the integration for good after that, and a range crossing the
-  new year is rejected and then ignored altogether. If your reduced grid fee only applies in
-  certain months, that is the limitation to know about — the replacement is designed in
-  `plans/011-tarifzeitfenster-und-abendreserve.md`.
+  With dates set and **Repeat the date range every year** on (the default), only day and month
+  count and the season comes back every year, including one that crosses the new year. With it
+  off the dates are absolute, and once the end date has passed the integration stops for good —
+  which it now reports in the repairs page instead of going quiet.
 - `sensor.…_calculated_soc` shows the target of the *running* window and its `is_active`
   attribute says whether one is running at all.
 
@@ -1063,12 +1066,15 @@ Step 4 -- advanced:
 - `command_delay` - Delay between min SOC and grid charge commands in seconds
 - `active_start_date` / `active_end_date` - Optional seasonal restriction (YYYY-MM-DD)
 
-  > **Known limitation.** These are absolute dates, so they do not repeat: a range that ends on
-  > `2027-03-31` stops the integration for good after that day. And a range that crosses the new
-  > year (`2026-11-01` to `2026-03-31`) is rejected as invalid and the restriction is then
-  > *ignored entirely*, so the window runs all year. A tariff-period list that repeats yearly and
-  > handles both is designed in `plans/011-tarifzeitfenster-und-abendreserve.md`. Until then,
-  > leave these empty unless you really mean one fixed stretch of calendar.
+- `active_range_yearly` - Repeat the range every year (default `true`)
+
+  > The dates are entered with the calendar picker, so they always carry a year. With
+  > `active_range_yearly` on, that year is ignored: only day and month count and the season
+  > returns every year. A range whose start falls after its end (`2026-11-01` to `2027-03-31`)
+  > crosses the new year and is read as a season either way — absolutely it could not contain a
+  > single day, which is why it used to be dropped altogether and the window then ran all year.
+  > Entries written before 3.2.0 keep the absolute meaning if they have a range set; the setting
+  > is theirs to switch on.
 - `backup_mode_entity` - Optional backup/island mode entity
 - `house_load_entity` - Optional cumulative house consumption meter (kWh)
 - `avg_house_load_kw` - Fallback average house load in kW

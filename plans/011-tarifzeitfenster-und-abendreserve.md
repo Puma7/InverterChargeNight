@@ -1,7 +1,16 @@
 # Plan 011: Tarifzeitfenster als Liste, und eine Reserve für die Hochpreiszone
 
-> Entwurf. Noch nicht zur Ausführung freigegeben — die offenen Fragen am Ende gehören zuerst
-> beantwortet. Ersetzt Backlog-Eintrag 010 in `plans/README.md`.
+> Entwurf, **teilweise umgesetzt**. Ersetzt Backlog-Eintrag 010 in `plans/README.md`.
+>
+> **Mit 3.2.0 erledigt**: der Defekt im Datumsbereich. Ein Bereich über den Jahreswechsel wird
+> jetzt wie ein Zeitfenster über Mitternacht gelesen, und die jährliche Wiederholung gibt es als
+> Schalter `active_range_yearly` statt über die Länge der Zeichenkette — die Datumsfelder sind
+> Kalender-Auswahlfelder, in die sich kein `MM-DD` eintragen lässt, und eine Textbox wäre
+> gegenüber dem Auswahlfeld ein Rückschritt. Der Schalter ist ab Werk an; bestehende Einträge mit
+> Datum behalten die absolute Bedeutung.
+>
+> **Offen**: die Periodenliste (`tariff_periods`), die Hochpreiszone und die Abendreserve, samt
+> der offenen Fragen am Ende.
 
 ## Status
 

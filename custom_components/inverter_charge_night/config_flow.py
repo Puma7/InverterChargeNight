@@ -25,6 +25,7 @@ from .const import (
     CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
     CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_RANGE_YEARLY,
     CONF_ACTIVE_START_DATE,
     CONF_AUTO_EFFICIENT_CHARGE,
     CONF_AVG_HOUSE_LOAD_KW,
@@ -64,6 +65,7 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
+    DEFAULT_ACTIVE_RANGE_YEARLY,
     DEFAULT_AVG_HOUSE_LOAD_KW,
     DEFAULT_BRIDGE_RESERVE_KWH,
     DEFAULT_CHARGE_EFFICIENCY,
@@ -157,6 +159,7 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_COMMAND_DELAY,
     CONF_ACTIVE_START_DATE,
     CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_RANGE_YEARLY,
     CONF_BACKUP_MODE_ENTITY,
     CONF_BACKUP_MODE_STATES,
     CONF_HOUSE_LOAD_ENTITY,
@@ -664,6 +667,9 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
             _optional(
                 CONF_ACTIVE_END_DATE, _normalize_date_value(defaults.get(CONF_ACTIVE_END_DATE))
             ): _date_selector(),
+            _required(
+                CONF_ACTIVE_RANGE_YEARLY, defaults, DEFAULT_ACTIVE_RANGE_YEARLY
+            ): _bool_selector(),
             _optional(
                 CONF_BACKUP_MODE_ENTITY, defaults.get(CONF_BACKUP_MODE_ENTITY)
             ): _entity_selector(["binary_sensor", "switch", "sensor"]),

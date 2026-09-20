@@ -11,6 +11,9 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     AUTO_EFFICIENCY_KEYS,
+    CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_RANGE_YEARLY,
+    CONF_ACTIVE_START_DATE,
     CONF_AUTO_EFFICIENCY_DATA,
     CONF_AUTO_EFFICIENT_CHARGE,
     CONF_BATTERY_SOC_ENTITY,
@@ -145,6 +148,22 @@ def _migrate_entry_data(hass: HomeAssistant, entry: InverterChargeNightConfigEnt
                     key,
                     value,
                 )
+
+    if CONF_ACTIVE_RANGE_YEARLY not in data:
+        # From 3.2.0 on an active date range repeats every year, which is what a
+        # tariff season is. An entry written before that meant the dates
+        # absolutely, so it keeps that meaning unless the user says otherwise -
+        # a range nobody re-enters must not suddenly come back next winter.
+        # Only a range that crosses the new year is read as a season either way:
+        # absolutely it would be start > end, which no day can satisfy.
+        has_range = bool(data.get(CONF_ACTIVE_START_DATE) or data.get(CONF_ACTIVE_END_DATE))
+        data[CONF_ACTIVE_RANGE_YEARLY] = not has_range
+        changed = True
+        if has_range:
+            _LOGGER.info(
+                "Keeping the configured date range absolute; switch on "
+                "\"Repeat the date range every year\" in the options to make it a season"
+            )
 
     for key in LEGACY_UNUSED_OPTION_KEYS:
         if key in options:

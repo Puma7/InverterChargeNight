@@ -5,6 +5,34 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-09-20
+
+A tariff season now behaves like a season. The optional date range was absolute-only, and the
+one shape a §14a season usually has — winter, crossing the new year — did not work at all.
+
+### Fixed
+
+- **A date range crossing the new year no longer disables the restriction.** `2026-11-01` to
+  `2027-03-31` was logged as invalid and then *ignored entirely*, so the window ran all year —
+  the opposite of what was configured. Such a range is now read the way a time window crossing
+  midnight has always been read: inside when today is on or after the start **or** on or before
+  the end.
+
+### Added
+
+- **Repeat the date range every year** (step 4, on by default). Only day and month of the two
+  dates count, so the season comes back every year; a price sheet holds until further notice.
+  Switched off, the years count and the range expires as before. A range crossing the new year
+  is always read as a season, because absolutely it could not contain a single day.
+- **A repair issue when an absolute range has expired.** Until now the integration simply stopped
+  one morning and nothing said why. It names the end date and the three ways out.
+
+### Changed
+
+- Entries written before 3.2.0 that have a date set **keep the absolute meaning**: a range
+  nobody re-entered must not come back next winter on its own. The migration records that
+  choice, and the log line says where to change it. Entries without dates get the new default.
+
 ## [3.1.0] - 2026-09-20
 
 The integration can be talked to. Until now the only way in from an automation was to toggle

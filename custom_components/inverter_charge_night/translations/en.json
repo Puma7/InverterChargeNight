@@ -105,6 +105,7 @@
           "command_delay": "Command Delay",
           "active_start_date": "Active Start Date (optional)",
           "active_end_date": "Active End Date (optional)",
+          "active_range_yearly": "Repeat the date range every year",
           "backup_mode_entity": "Backup / island mode entity (optional)",
           "backup_mode_states": "Backup mode states (optional)",
           "house_load_entity": "House Consumption Energy Meter (optional)",
@@ -121,6 +122,7 @@
           "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
           "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
           "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_range_yearly": "On (recommended): only the day and month of the two dates above count, so the range comes back every year - a tariff season stands in a price sheet and holds until further notice. Off: the years count too, and the integration stops for good once the end date has passed. A range that crosses the new year (start after end, e.g. 1 November to 31 March) is always read as a season, because read absolutely it could not contain a single day.",
           "backup_mode_entity": "Optional but important: an entity that says whether the house is running on the battery instead of the grid. While it does, the integration changes nothing on the inverter - there is nothing to charge from, and a raised min SOC would stop the battery from supplying the house. A switch, a binary sensor, or a state sensor (see below). With a manual transfer switch, an input_boolean you flip yourself works just as well.",
           "backup_mode_states": "Only needed when the entity above is a plain sensor rather than a switch: the states that mean the house is running on the battery, comma separated. A Kostal inverter reports “ESB” (Ersatzstrombetrieb) in its inverter state. Leave empty for a switch or binary sensor - on means backup there.",
           "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
@@ -237,6 +239,7 @@
           "command_delay": "Command Delay",
           "active_start_date": "Active Start Date (optional)",
           "active_end_date": "Active End Date (optional)",
+          "active_range_yearly": "Repeat the date range every year",
           "backup_mode_entity": "Backup / island mode entity (optional)",
           "backup_mode_states": "Backup mode states (optional)",
           "house_load_entity": "House Consumption Energy Meter (optional)",
@@ -253,6 +256,7 @@
           "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
           "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
           "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_range_yearly": "On (recommended): only the day and month of the two dates above count, so the range comes back every year - a tariff season stands in a price sheet and holds until further notice. Off: the years count too, and the integration stops for good once the end date has passed. A range that crosses the new year (start after end, e.g. 1 November to 31 March) is always read as a season, because read absolutely it could not contain a single day.",
           "backup_mode_entity": "Optional but important: an entity that says whether the house is running on the battery instead of the grid. While it does, the integration changes nothing on the inverter - there is nothing to charge from, and a raised min SOC would stop the battery from supplying the house. A switch, a binary sensor, or a state sensor (see below). With a manual transfer switch, an input_boolean you flip yourself works just as well.",
           "backup_mode_states": "Only needed when the entity above is a plain sensor rather than a switch: the states that mean the house is running on the battery, comma separated. A Kostal inverter reports “ESB” (Ersatzstrombetrieb) in its inverter state. Leave empty for a switch or binary sensor - on means backup there.",
           "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
@@ -398,6 +402,7 @@
           "command_delay": "Command Delay",
           "active_start_date": "Active Start Date (optional)",
           "active_end_date": "Active End Date (optional)",
+          "active_range_yearly": "Repeat the date range every year",
           "backup_mode_entity": "Backup / island mode entity (optional)",
           "backup_mode_states": "Backup mode states (optional)",
           "house_load_entity": "House Consumption Energy Meter (optional)",
@@ -414,6 +419,7 @@
           "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
           "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
           "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_range_yearly": "On (recommended): only the day and month of the two dates above count, so the range comes back every year - a tariff season stands in a price sheet and holds until further notice. Off: the years count too, and the integration stops for good once the end date has passed. A range that crosses the new year (start after end, e.g. 1 November to 31 March) is always read as a season, because read absolutely it could not contain a single day.",
           "backup_mode_entity": "Optional but important: an entity that says whether the house is running on the battery instead of the grid. While it does, the integration changes nothing on the inverter - there is nothing to charge from, and a raised min SOC would stop the battery from supplying the house. A switch, a binary sensor, or a state sensor (see below). With a manual transfer switch, an input_boolean you flip yourself works just as well.",
           "backup_mode_states": "Only needed when the entity above is a plain sensor rather than a switch: the states that mean the house is running on the battery, comma separated. A Kostal inverter reports “ESB” (Ersatzstrombetrieb) in its inverter state. Leave empty for a switch or binary sensor - on means backup there.",
           "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
@@ -555,6 +561,10 @@
     "discharge_block_without_backup": {
       "title": "{name}: the battery cannot supply the house during a power cut",
       "description": "To keep the energy it bought, this integration raises the inverter's minimum SOC while the window is open - and a battery does not discharge below its minimum SOC. If the power fails during the window and your house switches to the battery, the battery will refuse to supply it, however full it is.\n\nTwo ways out, either is enough:\n\n1. Set **Backup / island mode entity** in the integration options (step 4). Any entity that says the house is running on the battery: the inverter's state sensor (a Kostal reports `ESB` - add it under **Backup mode states**), a binary sensor, or an `input_boolean` you flip yourself when you operate a manual transfer switch. The integration then hands the inverter back within seconds.\n\n2. Set **Discharge block** to `Off` in step 3. The battery may then run the house at night, which costs the difference between the window tariff and the day tariff.\n\nThis message disappears once either is done."
+    },
+    "active_range_expired": {
+      "title": "{name}: the active date range ended on {end_date}",
+      "description": "The integration is configured to run only until {end_date}, and that date has passed - so it does not charge any more, and it will not start again on its own.\n\nThree ways out, whichever fits:\n\n1. Switch on **Repeat the date range every year** in the options (step 4). The range then means the day and month only, and comes back every year - which is what a tariff season usually is.\n2. Enter a new end date.\n3. Clear both dates to run all year round.\n\nThis message disappears as soon as one of them is done."
     }
   },
   "services": {

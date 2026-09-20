@@ -38,6 +38,7 @@ from .const import (
     CONF_BACKUP_MODE_STATES,
     CONF_ACTIVE_START_DATE,
     CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_RANGE_YEARLY,
     CONF_MIN_CHARGE_POWER_W,
     CONF_MAX_CHARGE_POWER_W,
     CONF_CHARGE_POWER_ENTITY,
@@ -100,6 +101,7 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_ACTIVE_START_DATE,
     DEFAULT_ACTIVE_END_DATE,
+    DEFAULT_ACTIVE_RANGE_YEARLY,
     DEFAULT_DISCHARGE_BLOCK_MODE,
     DISCHARGE_BLOCK_OFF,
     DISCHARGE_BLOCK_VIA_SWITCH,
@@ -255,6 +257,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # SOC listener writes the window's floor back within milliseconds, and
         # the window check restarts the window on the next update.
         self._hands_off_until: datetime | None = None
+        # The end date of the expired range the repair issue currently names,
+        # so the registry is only written when that changes.
+        self._expired_range_issue: date | None = None
         self.calculated_soc: float | None = None
         self.initial_calculated_soc: float | None = None  # Store SOC calculated at window start
         self.minimum_calculated_soc: float | None = None  # Store minimum SOC value (always <= initial)
@@ -1468,29 +1473,117 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
 
     def _is_within_date_range(self) -> bool:
-        """Check if today's date is within the optional active date range."""
-        start_date_str = self.config.get(CONF_ACTIVE_START_DATE, DEFAULT_ACTIVE_START_DATE)
-        end_date_str = self.config.get(CONF_ACTIVE_END_DATE, DEFAULT_ACTIVE_END_DATE)
-        start_date = self._parse_date_optional(start_date_str)
-        end_date = self._parse_date_optional(end_date_str)
+        """Is today inside the optional active date range?
+
+        The range means one of two things, and the difference is the
+        "repeat every year" setting:
+
+        * **Yearly** - only month and day count, so 11-01 to 03-31 is every
+          winter. A range whose start falls after its end crosses the new year
+          and is matched the same way a window crossing midnight is: inside
+          when today is on or after the start *or* on or before the end.
+        * **Absolute** - the years count too, and the range is over when its
+          end has passed. That is a silent stop, so it raises a repair issue
+          instead of leaving the user to wonder why nothing charges.
+
+        A range that crosses the new year is always yearly, whatever the
+        setting says: read absolutely it would be start > end, which cannot
+        contain any day at all. It used to be logged as invalid and then
+        dropped entirely, which turned "every winter" into "all year round".
+        """
+        start_date = self._parse_date_optional(
+            self.config.get(CONF_ACTIVE_START_DATE, DEFAULT_ACTIVE_START_DATE)
+        )
+        end_date = self._parse_date_optional(
+            self.config.get(CONF_ACTIVE_END_DATE, DEFAULT_ACTIVE_END_DATE)
+        )
 
         if start_date is None and end_date is None:
+            self._update_expired_range_issue(None)
             return True
 
-        if start_date and end_date and start_date > end_date:
+        today = dt_util.now().date()
+        wraps = (
+            start_date is not None
+            and end_date is not None
+            and (start_date.month, start_date.day) > (end_date.month, end_date.day)
+        )
+        yearly = wraps or bool(
+            self.config.get(CONF_ACTIVE_RANGE_YEARLY, DEFAULT_ACTIVE_RANGE_YEARLY)
+        )
+
+        if yearly:
+            self._update_expired_range_issue(None)
+            return self._is_within_yearly_range(today, start_date, end_date, wraps)
+
+        if start_date is not None and end_date is not None and start_date > end_date:
+            # Not a season crossing the new year (that is handled above) but the
+            # same year the wrong way round, e.g. 2026-06-01 to 2026-05-31.
             _LOGGER.warning(
                 "Active date range is invalid (%s > %s), ignoring date restriction",
                 start_date,
                 end_date,
             )
+            self._update_expired_range_issue(None)
             return True
 
-        today = dt_util.now().date()
+        self._update_expired_range_issue(end_date if end_date and today > end_date else None)
         if start_date and today < start_date:
             return False
         if end_date and today > end_date:
             return False
         return True
+
+    @staticmethod
+    def _is_within_yearly_range(
+        today: date, start_date: date | None, end_date: date | None, wraps: bool
+    ) -> bool:
+        """Match month and day only, so the range comes back every year.
+
+        Comparing (month, day) tuples rather than constructing dates keeps a
+        29 February boundary usable in a year that does not have one.
+        """
+        now_md = (today.month, today.day)
+        start_md = (start_date.month, start_date.day) if start_date else None
+        end_md = (end_date.month, end_date.day) if end_date else None
+        if wraps and start_md is not None and end_md is not None:
+            return now_md >= start_md or now_md <= end_md
+        if start_md is not None and now_md < start_md:
+            return False
+        if end_md is not None and now_md > end_md:
+            return False
+        return True
+
+    def _update_expired_range_issue(self, ended_on: date | None) -> None:
+        """Say out loud that an absolute date range has run out.
+
+        Without this the integration simply stops working one morning and
+        nothing anywhere says why - the log line it used to write is gone by
+        the time anyone looks.
+
+        The date range is checked on every poll and on every window trigger,
+        so the registry is only touched when something actually changed.
+        """
+        if ended_on == self._expired_range_issue:
+            return
+        issue_id = f"active_range_expired_{self.entry.entry_id}"
+        self._expired_range_issue = ended_on
+        if ended_on is None:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            issue_domain=DOMAIN,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="active_range_expired",
+            translation_placeholders={
+                "name": str(self.entry.title),
+                "end_date": ended_on.isoformat(),
+            },
+        )
 
     def _backup_mode_states(self) -> frozenset[str]:
         """The states the user declared as "backup mode", lowercased."""
