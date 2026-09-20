@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from custom_components.inverter_charge_night import const
+from custom_components.inverter_charge_night.planner import EveningOutlook
 from custom_components.inverter_charge_night.diagnostics import (
     REDACT_KEYS,
     async_get_config_entry_diagnostics,
@@ -75,3 +76,45 @@ def test_every_entity_config_key_is_redacted():
     # Plus the names the two inverter keys carried before 3.0.2: a diagnostics
     # dump taken from an entry that has not been migrated yet still holds them.
     assert REDACT_KEYS == entity_keys | set(const.LEGACY_INVERTER_KEYS)
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_explain_a_window_outside_the_schedule(mock_hass, mock_config_entry):
+    """"Why is it doing something at three in the afternoon" has to be answerable.
+
+    An ad-hoc window and the evening rescue drive the inverter outside any
+    configured window, so a diagnostics download that does not mention them
+    leaves the one question a support request actually asks unanswered.
+    """
+    coordinator = MagicMock()
+    coordinator.entry = mock_config_entry
+    coordinator._adhoc_until = datetime(2026, 6, 1, 18, 0)
+    coordinator._adhoc_reason = "evening_rescue"
+    coordinator._adhoc_target_soc = 62.0
+    coordinator._adhoc_allow_grid_charge = True
+    coordinator._rescue_stage = 2
+    coordinator.evening_rescue_charge = True
+    coordinator.last_evening_outlook = EveningOutlook(
+        zone_start=datetime(2026, 6, 1, 18, 0),
+        zone_end=datetime(2026, 6, 1, 21, 0),
+        required_soc=62.0,
+        projected_soc=38.0,
+        missing_kwh=2.4,
+        pv_to_come_kwh=0.3,
+        load_to_come_kwh=2.0,
+        forecast_available=True,
+    )
+    coordinator.get_auto_efficiency_data = MagicMock(
+        return_value={"bands": {"40": {"best_power_w": 3000}}}
+    )
+    coordinator._auto_test_start = None
+    mock_config_entry.runtime_data = coordinator
+
+    diagnostics = await async_get_config_entry_diagnostics(mock_hass, mock_config_entry)
+
+    state = diagnostics["state"]
+    assert state["adhoc_reason"] == "evening_rescue"
+    assert state["adhoc_until"] == "2026-06-01T18:00:00"
+    assert state["rescue_stage"] == 2
+    assert state["evening_outlook"]["missing_kwh"] == 2.4
+    assert state["auto_efficiency_bands"] == {"40": {"best_power_w": 3000}}
