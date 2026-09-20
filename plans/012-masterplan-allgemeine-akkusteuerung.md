@@ -83,6 +83,11 @@ Jede Stufe ist für sich nützlich und auslieferbar.
 
 ### Stufe 1 — Services (3.1) · Aufwand S · kein neuer HA-Boden — **UMGESETZT in 3.1.0**
 
+**Nachtrag 20.09.:** mit 3.5.0 vollständig — `charge_to`, `block_discharge` und
+`allow_discharge` sind dazugekommen, sobald das Ad-hoc-Fenster aus `plans/013` sie tragen konnte.
+Offen bleiben nur `force_discharge_to` (bräuchte ein Ad-hoc-Fenster in Entladerichtung) und
+`set_charge_power_limit` (schriebe ohne Fenster und damit ohne Restore).
+
 Umgesetzt wurden zunächst die beiden Aktionen ohne eigenen Fenster-Lebenszyklus:
 `plan_target_soc` (Response-Service, schreibt nichts) und `reset_inverter`. Die übrigen aus der
 Tabelle (`charge_to`, `block_discharge`/`allow_discharge`, `force_discharge_to`,

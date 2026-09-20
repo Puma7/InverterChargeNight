@@ -569,6 +569,9 @@
     }
   },
   "exceptions": {
+    "adhoc_refused": {
+      "message": "The inverter could not be driven right now. The configured window may be running, backup mode may be active, or the battery level cannot be read - the log says which."
+    },
     "entity_not_available": {
       "message": "Required entity {entity_id} is not yet available"
     },
@@ -580,6 +583,9 @@
     },
     "entry_not_loaded": {
       "message": "The configuration “{title}” is not loaded, so there is nothing to act on."
+    },
+    "nothing_to_release": {
+      "message": "Nothing is being held or charged by an action, so there is nothing to release."
     },
     "plan_failed": {
       "message": "The planner could not produce a target. The log says which setting it stumbled over."
@@ -603,6 +609,48 @@
     }
   },
   "services": {
+    "allow_discharge": {
+      "name": "Release the battery",
+      "description": "Ends a hold or a charge before its time is up and hands the inverter back. Only affects one started by an action or by the evening rescue — a configured window is the schedule doing its job, and ‘reset the inverter’ is what ends that.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Which configured inverter to act on. Can be left empty when only one is configured."
+        }
+      }
+    },
+    "block_discharge": {
+      "name": "Hold the battery",
+      "description": "Keeps the battery from running the house for a while, without buying anything: the house draws from the sun, and from the grid when the sun is not enough. The same thing the evening rescue does by itself.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Which configured inverter to act on. Can be left empty when only one is configured."
+        },
+        "duration": {
+          "name": "For how long",
+          "description": "How long the battery is held or charged. It ends by itself afterwards and the inverter goes back to the settings it had before. Two hours when left empty."
+        }
+      }
+    },
+    "charge_to": {
+      "name": "Charge to",
+      "description": "Charges the battery from the grid to a level, for a while. Everything the night window does applies: the house connection limit, the settings captured beforehand and restored afterwards. Refused while the configured window is running.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Which configured inverter to act on. Can be left empty when only one is configured."
+        },
+        "target_soc": {
+          "name": "Target level",
+          "description": "The state of charge to reach, in percent. Clamped to the minimum and maximum you configured."
+        },
+        "duration": {
+          "name": "For how long",
+          "description": "How long the battery is held or charged. It ends by itself afterwards and the inverter goes back to the settings it had before. Two hours when left empty."
+        }
+      }
+    },
     "plan_target_soc": {
       "name": "Plan target SOC",
       "description": "Works out the target state of charge for the next window from the forecast, the house load profile and the sun, and returns it without changing anything.",

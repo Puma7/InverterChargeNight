@@ -235,6 +235,14 @@ BACKUP_INACTIVE_STATES: frozenset[str] = frozenset(
 # checks the entry's state itself and says so rather than failing silently.
 SERVICE_PLAN_TARGET_SOC = "plan_target_soc"
 SERVICE_RESET_INVERTER = "reset_inverter"
+SERVICE_CHARGE_TO = "charge_to"
+SERVICE_BLOCK_DISCHARGE = "block_discharge"
+SERVICE_ALLOW_DISCHARGE = "allow_discharge"
+ATTR_TARGET_SOC = "target_soc"
+ATTR_DURATION = "duration"
+# How long an ad-hoc window from an action runs when the caller does not say.
+DEFAULT_ADHOC_DURATION_MIN = 120
+ADHOC_REASON_SERVICE = "service"
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 
 # Settings and stored data of earlier versions. Installations that have been

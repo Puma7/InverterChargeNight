@@ -809,6 +809,35 @@ action:
   - service: inverter_charge_night.reset_inverter
 ```
 
+### `inverter_charge_night.charge_to`
+
+Charges the battery from the grid to a level, for a while (`duration`, two hours by default).
+Everything the night window does applies — the house connection limit, the settings captured
+beforehand and restored when it ends. Refused while the configured window is running: that one
+has the tariff behind it.
+
+```yaml
+alias: Top the battery up before the expensive block
+trigger:
+  - platform: time
+    at: "16:00:00"
+condition:
+  - condition: numeric_state
+    entity_id: sensor.inverter_charge_night_evening_outlook
+    above: 0.5
+action:
+  - service: inverter_charge_night.charge_to
+    data:
+      target_soc: 60
+      duration: {hours: 2}
+```
+
+### `inverter_charge_night.block_discharge` and `allow_discharge`
+
+`block_discharge` keeps the battery from running the house for a while without buying anything —
+the same thing the evening rescue does by itself. `allow_discharge` ends a hold or a charge early
+and hands the inverter back; it only affects one an action or the rescue started.
+
 Both actions report failure as an error the automation can catch: an unknown or unloaded entry,
 a plan the planner could not produce, or an inverter that did not accept the reset (which is
 retried by the integration regardless).

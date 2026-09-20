@@ -128,6 +128,7 @@ from .const import (
     DEFAULT_GRID_PHASES,
     DEFAULT_GRID_VOLTAGE_V,
     ADHOC_REASON_EVENING_RESCUE,
+    ADHOC_REASON_SERVICE,
     EFFICIENCY_BAND_MAX_SPAN,
     EFFICIENCY_BAND_MIN_SAMPLES,
     EFFICIENCY_BAND_WIDTH_PCT,
@@ -3390,6 +3391,51 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             allow_grid_charge=stage == 2,
         ):
             self._rescue_stage = stage
+
+    async def async_charge_to(self, target_soc: float, duration: timedelta) -> bool:
+        """Charge to a level from the grid, for the ``charge_to`` action.
+
+        An ad-hoc window with grid charging allowed, so the house connection
+        limit, the capture of the inverter's own settings and the restore when
+        it ends all apply exactly as they do at night.
+        """
+        return await self.async_open_adhoc_window(
+            target_soc=target_soc,
+            until=dt_util.now() + duration,
+            reason=ADHOC_REASON_SERVICE,
+            allow_grid_charge=True,
+        )
+
+    async def async_block_discharge(self, duration: timedelta) -> bool:
+        """Hold what is in the battery, for the ``block_discharge`` action.
+
+        The same thing the evening rescue does by itself, on request: an ad-hoc
+        window at the level the battery is at now, with no buying. The house
+        runs from the sun or the grid until it ends.
+        """
+        current_soc = self._current_battery_soc()
+        if current_soc is None:
+            _LOGGER.warning("Cannot block the discharge - the battery level cannot be read")
+            return False
+        return await self.async_open_adhoc_window(
+            target_soc=current_soc,
+            until=dt_util.now() + duration,
+            reason=ADHOC_REASON_SERVICE,
+            allow_grid_charge=False,
+        )
+
+    async def async_allow_discharge(self) -> bool:
+        """End an ad-hoc window early, for the ``allow_discharge`` action.
+
+        Only an ad-hoc one: a configured window is the schedule doing its job,
+        and ending that is what ``reset_inverter`` is for.
+        """
+        if self._adhoc_until is None:
+            _LOGGER.info("No ad-hoc window is running - nothing to release")
+            return False
+        _LOGGER.info("Releasing the ad-hoc window (%s) on request", self._adhoc_reason)
+        await self._on_window_end(dt_util.now())
+        return not self._pending_reset
 
     async def async_open_adhoc_window(
         self,

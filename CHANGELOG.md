@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before the period, when the forecast hardly turns any more. At the period's start the block is
   released and the inverter goes back to what it was. The switch is off by default: watch the
   outlook sensor for a season before letting it spend money.
+- **Three more actions, now that the ad-hoc window exists to carry them.** `charge_to` charges
+  to a level from the grid for a while; `block_discharge` holds what is in the battery without
+  buying; `allow_discharge` ends either early. All three run as ad-hoc windows, so the house
+  connection limit, the capture of your inverter's settings and the restore afterwards apply
+  exactly as they do at night. This completes stage 1 of the masterplan, whose remaining actions
+  had been waiting for precisely this lifecycle.
 - **The ad-hoc window.** Both stages run as a window like any other — same capture of the
   inverter's settings, same restore, same retry ladder, same backup interlock, same house
   connection limit, same verification — whose start comes from a call rather than from the clock.

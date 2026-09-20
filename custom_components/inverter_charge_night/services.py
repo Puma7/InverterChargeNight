@@ -19,6 +19,7 @@ and raises a translated error instead of failing quietly.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 import voluptuous as vol
 
@@ -35,7 +36,13 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import (
     ATTR_CONFIG_ENTRY_ID,
+    ATTR_DURATION,
+    ATTR_TARGET_SOC,
+    DEFAULT_ADHOC_DURATION_MIN,
     DOMAIN,
+    SERVICE_ALLOW_DISCHARGE,
+    SERVICE_BLOCK_DISCHARGE,
+    SERVICE_CHARGE_TO,
     SERVICE_PLAN_TARGET_SOC,
     SERVICE_RESET_INVERTER,
 )
@@ -44,6 +51,18 @@ from .coordinator import InverterChargeNightConfigEntry, InverterChargeNightCoor
 _LOGGER = logging.getLogger(__name__)
 
 _ENTRY_SCHEMA = vol.Schema({vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string})
+_DEFAULT_DURATION = timedelta(minutes=DEFAULT_ADHOC_DURATION_MIN)
+_CHARGE_TO_SCHEMA = _ENTRY_SCHEMA.extend(
+    {
+        vol.Required(ATTR_TARGET_SOC): vol.All(
+            vol.Coerce(float), vol.Range(min=0, max=100)
+        ),
+        vol.Optional(ATTR_DURATION, default=_DEFAULT_DURATION): cv.positive_time_period,
+    }
+)
+_DURATION_SCHEMA = _ENTRY_SCHEMA.extend(
+    {vol.Optional(ATTR_DURATION, default=_DEFAULT_DURATION): cv.positive_time_period}
+)
 
 
 def _coordinator_for(hass: HomeAssistant, call: ServiceCall) -> InverterChargeNightCoordinator:
@@ -128,6 +147,35 @@ async def _async_reset_inverter(call: ServiceCall) -> None:
         )
 
 
+async def _async_charge_to(call: ServiceCall) -> None:
+    """Charge the battery to a level from the grid, for a while.
+
+    Everything the night window does, on request: the house connection limit,
+    the capture of the inverter's own settings, the restore when the window
+    ends. Refused while the configured window is running - that one has the
+    tariff behind it.
+    """
+    coordinator = _coordinator_for(call.hass, call)
+    if not await coordinator.async_charge_to(
+        float(call.data[ATTR_TARGET_SOC]), call.data[ATTR_DURATION]
+    ):
+        raise HomeAssistantError(translation_domain=DOMAIN, translation_key="adhoc_refused")
+
+
+async def _async_block_discharge(call: ServiceCall) -> None:
+    """Hold what is in the battery for a while, buying nothing."""
+    coordinator = _coordinator_for(call.hass, call)
+    if not await coordinator.async_block_discharge(call.data[ATTR_DURATION]):
+        raise HomeAssistantError(translation_domain=DOMAIN, translation_key="adhoc_refused")
+
+
+async def _async_allow_discharge(call: ServiceCall) -> None:
+    """Release a hold or a charge before its time is up."""
+    coordinator = _coordinator_for(call.hass, call)
+    if not await coordinator.async_allow_discharge():
+        raise HomeAssistantError(translation_domain=DOMAIN, translation_key="nothing_to_release")
+
+
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
     """Register the integration's actions once per Home Assistant start."""
@@ -143,4 +191,13 @@ def async_setup_services(hass: HomeAssistant) -> None:
         SERVICE_RESET_INVERTER,
         _async_reset_inverter,
         schema=_ENTRY_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_CHARGE_TO, _async_charge_to, schema=_CHARGE_TO_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_BLOCK_DISCHARGE, _async_block_discharge, schema=_DURATION_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_ALLOW_DISCHARGE, _async_allow_discharge, schema=_ENTRY_SCHEMA
     )

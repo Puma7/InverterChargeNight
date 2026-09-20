@@ -569,6 +569,9 @@
     }
   },
   "exceptions": {
+    "adhoc_refused": {
+      "message": "Der Wechselrichter konnte gerade nicht angesteuert werden. Vielleicht läuft das eingerichtete Fenster, vielleicht ist Notstrombetrieb aktiv, vielleicht ist der Ladestand nicht lesbar — im Protokoll steht, was davon."
+    },
     "entity_not_available": {
       "message": "Die benötigte Entität {entity_id} ist noch nicht verfügbar"
     },
@@ -580,6 +583,9 @@
     },
     "entry_not_loaded": {
       "message": "Die Konfiguration „{title}“ ist nicht geladen, es gibt also nichts, worauf die Aktion wirken könnte."
+    },
+    "nothing_to_release": {
+      "message": "Es wird gerade nichts durch eine Aktion gehalten oder geladen, also gibt es nichts freizugeben."
     },
     "plan_failed": {
       "message": "Der Planer konnte kein Ziel berechnen. Im Protokoll steht, welche Einstellung ihm im Weg stand."
@@ -603,6 +609,48 @@
     }
   },
   "services": {
+    "allow_discharge": {
+      "name": "Akku freigeben",
+      "description": "Beendet ein Halten oder Laden vor der Zeit und gibt den Wechselrichter zurück. Wirkt nur auf eines, das eine Aktion oder die Abendrettung begonnen hat — ein eingerichtetes Fenster ist der Zeitplan bei der Arbeit, und dafür gibt es „Wechselrichter zurücksetzen“.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wechselrichter",
+          "description": "Auf welchen eingerichteten Wechselrichter die Aktion wirken soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
+        }
+      }
+    },
+    "block_discharge": {
+      "name": "Akku halten",
+      "description": "Hindert den Akku für eine Weile daran, das Haus zu versorgen, ohne etwas zu kaufen: das Haus zieht aus der Sonne und, wo die nicht reicht, aus dem Netz. Dasselbe, was die Abendrettung von selbst tut.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wechselrichter",
+          "description": "Auf welchen eingerichteten Wechselrichter die Aktion wirken soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
+        },
+        "duration": {
+          "name": "Wie lange",
+          "description": "Wie lange der Akku gehalten oder geladen wird. Danach endet es von selbst und der Wechselrichter steht wieder so wie vorher. Leer bedeutet zwei Stunden."
+        }
+      }
+    },
+    "charge_to": {
+      "name": "Laden bis",
+      "description": "Lädt den Akku für eine Weile aus dem Netz auf einen Stand. Es gilt alles, was auch nachts gilt: die Hausanschlussgrenze, die vorher gemerkten und nachher zurückgesetzten Einstellungen. Wird abgelehnt, solange das eingerichtete Fenster läuft.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wechselrichter",
+          "description": "Auf welchen eingerichteten Wechselrichter die Aktion wirken soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
+        },
+        "target_soc": {
+          "name": "Zielstand",
+          "description": "Der Ladestand, der erreicht werden soll, in Prozent. Wird auf dein eingestelltes Minimum und Maximum begrenzt."
+        },
+        "duration": {
+          "name": "Wie lange",
+          "description": "Wie lange der Akku gehalten oder geladen wird. Danach endet es von selbst und der Wechselrichter steht wieder so wie vorher. Leer bedeutet zwei Stunden."
+        }
+      }
+    },
     "plan_target_soc": {
       "name": "Ziel-Ladestand berechnen",
       "description": "Berechnet den Ziel-Ladestand für das nächste Fenster aus Prognose, Hausverbrauchsprofil und Sonnenstand und gibt ihn zurück, ohne etwas zu ändern.",

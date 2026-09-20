@@ -317,3 +317,81 @@ async def test_a_malformed_persisted_deadline_is_ignored(mock_hass, caplog):
     )
     assert coordinator._adhoc_until is None
     assert "adhoc_until" in caplog.text
+
+
+# The actions that open one (plan 013) -------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_charge_to_opens_a_window_that_may_buy(mock_hass):
+    coordinator = _make_coordinator(mock_hass)
+
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=AFTERNOON
+    ):
+        assert await coordinator.async_charge_to(62.0, timedelta(hours=2)) is True
+
+    assert coordinator.initial_calculated_soc == 62.0
+    assert coordinator._adhoc_allow_grid_charge is True
+    assert coordinator._adhoc_until == AFTERNOON + timedelta(hours=2)
+    assert coordinator._adhoc_reason == "service"
+
+
+@pytest.mark.asyncio
+async def test_block_discharge_holds_at_the_level_it_finds(mock_hass):
+    coordinator = _make_coordinator(mock_hass)  # battery at 40 %
+
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=AFTERNOON
+    ):
+        assert await coordinator.async_block_discharge(timedelta(hours=1)) is True
+
+    assert coordinator.initial_calculated_soc == 40.0
+    assert coordinator._adhoc_allow_grid_charge is False
+
+
+@pytest.mark.asyncio
+async def test_block_discharge_refuses_an_unreadable_battery(mock_hass):
+    """Holding at a level nobody can read is not holding, it is guessing."""
+    coordinator = _make_coordinator(mock_hass)
+    mock_hass.states.async_set(BATTERY, "unavailable")
+
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=AFTERNOON
+    ):
+        assert await coordinator.async_block_discharge(timedelta(hours=1)) is False
+
+    assert coordinator.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_allow_discharge_ends_it_early_and_resets(mock_hass):
+    coordinator = _make_coordinator(mock_hass)
+    await _open(coordinator)
+    coordinator.original_min_soc = 8.0
+    coordinator._reset_absolute_charge_power = AsyncMock()
+    mock_hass.services.async_call.reset_mock()
+
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=AFTERNOON + timedelta(minutes=20)
+    ):
+        assert await coordinator.async_allow_discharge() is True
+
+    assert coordinator.is_active is False
+    assert coordinator._adhoc_until is None
+    assert any(
+        call.args[:2] == ("number", "set_value")
+        for call in mock_hass.services.async_call.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_allow_discharge_leaves_a_configured_window_alone(mock_hass):
+    """That is the schedule doing its job; reset_inverter is what ends it."""
+    coordinator = _make_coordinator(mock_hass)
+    coordinator.is_active = True  # a configured window, no ad-hoc state
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=AFTERNOON):
+        assert await coordinator.async_allow_discharge() is False
+
+    assert coordinator.is_active is True
