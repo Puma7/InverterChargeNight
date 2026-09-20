@@ -926,3 +926,84 @@ async def test_a_failed_reset_from_the_action_is_reported(mock_hass):
 
     assert ok is False
     assert coordinator._pending_reset is True
+
+
+@pytest.mark.asyncio
+async def test_the_mid_window_restore_keeps_remembering_the_original(mock_hass):
+    """Reaching the charge target does not end the window - and used to lose the setting.
+
+    ``_stop_grid_charging`` restores the absolute limit while the window is
+    still open. The service call is not blocking, and the inverter's limit
+    register falls back on its own, so moments later the entity can still be
+    reading *our* limit. If the capture had been forgotten by then, the next
+    charge pass adopted that as "the user's value" and the window-end reset put
+    our own number back as if it were theirs. The real one was gone for good.
+    """
+    mock_hass.states.async_set(ABS_LIMIT, "9000", {"unit_of_measurement": "W"})
+    coordinator = _make_coordinator(mock_hass, ABS_CONFIG)
+
+    await coordinator._apply_absolute_charge_power_limit()
+    assert coordinator._original_absolute_charge_power == 9000.0
+
+    # The inverter now holds our 5000 W, and the target is reached mid-window.
+    mock_hass.states.async_set(ABS_LIMIT, "5000", {"unit_of_measurement": "W"})
+    assert await coordinator._reset_absolute_charge_power(forget=False) is True
+    assert coordinator._original_absolute_charge_power == 9000.0, (
+        "the window is still open, so the user's value must still be remembered"
+    )
+
+    # SOC dips, charging resumes, and the entity has not settled yet.
+    await coordinator._apply_absolute_charge_power_limit()
+    assert coordinator._original_absolute_charge_power == 9000.0
+
+    # The window ends: the user gets their own value back, not ours.
+    assert await coordinator._reset_absolute_charge_power() is True
+    assert coordinator._original_absolute_charge_power is None
+    assert mock_hass.services.async_call.await_args_list[-1] == call(
+        "number", "set_value", {"entity_id": ABS_LIMIT, "value": 9000.0}
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_capture_refuses_to_adopt_our_own_limit(mock_hass, caplog):
+    """The belt to the mid-window braces: any route that lost the capture.
+
+    A restart mid-window restores it from the persisted state, so this is the
+    remaining case - the capture is empty and the entity reads back exactly what
+    we wrote. Leaving the limit off is recoverable; adopting the value is not.
+    """
+    mock_hass.states.async_set(ABS_LIMIT, "9000", {"unit_of_measurement": "W"})
+    coordinator = _make_coordinator(mock_hass, ABS_CONFIG)
+    await coordinator._apply_absolute_charge_power_limit()
+
+    coordinator._original_absolute_charge_power = None
+    mock_hass.states.async_set(ABS_LIMIT, "5000", {"unit_of_measurement": "W"})
+    mock_hass.services.async_call.reset_mock()
+
+    await coordinator._apply_absolute_charge_power_limit()
+
+    assert coordinator._original_absolute_charge_power is None
+    mock_hass.services.async_call.assert_not_awaited()
+    assert "our own limit" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_kilowatt_entity_is_compared_in_the_same_unit(mock_hass):
+    """The written value is in W; a kW entity reads back a thousandth of it."""
+    mock_hass.states.async_set(ABS_LIMIT, "9", {"unit_of_measurement": "kW"})
+    coordinator = _make_coordinator(mock_hass, ABS_CONFIG)
+
+    await coordinator._apply_absolute_charge_power_limit()
+    assert coordinator._original_absolute_charge_power == 9.0
+    mock_hass.services.async_call.assert_awaited_once_with(
+        "number", "set_value", {"entity_id": ABS_LIMIT, "value": 5.0}
+    )
+
+    coordinator._original_absolute_charge_power = None
+    mock_hass.states.async_set(ABS_LIMIT, "5", {"unit_of_measurement": "kW"})
+    mock_hass.services.async_call.reset_mock()
+
+    await coordinator._apply_absolute_charge_power_limit()
+
+    assert coordinator._original_absolute_charge_power is None, "5 kW is our own 5000 W"
+    mock_hass.services.async_call.assert_not_awaited()

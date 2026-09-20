@@ -655,6 +655,36 @@ explains what it is for and when it pays.
   unreadable, stale or oddly-united grid import sensor lowers it instead of removing the cap
 - Comprehensive error handling with logging
 
+
+### The feed-in cap, and what it throws away
+
+If your system is capped at the grid connection point — the German 60 % or 70 % EEG limit, or
+anything like it — then on a good day the battery is full by noon and everything above the cap is
+simply lost. `sensor.…_curtailment_outlook` puts a number on that.
+
+It is **disabled by default**: its attributes carry an hourly series that the recorder would keep
+for every user, including the ones who are not capped at all. Enable it under the device page if
+the question applies to you.
+
+Two settings turn it on, both in the advanced step:
+
+- **Feed-in cap** — the cap itself in watts, not the percentage: `0.60 × your array in watts`, so
+  `9000` for 15 kWp at 60 %.
+- **Feed-in power entity** — optional, and worth configuring. The cap applies to what actually
+  goes out to the grid, so this is the one measurement that can check the figure above. The sensor
+  reads its hourly maxima over 14 days and shows `model_vs_measured_pct`: the modelled spill next
+  to the real one.
+
+It also needs a PV forecast entity for **today**. Without one the integration would fall back to
+tomorrow's forecast, which for a decision made in the morning is the wrong day — so the feature
+stays off and says so rather than answering about the wrong day.
+
+**Nothing is throttled from this.** Actually capping the morning charge to leave room for midday
+is the next step and is deliberately not built yet: the model says a 60 % cap on a large array
+should never bite, while owners of such systems report that it does. Throttling on a day that did
+not need it costs twice — the battery is short in the evening, and the evening rescue buys it back
+from the grid. So this release measures first. See `plans/014`.
+
 ## Entity List (End-User)
 
 Every entity below belongs to the device **Inverter Charge Night**, so Home Assistant shows it
@@ -678,6 +708,7 @@ as "Inverter Charge Night <name>". The entity ids are stable; the display names 
 | Charge power left by the house connection | `sensor.…_grid_charge_headroom` | What the connection still allows the battery. |
 | Evening outlook | `sensor.…_evening_outlook` | How much the battery will be short when the expensive hours start. 0 means it will make it. |
 | Next high-price period | `sensor.…_next_high_price_window` | When the next peak period starts, how long it lasts, and the reserve the planner put aside for it. |
+| Curtailment outlook | `sensor.…_curtailment_outlook` | How much of today's PV a permanent feed-in cap throws away because the battery was already full. Disabled by default. |
 
 > **The three entities that all used to be called "Inverter Charge Night".** Before this
 > version the operation mode select and the skip switch had no translated name, so Home

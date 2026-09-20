@@ -36,6 +36,7 @@ REDACT_KEYS = {
     "house_load_entity",
     "grid_import_entity",
     "discharge_block_switch",
+    "curtailment_feed_in_entity",
 }
 
 
@@ -78,6 +79,9 @@ async def async_get_config_entry_diagnostics(
             "adhoc_allow_grid_charge": coordinator._adhoc_allow_grid_charge,
             "rescue_stage": coordinator._rescue_stage,
             "evening_rescue_charge": coordinator.evening_rescue_charge,
+            # Display only in 3.7.0: the model has to be held against the
+            # measurement for a season before anything throttles on it.
+            "curtailment": coordinator.last_curtailment_attributes or None,
             "evening_outlook": (
                 {
                     "zone_start": coordinator.last_evening_outlook.zone_start.isoformat(),

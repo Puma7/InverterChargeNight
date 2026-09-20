@@ -444,7 +444,10 @@ def test_only_the_efficiency_search_entities_are_disabled_by_default():
             target = enabled if entity.entity_registry_enabled_default else disabled
             target.add(entity.translation_key)
 
-    assert disabled == {"best_charge_power", "efficiency_search"}
+    # The curtailment outlook joins them deliberately: its attributes carry a
+    # 24-value hourly peak series, which is state the recorder would keep for
+    # every user, including the ones who are not capped at all.
+    assert disabled == {"best_charge_power", "efficiency_search", "curtailment_outlook"}
     assert {"calculated_soc", "active", "enabled", "operation_mode"} <= enabled
     # The house connection limit stays visible: it is a protection, not a detail
     assert {"grid_charge_headroom", "planned_charge_power"} <= enabled

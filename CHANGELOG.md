@@ -5,6 +5,50 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] - 2026-09-20
+
+### Added
+
+- **A permanent feed-in cap is now visible, and what it costs is a number.** A 60 % or 70 % EEG
+  limit at the grid connection point is not something the grid operator switches on: it is always
+  in force and only *bites* around midday, when production exceeds it. So there is no window to
+  learn or configure — the hours it bites in follow from the forecast, the sun times and the load
+  profile, and on a dull day the answer is correctly "it never bites".
+  `sensor.…_curtailment_outlook` reports what today's cap throws away because the battery was
+  already full.
+- **The PV power curve, as the exact derivative of the energy curve.** 3.4.0 added the clear-sky
+  bell as an *energy* fraction; a cap is about *power*, so the same model had to be readable the
+  other way round. A property test integrates one and compares it to the other on every run: if
+  they ever drift apart, a display built on one would contradict a decision built on the other,
+  and nothing else in the suite would notice.
+- **A reality check, not just a model.** With a feed-in power sensor configured, the hourly maxima
+  of the last 14 days are read from the recorder and shown beside the modelled overflow as
+  `model_vs_measured_pct`. This is the number the whole release exists to produce.
+
+### Fixed
+
+- **The absolute charge power limit could overwrite the user's own setting, permanently.** Nothing
+  to do with curtailment — it was already reachable through the night window. Reaching the charge
+  target restores the limit *while the window is still open*; the service call is not blocking,
+  and an inverter whose limit register falls back on its own can still be reading our value
+  moments later. The next charge pass then captured that as "the user's setting", and the window
+  end put our own number back as if it were theirs. The mid-window restore now keeps remembering
+  the captured value, and a capture that reads back exactly what we last wrote refuses to take it.
+
+### Notes
+
+**Nothing is throttled from any of this.** Stage two of plan 014 — capping the morning charge so
+the battery still has room at midday — is deliberately not in this release. The model and the
+observation currently disagree: at 100 kWh across a summer day the modelled peak is about 9.8 kW,
+so a 60 % cap on anything above ~16 kWp would never bite, and yet it demonstrably does. Until that
+is settled, throttling would fire on an unknown share of days that did not need it, and such a day
+costs twice — the battery is short in the evening, and the evening rescue buys it back from the
+grid.
+
+Both new settings are optional and the feature is off without them. It also stays off unless a
+PV forecast entity for **today** is configured: the forecast selection otherwise falls back to
+tomorrow's entity, which for a morning decision is quietly the wrong day.
+
 ## [3.6.0] - 2026-09-20
 
 ### Added

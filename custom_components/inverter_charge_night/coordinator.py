@@ -77,6 +77,8 @@ from .const import (
     CONF_PRICE_SURCHARGE_CT,
     CONF_PRICE_SURCHARGE_WINDOW_CT,
     CONF_PRICE_UNIT,
+    CONF_CURTAILMENT_FEED_IN_ENTITY,
+    CONF_CURTAILMENT_LIMIT_W,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_PLANNER_MODE,
@@ -98,6 +100,8 @@ from .const import (
     DEFAULT_BRIDGE_RESERVE_KWH,
     DEFAULT_CHARGE_EFFICIENCY,
     HOUSE_LOAD_PROFILE_DAYS,
+    CURTAILMENT_PEAK_CACHE_S,
+    CURTAILMENT_PEAK_DAYS,
     HOUSE_LOAD_PROFILE_CACHE_S,
     PLANNED_POWER_WRITE_THRESHOLD_W,
     PLANNER_MODE_BRIDGE,
@@ -152,10 +156,12 @@ from .calculation import calculate_required_soc
 from .prices import PriceSeries, mean_price_ct, parse_price_series
 from .planner import (
     REASON_FALLBACK,
+    CurtailmentOutlook,
     EveningOutlook,
     PlanInput,
     PlanResult,
     allowed_charge_power_w,
+    curtailment_outlook,
     evening_outlook,
     evening_reserve_soc,
     grid_budget_w,
@@ -311,6 +317,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # ignoring the forecast. Counts down at every window end.
         self.snow_nights: int = 0
         self._original_absolute_charge_power: float | None = None
+        # What we last wrote there ourselves. Without it a fresh capture
+        # cannot tell the user's value from our own - see the guard in
+        # _apply_absolute_charge_power_limit.
+        self._absolute_charge_power_written_w: float | None = None
         self._original_ac_charge_power: float | None = None  # W, captured before the finder's first write
         self._pending_reset = False  # window ended but the inverter is not back at its original settings
         self._reset_retry_unsub: CALLBACK_TYPE | None = None
@@ -345,6 +355,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # kept here rather than in the coordinator data, which is empty while
         # no window runs - which is exactly when this matters (plan 013).
         self.last_evening_outlook: EveningOutlook | None = None
+        self.last_curtailment_outlook: CurtailmentOutlook | None = None
+        # Built once per poll: the attributes need the recorder, and an
+        # entity's attribute property cannot await anything.
+        self.last_curtailment_attributes: dict[str, Any] = {}
         self.planned_charge_power_w: float | None = None  # setpoint for the remaining window
         # Whether that setpoint is also ordered from the inverter. The plan is
         # worth showing in every mode, but a number that looks like a command
@@ -354,6 +368,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._original_discharge_limit: float | None = None  # raw value in the entity's unit
         self._planned_setpoint_written_w: float | None = None
         self._house_load_cache: tuple[datetime, list[float]] | None = None
+        self._feed_in_peak_cache: tuple[datetime, list[float]] | None = None
         self._sun_fallback_logged = False
         # House connection limit (plan 008)
         self._grid_limit_listener: CALLBACK_TYPE | None = None
@@ -1084,6 +1099,68 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         return [sums[hour] / counts[hour] if counts[hour] else avg_kw for hour in range(24)]
 
+    async def _feed_in_peaks_by_hour(self) -> list[float] | None:
+        """The highest feed-in power seen in each hour of the day, in W, or None.
+
+        The reality check for the curtailment model. A feed-in curve that sits
+        flat on the same number for hours is a curve against a cap, and where it
+        sits is where the cap is - which is the one thing the model cannot tell
+        you, because it is the number the model was given.
+
+        Not the same call as the house load profile: that one asks for
+        ``change``, which only exists for a total/total_increasing meter. A
+        power sensor is a ``measurement``, so it has ``max`` and no ``change``
+        at all, and asking for both in one call gets neither.
+        """
+        entity_id = self.config.get(CONF_CURTAILMENT_FEED_IN_ENTITY)
+        if not entity_id:
+            return None
+        now = dt_util.utcnow()
+        if self._feed_in_peak_cache is not None:
+            cached_at, cached = self._feed_in_peak_cache
+            if (now - cached_at).total_seconds() < CURTAILMENT_PEAK_CACHE_S:
+                return cached
+        peaks = await self._learn_feed_in_peaks(str(entity_id))
+        if peaks is not None:
+            self._feed_in_peak_cache = (now, peaks)
+        return peaks
+
+    async def _learn_feed_in_peaks(self, entity_id: str) -> list[float] | None:
+        """Read the hourly maxima of a feed-in power sensor over 14 days."""
+        if DATA_INSTANCE not in self.hass.data:
+            _LOGGER.debug("Recorder is not loaded; cannot read the feed-in peaks")
+            return None
+        # Imported here so the integration never depends on the recorder being present
+        from homeassistant.components.recorder.statistics import statistics_during_period
+
+        start = (dt_util.utcnow() - timedelta(days=CURTAILMENT_PEAK_DAYS)).replace(
+            minute=0, second=0, microsecond=0
+        )
+        try:
+            rows = await get_instance(self.hass).async_add_executor_job(
+                lambda: statistics_during_period(
+                    self.hass, start, None, {entity_id}, "hour", None, {"max"}
+                )
+            )
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Reading feed-in statistics for %s failed: %s", entity_id, err)
+            return None
+        unit = _unit_of(self.hass.states.get(entity_id))
+        factor = 1000.0 if unit in ("kw", "kilowatt", "kilowatts") else 1.0
+        peaks = [0.0] * 24
+        seen = False
+        for row in rows.get(entity_id, []):
+            start_ts = row.get("start")
+            value = row.get("max")
+            if not isinstance(start_ts, (int, float)) or not isinstance(value, (int, float)):
+                continue
+            hour = dt_util.as_local(dt_util.utc_from_timestamp(start_ts)).hour
+            # A negative reading is this meter pointing the other way; the peak
+            # of an export sensor is never below zero.
+            peaks[hour] = max(peaks[hour], float(value) * factor)
+            seen = True
+        return peaks if seen else None
+
     async def _build_plan_input(
         self, forecast_kwh: float, forecast_available: bool
     ) -> tuple[PlanInput, datetime]:
@@ -1261,6 +1338,113 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except (ValueError, TypeError) as err:
             _LOGGER.error("Could not work out the evening outlook: %s", err)
             return None
+
+    async def async_curtailment_outlook(self) -> CurtailmentOutlook | None:
+        """How much of today's PV a permanent feed-in cap will throw away.
+
+        Display only. Nothing is written from this in 3.7.0: the model and the
+        observation have to be held against each other for a season first, and
+        the sensor's ``model_vs_measured_pct`` is what does the holding.
+
+        ``None`` without a cap configured, and - deliberately - ``None`` without
+        an explicit *today* forecast entity. ``_get_active_forecast_entity``
+        falls back to tomorrow's entity when today's is unset, which for a
+        morning decision is quietly the wrong day. Better no answer than an
+        answer about the wrong day.
+        """
+        limit_w = self.config.get(CONF_CURTAILMENT_LIMIT_W)
+        today_entity = self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)
+        if not limit_w or not today_entity:
+            return None
+        now = dt_util.now()
+        sunrise, sunset = self._sun_times(now, now)
+        forecast_kwh, forecast_available = self._parse_forecast_energy(today_entity)
+        if not forecast_available:
+            return None
+        reserve_floor = 0.0
+        try:
+            plan_input, _ = await self._build_plan_input(forecast_kwh, forecast_available)
+            reserve_floor = evening_reserve_soc(plan_input)
+        except (ValueError, TypeError) as err:
+            # No reserve is a weaker floor, not a wrong one: the user minimum
+            # still holds, and the sensor writes nothing either way.
+            _LOGGER.debug("No evening reserve for the curtailment outlook: %s", err)
+        try:
+            return curtailment_outlook(
+                capacity_kwh=float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)),
+                user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
+                user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
+                house_load_kw_profile=await self._house_load_profile(),
+                sunrise=sunrise,
+                sunset=sunset,
+                forecast_kwh_today=forecast_kwh,
+                forecast_available=forecast_available,
+                error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
+                limit_w=float(limit_w),
+                charge_efficiency=float(
+                    self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)
+                ),
+                evening_reserve_soc_pct=reserve_floor,
+            )
+        except (ValueError, TypeError) as err:
+            _LOGGER.error("Could not work out the curtailment outlook: %s", err)
+            return None
+
+    async def curtailment_attributes(self) -> dict[str, Any]:
+        """What the curtailment sensor shows beside its state.
+
+        The measured half is the point of the whole release: the model says how
+        much should be spilling, the recorder says how much actually was, and
+        the ratio between them is the number that decides whether throttling is
+        worth building at all.
+        """
+        outlook = self.last_curtailment_outlook
+        peaks = await self._feed_in_peaks_by_hour()
+        limit_w = self.config.get(CONF_CURTAILMENT_LIMIT_W)
+        attrs: dict[str, Any] = {
+            "limit_w": float(limit_w) if limit_w else None,
+            # Plan 014 stage 2 writes the cap on this entity and nothing else
+            # can cap DC-side charging. Saying so is better than a feature that
+            # silently does nothing.
+            "control_entity_configured": bool(
+                self.config.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY)
+            ),
+            "forecast_today_configured": bool(self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)),
+        }
+        if outlook is None:
+            return attrs
+        attrs.update(
+            {
+                "binding_start": (
+                    outlook.binding_start.isoformat() if outlook.binding_start else None
+                ),
+                "binding_end": (
+                    outlook.binding_end.isoformat() if outlook.binding_end else None
+                ),
+                "room_needed_kwh": round(outlook.room_needed_kwh, 2),
+                "morning_target_soc": outlook.morning_target_soc,
+                "clamped_by": outlook.clamped_by,
+                "forecast_available": outlook.forecast_available,
+            }
+        )
+        if peaks is not None:
+            measured_overflow = sum(
+                max(0.0, peak - float(limit_w or 0.0)) for peak in peaks
+            )
+            attrs["measured_peak_w_by_hour"] = {
+                str(hour): round(peak) for hour, peak in enumerate(peaks) if peak > 0
+            }
+            attrs["measured_peak_w"] = round(max(peaks))
+            attrs["measured_hours_at_the_cap"] = sum(
+                1 for peak in peaks if limit_w and peak >= float(limit_w) * 0.98
+            )
+            if outlook.overflow_kwh > 0:
+                # Both sides are powers above the cap, so the ratio is a like
+                # for like comparison of shape, not of energy.
+                attrs["model_vs_measured_pct"] = round(
+                    measured_overflow / (outlook.overflow_kwh * 1000.0) * 100.0, 1
+                )
+        return attrs
 
     async def preview_plan(self) -> tuple[PlanResult, PlanInput] | None:
         """Run the planner on the current inputs and change nothing.
@@ -2186,8 +2370,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if domain not in ("number", "input_number"):
             _LOGGER.warning("Absolute charge power entity %s has unsupported domain %s", entity_id, domain)
             return
+        state = self.hass.states.get(entity_id)
+        unit = _unit_of(state)
+        scale = 1000.0 if unit in ("kw", "kilowatt", "kilowatts") else 1.0
+
         if self._original_absolute_charge_power is None:
-            state = self.hass.states.get(entity_id)
             current = (
                 _as_float(state.state)
                 if state and state.state not in ("unknown", "unavailable")
@@ -2200,29 +2387,51 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     entity_id,
                 )
                 return
+            written = self._absolute_charge_power_written_w
+            if (
+                written is not None
+                and abs(current * scale - written) <= PLANNED_POWER_WRITE_THRESHOLD_W
+            ):
+                # This reading is our own limit, not the user's setting. Adopting
+                # it would make the window-end restore put our value back as if
+                # it were theirs, and the real one would be gone for good. Better
+                # to leave the limit off than to lose what it was.
+                _LOGGER.warning(
+                    "%s still reads back our own limit (%.3f) - not capturing it as the "
+                    "original value",
+                    entity_id,
+                    current,
+                )
+                return
             self._original_absolute_charge_power = current
             _LOGGER.info("Stored original absolute charge power: %.3f", current)
             self._persist_state()
-        value = max_power
-        state = self.hass.states.get(entity_id)
-        unit = _unit_of(state)
-        if unit in ("kw", "kilowatt", "kilowatts"):
-            value = value / 1000.0
+        value = max_power / scale
         try:
             await self.hass.services.async_call(
                 domain,
                 service,
                 {"entity_id": entity_id, "value": value},
             )
+            self._absolute_charge_power_written_w = max_power
             _LOGGER.info("Set absolute charge power to %.3f (%s)", value, unit or "unitless")
         except Exception as e:
             _LOGGER.error("Error setting absolute charge power: %s", e, exc_info=True)
 
-    async def _reset_absolute_charge_power(self) -> bool:
+    async def _reset_absolute_charge_power(self, *, forget: bool = True) -> bool:
         """Restore the absolute charge power captured before the first write.
 
         Returns True when nothing is left to restore; on failure the original
         value is kept so a retry can still put it back.
+
+        ``forget=False`` restores the value but keeps remembering it. That is
+        for the restore that happens *while the window is still open* - the one
+        on reaching the charge target. The service call is not blocking, and on
+        an inverter whose limit register falls back to factory on its own the
+        entity can still be reading our value moments later. A later charge pass
+        would then capture that as "the user's setting" and the real one would be
+        lost at the window end. Keeping it costs one redundant write; dropping it
+        costs the setting.
         """
         if self._original_absolute_charge_power is None:
             return True
@@ -2231,6 +2440,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not entity_id or domain not in ("number", "input_number"):
             # Entity no longer configured or unusable: nothing we can restore
             self._original_absolute_charge_power = None
+            self._absolute_charge_power_written_w = None
             return True
         value = self._original_absolute_charge_power
         state = self.hass.states.get(entity_id)
@@ -2245,7 +2455,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Error resetting absolute charge power: %s", e, exc_info=True)
             return False
         _LOGGER.info("Reset absolute charge power to original value: %.3f (%s)", value, unit or "unitless")
-        self._original_absolute_charge_power = None
+        self._absolute_charge_power_written_w = None
+        if forget:
+            self._original_absolute_charge_power = None
+            self._persist_state()
         return True
 
     def get_auto_efficiency_data(self) -> dict[str, Any]:
@@ -4022,6 +4235,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.last_evening_outlook = (
             await self.async_evening_outlook() if self.is_enabled else None
         )
+        self.last_curtailment_outlook = (
+            await self.async_curtailment_outlook() if self.is_enabled else None
+        )
+        self.last_curtailment_attributes = (
+            await self.curtailment_attributes() if self.is_enabled else {}
+        )
         await self._maybe_rescue_the_evening()
         if not self.is_enabled or not self.is_active:
             return inactive_data
@@ -4625,7 +4844,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.warning("Cannot stop grid charge - entity state unavailable")
             except Exception as e:
                 _LOGGER.error("Error stopping grid charge: %s", e, exc_info=True)
-        await self._reset_absolute_charge_power()
+        # The window is still open here - reaching the target does not end it -
+        # so the captured original has to survive this restore.
+        await self._reset_absolute_charge_power(forget=False)
         self._finalize_auto_test()
         if self.is_active and self._grid_budget() is not None:
             # The house connection limit stays on the inverter until the window

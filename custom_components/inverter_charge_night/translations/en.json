@@ -126,7 +126,9 @@
           "price_entity": "Electricity price entity (optional)",
           "price_unit": "What the prices are in",
           "price_surcharge_ct": "Surcharge on the exchange price",
-          "price_surcharge_window_ct": "Surcharge inside the window (optional)"
+          "price_surcharge_window_ct": "Surcharge inside the window (optional)",
+          "curtailment_limit_w": "Feed-in cap (optional)",
+          "curtailment_feed_in_entity": "Feed-in power entity (optional)"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -148,7 +150,9 @@
           "price_entity": "Optional: a sensor whose attributes carry today's and tomorrow's hourly prices — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them. The integration does not need to know which one it is; it recognises the series by its shape and reports what it matched on the price sensor. Leave empty to keep using the three fixed prices above.",
           "price_unit": "Leave on 'detect automatically' unless the entity carries no unit, or carries one that is wrong. Nothing is ever guessed here: with no unit from the entity, the attribute name or this field, the price entity is refused and the fixed prices are used — a wrong guess would be a factor of a hundred.",
           "price_surcharge_ct": "What your bill adds on top of what the entity shows — grid fee, levies, taxes, VAT. Tibber already shows the full price, so leave this at 0. aWATTar, EPEX Spot, Nordpool and ENTSO-e usually show the exchange price alone; in Germany the difference is typically 20–25 ct/kWh. Getting this wrong does not look wrong — 6 ct and 32 ct are both plausible numbers, and the evening reserve comes out the other way round on the wrong one.",
-          "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock."
+          "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock.",
+          "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
+          "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so."
         }
       },
       "reconfigure": {
@@ -276,7 +280,9 @@
           "price_entity": "Electricity price entity (optional)",
           "price_unit": "What the prices are in",
           "price_surcharge_ct": "Surcharge on the exchange price",
-          "price_surcharge_window_ct": "Surcharge inside the window (optional)"
+          "price_surcharge_window_ct": "Surcharge inside the window (optional)",
+          "curtailment_limit_w": "Feed-in cap (optional)",
+          "curtailment_feed_in_entity": "Feed-in power entity (optional)"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -298,7 +304,9 @@
           "price_entity": "Optional: a sensor whose attributes carry today's and tomorrow's hourly prices — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them. The integration does not need to know which one it is; it recognises the series by its shape and reports what it matched on the price sensor. Leave empty to keep using the three fixed prices above.",
           "price_unit": "Leave on 'detect automatically' unless the entity carries no unit, or carries one that is wrong. Nothing is ever guessed here: with no unit from the entity, the attribute name or this field, the price entity is refused and the fixed prices are used — a wrong guess would be a factor of a hundred.",
           "price_surcharge_ct": "What your bill adds on top of what the entity shows — grid fee, levies, taxes, VAT. Tibber already shows the full price, so leave this at 0. aWATTar, EPEX Spot, Nordpool and ENTSO-e usually show the exchange price alone; in Germany the difference is typically 20–25 ct/kWh. Getting this wrong does not look wrong — 6 ct and 32 ct are both plausible numbers, and the evening reserve comes out the other way round on the wrong one.",
-          "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock."
+          "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock.",
+          "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
+          "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so."
         }
       }
     },
@@ -456,7 +464,9 @@
           "price_entity": "Electricity price entity (optional)",
           "price_unit": "What the prices are in",
           "price_surcharge_ct": "Surcharge on the exchange price",
-          "price_surcharge_window_ct": "Surcharge inside the window (optional)"
+          "price_surcharge_window_ct": "Surcharge inside the window (optional)",
+          "curtailment_limit_w": "Feed-in cap (optional)",
+          "curtailment_feed_in_entity": "Feed-in power entity (optional)"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -478,7 +488,9 @@
           "price_entity": "Optional: a sensor whose attributes carry today's and tomorrow's hourly prices — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them. The integration does not need to know which one it is; it recognises the series by its shape and reports what it matched on the price sensor. Leave empty to keep using the three fixed prices above.",
           "price_unit": "Leave on 'detect automatically' unless the entity carries no unit, or carries one that is wrong. Nothing is ever guessed here: with no unit from the entity, the attribute name or this field, the price entity is refused and the fixed prices are used — a wrong guess would be a factor of a hundred.",
           "price_surcharge_ct": "What your bill adds on top of what the entity shows — grid fee, levies, taxes, VAT. Tibber already shows the full price, so leave this at 0. aWATTar, EPEX Spot, Nordpool and ENTSO-e usually show the exchange price alone; in Germany the difference is typically 20–25 ct/kWh. Getting this wrong does not look wrong — 6 ct and 32 ct are both plausible numbers, and the evening reserve comes out the other way round on the wrong one.",
-          "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock."
+          "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock.",
+          "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
+          "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so."
         }
       }
     },
@@ -564,6 +576,9 @@
       },
       "price_signal": {
         "name": "Price signal"
+      },
+      "curtailment_outlook": {
+        "name": "Curtailment outlook"
       }
     },
     "switch": {

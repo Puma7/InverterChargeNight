@@ -24,6 +24,9 @@
       },
       "price_signal": {
         "default": "mdi:currency-eur"
+      },
+      "curtailment_outlook": {
+        "default": "mdi:solar-power-variant-outline"
       }
     },
     "switch": {

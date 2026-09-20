@@ -169,6 +169,30 @@ async def main() -> int:
         await asyncio.sleep(0.5)
         await hass.async_block_till_done()
         check("window is active after setup", coordinator.is_active is True)
+
+        # Curtailment (plan 014, stage one). It is registered but disabled by
+        # default - its attributes carry a 24-value hourly series, which the
+        # recorder would keep for every user, capped or not. So it has to be
+        # checked in the registry, where a disabled entity actually lives, and
+        # not in the state machine, where it deliberately does not.
+        curtail_entry = registry.async_get("sensor.smoke_curtailment_outlook")
+        check("the curtailment sensor is registered and disabled by default",
+              curtail_entry is not None and curtail_entry.disabled_by is not None,
+              f"disabled_by={curtail_entry.disabled_by if curtail_entry else None}")
+        check("it carries its translated name, not a raw key",
+              curtail_entry is not None
+              and curtail_entry.original_name == "Curtailment outlook",
+              f"name={curtail_entry.original_name if curtail_entry else None}")
+        # With no feed-in cap configured the answer is "no opinion", which is a
+        # different answer from "nothing spills today".
+        check("without a cap there is no outlook, rather than a zero one",
+              coordinator.last_curtailment_outlook is None,
+              f"outlook={coordinator.last_curtailment_outlook}")
+        curtail_attrs = await coordinator.curtailment_attributes()
+        check("and it says out loud that stage two has no control entity",
+              curtail_attrs.get("control_entity_configured") is False
+              and curtail_attrs.get("limit_w") is None,
+              f"attrs={curtail_attrs}")
         check("a target was computed", coordinator.initial_calculated_soc is not None,
               f"target={coordinator.initial_calculated_soc}")
         min_soc = hass.states.get("number.inv_min_soc")

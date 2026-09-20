@@ -18,10 +18,12 @@ from custom_components.inverter_charge_night.planner import (
     REASON_CONFLICT_HEADROOM_WINS,
     REASON_FALLBACK,
     PlanInput,
+    curtailment_outlook,
     evening_outlook,
     evening_reserve_soc,
     integrate_load,
     pv_fraction_between,
+    pv_power_kw_at,
     plan_target_soc,
     required_charge_power_w,
 )
@@ -604,3 +606,167 @@ def test_prices_without_a_period_change_nothing():
     plan = plan_target_soc(_plan_input(window_price_ct=38.0, evening_price_ct=22.0))
     assert plan.evening_reserve_kwh == 0.0
     assert plan.evening_reserve_dropped is False, "there was no reserve to drop"
+
+
+# --- Curtailment: a permanent feed-in cap (plan 014) ------------------------
+#
+# A 16 h solar day so the numbers are a summer day rather than the January one
+# the rest of this file uses.
+
+CURT_SUNRISE = datetime(2026, 6, 21, 5, 30)
+CURT_SUNSET = datetime(2026, 6, 21, 21, 30)
+CURT_FORECAST = 100.0
+
+
+def _integrate_pv_power(start, end, steps=20000, daily_kwh=CURT_FORECAST):
+    """Integrate the power curve the slow, obvious way, for the property test."""
+    total = 0.0
+    step = (end - start) / steps
+    for i in range(steps):
+        midpoint = start + step * (i + 0.5)
+        total += pv_power_kw_at(CURT_SUNRISE, CURT_SUNSET, midpoint, daily_kwh) * (
+            step.total_seconds() / 3600.0
+        )
+    return total
+
+
+@pytest.mark.parametrize(
+    "start_hour,end_hour",
+    [(5, 21), (6, 12), (11, 14), (9, 10), (5, 6), (20, 21), (4, 23)],
+)
+def test_the_power_curve_integrates_to_the_energy_fraction(start_hour, end_hour):
+    """The one test that keeps the two PV models from drifting apart.
+
+    ``pv_power_kw_at`` is the analytic derivative of ``pv_fraction_between``.
+    If that ever stops being true, a sensor built on one contradicts a decision
+    built on the other, and nothing else in the suite would notice. The last
+    case runs past both ends of the solar day on purpose.
+    """
+    start = datetime(2026, 6, 21, start_hour, 0)
+    end = datetime(2026, 6, 21, end_hour, 0)
+    expected = pv_fraction_between(CURT_SUNRISE, CURT_SUNSET, start, end) * CURT_FORECAST
+    assert _integrate_pv_power(start, end) == pytest.approx(expected, abs=1e-4)
+
+
+def test_the_power_curve_is_zero_outside_the_solar_day():
+    before = datetime(2026, 6, 21, 4, 0)
+    after = datetime(2026, 6, 21, 22, 0)
+    assert pv_power_kw_at(CURT_SUNRISE, CURT_SUNSET, before, CURT_FORECAST) == 0.0
+    assert pv_power_kw_at(CURT_SUNRISE, CURT_SUNSET, after, CURT_FORECAST) == 0.0
+    assert pv_power_kw_at(CURT_SUNSET, CURT_SUNRISE, before, CURT_FORECAST) == 0.0
+
+
+def _curtailment(**overrides):
+    kwargs = dict(
+        capacity_kwh=35.0,
+        user_min_soc=10.0,
+        user_max_soc=95.0,
+        house_load_kw_profile=[0.7] * 24,
+        sunrise=CURT_SUNRISE,
+        sunset=CURT_SUNSET,
+        forecast_kwh_today=CURT_FORECAST,
+        forecast_available=True,
+        error_margin_pct=0.0,
+        limit_w=7200.0,
+        charge_efficiency=0.95,
+        evening_reserve_soc_pct=20.0,
+    )
+    kwargs.update(overrides)
+    return curtailment_outlook(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwp,expect_binding",
+    [(10, True), (12, True), (14, True), (16, False), (20, False)],
+)
+def test_a_bigger_array_means_the_cap_bites_less(kwp, expect_binding):
+    """The cap is on the feed-in, so a larger array clears it earlier.
+
+    At 100 kWh across a 16 h day the modelled peak is about 9.8 kW; a 60 % cap
+    above that is never reached, and "it never bites" has to come back as
+    exactly that rather than as a shortfall of zero.
+    """
+    outlook = _curtailment(limit_w=0.6 * kwp * 1000)
+    assert (outlook.binding_start is not None) is expect_binding
+    if expect_binding:
+        assert outlook.overflow_kwh > 0
+        assert outlook.binding_end > outlook.binding_start
+    else:
+        assert outlook.overflow_kwh == 0.0
+        assert outlook.binding_end is None
+        assert outlook.morning_target_soc == 95.0, "nothing to make room for"
+
+
+def test_the_overflow_takes_its_charge_losses_into_account():
+    """Room is the AC amount *times* efficiency - less arrives than was diverted.
+
+    The opposite direction from the night plan, where the question is how much
+    to buy in order to store a given amount.
+    """
+    outlook = _curtailment(charge_efficiency=0.9)
+    assert outlook.room_needed_kwh == pytest.approx(outlook.overflow_kwh * 0.9)
+    assert outlook.room_needed_kwh < outlook.overflow_kwh
+
+
+def test_the_error_margin_damps_the_forecast_here():
+    """Inflating it would throttle on days that did not need it, and that costs twice."""
+    plain = _curtailment(error_margin_pct=0.0)
+    damped = _curtailment(error_margin_pct=10.0)
+    assert damped.overflow_kwh < plain.overflow_kwh
+
+
+def test_the_morning_target_never_falls_below_the_evening_reserve():
+    """A day throttled so hard the evening is lost has bought the expensive hours."""
+    outlook = _curtailment(limit_w=2000.0, evening_reserve_soc_pct=80.0)
+    assert outlook.morning_target_soc == 80.0
+    assert outlook.clamped_by == "evening_reserve"
+
+
+def test_without_an_evening_reserve_the_user_minimum_is_the_floor():
+    outlook = _curtailment(limit_w=2000.0, evening_reserve_soc_pct=10.0)
+    assert outlook.morning_target_soc == 10.0
+    assert outlook.clamped_by == "user_min"
+
+
+def test_an_unthrottled_day_reports_no_clamp():
+    assert _curtailment(limit_w=8400.0).clamped_by is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"limit_w": 0.0},
+        {"limit_w": -1.0},
+        {"forecast_available": False},
+        {"sunset": CURT_SUNRISE},
+        {"sunset": CURT_SUNRISE - timedelta(hours=1)},
+    ],
+    ids=["no_limit", "negative_limit", "no_forecast", "no_day", "reversed_day"],
+)
+def test_an_unanswerable_question_returns_none_not_zero(overrides):
+    """None means "no opinion"; 0.0 would mean "nothing overflows today"."""
+    assert _curtailment(**overrides) is None
+
+
+def test_a_zero_forecast_still_answers():
+    """The question is answerable, and the answer is that nothing overflows."""
+    outlook = _curtailment(forecast_kwh_today=0.0)
+    assert outlook is not None
+    assert outlook.overflow_kwh == 0.0
+    assert outlook.binding_start is None
+
+
+def test_bad_inputs_raise_rather_than_guess():
+    with pytest.raises(ValueError):
+        _curtailment(capacity_kwh=0.0)
+    with pytest.raises(ValueError):
+        _curtailment(house_load_kw_profile=[0.7] * 23)
+    with pytest.raises(ValueError):
+        _curtailment(step_minutes=0)
+
+
+def test_a_higher_house_load_leaves_less_to_spill():
+    """The cap is on what reaches the grid, so the house eats into it first."""
+    quiet = _curtailment(house_load_kw_profile=[0.2] * 24)
+    busy = _curtailment(house_load_kw_profile=[3.0] * 24)
+    assert busy.overflow_kwh < quiet.overflow_kwh

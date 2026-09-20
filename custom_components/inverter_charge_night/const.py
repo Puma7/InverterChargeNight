@@ -96,6 +96,15 @@ DEFAULT_CHARGE_EFFICIENCY = 0.90
 DEFAULT_DISCHARGE_EFFICIENCY = 0.95
 HOUSE_LOAD_PROFILE_DAYS = 14  # history used to learn the hourly load profile
 HOUSE_LOAD_PROFILE_CACHE_S = 900  # 15 minutes
+
+# Curtailment (plan 014). A permanent feed-in cap bites wherever PV minus house
+# load exceeds it; the overflow is integrated in steps small enough that the
+# bell's curvature is not lost between two samples.
+CURTAILMENT_INTEGRATION_STEP_MIN = 5
+CONF_CURTAILMENT_LIMIT_W = "curtailment_limit_w"
+CONF_CURTAILMENT_FEED_IN_ENTITY = "curtailment_feed_in_entity"
+CURTAILMENT_PEAK_DAYS = 14  # history used to check the model against reality
+CURTAILMENT_PEAK_CACHE_S = 900  # 15 minutes, like the load profile
 PLANNED_POWER_WRITE_THRESHOLD_W = 100  # write the charge setpoint only when it moves more than this
 
 # Attributes

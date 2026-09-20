@@ -1,147 +1,131 @@
-# Plan 014: Abregelung — die PV-Ladung so legen, dass die Mittagsspitze noch hineinpasst
+# Plan 014: Abregelung — den Platz freihalten, den die Mittagsspitze braucht
 
-> Entwurf. Noch nicht zur Ausführung freigegeben.
+> **Stufe 1 umgesetzt mit 3.7.0** (Anzeige und Messung). **Stufe 2 (Drosselung) wartet
+> ausdrücklich auf eine Messsaison** — siehe „Warum Stufe 2 noch nicht gebaut wird".
+>
+> Der Entwurf vom 20.09. ging von einem *geschalteten* Abregelungsfenster aus, das aus der
+> Einspeisekurve gelernt werden müsste. Diese Annahme ist gefallen, und mit ihr der teuerste Teil
+> des Plans. Was unten steht, ist der berichtigte Stand.
 
 ## Status
 
 - **Priorität**: P1 (Pascal: kostet real Geld, jeden Sommertag)
-- **Aufwand**: L
-- **Risiko**: **HOCH** — eine falsche Vorhersage drosselt an einem Tag, der es nicht gebraucht hätte
-- **Hängt ab von**: 013 (Ad-hoc-Fenster, Tagesbetrieb), 011 (Abendreserve als Untergrenze)
-- **Geplant bei**: Commit `c8c72e3`, 2026-09-20
+- **Aufwand**: M (war L, bevor die Lernerkennung entfiel)
+- **Risiko**: Stufe 1 keins (schreibt nichts); Stufe 2 **hoch**
+- **Hängt ab von**: 013 (Ad-hoc-Fenster), 011 (Abendreserve als Untergrenze)
 
 ## Das Problem, in Pascals Zahlen
 
-100 kWh Prognose, 35 kWh Speicher. Der ist mittags voll, und genau dann nimmt das Netz die
-Einspeisung nicht mehr — die Mittagsspitze geht verloren.
+100 kWh Prognose, 35 kWh Speicher, Einspeisung dauerhaft auf **60 %** begrenzt. Der Speicher ist
+mittags längst voll, und was dann über die Grenze läuft, ist weg.
 
-## Korrektur am Masterplan: die Richtung stimmt dort nicht
+## Die Korrektur: eine dauerhafte Grenze ist kein Ereignis
 
-Plan 012 schreibt, die Ladung müsse „gestreckt" werden, damit der Speicher erst nachmittags voll
-ist. So herum ist es falsch. Man muss sich den Tag in drei Abschnitten ansehen:
-
-| | Sonne > Haus | Überschuss kann ins Netz? | Also |
-|---|---|---|---|
-| **Vormittag** | ja | **ja**, und wird vergütet | Überschuss ins Netz, Speicher Platz lassen |
-| **Abregelung** | ja | **nein** | Speicher nimmt **alles**, was er kriegen kann |
-| **Nachmittag** | ja | ja | Speicher auffüllen, Rest ins Netz |
-
-Die Drosselung gehört also **vor** das Abregelungsfenster, nicht hinein. Während der Abregelung
-ist das Gegenteil richtig: dann ist der Speicher die einzige Senke, die es noch gibt. Ein Deckel,
-der über die Mittagszeit weiterläuft, verschenkt genau die Energie, für die er gedacht war.
-
-Die Steuergröße ist deshalb keine Ladekurve, sondern **ein Platzziel zum Beginn der Abregelung**.
-
-## Die Rechnung
+Pascals Antwort vom 20.09.: die 60 % sind die **EEG-Einspeisebegrenzung am
+Netzverknüpfungspunkt**, rund um die Uhr in Kraft. Der Netzbetreiber schaltet nichts. Damit gibt
+es kein Fenster, das gelernt oder eingetragen werden müsste: die Grenze beißt genau in den
+Stunden, in denen
 
 ```
-platz_kwh   = erwarteter Überschuss im Abregelungsfenster
-            = prognose_heute * pv_fraction_between(sonnenaufgang, sonnenuntergang,
-                                                   abregelung_start, abregelung_ende)
-              - integrate_load(profil, abregelung_start, abregelung_ende)
-
-vormittags_ziel_soc = user_max - platz_kwh / kapazität * 100
+PV-Leistung(t) − Hauslast(t) > Grenze
 ```
 
-und der Deckel für den Vormittag ist die Leistung, die diesen Stand genau zum Abregelungsbeginn
-erreicht — `planner.required_charge_power_w(vormittags_ziel_soc, aktueller_soc, kapazität,
-stunden_bis_abregelung, wirkungsgrad)`. **Beides gibt es schon**: `pv_fraction_between` kam mit
-3.4.0, `required_charge_power_w` mit Plan 006. Neu ist nur, sie so herum zu benutzen.
+und die folgen aus Prognose, Sonnenstand und Lastprofil. An einem trüben Tag kommt korrekt „gar
+nicht" heraus, ohne dass jemand etwas abschaltet.
 
-**Zwei Untergrenzen, die der Deckel nie unterschreiten darf:**
+**Damit entfällt Eingang B (Erkennung aus der Einspeisekurve) ersatzlos** — der unsichere und mit
+Abstand teuerste Teil des alten Entwurfs. Feste Uhrzeiten (Eingang C) bleiben nur als
+Überschreibung für den, dessen Abregelung doch geschaltet wird; gebaut sind sie noch nicht, weil
+niemand sie braucht.
 
-1. **Die Abendreserve** (`evening_reserve_soc`, 3.2.0/3.3.1). Ein Tag, der so scharf gedrosselt
-   wird, dass der Speicher den Abend nicht mehr trägt, hat die Abregelung vermieden und dafür die
-   Hochpreiszone eingekauft. Das ist der teurere Fehler.
-2. **Der Nutzer-Mindeststand.** Versteht sich, steht aber hier, weil `_clamp` es sonst niemand tut.
+## Die Rechnung, ebenfalls berichtigt
 
-Ist `vormittags_ziel_soc` kleiner als eine der beiden, gilt die größere — und es wird gar nicht
-gedrosselt. Auf einem 35-kWh-Speicher mit 100 kWh Prognose kommt das kaum vor; an einem trüben
-Tag ständig, und dann ist Nichtstun richtig.
+Der alte Entwurf nahm den **ganzen** Mittagsüberschuss als Platzbedarf. Bei 60 % geht aber nur der
+Teil **oberhalb** der Grenze verloren:
 
-## Woher die Abregelungszeit kommt
+```
+overflow_kwh       = ∫ max(0, pv_power(t) − last(t) − grenze) dt
+room_needed_kwh    = overflow_kwh × ladewirkungsgrad          (Speicherseite)
+morning_target_soc = user_max − room_needed_kwh / kapazität × 100
+                     geklammert auf max(evening_reserve_soc, user_min_soc)
+```
 
-Pascals Entscheidung vom 20.09.:
+`pv_power` ist neu und ist die **exakte Ableitung** von `pv_fraction_between` (3.4.0):
+`(π/2)·sin(π·x)·prognose/tageslänge`. Ein Eigenschaftstest hält beide zusammen — integriert man
+die Leistung über ein beliebiges Intervall, kommt die Fraktion heraus, auf 1e-4 genau. Läuft das
+auseinander, widerspricht die Anzeige dem späteren Deckel, und sonst merkt es niemand.
 
-> „Sobald der Netzbetreiber abregelt, sind wir schon zu spät dran."
+**Die Wirkungsgradrichtung ist umgekehrt zur Nachtladung**: hier wird *mal* η gerechnet, nicht
+geteilt — es kommt weniger an, als umgeleitet wurde.
 
-Das stimmt — **fürs Handeln**. Fürs **Lernen** ist genau dieses Signal das beste, das es gibt. Die
-Auflösung des Widerspruchs: reaktiv beobachten, vorausschauend anwenden.
+**`forecast_error_margin` wirkt gegenläufig.** `surplus_kwh` bläht die Prognose auf; hier wird sie
+gedämpft. Beide Male lehnt sich der Fehler weg von einem Speicher, der abends leer ist.
 
-### Eingang A (am besten): eine Entität, die die Begrenzung meldet
+## Warum Stufe 2 noch nicht gebaut wird
 
-Ein Kostal G3 kennt die Wirkleistungsbegrenzung als Register. Wer so eine Entität hat, trägt sie
-ein; die Integration schreibt sich über `statistics_during_period` — derselbe Weg wie beim
-Hausverbrauchsprofil — auf, **zu welchen Stunden des Tages** sie in den letzten 14 Tagen aktiv
-war, und leitet daraus das Fenster für morgen ab.
+Zwei Zahlen fehlen, und Pascal kennt beide nicht: die Anlagengröße und ob die Stellgröße
+überhaupt eingetragen ist. Das Modell allein klärt sie nicht — es **widerspricht** der
+Beobachtung:
 
-### Eingang B: ein Einspeise- oder Erzeugungszähler
+```
+100 kWh Prognose, 16 h Sonnentag -> modellierte Mittagsspitze ~9,8 kW
+   10 kWp -> Grenze  6,0 kW -> 17,2 kWh Überlauf
+   12 kWp -> Grenze  7,2 kW ->  8,2 kWh
+   14 kWp -> Grenze  8,4 kW ->  1,9 kWh
+   ab 16 kWp                ->  gar keiner
+```
 
-Ohne Begrenzungsentität bleibt der Rückschluss aus der Erzeugung: eine Stunde, in der die
-Erzeugung deutlich unter dem liegt, was Prognose und Sonnenstand erwarten lassen, **und** in der
-die Einspeisung flach auf demselben Wert steht, ist ein Abregelungsverdacht.
+Oberhalb von rund 16 kWp beißt eine 60-%-Grenze an einem 100-kWh-Tag im Modell nie — Pascal
+beobachtet aber, dass sie beißt. Einer von beiden irrt. Vermutlich die Glocke: eine reine
+Sinuskurve läuft oben spitzer und niedriger als eine echte Schönwetterkurve.
 
-**Das ist der unsichere Teil dieses Plans und muss als solcher behandelt werden.** Eine Wolke
-sieht genauso aus. Die Prognose selbst ist ungenau. Und ein falscher Verdacht ist nicht neutral:
-er drosselt an einem Tag, der es nicht gebraucht hätte, der Speicher wird abends nicht voll, die
-Abendrettung kauft nach — der Fehler kostet **zweimal**.
+**Solange das offen ist, würde Stufe 2 an einem unbekannten Anteil der Tage grundlos drosseln —
+und ein solcher Tag kostet zweimal**: der Speicher ist abends zu leer, und die Abendrettung kauft
+aus dem Netz nach. Deshalb misst 3.7.0 erst.
 
-Deshalb: B erzeugt nur einen Vorschlag, nie eine Steuerung. Der Sensor zeigt „an 9 von 14 Tagen
-zwischen 11:30 und 15:30 abgeregelt" und Pascal trägt es ein, wenn es passt.
+## Was 3.7.0 liefert
 
-### Eingang C: feste Uhrzeiten
+- `planner.pv_power_kw_at` und `planner.curtailment_outlook` (rein, ohne HA-Importe).
+- `sensor.…_curtailment_outlook`, diagnostisch und per Vorgabe deaktiviert (die stündliche
+  Spitzenreihe ist Zustand, den der Recorder sonst für jeden Nutzer mitschreibt). Zustand:
+  `overflow_kwh`, im Normalfall 0 — `None`, wenn die Frage gar nicht gestellt werden kann.
+- Die **Gegenprobe**: stündliche Maxima der Einspeiseleistung über 14 Tage aus dem Recorder.
+  Eigener `statistics_during_period`-Aufruf mit `{"max"}` — eine Leistung ist `measurement` und
+  hat `change` überhaupt nicht, also lässt sich der Aufruf des Lastprofils nicht mitbenutzen.
+  Daraus `model_vs_measured_pct`, die Zahl, wegen der es diese Version gibt.
+- Zwei Felder: `curtailment_limit_w` (die Grenze in W, nicht der Prozentsatz) und
+  `curtailment_feed_in_entity`.
+- Die Funktion ist **abgeschaltet, solange keine Heute-Prognoseentität eingetragen ist**:
+  `_get_active_forecast_entity` fällt sonst auf die Morgen-Entität zurück, und das ist für eine
+  Vormittagsentscheidung still der falsche Tag.
 
-Von Pascal ausdrücklich als zweite Option gewünscht. Zwei Uhrzeiten, optional saisonal, im Muster
-der Hochpreiszone. **Das ist gleichzeitig der Rückfall, solange nichts gelernt ist, und die
-Überschreibung für den, der seine Zeiten kennt.** Reihenfolge: eingetragene Zeiten schlagen
-Gelerntes.
+## Stufe 2, wenn die Messung sie rechtfertigt
 
-## Die Stellgröße
+Die Stellgröße ist das **absolute Maximum (AC+DC)** (`CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY`,
+Kostal G3 Register 1280). Das AC-Ladelimit reicht nicht: es begrenzt nur den Netzbezug, nicht die
+DC-seitige PV-Ladung.
 
-Geschrieben wird auf das **absolute Maximum (AC+DC)**, das die Integration schon kennt
-(`CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY`, beim Kostal G3 Register 1280). Das AC-Ladelimit reicht
-nicht: es begrenzt nur den Netzbezug, nicht die DC-seitige PV-Ladung.
+Zu klären ist dabei dreierlei, und das erste ist mit 3.7.0 bereits erledigt:
 
-**Register 1280 fällt zurück.** Ohne regelmäßiges Nachschreiben springt es nach „Battery Time
-Until Fallback" auf die Werkseinstellung (`docs/kostal-kore.md`). Der Deckel muss also in jedem
-Poll erneuert werden — und zwar so, dass der bestehende Capture-und-Restore-Vertrag den
-Originalwert nicht mit dem selbst geschriebenen überschreibt. `_reset_absolute_charge_power` und
-`_original_absolute_charge_power` gibt es; sie sind bisher auf „einmal setzen, am Fensterende
-zurück" ausgelegt.
+1. ~~Der Schreibpfad konnte den selbst geschriebenen Deckel als „Originalwert des Nutzers"
+   übernehmen.~~ **Behoben in 3.7.0**, unabhängig von der Abregelung, weil es schon heute das
+   Nachtfenster betraf.
+2. `_apply_absolute_charge_power_limit` feuert bisher nur unter
+   `grid_charge_switch and not should_skip_charging` — ein Vormittagsdeckel ohne Netzladen
+   erreicht es nie. Zweiter Aufrufort nötig.
+3. Register 1280 fällt auf Werk zurück und muss in **jedem** Poll erneuert werden.
 
-## Der Lebenszyklus
-
-Ein Vormittags-Deckel ist ein **Ad-hoc-Fenster** (Plan 013) mit `until = abregelung_start`:
-Capture, Restore, Wiederholungsleiter, Notstromverriegelung und periodische Verifikation gelten
-damit unverändert, und zum Abregelungsbeginn fällt der Deckel von selbst — was genau der Moment
-ist, an dem der Speicher wieder alles nehmen soll.
-
-Dafür braucht das Ad-hoc-Fenster **eine Erweiterung**: heute trägt es ein Ziel-SOC und eine
-Netzladeerlaubnis, aber keinen Leistungsdeckel. Vorschlag: ein optionales `max_charge_power_w`,
-das `_plan_charge_power` als zusätzliche Obergrenze liest — dieselbe Stelle, an der schon die
-Hausanschlussgrenze und das Effizienzoptimum eingreifen.
-
-## Ausrollen in Stufen, wie bei der Abendrettung
-
-Dasselbe Muster, das Pascal am 20.09. für die Abendrettung gewählt hat („Sperren ja, Nachladen
-nur mit Schalter"):
-
-1. **Nur anzeigen.** Sensor `curtailment_outlook`: erkanntes oder eingetragenes Fenster, erwarteter
-   Überschuss darin, der Platz, der dafür nötig wäre, und das Vormittagsziel, das sich daraus
-   ergäbe. Schreibt nichts. Eine Saison lang danebenhalten.
-2. **Mit Schalter drosseln.** `switch.…_curtailment_pacing`, ab Werk aus.
+Der Lebenszyklus ist ein **Ad-hoc-Fenster** (Plan 013) mit `until = beginn der bindenden Stunden`
+und einem neuen optionalen `max_charge_power_w`, das `_plan_charge_power` als zusätzliche
+Obergrenze liest. Dabei ist die Lehre aus der Abendrettung zu beachten: ein Ad-hoc-Fenster setzt
+`is_active`, und was daran hängt, schaltet sich still ab. Ein eigener Grund
+(`ADHOC_REASON_CURTAILMENT`) samt Ausnahmen ist Pflicht, nicht Kür.
 
 ## Offene Fragen
 
-1. **Wie scharf muss die Erkennung sein, damit sie mehr nützt als schadet?** Konkret: ab wie
-   vielen Tagen mit demselben Muster ist es ein Fenster? Mein Vorschlag: 5 von 14, und nur
-   zusammenhängende Stunden.
-2. **Teilabregelung.** Viele Anlagen werden auf 70 % oder 60 % begrenzt, nicht auf 0. Dann geht
-   nicht alles verloren, sondern ein Teil — die Rechnung oben nimmt implizit 0 % an und
-   überschätzt den nötigen Platz. Mit Eingang A ist der Prozentsatz bekannt; mit B nicht.
-3. **Zwei Speicher-Ladewege.** Wenn der Wechselrichter DC-seitig lädt, ist der „Ladestrom" nicht
-   dasselbe wie der AC-Ladestrom, den die Effizienzsuche vermisst. Die Bänder aus 3.3.0 sind an
-   AC-Messungen gelernt — ob sie für DC-Laden gelten, ist offen.
-4. **Braucht es überhaupt eine Erkennung?** Wenn Pascals Abregelung jeden Sommertag zur selben
-   Zeit stattfindet, tun feste Zeiten es, und Eingang A/B sind Komfort. Das ist vor dem Bau von B
-   zu klären — B ist mit Abstand der teuerste Teil dieses Plans.
+1. **Wie weit trägt die Glocke?** Die erste Frage, die `model_vs_measured_pct` beantwortet. Reicht
+   sie nicht, ist der nächste Schritt kein Deckel, sondern ein besseres Tagesprofil.
+2. **Zwei Ladewege.** Lädt der Wechselrichter DC-seitig, ist der Ladestrom nicht derselbe, den die
+   Effizienzbänder aus 3.3.0 an AC-Messungen gelernt haben.
+3. **Teilabregelung anderer Höhe.** 70 % statt 60 % ist nur eine andere Zahl im selben Feld — das
+   trägt der Entwurf schon, weil die Grenze in Watt eingetragen wird und nicht als Prozentsatz.

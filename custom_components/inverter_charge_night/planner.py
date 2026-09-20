@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from .const import (
+    CURTAILMENT_INTEGRATION_STEP_MIN,
     DEFAULT_GRID_CONTINUOUS_PCT,
     DEFAULT_GRID_VOLTAGE_V,
     DEFAULT_SAFE_FALLBACK_SOC,
@@ -517,5 +518,149 @@ def evening_outlook(
         missing_kwh=missing_kwh,
         pv_to_come_kwh=pv_to_come,
         load_to_come_kwh=load_to_come,
+        forecast_available=forecast_available,
+    )
+
+
+def pv_power_kw_at(
+    sunrise: datetime, sunset: datetime, when: datetime, daily_kwh: float
+) -> float:
+    """Clear-sky output at one instant, in kW.
+
+    This is the derivative of :func:`pv_fraction_between` and has to stay that
+    way: the energy between two points is ``(cos(pi*x1) - cos(pi*x2)) / 2``, so
+    the density is ``(pi/2) * sin(pi*x)`` per unit of ``x``, and ``x`` runs
+    across the solar day. Integrating this curve over any stretch reproduces
+    the fraction exactly, which is what keeps a display built on one from
+    contradicting a decision built on the other.
+
+    Zero outside the solar day, and zero for a day that has no length.
+    """
+    day_s = (sunset - sunrise).total_seconds()
+    if day_s <= 0 or daily_kwh <= 0:
+        return 0.0
+    x = (when - sunrise).total_seconds() / day_s
+    if x <= 0.0 or x >= 1.0:
+        return 0.0
+    day_h = day_s / 3600.0
+    return daily_kwh * (math.pi / 2.0) * math.sin(math.pi * x) / day_h
+
+
+@dataclass(frozen=True)
+class CurtailmentOutlook:
+    """What a permanent feed-in cap will throw away today, and what would hold it."""
+
+    limit_w: float
+    # The envelope of the hours the cap actually bites in. None on a day it
+    # never bites - which is the honest answer on a dull day, not zero.
+    binding_start: datetime | None
+    binding_end: datetime | None
+    overflow_kwh: float          # thrown away today if the battery has no room
+    room_needed_kwh: float       # what the battery has to have free by then
+    morning_target_soc: float    # the cap's target, already clamped
+    clamped_by: str | None       # "evening_reserve" | "user_min" | None
+    forecast_available: bool
+
+
+CLAMPED_BY_EVENING_RESERVE = "evening_reserve"
+CLAMPED_BY_USER_MIN = "user_min"
+
+
+def curtailment_outlook(
+    *,
+    capacity_kwh: float,
+    user_min_soc: float,
+    user_max_soc: float,
+    house_load_kw_profile: Sequence[float],
+    sunrise: datetime,
+    sunset: datetime,
+    forecast_kwh_today: float,
+    forecast_available: bool,
+    error_margin_pct: float,
+    limit_w: float,
+    charge_efficiency: float,
+    evening_reserve_soc_pct: float,
+    step_minutes: int = CURTAILMENT_INTEGRATION_STEP_MIN,
+) -> CurtailmentOutlook | None:
+    """How much PV a permanent feed-in cap will throw away today.
+
+    A cap at the grid connection point is not an event somebody switches on:
+    it bites in exactly the hours where ``PV - house load`` exceeds it, and
+    those follow from the forecast, the sun times and the load profile. On a
+    dull day the answer is correctly "it never bites".
+
+    Returns ``None`` when the question cannot be asked - no cap configured, no
+    forecast, a day with no length. None means "no opinion" and every caller
+    has to treat it as such; it is never 0.0, because 0.0 is a real answer.
+
+    The forecast is *damped* by the error margin here, the opposite direction
+    from :func:`surplus_kwh`, which inflates it. Both lean the same way in the
+    end: away from a battery that is empty in the evening. Overestimating the
+    overflow throttles the morning on a day that did not need it, and that day
+    costs twice - short in the evening, and then bought back from the grid.
+    """
+    if capacity_kwh <= 0:
+        raise ValueError("Battery capacity must be positive")
+    if limit_w <= 0 or not forecast_available or sunset <= sunrise:
+        return None
+    if step_minutes <= 0:
+        raise ValueError("Integration step must be positive")
+    if len(house_load_kw_profile) != 24:
+        raise ValueError(
+            f"Load profile needs 24 hourly values, got {len(house_load_kw_profile)}"
+        )
+
+    damped_kwh = max(0.0, forecast_kwh_today) * max(
+        0.0, 1.0 - max(0.0, error_margin_pct) / 100.0
+    )
+    limit_kw = limit_w / 1000.0
+    step = timedelta(minutes=step_minutes)
+
+    overflow_kwh = 0.0
+    first: datetime | None = None
+    last: datetime | None = None
+    cursor = sunrise
+    while cursor < sunset:
+        segment_end = min(cursor + step, sunset)
+        hours = (segment_end - cursor).total_seconds() / 3600.0
+        # Sample at the midpoint: the bell is curved, and its endpoints are the
+        # two places a rectangle rule is worst.
+        midpoint = cursor + (segment_end - cursor) / 2
+        pv_kw = pv_power_kw_at(sunrise, sunset, midpoint, damped_kwh)
+        load_kw = float(house_load_kw_profile[midpoint.hour])
+        excess_kw = pv_kw - load_kw - limit_kw
+        if excess_kw > 0:
+            overflow_kwh += excess_kw * hours
+            if first is None:
+                first = cursor
+            last = segment_end
+        cursor = segment_end
+
+    # What the overflow will occupy in the battery is the AC amount times the
+    # charge efficiency, not divided by it - the loss happens on the way in, so
+    # less arrives than was diverted. This is the opposite direction from the
+    # night plan, where the question is how much to buy to store a given amount.
+    room_needed_kwh = overflow_kwh * min(1.0, max(0.01, charge_efficiency))
+    unclamped_soc = user_max_soc - room_needed_kwh / capacity_kwh * 100.0
+
+    clamped_by: str | None = None
+    floor = user_min_soc
+    if evening_reserve_soc_pct > floor:
+        floor = evening_reserve_soc_pct
+    if unclamped_soc < floor:
+        clamped_by = (
+            CLAMPED_BY_EVENING_RESERVE
+            if floor == evening_reserve_soc_pct and evening_reserve_soc_pct > user_min_soc
+            else CLAMPED_BY_USER_MIN
+        )
+
+    return CurtailmentOutlook(
+        limit_w=limit_w,
+        binding_start=first,
+        binding_end=last,
+        overflow_kwh=overflow_kwh,
+        room_needed_kwh=room_needed_kwh,
+        morning_target_soc=round(_clamp(unclamped_soc, floor, user_max_soc), 1),
+        clamped_by=clamped_by,
         forecast_available=forecast_available,
     )

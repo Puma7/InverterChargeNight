@@ -60,6 +60,8 @@ from .const import (
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
     CONF_NIGHT_PRICE_CT,
+    CONF_CURTAILMENT_FEED_IN_ENTITY,
+    CONF_CURTAILMENT_LIMIT_W,
     CONF_PRICE_ENTITY,
     CONF_PRICE_SURCHARGE_CT,
     CONF_PRICE_SURCHARGE_WINDOW_CT,
@@ -194,6 +196,8 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_PRICE_SURCHARGE_WINDOW_CT,
     CONF_DAY_PRICE_CT,
     CONF_FEED_IN_PRICE_CT,
+    CONF_CURTAILMENT_LIMIT_W,
+    CONF_CURTAILMENT_FEED_IN_ENTITY,
 )
 # Every key the wizard owns; anything else in entry.data is written at runtime.
 _ALL_STEP_KEYS: frozenset[str] = frozenset(
@@ -253,6 +257,8 @@ def _normalize_date_value(value: str | date | None) -> str | None:
 
 
 _ENTITY_KEYS_TO_VALIDATE = [
+    CONF_CURTAILMENT_FEED_IN_ENTITY,
+    CONF_CURTAILMENT_LIMIT_W,
     CONF_PRICE_ENTITY,
     CONF_MIN_SOC_ENTITY,
     CONF_GRID_CHARGE_SWITCH,
@@ -271,6 +277,7 @@ _ENTITY_KEYS_TO_VALIDATE = [
     CONF_HOUSE_LOAD_ENTITY,
     CONF_GRID_IMPORT_ENTITY,
     CONF_DISCHARGE_BLOCK_SWITCH,
+    CONF_CURTAILMENT_FEED_IN_ENTITY,
 ]
 
 
@@ -780,6 +787,12 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
             _optional(
                 CONF_PRICE_SURCHARGE_WINDOW_CT, defaults.get(CONF_PRICE_SURCHARGE_WINDOW_CT)
             ): _number_selector(0, 100, 0.1, "ct/kWh"),
+            _optional(
+                CONF_CURTAILMENT_LIMIT_W, defaults.get(CONF_CURTAILMENT_LIMIT_W)
+            ): _number_selector(100, 100000, 100, "W"),
+            _optional(
+                CONF_CURTAILMENT_FEED_IN_ENTITY, defaults.get(CONF_CURTAILMENT_FEED_IN_ENTITY)
+            ): _entity_selector("sensor", "power"),
         }
     )
 

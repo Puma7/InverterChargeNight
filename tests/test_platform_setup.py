@@ -18,6 +18,7 @@ from custom_components.inverter_charge_night.number import (
 )
 from custom_components.inverter_charge_night.select import OperationModeSelect
 from custom_components.inverter_charge_night.sensor import (
+    CurtailmentOutlookSensor,
     BestChargePowerSensor,
     CalculatedSOCSensor,
     PlannedChargePowerSensor,
@@ -50,6 +51,7 @@ PLATFORM_ENTITIES = {
             (NextHighPriceWindowSensor, "next_high_price_window"),
             (EveningOutlookSensor, "evening_outlook"),
             (PriceSignalSensor, "price_signal"),
+            (CurtailmentOutlookSensor, "curtailment_outlook"),
         ],
     ),
     "number": (
