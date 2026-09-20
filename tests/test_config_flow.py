@@ -1,7 +1,7 @@
 """Tests for the four-step config, reconfigure and options flows."""
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import voluptuous as vol
@@ -599,3 +599,37 @@ def test_every_error_key_is_translated():
     for error in strings["config"]["error"]:
         assert f'"{error}"' in source, error
     assert strings["options"]["error"] == strings["config"]["error"]
+
+
+def test_only_entity_ids_are_looked_up_as_entities(mock_hass):
+    """A plain number in the entity list aborts the whole flow.
+
+    Every key in ``_ENTITY_KEYS_TO_VALIDATE`` is handed to the registry and
+    then to ``hass.states.get``, and Home Assistant lowercases what it is
+    given - so a float reaches ``float.lower()`` and raises. The feed-in cap is
+    watts, not an entity, and it was in that list: entering it in the advanced
+    step killed the config and options flow outright.
+    """
+    from custom_components.inverter_charge_night import config_flow
+    from custom_components.inverter_charge_night.const import (
+        CONF_CURTAILMENT_FEED_IN_ENTITY,
+        CONF_CURTAILMENT_LIMIT_W,
+    )
+
+    numeric_keys = {
+        key for key in config_flow._ENTITY_KEYS_TO_VALIDATE if key.endswith(("_w", "_ct", "_pct"))
+    }
+    assert numeric_keys == set(), f"not entity ids: {numeric_keys}"
+    assert CONF_CURTAILMENT_LIMIT_W not in config_flow._ENTITY_KEYS_TO_VALIDATE
+    assert CONF_CURTAILMENT_FEED_IN_ENTITY in config_flow._ENTITY_KEYS_TO_VALIDATE
+    assert len(config_flow._ENTITY_KEYS_TO_VALIDATE) == len(
+        set(config_flow._ENTITY_KEYS_TO_VALIDATE)
+    ), "a duplicate means the same entity is reported twice"
+
+    # And the real path: a cap on its own must validate without raising. The
+    # registry is patched because the lookup order is registry first, state
+    # machine second, and it is the second one that lowercases.
+    with patch.object(config_flow.er, "async_get") as registry:
+        registry.return_value.async_get.return_value = None
+        errors = config_flow._validate_user_input({CONF_CURTAILMENT_LIMIT_W: 9000.0}, mock_hass)
+    assert CONF_CURTAILMENT_LIMIT_W not in errors

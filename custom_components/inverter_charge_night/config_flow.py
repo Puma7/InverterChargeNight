@@ -256,9 +256,10 @@ def _normalize_date_value(value: str | date | None) -> str | None:
         return None
 
 
+# Only entity ids belong here: each one is looked up in the registry and then
+# in the state machine, and Home Assistant lowercases what it is given. A plain
+# number in this list aborts the whole config flow with an AttributeError.
 _ENTITY_KEYS_TO_VALIDATE = [
-    CONF_CURTAILMENT_FEED_IN_ENTITY,
-    CONF_CURTAILMENT_LIMIT_W,
     CONF_PRICE_ENTITY,
     CONF_MIN_SOC_ENTITY,
     CONF_GRID_CHARGE_SWITCH,

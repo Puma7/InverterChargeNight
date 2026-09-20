@@ -492,7 +492,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except (ValueError, TypeError):
                 _LOGGER.warning("Ignoring invalid persisted adhoc_until %r", adhoc_raw)
             else:
-                if adhoc_until > dt_util.now():
+                now_local = dt_util.now()
+                # A naive persisted value is not reachable through the actions
+                # (they all take a duration and add it to an aware now), but an
+                # unguarded comparison here raises inside __init__ - and that
+                # means the integration does not load at all.
+                if self._align_tz(adhoc_until, now_local) > now_local:
+                    adhoc_until = self._align_tz(adhoc_until, now_local)
                     self._adhoc_until = adhoc_until
                     self._adhoc_reason = (
                         state["adhoc_reason"] if isinstance(state.get("adhoc_reason"), str) else None
@@ -828,10 +834,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         fall-back, where the end minute occurs twice; ``_plan_charge_power``
         guards the resulting near-zero remainder.
         """
-        if self._adhoc_until is not None:
+        if self._adhoc_until is not None and self._adhoc_until > now:
             # An ad-hoc window ends when it was told to, not when the configured
             # one would. Everything that asks "how long has this window left" -
             # the charge power plan above all - has to get that answer.
+            #
+            # Only while it is still ahead of us. A deadline left behind in the
+            # past would answer every planner question with a window that ended
+            # long ago, which is worse than having no ad-hoc window at all.
             return self._adhoc_until
         _, end = self._window_times()
         end_dt = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
@@ -3390,6 +3400,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 await self._on_window_end(now_dt)
 
+            # A restart during an ad-hoc window restores its deadline but not
+            # is_active, which is not persisted. Without picking the window up
+            # again the hold it was keeping is undone one poll later by the
+            # "settings still on the inverter" branch below, and the deadline
+            # is never cleared - it then answers every later planner question
+            # and ends the next configured window one poll after it starts.
+            if (
+                not in_window
+                and not self.is_active
+                and self._adhoc_until is not None
+                and self._adhoc_until > now_dt
+            ):
+                _LOGGER.info(
+                    "Resuming the ad-hoc window (%s) that a restart interrupted, until %s",
+                    self._adhoc_reason,
+                    self._adhoc_until.isoformat(timespec="minutes"),
+                )
+                await self._on_window_start(now_dt)
+
             # Handle state transitions
             if in_window and not self.is_active:
                 # We're in the window but not active - start it
@@ -3516,6 +3545,28 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Continue with that target instead of guessing it from the
             # inverter's live value - which is our own night target, not the
             # original - or recalculating it from a forecast that has moved on.
+            if self._adhoc_target_soc is not None:
+                # Before the restart branch below, deliberately. An ad-hoc
+                # window carries its own target, and it is persisted, so it is
+                # the right answer after a restart too. Checking the restart
+                # case first meant that once stage 1 of the evening rescue had
+                # run a single poll - which is all it takes to capture the
+                # inverter's min SOC - stage 2's higher target was discarded
+                # and the grid top-up the whole feature exists for never
+                # happened.
+                adhoc_soc = max(user_min_soc, min(self._adhoc_target_soc, user_max_soc))
+                self.initial_calculated_soc = adhoc_soc
+                self.minimum_calculated_soc = adhoc_soc
+                self.calculated_soc = adhoc_soc
+                _LOGGER.info(
+                    "Ad-hoc window (%s): target %.1f%% until %s",
+                    self._adhoc_reason,
+                    adhoc_soc,
+                    self._adhoc_until.isoformat(timespec="minutes") if self._adhoc_until else "?",
+                )
+                self._persist_state()
+                return
+
             if (
                 self._pending_reset or self.original_min_soc is not None
             ) and self.initial_calculated_soc is not None:
@@ -3528,22 +3579,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     preserved_soc,
                     f"{self.original_min_soc:.1f}%" if self.original_min_soc is not None else "not captured",
                 )
-                return
-
-            if self._adhoc_target_soc is not None:
-                # An ad-hoc window was opened with a target rather than with a
-                # forecast to derive one from.
-                adhoc_soc = max(user_min_soc, min(self._adhoc_target_soc, user_max_soc))
-                self.initial_calculated_soc = adhoc_soc
-                self.minimum_calculated_soc = adhoc_soc
-                self.calculated_soc = adhoc_soc
-                _LOGGER.info(
-                    "Ad-hoc window (%s): target %.1f%% until %s",
-                    self._adhoc_reason,
-                    adhoc_soc,
-                    self._adhoc_until.isoformat(timespec="minutes") if self._adhoc_until else "?",
-                )
-                self._persist_state()
                 return
 
             # Otherwise, calculate normally from forecast
@@ -3947,7 +3982,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         still pending from a real window is retried by its own timer.
         """
         if not self.is_active:
-            _LOGGER.debug("Window end without an active window - nothing to reset")
+            if self._adhoc_until is not None:
+                # There is nothing to reset, but the deadline still has to go:
+                # left behind it becomes the answer to every later question
+                # about when the current window ends.
+                _LOGGER.info(
+                    "Clearing the ad-hoc deadline (%s) of a window that is no longer active",
+                    self._adhoc_reason,
+                )
+                self._adhoc_until = None
+                self._adhoc_reason = None
+                self._adhoc_target_soc = None
+                self._adhoc_allow_grid_charge = False
+                self._persist_state()
+            else:
+                _LOGGER.debug("Window end without an active window - nothing to reset")
             return
         mode_label = "Morning discharge" if self.is_discharge_mode else "Night charge"
         _LOGGER.info("%s window ended, resetting settings", mode_label)

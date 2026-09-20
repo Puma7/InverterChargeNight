@@ -395,3 +395,80 @@ async def test_allow_discharge_leaves_a_configured_window_alone(mock_hass):
         assert await coordinator.async_allow_discharge() is False
 
     assert coordinator.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_extending_a_window_actually_moves_the_target(mock_hass):
+    """Stage 2 of the evening rescue raises the target - and it used to be dropped.
+
+    Stage 1 holds the battery: an ad-hoc window at the current level with no
+    grid charging. One poll later ``_control_charge`` has captured the
+    inverter's own min SOC into ``original_min_soc``. Stage 2 then reopens the
+    window with the level the evening actually needs.
+
+    ``_calculate_initial_soc`` decides between three cases in order, and the
+    first one is "restarted during an active window, keep the persisted
+    target". After stage 1 that branch matches - min SOC captured, target
+    set - so it returned before ever reaching the ad-hoc branch, and stage 2's
+    target was discarded. The grid buying that the whole feature exists for
+    never happened.
+
+    The same defeats a second ``charge_to``, and a ``charge_to`` after a
+    ``block_discharge``.
+    """
+    coordinator = _make_coordinator(mock_hass)
+
+    # Stage 1: hold what is there.
+    assert await _open(coordinator, target=40.0, grid=False) is True
+    assert coordinator.calculated_soc == 40.0
+
+    # A poll runs: the inverter's own floor is captured, as _control_charge does.
+    coordinator.original_min_soc = 8.0
+    coordinator.initial_calculated_soc = 40.0
+
+    # Stage 2: the evening needs 62 %, and buying is now allowed.
+    assert await _open(coordinator, target=62.0, grid=True) is True
+
+    assert coordinator.calculated_soc == 62.0, (
+        "stage 2 raised the target and the window must follow it"
+    )
+    assert coordinator.minimum_calculated_soc == 62.0
+    assert coordinator._adhoc_allow_grid_charge is True
+
+
+@pytest.mark.asyncio
+async def test_a_restart_during_an_adhoc_window_does_not_leave_a_dead_deadline(mock_hass):
+    """``is_active`` is not persisted, so a restart forgets the window was running.
+
+    The deadline is restored, the window is not. ``_on_window_end`` then
+    early-returns on ``not is_active`` and never clears ``_adhoc_until``, so a
+    timestamp in the past is left behind for good. From then on
+    ``_window_end_datetime`` answers every planner question with it - and the
+    next real window is ended one poll after it starts, because the expiry
+    check fires on ``in_window``.
+
+    A rescue that a restart interrupts must not cost the night charge.
+    """
+    coordinator = _make_coordinator(mock_hass)
+    assert await _open(coordinator, target=62.0, until=ZONE_START) is True
+
+    # Restart: a fresh coordinator restores the deadline but not is_active.
+    restarted = _make_coordinator(mock_hass, options=coordinator.entry.options)
+    restarted._adhoc_until = ZONE_START
+    restarted._adhoc_reason = "evening_rescue"
+    restarted.is_active = False
+
+    # The deadline passes while nothing resumed the window.
+    after = ZONE_START + timedelta(minutes=30)
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=after
+    ):
+        await restarted._on_window_end(after)
+
+    assert restarted._adhoc_until is None, (
+        "an expired ad-hoc deadline must be cleared even when the window was "
+        "not resumed, or it poisons every later window"
+    )
+    assert restarted._window_end_datetime(after) > after, (
+        "the window end must never be a timestamp in the past"
+    )
