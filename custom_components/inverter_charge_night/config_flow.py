@@ -45,6 +45,7 @@ from .const import (
     CONF_DEFAULT_MIN_SOC,
     CONF_DISCHARGE_BLOCK_MODE,
     CONF_DISCHARGE_BLOCK_SWITCH,
+    CONF_DISCHARGE_EFFICIENCY,
     CONF_DISCHARGE_LIMIT_ENTITY,
     CONF_END_TIME,
     CONF_FEED_IN_PRICE_CT,
@@ -72,6 +73,7 @@ from .const import (
     DEFAULT_AVG_HOUSE_LOAD_KW,
     DEFAULT_BRIDGE_RESERVE_KWH,
     DEFAULT_CHARGE_EFFICIENCY,
+    DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_COMMAND_DELAY,
     DEFAULT_DISCHARGE_BLOCK_MODE,
     DEFAULT_END_TIME,
@@ -174,6 +176,7 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_PV_CROSSOVER_DELAY_MIN,
     CONF_BRIDGE_RESERVE_KWH,
     CONF_CHARGE_EFFICIENCY,
+    CONF_DISCHARGE_EFFICIENCY,
     CONF_NIGHT_PRICE_CT,
     CONF_DAY_PRICE_CT,
     CONF_FEED_IN_PRICE_CT,
@@ -720,6 +723,9 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
             ): _number_selector(0, 50, 0.1, "kWh"),
             _required(
                 CONF_CHARGE_EFFICIENCY, defaults, DEFAULT_CHARGE_EFFICIENCY
+            ): _number_selector(0.5, 1.0, 0.01),
+            _required(
+                CONF_DISCHARGE_EFFICIENCY, defaults, DEFAULT_DISCHARGE_EFFICIENCY
             ): _number_selector(0.5, 1.0, 0.01),
             _optional(CONF_NIGHT_PRICE_CT, defaults.get(CONF_NIGHT_PRICE_CT)): _number_selector(
                 0, 200, 0.1, "ct/kWh"

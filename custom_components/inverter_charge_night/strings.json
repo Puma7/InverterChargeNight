@@ -119,6 +119,7 @@
           "pv_crossover_delay_min": "PV Crossover Delay",
           "bridge_reserve_kwh": "Bridge Reserve",
           "charge_efficiency": "Charge Efficiency",
+          "discharge_efficiency": "Discharge efficiency",
           "night_price_ct": "Night Price (optional)",
           "day_price_ct": "Day Price (optional)",
           "feed_in_price_ct": "Feed-in Price (optional)"
@@ -136,6 +137,7 @@
           "pv_crossover_delay_min": "Minutes after sunrise until the PV output exceeds the house load (default 90). The Bridge planner charges enough to bridge the window end until then.",
           "bridge_reserve_kwh": "Safety reserve in kWh added to the bridge energy (default 0.5).",
           "charge_efficiency": "Grid-to-battery charge efficiency (0.5-1.0, default 0.9), used to plan the charge power for the remaining window time.",
+          "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
           "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom.",
           "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the other two prices).",
           "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices)."
@@ -259,6 +261,7 @@
           "pv_crossover_delay_min": "PV Crossover Delay",
           "bridge_reserve_kwh": "Bridge Reserve",
           "charge_efficiency": "Charge Efficiency",
+          "discharge_efficiency": "Discharge efficiency",
           "night_price_ct": "Night Price (optional)",
           "day_price_ct": "Day Price (optional)",
           "feed_in_price_ct": "Feed-in Price (optional)"
@@ -276,6 +279,7 @@
           "pv_crossover_delay_min": "Minutes after sunrise until the PV output exceeds the house load (default 90). The Bridge planner charges enough to bridge the window end until then.",
           "bridge_reserve_kwh": "Safety reserve in kWh added to the bridge energy (default 0.5).",
           "charge_efficiency": "Grid-to-battery charge efficiency (0.5-1.0, default 0.9), used to plan the charge power for the remaining window time.",
+          "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
           "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom.",
           "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the other two prices).",
           "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices)."
@@ -429,6 +433,7 @@
           "pv_crossover_delay_min": "PV Crossover Delay",
           "bridge_reserve_kwh": "Bridge Reserve",
           "charge_efficiency": "Charge Efficiency",
+          "discharge_efficiency": "Discharge efficiency",
           "night_price_ct": "Night Price (optional)",
           "day_price_ct": "Day Price (optional)",
           "feed_in_price_ct": "Feed-in Price (optional)"
@@ -446,6 +451,7 @@
           "pv_crossover_delay_min": "Minutes after sunrise until the PV output exceeds the house load (default 90). The Bridge planner charges enough to bridge the window end until then.",
           "bridge_reserve_kwh": "Safety reserve in kWh added to the bridge energy (default 0.5).",
           "charge_efficiency": "Grid-to-battery charge efficiency (0.5-1.0, default 0.9), used to plan the charge power for the remaining window time.",
+          "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
           "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom.",
           "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the other two prices).",
           "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices)."

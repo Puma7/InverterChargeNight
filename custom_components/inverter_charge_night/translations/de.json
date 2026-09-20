@@ -119,6 +119,7 @@
           "pv_crossover_delay_min": "Verzögerung bis PV den Verbrauch deckt",
           "bridge_reserve_kwh": "Reserve für die Überbrückung",
           "charge_efficiency": "Ladewirkungsgrad",
+          "discharge_efficiency": "Entladewirkungsgrad",
           "night_price_ct": "Preis im Fenster (optional)",
           "day_price_ct": "Preis außerhalb des Fensters (optional)",
           "feed_in_price_ct": "Einspeisevergütung (optional)"
@@ -136,6 +137,7 @@
           "pv_crossover_delay_min": "Minuten nach Sonnenaufgang, bis der PV-Ertrag den Hausverbrauch übersteigt (Standard 90). Bis dahin überbrückt der Planer mit dem Speicher.",
           "bridge_reserve_kwh": "Sicherheitsreserve in kWh, die zur Überbrückungsenergie addiert wird (Standard 0,5).",
           "charge_efficiency": "Wirkungsgrad vom Netz bis in den Speicher (0,5–1,0, Standard 0,9). Daraus wird die nötige Ladeleistung für die Restzeit des Fensters berechnet.",
+          "discharge_efficiency": "Wie viel von dem, was den Akku verlässt, im Haus ankommt (0,5–1,0, Vorgabe 0,95). Verbrauchsprofil und Prognose werden auf der Hausseite gemessen; Energie aus dem Akku verliert auf dem Weg durch den Wechselrichter ein paar Prozent. Ohne diesen Wert kauft der Planer für Überbrückung und Abendreserve etwas zu wenig — jede Nacht, immer in dieselbe Richtung.",
           "night_price_ct": "Optional: Arbeitspreis im Fenster in ct/kWh. Alle drei Preise setzen oder keinen; der Überbrückungs-Planer entscheidet damit den Konflikt zwischen Überbrücken und PV-Freiraum.",
           "day_price_ct": "Optional: Arbeitspreis außerhalb des Fensters in ct/kWh.",
           "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh."
@@ -259,6 +261,7 @@
           "pv_crossover_delay_min": "Verzögerung bis PV den Verbrauch deckt",
           "bridge_reserve_kwh": "Reserve für die Überbrückung",
           "charge_efficiency": "Ladewirkungsgrad",
+          "discharge_efficiency": "Entladewirkungsgrad",
           "night_price_ct": "Preis im Fenster (optional)",
           "day_price_ct": "Preis außerhalb des Fensters (optional)",
           "feed_in_price_ct": "Einspeisevergütung (optional)"
@@ -276,6 +279,7 @@
           "pv_crossover_delay_min": "Minuten nach Sonnenaufgang, bis der PV-Ertrag den Hausverbrauch übersteigt (Standard 90). Bis dahin überbrückt der Planer mit dem Speicher.",
           "bridge_reserve_kwh": "Sicherheitsreserve in kWh, die zur Überbrückungsenergie addiert wird (Standard 0,5).",
           "charge_efficiency": "Wirkungsgrad vom Netz bis in den Speicher (0,5–1,0, Standard 0,9). Daraus wird die nötige Ladeleistung für die Restzeit des Fensters berechnet.",
+          "discharge_efficiency": "Wie viel von dem, was den Akku verlässt, im Haus ankommt (0,5–1,0, Vorgabe 0,95). Verbrauchsprofil und Prognose werden auf der Hausseite gemessen; Energie aus dem Akku verliert auf dem Weg durch den Wechselrichter ein paar Prozent. Ohne diesen Wert kauft der Planer für Überbrückung und Abendreserve etwas zu wenig — jede Nacht, immer in dieselbe Richtung.",
           "night_price_ct": "Optional: Arbeitspreis im Fenster in ct/kWh. Alle drei Preise setzen oder keinen; der Überbrückungs-Planer entscheidet damit den Konflikt zwischen Überbrücken und PV-Freiraum.",
           "day_price_ct": "Optional: Arbeitspreis außerhalb des Fensters in ct/kWh.",
           "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh."
@@ -429,6 +433,7 @@
           "pv_crossover_delay_min": "Verzögerung bis PV den Verbrauch deckt",
           "bridge_reserve_kwh": "Reserve für die Überbrückung",
           "charge_efficiency": "Ladewirkungsgrad",
+          "discharge_efficiency": "Entladewirkungsgrad",
           "night_price_ct": "Preis im Fenster (optional)",
           "day_price_ct": "Preis außerhalb des Fensters (optional)",
           "feed_in_price_ct": "Einspeisevergütung (optional)"
@@ -446,6 +451,7 @@
           "pv_crossover_delay_min": "Minuten nach Sonnenaufgang, bis der PV-Ertrag den Hausverbrauch übersteigt (Standard 90). Bis dahin überbrückt der Planer mit dem Speicher.",
           "bridge_reserve_kwh": "Sicherheitsreserve in kWh, die zur Überbrückungsenergie addiert wird (Standard 0,5).",
           "charge_efficiency": "Wirkungsgrad vom Netz bis in den Speicher (0,5–1,0, Standard 0,9). Daraus wird die nötige Ladeleistung für die Restzeit des Fensters berechnet.",
+          "discharge_efficiency": "Wie viel von dem, was den Akku verlässt, im Haus ankommt (0,5–1,0, Vorgabe 0,95). Verbrauchsprofil und Prognose werden auf der Hausseite gemessen; Energie aus dem Akku verliert auf dem Weg durch den Wechselrichter ein paar Prozent. Ohne diesen Wert kauft der Planer für Überbrückung und Abendreserve etwas zu wenig — jede Nacht, immer in dieselbe Richtung.",
           "night_price_ct": "Optional: Arbeitspreis im Fenster in ct/kWh. Alle drei Preise setzen oder keinen; der Überbrückungs-Planer entscheidet damit den Konflikt zwischen Überbrücken und PV-Freiraum.",
           "day_price_ct": "Optional: Arbeitspreis außerhalb des Fensters in ct/kWh.",
           "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh."

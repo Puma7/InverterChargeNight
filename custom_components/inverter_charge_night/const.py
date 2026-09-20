@@ -80,6 +80,10 @@ CONF_AVG_HOUSE_LOAD_KW = "avg_house_load_kw"  # fallback without a meter: averag
 CONF_PV_CROSSOVER_DELAY_MIN = "pv_crossover_delay_min"  # minutes after sunrise until PV > load
 CONF_BRIDGE_RESERVE_KWH = "bridge_reserve_kwh"  # safety reserve added to the bridge energy
 CONF_CHARGE_EFFICIENCY = "charge_efficiency"  # 0.80-1.0, default 0.90
+# The other direction. Energy leaving the battery passes through the inverter
+# too, so the battery has to hold more than the house will draw - which is what
+# decides how much has to be bought for a bridge or an evening.
+CONF_DISCHARGE_EFFICIENCY = "discharge_efficiency"  # 0.50-1.0, default 0.95
 CONF_DISCHARGE_LIMIT_ENTITY = "discharge_limit_entity"  # number: discharge power limit (W), optional
 CONF_FEED_IN_PRICE_CT = "feed_in_price_ct"  # optional
 CONF_NIGHT_PRICE_CT = "night_price_ct"  # optional
@@ -89,6 +93,7 @@ DEFAULT_AVG_HOUSE_LOAD_KW = 0.5
 DEFAULT_PV_CROSSOVER_DELAY_MIN = 90
 DEFAULT_BRIDGE_RESERVE_KWH = 0.5
 DEFAULT_CHARGE_EFFICIENCY = 0.90
+DEFAULT_DISCHARGE_EFFICIENCY = 0.95
 HOUSE_LOAD_PROFILE_DAYS = 14  # history used to learn the hourly load profile
 HOUSE_LOAD_PROFILE_CACHE_S = 900  # 15 minutes
 PLANNED_POWER_WRITE_THRESHOLD_W = 100  # write the charge setpoint only when it moves more than this

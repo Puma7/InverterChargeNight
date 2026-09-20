@@ -31,6 +31,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_START_TIME,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
+    DEFAULT_DISCHARGE_EFFICIENCY,
     MODE_MORNING_DISCHARGE,
     PLANNER_MODE_BRIDGE,
 )
@@ -138,10 +139,14 @@ async def test_a_dull_forecast_raises_the_night_target(mock_hass):
         sunny = await coordinator._plan_target(20.0, True)
 
     assert dull is not None and sunny is not None
-    # 0.5 kW over three hours, on a 10 kWh battery
+    # 0.5 kW over three hours is what the house draws; the battery has to hold
+    # rather more of it, because the way out through the inverter costs too.
     assert dull.evening_reserve_kwh == pytest.approx(1.5)
-    assert dull.evening_shortfall_kwh == pytest.approx(1.5)
-    assert dull.target_soc - sunny.target_soc == pytest.approx(15.0, abs=0.2)
+    bought = 1.5 / DEFAULT_DISCHARGE_EFFICIENCY
+    # The reserve is the house draw; the shortfall is what the battery has to
+    # gain to deliver it, which is more.
+    assert dull.evening_shortfall_kwh == pytest.approx(bought)
+    assert dull.target_soc - sunny.target_soc == pytest.approx(bought / 10.0 * 100, abs=0.2)
     assert sunny.evening_shortfall_kwh == 0.0
 
 
@@ -239,9 +244,11 @@ async def test_a_dull_day_stops_the_morning_discharge_selling_the_evening(mock_h
         floor = await coordinator._evening_reserve_floor(0.0, True)
         raised = await coordinator._floor_discharge_at_the_evening_reserve(8.0, 0.0, True)
 
-    # 1.5 kWh of evening on a 10 kWh battery, on top of the 8 % user minimum
-    assert floor == pytest.approx(23.0)
-    assert raised == pytest.approx(23.0)
+    # 1.5 kWh of evening draw on a 10 kWh battery, grossed up by the discharge
+    # loss, on top of the 8 % user minimum
+    expected = 8.0 + (1.5 / DEFAULT_DISCHARGE_EFFICIENCY) / 10.0 * 100
+    assert floor == pytest.approx(expected, abs=0.01)
+    assert raised == pytest.approx(expected, abs=0.01)
 
 
 @pytest.mark.asyncio

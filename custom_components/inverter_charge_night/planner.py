@@ -61,6 +61,10 @@ class PlanInput:
     house_load_kw_profile: Sequence[float]  # 24 values, one per hour of the day
     reserve_kwh: float
     charge_efficiency: float
+    # Energy on its way out of the battery passes through the inverter as well,
+    # so the battery has to hold more than the house will draw. 1.0 means "do
+    # not account for it" and is what a caller that predates this field gets.
+    discharge_efficiency: float = 1.0
     prices_ct: tuple[float, float, float] | None = None  # (night, day, feed-in)
     # The next high-price period after the window, e.g. 18:00-21:00 tomorrow.
     # The house must come through it without buying at that tariff.
@@ -72,7 +76,12 @@ class PlanInput:
 
 @dataclass(frozen=True)
 class PlanResult:
-    """The planner's answer plus the numbers it was derived from."""
+    """The planner's answer plus the numbers it was derived from.
+
+    Energies here are what the **battery** has to hold, not what the house will
+    draw: the two differ by the discharge loss, and the planner's job is to buy
+    the first so the house gets the second.
+    """
 
     target_soc: float
     bridge_kwh: float
@@ -80,8 +89,10 @@ class PlanResult:
     lower_bound_soc: float
     upper_bound_soc: float
     reason: str
-    # What the high-price period is expected to draw, and how much of that the
-    # night has to buy because the day's surplus will not cover it.
+    # What the high-price period is expected to draw (house side), and how much
+    # the battery therefore has to gain tonight because the day's surplus will
+    # not cover it - that second figure is battery side, so it carries the
+    # discharge loss, the same way ``bridge_kwh`` does.
     evening_reserve_kwh: float = 0.0
     evening_shortfall_kwh: float = 0.0
 
@@ -146,6 +157,19 @@ def evening_shortfall_kwh(p: PlanInput) -> float:
     return max(0.0, evening_reserve_kwh(p) - covered_by_pv)
 
 
+def _from_battery_kwh(house_kwh: float, discharge_efficiency: float) -> float:
+    """What the battery must hold to deliver ``house_kwh`` to the house.
+
+    The house load profile and the forecast are both measured on the house
+    side of the inverter. Energy coming out of the battery is not: it loses a
+    few percent on the way, and a plan that ignores that buys a few percent too
+    little - every time, in the same direction, which is the kind of error that
+    only shows up as "the battery did not quite make it through the evening".
+    """
+    efficiency = min(1.0, max(0.01, discharge_efficiency))
+    return house_kwh / efficiency
+
+
 def evening_reserve_soc(p: PlanInput) -> float:
     """The SOC the battery must not fall below if the evening is to be covered.
 
@@ -156,7 +180,7 @@ def evening_reserve_soc(p: PlanInput) -> float:
     """
     if p.capacity_kwh <= 0:
         raise ValueError("Battery capacity must be positive")
-    shortfall = evening_shortfall_kwh(p)
+    shortfall = _from_battery_kwh(evening_shortfall_kwh(p), p.discharge_efficiency)
     return _clamp(
         p.user_min_soc + shortfall / p.capacity_kwh * 100.0,
         p.user_min_soc,
@@ -178,15 +202,19 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
         )
 
     capacity = float(p.capacity_kwh)
-    bridge_kwh = integrate_load(p.house_load_kw_profile, p.window_end, p.pv_crossover) + max(
-        0.0, float(p.reserve_kwh)
-    )
+    # Both figures are what the battery has to hold, not what the house draws:
+    # the difference is the inverter's discharge loss, and ignoring it under-buys
+    # a little every single night.
+    bridge_kwh = _from_battery_kwh(
+        integrate_load(p.house_load_kw_profile, p.window_end, p.pv_crossover),
+        p.discharge_efficiency,
+    ) + max(0.0, float(p.reserve_kwh))
     surplus = surplus_kwh(p)
 
     evening_kwh = evening_reserve_kwh(p)
     # The sun charges the battery before the evening does, so only the part it
     # will not cover has to be bought tonight.
-    evening_shortfall = evening_shortfall_kwh(p)
+    evening_shortfall = _from_battery_kwh(evening_shortfall_kwh(p), p.discharge_efficiency)
 
     lower = _clamp(
         (bridge_kwh + evening_shortfall + capacity * p.user_min_soc / 100.0)

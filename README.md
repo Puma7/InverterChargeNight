@@ -240,6 +240,10 @@ To find entities:
    - **Bridge Reserve**: Safety reserve in kWh added to the bridge energy (default `0.5`)
    - **Charge Efficiency**: Grid-to-battery efficiency used to plan the charge power
      (default `0.9`)
+   - **Discharge Efficiency**: Battery-to-house efficiency (default `0.95`). The load profile and
+     the forecast are measured on the house side; what leaves the battery loses a few percent on
+     the way through the inverter. The bridge energy and the evening reserve are sized with it,
+     so the battery holds what the house will actually get
    - **Night / Day / Feed-in Price** (optional): Tariffs in ct/kWh. Set all three or none; the
      Bridge planner uses them to decide a conflict between bridging and PV headroom.
 

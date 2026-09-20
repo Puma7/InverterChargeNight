@@ -375,3 +375,52 @@ def test_the_discharge_floor_never_passes_the_user_maximum():
 def test_the_discharge_floor_rejects_an_impossible_capacity():
     with pytest.raises(ValueError):
         evening_reserve_soc(_plan_input(capacity_kwh=0.0, high_price_window=EVENING))
+
+
+# The discharge loss (Pascal, 20.09.) --------------------------------------------
+
+
+def test_without_a_discharge_efficiency_nothing_changes():
+    """The field defaults to 1.0, so every caller that predates it is unaffected."""
+    assert plan_target_soc(_plan_input()).target_soc == _lower_bound(BRIDGE_KWH)
+
+
+def test_the_bridge_must_hold_more_than_the_house_will_draw():
+    """4 kWh in the house needs about 4.2 in the battery at 95 %.
+
+    The load profile is measured on the house side; what leaves the battery
+    loses a few percent through the inverter on the way there.
+    """
+    plan = plan_target_soc(_plan_input(discharge_efficiency=0.95))
+    load_kwh = BRIDGE_KWH - 0.5  # the reserve is battery-side already
+    assert plan.bridge_kwh == pytest.approx(load_kwh / 0.95 + 0.5)
+    assert plan.target_soc > _lower_bound(BRIDGE_KWH)
+
+
+def test_the_evening_reserve_is_grossed_up_too():
+    plan = plan_target_soc(
+        _plan_input(
+            forecast_kwh_next_day=0.0, high_price_window=EVENING, discharge_efficiency=0.90
+        )
+    )
+    # The reserve itself stays the house draw; what has to be bought is more
+    assert plan.evening_reserve_kwh == pytest.approx(EVENING_KWH)
+    assert plan.target_soc == pytest.approx(
+        _lower_bound((BRIDGE_KWH - 0.5) / 0.9 + 0.5 + EVENING_KWH / 0.9), abs=0.05
+    )
+
+
+def test_the_discharge_floor_is_grossed_up_too():
+    plan_input = _plan_input(
+        forecast_kwh_next_day=0.0, high_price_window=EVENING, discharge_efficiency=0.90
+    )
+    assert evening_reserve_soc(plan_input) == pytest.approx(
+        USER_MIN + (EVENING_KWH / 0.9) / CAPACITY * 100, abs=0.01
+    )
+
+
+@pytest.mark.parametrize("efficiency", [0.0, -1.0, 2.0])
+def test_an_impossible_discharge_efficiency_cannot_divide_by_zero(efficiency):
+    """Clamped into (0, 1], so a bad setting is survivable rather than fatal."""
+    plan = plan_target_soc(_plan_input(discharge_efficiency=efficiency))
+    assert math.isfinite(plan.target_soc)

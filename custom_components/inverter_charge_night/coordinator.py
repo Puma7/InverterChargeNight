@@ -81,6 +81,7 @@ from .const import (
     CONF_PV_CROSSOVER_DELAY_MIN,
     CONF_BRIDGE_RESERVE_KWH,
     CONF_CHARGE_EFFICIENCY,
+    CONF_DISCHARGE_EFFICIENCY,
     CONF_DISCHARGE_LIMIT_ENTITY,
     CONF_DISCHARGE_BLOCK_SWITCH,
     CONF_DISCHARGE_BLOCK_MODE,
@@ -106,6 +107,7 @@ from .const import (
     DEFAULT_ACTIVE_END_DATE,
     DEFAULT_ACTIVE_RANGE_YEARLY,
     DEFAULT_DISCHARGE_BLOCK_MODE,
+    DEFAULT_DISCHARGE_EFFICIENCY,
     DISCHARGE_BLOCK_OFF,
     DISCHARGE_BLOCK_VIA_SWITCH,
     DISCHARGE_BLOCK_VIA_LIMIT,
@@ -957,6 +959,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 house_load_kw_profile=await self._house_load_profile(),
                 reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
                 charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
+                discharge_efficiency=float(
+                    self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)
+                ),
                 prices_ct=self._prices_ct(),
                 # Measured from the window end: the evening the battery has to
                 # reach is the one on the solar day this window is planning for.

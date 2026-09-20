@@ -5,6 +5,27 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.1] - 2026-09-20
+
+### Fixed
+
+- **The planner bought too little, every night, in the same direction.** The house load profile
+  and the forecast are measured on the house side of the inverter; energy coming *out* of the
+  battery is not. The bridge energy and the evening reserve were converted one to one all the
+  same, as if discharging were free. To deliver 4 kWh to the house on a winter evening the
+  battery has to hold roughly 4.2. New setting **Discharge efficiency** (step 4, default 0.95)
+  with the arithmetic behind it; targets rise by about a point on a typical bridge. Raised by
+  Pascal, who named exactly this ("bei den Entladeverlusten könnte man zu knapp agieren")
+  — the code confirmed it: `charge_efficiency` was carried into the planner and then never used
+  by it at all.
+
+### Changed
+
+- The energies in the plan (`bridge_kwh`, `evening_shortfall_kwh`, and the matching sensor
+  attributes) are now stated as what the **battery** has to hold rather than what the house will
+  draw. `evening_reserve_kwh` stays the house draw, so the pair reads as "the evening will take
+  1.5 kWh; the battery has to gain 1.58 tonight to deliver it".
+
 ## [3.3.0] - 2026-09-20
 
 ### Added

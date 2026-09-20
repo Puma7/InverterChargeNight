@@ -494,7 +494,9 @@ async def test_window_end_waits_for_running_verification_before_reset(mock_hass)
 # Bridge inputs for every test below: window 00:00-05:59, sunrise 07:30 with a
 # 90 minute crossover delay (PV > load at 09:00), sunset 17:00, a flat 0.5 kW
 # house load and a 0.5 kWh reserve. The bridge is therefore
-# 0.5 kW * 3 h 01 min + 0.5 kWh = 2.008 kWh -> lower bound 28.1 % of 10 kWh.
+# 0.5 kW * 3 h 01 min of house load, which the battery has to hold ~5 % more of
+# (the discharge loss), plus the 0.5 kWh reserve -> a lower bound of 28.9 % of
+# 10 kWh.
 # ``dt_util.now`` is naive in these tests, so the sun times are read as UTC
 # and aligned to naive local time by the coordinator.
 
@@ -523,6 +525,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_NIGHT_PRICE_CT,
     CONF_PLANNER_MODE,
     CONF_PV_CROSSOVER_DELAY_MIN,
+    DEFAULT_DISCHARGE_EFFICIENCY,
     PLANNER_MODE_BRIDGE,
 )
 from custom_components.inverter_charge_night.planner import (
@@ -545,8 +548,11 @@ BRIDGE_CONFIG = {
     CONF_BRIDGE_RESERVE_KWH: 0.5,
     CONF_CHARGE_EFFICIENCY: 0.9,
 }
-BRIDGE_KWH = 0.5 * (3 + 1 / 60) + 0.5
-BRIDGE_TARGET = round((BRIDGE_KWH + CAPACITY_KWH * USER_MIN / 100) / CAPACITY_KWH * 100, 1)  # 28.1
+BRIDGE_LOAD_KWH = 0.5 * (3 + 1 / 60)
+# What the house draws is not what the battery gives up: the way out through the
+# inverter costs a few percent, and the plan has to buy that too.
+BRIDGE_KWH = BRIDGE_LOAD_KWH / DEFAULT_DISCHARGE_EFFICIENCY + 0.5
+BRIDGE_TARGET = round((BRIDGE_KWH + CAPACITY_KWH * USER_MIN / 100) / CAPACITY_KWH * 100, 1)  # 28.9
 PV_CROSSOVER = datetime(2026, 1, 15, 9, 0)
 
 
@@ -592,7 +598,7 @@ async def bridge(mock_hass):
 @pytest.mark.asyncio
 async def test_bridge_mode_targets_bridge_energy_not_headroom(mock_hass, bridge):
     """5 kWh forecast: headroom would say 45 %, the bridge planner says 28.1 %."""
-    assert BRIDGE_TARGET == 28.1
+    assert BRIDGE_TARGET == 28.9
     await bridge._on_window_start(WINDOW_START)
 
     assert bridge.initial_calculated_soc == BRIDGE_TARGET
@@ -671,10 +677,16 @@ async def test_replan_in_window_raises_target_but_never_lowers_it(mock_hass):
     """A smaller forecast raises the target; a larger one does not lower it.
 
     Forecast 13 kWh: surplus 10.3 kWh > bridge, conflict, headroom wins at
-    28 / 30 / 20 ct -> target 17.1 % (upper bound). Forecast 5 kWh: no conflict
-    -> 28.1 % (bridge). Back to 13 kWh: the plan says 17.1 % but the window
-    target stays at 28.1 %.
+    28 / 30 / 20 ct -> the upper bound. Forecast 5 kWh: no conflict, so the
+    bridge bound. Back to 13 kWh: the plan drops again, but the window target
+    stays where it was.
+
+    The upper bound is derived rather than written out: it moves with the
+    bridge energy, and the bridge energy carries the discharge loss.
     """
+    # Room the bridge frees before the crossover, so the surplus needs that
+    # much less of its own
+    headroom_target = round((1.0 - (13 * 1.1 - 4.0 - BRIDGE_KWH) / CAPACITY_KWH) * 100, 1)
     _real_task_runner(mock_hass)
     _persisting(mock_hass)
     _register_inverter(mock_hass, battery="10", pv="13")
@@ -690,7 +702,7 @@ async def test_replan_in_window_raises_target_but_never_lowers_it(mock_hass):
         await coordinator._on_window_start(WINDOW_START)
         assert coordinator.last_plan.reason == REASON_CONFLICT_HEADROOM_WINS
         first_target = coordinator.initial_calculated_soc
-        assert first_target == 17.1
+        assert first_target == headroom_target
         await coordinator._async_update_data()
         mock_hass.states.async_set(MIN_SOC, str(first_target))
         mock_hass.states.async_set(GRID, "on")
@@ -714,7 +726,7 @@ async def test_replan_in_window_raises_target_but_never_lowers_it(mock_hass):
         mock_hass.states.async_set(PV, "13", {"unit_of_measurement": "kWh"})
         data = await coordinator._async_update_data()
 
-        assert coordinator.last_plan.target_soc == 17.1
+        assert coordinator.last_plan.target_soc == headroom_target
         assert coordinator.initial_calculated_soc == BRIDGE_TARGET
         assert data["calculated_soc"] == BRIDGE_TARGET
         mock_hass.services.async_call.assert_not_awaited()
