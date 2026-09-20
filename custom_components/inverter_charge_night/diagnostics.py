@@ -59,6 +59,13 @@ async def async_get_config_entry_diagnostics(
             "is_enabled": coordinator.is_enabled,
             "operation_mode": coordinator.operation_mode,
             "skip_next": coordinator.skip_next,
+            # Set by the reset_inverter action: until then the running window is
+            # not taken up again. Answers "why is it not charging tonight".
+            "hands_off_until": (
+                coordinator._hands_off_until.isoformat()
+                if coordinator._hands_off_until
+                else None
+            ),
             "target_reached": coordinator.target_reached,
             "calculated_soc": coordinator.calculated_soc,
             "initial_calculated_soc": coordinator.initial_calculated_soc,

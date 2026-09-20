@@ -188,6 +188,53 @@ async def main() -> int:
         check("grid charging stops at the target", grid is not None and grid.state == "off",
               f"grid_charge={grid.state}")
 
+        # The actions are registered from async_setup, so they exist for every
+        # entry and survive one being unloaded.
+        check("both actions are registered",
+              hass.services.has_service("inverter_charge_night", "plan_target_soc")
+              and hass.services.has_service("inverter_charge_night", "reset_inverter"))
+
+        # A response action: it must answer with a plan and write nothing.
+        before = hass.states.get("number.inv_min_soc").state
+        answer = await hass.services.async_call(
+            "inverter_charge_night", "plan_target_soc", {},
+            blocking=True, return_response=True,
+        )
+        check("plan_target_soc answers with a target",
+              isinstance(answer, dict) and isinstance(answer.get("target_soc"), float),
+              f"answer={answer}")
+        check("plan_target_soc writes nothing",
+              hass.states.get("number.inv_min_soc").state == before,
+              f"min_soc={hass.states.get('number.inv_min_soc').state} (was {before})")
+
+        # The other direction: an action that reaches the inverter. The floor is
+        # raised at this point, so a restore to 8 % can only come from the call.
+        check("the floor is raised before the reset action", float(before) > 8.0,
+              f"min_soc={before}")
+        await hass.services.async_call(
+            "inverter_charge_night", "reset_inverter", {}, blocking=True,
+        )
+        await hass.async_block_till_done()
+        min_soc = hass.states.get("number.inv_min_soc")
+        check("reset_inverter writes the floor back to the inverter",
+              min_soc is not None and float(min_soc.state) == 8.0, f"min_soc={min_soc.state}")
+
+        # Bad input is refused with a translated message, not a raw key.
+        from homeassistant.exceptions import ServiceValidationError
+
+        try:
+            await hass.services.async_call(
+                "inverter_charge_night", "reset_inverter",
+                {"config_entry_id": "does_not_exist"}, blocking=True,
+            )
+        except ServiceValidationError as err:
+            message = str(err)
+        else:
+            message = ""
+        check("an unknown entry id is refused with a translated message",
+              "does_not_exist" in message and "entry_not_found" not in message,
+              f"message={message!r}")
+
         # The window end must restore the original floor
         await coordinator._on_window_end(dt_util.now())  # noqa: SLF001
         await hass.async_block_till_done()

@@ -212,6 +212,13 @@ BACKUP_INACTIVE_STATES: frozenset[str] = frozenset(
     }
 )
 
+# Service actions (plan 012, stage 1). Registered in async_setup so an
+# automation can call them even while an entry is reloading; each handler
+# checks the entry's state itself and says so rather than failing silently.
+SERVICE_PLAN_TARGET_SOC = "plan_target_soc"
+SERVICE_RESET_INVERTER = "reset_inverter"
+ATTR_CONFIG_ENTRY_ID = "config_entry_id"
+
 # Settings and stored data of earlier versions. Installations that have been
 # through several releases carry keys nobody reads any more; one real entry
 # held 500 dead measurement records, about a hundred kilobytes that Home

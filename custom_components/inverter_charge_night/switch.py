@@ -58,6 +58,9 @@ class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):
 
         _LOGGER.info("Enabling Inverter Charge Night")
         self.coordinator.is_enabled = True
+        # Switching it back on takes the inverter back from a reset_inverter
+        # call that handed it over for the rest of the window.
+        self.coordinator.clear_hands_off()
         self.coordinator._persist_state()
         self.async_write_ha_state()
         await self.coordinator.async_request_refresh()

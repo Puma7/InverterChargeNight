@@ -8,8 +8,11 @@
 rules:
   # Bronze
   action-setup:
-    status: exempt
-    comment: The integration registers no service actions; everything is controlled through entities.
+    status: done
+    comment: >-
+      plan_target_soc and reset_inverter are registered from async_setup in
+      services.py, so they exist independently of any entry being loaded; each
+      handler resolves its entry and reports an unloaded one as an error.
   appropriate-polling:
     status: done
     comment: |
@@ -90,8 +93,11 @@ rules:
 
   # Silver
   action-exceptions:
-    status: exempt
-    comment: No service actions are registered.
+    status: done
+    comment: >-
+      Bad input (missing, unknown or unloaded entry) raises
+      ServiceValidationError, a failed plan or reset raises HomeAssistantError,
+      both with translated messages.
   config-entry-unloading:
     status: done
     comment: |

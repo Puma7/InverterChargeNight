@@ -412,6 +412,7 @@ def test_persist_state_round_trip_next_to_auto_efficiency_data(mock_hass):
         "original_absolute_charge_power": None,
         "pending_reset": True,
         "snow_nights": 3,
+        "hands_off_until": None,
     }
 
     # "Restart": a new coordinator on the same entry gets everything back

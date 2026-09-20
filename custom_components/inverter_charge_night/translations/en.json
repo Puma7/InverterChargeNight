@@ -530,6 +530,21 @@
   "exceptions": {
     "entity_not_available": {
       "message": "Required entity {entity_id} is not yet available"
+    },
+    "entry_id_required": {
+      "message": "Several inverters are configured, so the action needs to be told which one. Choose an inverter in the action's fields."
+    },
+    "entry_not_found": {
+      "message": "No Inverter Charge Night configuration with the id {entry_id} exists."
+    },
+    "entry_not_loaded": {
+      "message": "The configuration “{title}” is not loaded, so there is nothing to act on."
+    },
+    "plan_failed": {
+      "message": "The planner could not produce a target. The log says which setting it stumbled over."
+    },
+    "reset_failed": {
+      "message": "The inverter did not accept the reset. It is retried automatically; the log names the setting that failed."
     }
   },
   "issues": {
@@ -540,6 +555,28 @@
     "discharge_block_without_backup": {
       "title": "{name}: the battery cannot supply the house during a power cut",
       "description": "To keep the energy it bought, this integration raises the inverter's minimum SOC while the window is open - and a battery does not discharge below its minimum SOC. If the power fails during the window and your house switches to the battery, the battery will refuse to supply it, however full it is.\n\nTwo ways out, either is enough:\n\n1. Set **Backup / island mode entity** in the integration options (step 4). Any entity that says the house is running on the battery: the inverter's state sensor (a Kostal reports `ESB` - add it under **Backup mode states**), a binary sensor, or an `input_boolean` you flip yourself when you operate a manual transfer switch. The integration then hands the inverter back within seconds.\n\n2. Set **Discharge block** to `Off` in step 3. The battery may then run the house at night, which costs the difference between the window tariff and the day tariff.\n\nThis message disappears once either is done."
+    }
+  },
+  "services": {
+    "plan_target_soc": {
+      "name": "Plan target SOC",
+      "description": "Works out the target state of charge for the next window from the forecast, the house load profile and the sun, and returns it without changing anything.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Which configured inverter to plan for. Can be left empty when only one is configured."
+        }
+      }
+    },
+    "reset_inverter": {
+      "name": "Reset the inverter",
+      "description": "Puts the minimum SOC, the charge limits and the switches back to the values captured before the window. The same reset the window end performs. Refused while backup mode is active.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Which configured inverter to reset. Can be left empty when only one is configured."
+        }
+      }
     }
   }
 }

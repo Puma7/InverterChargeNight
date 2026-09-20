@@ -250,6 +250,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.skip_next = False
         self._skip_next_until: datetime | None = None
         self._skip_next_unsub: CALLBACK_TYPE | None = None
+        # Set by the reset_inverter action: until this moment the running window
+        # is not taken up again. Without it the action would be a no-op - the min
+        # SOC listener writes the window's floor back within milliseconds, and
+        # the window check restarts the window on the next update.
+        self._hands_off_until: datetime | None = None
         self.calculated_soc: float | None = None
         self.initial_calculated_soc: float | None = None  # Store SOC calculated at window start
         self.minimum_calculated_soc: float | None = None  # Store minimum SOC value (always <= initial)
@@ -355,6 +360,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "original_discharge_block": self._original_discharge_block,
             "original_absolute_charge_power": self._original_absolute_charge_power,
             "pending_reset": self._pending_reset,
+            "hands_off_until": (
+                self._hands_off_until.isoformat() if self._hands_off_until else None
+            ),
             "snow_nights": self.snow_nights,
         }
         self.hass.config_entries.async_update_entry(self.entry, options=options)
@@ -399,6 +407,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
             self.snow_nights = snow_raw
+
+        hands_off_raw = state.get("hands_off_until")
+        if isinstance(hands_off_raw, str):
+            try:
+                hands_off = datetime.fromisoformat(hands_off_raw)
+            except (ValueError, TypeError):
+                _LOGGER.warning("Ignoring invalid persisted hands_off_until %r", hands_off_raw)
+            else:
+                # A deadline in the past is simply over; no timer is needed
+                # either way, because the window check looks at the clock.
+                if hands_off > dt_util.now():
+                    self._hands_off_until = hands_off
 
         until_raw = state.get("skip_next_until")
         if isinstance(until_raw, str):
@@ -539,6 +559,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         remaining = max(0.0, (until - now).total_seconds())
         self._skip_next_unsub = async_call_later(self.hass, remaining, _expire_skip_next)
+
+    def clear_hands_off(self) -> None:
+        """Let the integration drive the running window again.
+
+        The ``reset_inverter`` action keeps it off the inverter until the
+        window's end time; switching the integration back on is the user saying
+        otherwise. The caller persists.
+        """
+        if self._hands_off_until is not None:
+            _LOGGER.info("Driving the window again - the inverter is no longer handed back")
+            self._hands_off_until = None
 
     def _cancel_skip_next_expiry(self) -> None:
         """Cancel the skip_next expiry timer."""
@@ -834,6 +865,79 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         return [sums[hour] / counts[hour] if counts[hour] else avg_kw for hour in range(24)]
 
+    async def _build_plan_input(
+        self, forecast_kwh: float, forecast_available: bool
+    ) -> tuple[PlanInput, datetime]:
+        """Gather every state the planner needs; returns the input and the crossover.
+
+        Split out of :meth:`_plan_target` so that a caller can run the planner
+        without the side effects - the ``plan_target_soc`` action answers with a
+        plan and must not move the window's target while it does so.
+        """
+        capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
+        now = dt_util.now()
+        window_end = self._window_end_datetime(now)
+        sunrise, sunset = self._sun_times(now, window_end)
+        delay_min = int(float(self.config.get(CONF_PV_CROSSOVER_DELAY_MIN, DEFAULT_PV_CROSSOVER_DELAY_MIN)))
+        pv_crossover = sunrise + timedelta(minutes=delay_min)
+        if pv_crossover < window_end:
+            # The sun is already up when the window ends (morning discharge,
+            # or a spring window ending after sunrise): there is nothing to
+            # bridge, PV carries the house from the window end onwards.
+            _LOGGER.debug(
+                "PV crossover %s is before the window end %s - no bridge needed",
+                pv_crossover,
+                window_end,
+            )
+            pv_crossover = window_end
+        bridge_hours = (pv_crossover - window_end).total_seconds() / 3600.0
+        if bridge_hours > MAX_PLAUSIBLE_BRIDGE_HOURS:
+            _LOGGER.warning(
+                "Bridging %.1f h from the window end %s to the PV crossover %s - check "
+                "%s and the crossover delay; the target will be very high",
+                bridge_hours,
+                window_end,
+                pv_crossover,
+                SUN_ENTITY_ID,
+            )
+        current_soc = self._current_battery_soc()
+        return (
+            PlanInput(
+                capacity_kwh=capacity,
+                current_soc=current_soc if current_soc is not None else 0.0,
+                user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
+                user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
+                forecast_kwh_next_day=forecast_kwh,
+                forecast_available=forecast_available,
+                error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
+                window_end=window_end,
+                pv_crossover=pv_crossover,
+                sunset=sunset,
+                house_load_kw_profile=await self._house_load_profile(),
+                reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
+                charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
+                prices_ct=self._prices_ct(),
+            ),
+            pv_crossover,
+        )
+
+    async def preview_plan(self) -> tuple[PlanResult, PlanInput] | None:
+        """Run the planner on the current inputs and change nothing.
+
+        For the ``plan_target_soc`` action: an automation may ask what the
+        planner would do at any time, including outside a window, without the
+        answer becoming the window's target.
+        """
+        forecast_kwh, forecast_available = self._parse_forecast_energy(
+            self._get_active_forecast_entity()
+        )
+        try:
+            plan_input, _ = await self._build_plan_input(forecast_kwh, forecast_available)
+            return plan_target_soc(plan_input), plan_input
+        except (ValueError, TypeError) as err:
+            _LOGGER.error("Bridge planner failed: %s", err)
+            return None
+
     async def _plan_target(self, forecast_kwh: float, forecast_available: bool) -> PlanResult | None:
         """Run the bridge planner on the current inputs; None when it cannot plan.
 
@@ -841,51 +945,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         (invalid configuration) is logged and the caller uses the headroom formula.
         """
         try:
-            capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
-            now = dt_util.now()
-            window_end = self._window_end_datetime(now)
-            sunrise, sunset = self._sun_times(now, window_end)
-            delay_min = int(float(self.config.get(CONF_PV_CROSSOVER_DELAY_MIN, DEFAULT_PV_CROSSOVER_DELAY_MIN)))
-            pv_crossover = sunrise + timedelta(minutes=delay_min)
-            if pv_crossover < window_end:
-                # The sun is already up when the window ends (morning discharge,
-                # or a spring window ending after sunrise): there is nothing to
-                # bridge, PV carries the house from the window end onwards.
-                _LOGGER.debug(
-                    "PV crossover %s is before the window end %s - no bridge needed",
-                    pv_crossover,
-                    window_end,
-                )
-                pv_crossover = window_end
-            bridge_hours = (pv_crossover - window_end).total_seconds() / 3600.0
-            if bridge_hours > MAX_PLAUSIBLE_BRIDGE_HOURS:
-                _LOGGER.warning(
-                    "Bridging %.1f h from the window end %s to the PV crossover %s - check "
-                    "%s and the crossover delay; the target will be very high",
-                    bridge_hours,
-                    window_end,
-                    pv_crossover,
-                    SUN_ENTITY_ID,
-                )
-            current_soc = self._current_battery_soc()
-            plan = plan_target_soc(
-                PlanInput(
-                    capacity_kwh=capacity,
-                    current_soc=current_soc if current_soc is not None else 0.0,
-                    user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
-                    user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
-                    forecast_kwh_next_day=forecast_kwh,
-                    forecast_available=forecast_available,
-                    error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
-                    window_end=window_end,
-                    pv_crossover=pv_crossover,
-                    sunset=sunset,
-                    house_load_kw_profile=await self._house_load_profile(),
-                    reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
-                    charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
-                    prices_ct=self._prices_ct(),
-                )
+            plan_input, pv_crossover = await self._build_plan_input(
+                forecast_kwh, forecast_available
             )
+            plan = plan_target_soc(plan_input)
         except (ValueError, TypeError) as err:
             _LOGGER.error("Bridge planner failed, using the headroom formula instead: %s", err)
             return None
@@ -2522,6 +2585,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await self._on_window_end(dt_util.now())
                 return
 
+            if self._hands_off_until is not None:
+                if dt_util.now() < self._hands_off_until:
+                    # The reset_inverter action gave the inverter back for the
+                    # rest of this window. Starting it again here would undo
+                    # exactly what the caller asked for.
+                    _LOGGER.debug(
+                        "Inverter handed back until %s - leaving it alone",
+                        self._hands_off_until.isoformat(),
+                    )
+                    if self.is_active:
+                        await self._on_window_end(dt_util.now())
+                    return
+                _LOGGER.info("The window may be driven again")
+                self._hands_off_until = None
+                self._persist_state()
+
             if self._is_backup_active():
                 if self.is_active:
                     _LOGGER.info("Backup mode active - stopping window and resetting settings")
@@ -2785,6 +2864,42 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.operation_mode = mode
         finally:
             self._switching_mode = False
+
+    async def async_reset_inverter(self) -> bool:
+        """Put the inverter back to the settings captured before the window.
+
+        The public way into :meth:`_reset_settings`, for the ``reset_inverter``
+        action. Backup mode refuses: there the house runs on the battery and the
+        inverter is not ours to write to, and a reset that "succeeded" by doing
+        nothing would clear the captures we still need afterwards.
+
+        Inside a running window the window is ended first, and not taken up
+        again before its end time. A bare reset would not survive the second it
+        was written in: the min SOC listener and the verification task exist to
+        put the window's floor straight back whenever something else moves it.
+        The next window runs as usual - this hands the inverter back for the
+        window it is called in, it does not switch the integration off.
+
+        The result is the reset's own: False also arms the retry ladder, because
+        _reset_settings records its outcome itself.
+        """
+        if self._is_backup_active():
+            _LOGGER.info("Backup mode active - not resetting the inverter on request")
+            return False
+        if self.is_active:
+            now = dt_util.now()
+            self._hands_off_until = self._window_end_datetime(now)
+            _LOGGER.info(
+                "Resetting the inverter settings on request - ending the window and "
+                "leaving the inverter alone until %s",
+                self._hands_off_until.isoformat(),
+            )
+            # The deadline is set before the end runs, so the end's own
+            # _persist_state carries it.
+            await self._on_window_end(now)
+            return not self._pending_reset
+        _LOGGER.info("Resetting the inverter settings on request")
+        return await self._reset_settings()
 
     async def async_disable(self) -> None:
         """Switch the integration off and hand the inverter back.

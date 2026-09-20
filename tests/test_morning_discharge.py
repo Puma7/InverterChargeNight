@@ -45,6 +45,7 @@ def _make_coordinator(mock_hass, mock_config_entry, mode=MODE_MORNING_DISCHARGE)
         coord.skip_next = False
         coord._skip_next_unsub = None
         coord._skip_next_until = None
+        coord._hands_off_until = None
         coord.original_min_soc = None
         coord.is_active = True
         coord.is_enabled = True

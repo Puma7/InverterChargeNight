@@ -5,6 +5,38 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-09-20
+
+The integration can be talked to. Until now the only way in from an automation was to toggle
+its entities; it registered no actions at all.
+
+### Added
+
+- **`inverter_charge_night.plan_target_soc`** — a response action. It runs the planner on the
+  current inputs and answers with the target, the reason, both bounds and the energies they came
+  from, **without writing anything to the inverter**. An automation can now decide whether
+  tonight is worth charging at all.
+- **`inverter_charge_night.reset_inverter`** — hands the inverter back: minimum SOC, charge
+  limits and switches return to the values captured before the window. Inside a running window
+  it ends that window and stays off the inverter until the window's end time, because a bare
+  reset would not survive the second it was written in — the min SOC watchdog puts the window's
+  floor straight back. The next window runs as usual, and switching the integration off and on
+  again takes control back immediately. Backup mode refuses the call.
+- Both actions are registered from `async_setup`, so they exist even while no entry is loaded,
+  and both report a bad or unloaded entry, a failed plan and a refused reset as translated
+  errors an automation can catch. `action-setup` and `action-exceptions` in `quality_scale.yaml`
+  moved from `exempt` to `done`.
+- Diagnostics gained `hands_off_until`, which answers "why is it not charging tonight" after a
+  `reset_inverter` call.
+
+### Fixed
+
+- The end-to-end smoke test against a real Home Assistant now also calls both actions. It caught
+  two things a unit test would not have: the exception strings were written as plain text rather
+  than as `{"message": ...}` objects, so Home Assistant would have shown the raw translation key
+  to the user, and a reset inside a window was undone within milliseconds by the integration's
+  own watchdog.
+
 ## [3.0.2] - 2026-09-20
 
 Follow-ups from a review of 3.0.1. One of them is a safety fix, and one setting changes.

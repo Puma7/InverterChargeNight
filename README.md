@@ -668,6 +668,63 @@ as "Inverter Charge Night <name>". The entity ids are stable; the display names 
 - **House load after the window**: Switch the planner to `Bridge` so the battery also carries
   the house until the PV output takes over in the morning.
 
+## Actions
+
+Two actions make the integration reachable from an automation or a script. Both take an
+optional `config_entry_id` (a picker in the UI); with a single inverter configured it can be
+left out.
+
+### `inverter_charge_night.plan_target_soc`
+
+Runs the planner on the current inputs and **answers with the result without writing anything**.
+Useful to decide in an automation whether tonight is worth charging at all, and to see why a
+target came out as it did.
+
+```yaml
+alias: Tell me tonight's target
+trigger:
+  - platform: time
+    at: "22:30:00"
+action:
+  - service: inverter_charge_night.plan_target_soc
+    response_variable: plan
+  - service: notify.persistent_notification
+    data:
+      message: >-
+        Tonight: {{ plan.target_soc }} % ({{ plan.reason }}),
+        bridge {{ plan.bridge_kwh }} kWh, surplus {{ plan.surplus_kwh }} kWh
+```
+
+The response carries `target_soc`, `reason` (`bridge`, `headroom`, `conflict_bridge_wins`,
+`conflict_headroom_wins` or `fallback`), the two bounds `lower_bound_soc` / `upper_bound_soc`,
+the energies `bridge_kwh` / `surplus_kwh`, and the inputs they came from: `current_soc`,
+`forecast_kwh`, `forecast_available`, `window_end`, `pv_crossover`, `sunset`.
+
+### `inverter_charge_night.reset_inverter`
+
+Puts the minimum SOC, the charge limits and the switches back to the values captured before the
+window — the same reset the window end performs.
+
+Called **inside a running window it ends that window** and leaves the inverter alone until the
+window's end time. That is deliberate: without it the reset would not survive the second it was
+written in, because the min SOC watchdog puts the window's floor straight back whenever
+something else moves it. The next window runs as usual; switching the integration off and on
+again takes control back immediately. Backup mode refuses the call.
+
+```yaml
+alias: Hand the inverter over to the wallbox
+trigger:
+  - platform: state
+    entity_id: binary_sensor.wallbox_charging
+    to: "on"
+action:
+  - service: inverter_charge_night.reset_inverter
+```
+
+Both actions report failure as an error the automation can catch: an unknown or unloaded entry,
+a plan the planner could not produce, or an inverter that did not accept the reset (which is
+retried by the integration regardless).
+
 ## Example Automations
 
 **Enable nightly charging**

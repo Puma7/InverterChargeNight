@@ -6,7 +6,8 @@ from datetime import timedelta
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import config_validation as cv, issue_registry as ir
+from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     AUTO_EFFICIENCY_KEYS,
@@ -34,6 +35,7 @@ from .coordinator import (
     InverterChargeNightConfigEntry,
     InverterChargeNightCoordinator,
 )
+from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,14 +47,29 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
 ]
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 __all__ = [
+    "CONFIG_SCHEMA",
     "PLATFORMS",
     "InverterChargeNightConfigEntry",
     "InverterChargeNightCoordinator",
+    "async_setup",
     "async_setup_entry",
     "async_unload_entry",
     "async_update_entry",
 ]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the actions once, before any entry is set up.
+
+    The quality scale asks for this: an action that only exists while an entry
+    happens to be loaded disappears from an automation's reach exactly when
+    something went wrong. The handlers check the entry themselves instead.
+    """
+    async_setup_services(hass)
+    return True
 
 
 def _clear_stale_entity_issues(hass: HomeAssistant) -> None:

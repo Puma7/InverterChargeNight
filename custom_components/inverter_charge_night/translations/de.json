@@ -530,6 +530,21 @@
   "exceptions": {
     "entity_not_available": {
       "message": "Die benötigte Entität {entity_id} ist noch nicht verfügbar"
+    },
+    "entry_id_required": {
+      "message": "Es sind mehrere Wechselrichter eingerichtet, die Aktion braucht also die Angabe, welcher gemeint ist. Wähle einen in den Feldern der Aktion aus."
+    },
+    "entry_not_found": {
+      "message": "Es gibt keine Inverter-Charge-Night-Konfiguration mit der Kennung {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "Die Konfiguration „{title}“ ist nicht geladen, es gibt also nichts, worauf die Aktion wirken könnte."
+    },
+    "plan_failed": {
+      "message": "Der Planer konnte kein Ziel berechnen. Im Protokoll steht, welche Einstellung ihm im Weg stand."
+    },
+    "reset_failed": {
+      "message": "Der Wechselrichter hat den Reset nicht angenommen. Er wird automatisch wiederholt; im Protokoll steht, welche Einstellung fehlgeschlagen ist."
     }
   },
   "issues": {
@@ -540,6 +555,28 @@
     "entity_not_available": {
       "title": "Die benötigte Entität {entity_id} fehlt",
       "description": "Inverter Charge Night braucht die Entität {entity_id}, aber Home Assistant kennt sie nicht. Prüfe die Entitäts-ID in den Einstellungen der Integration (Neu konfigurieren) oder stelle die Entität in ihrer eigenen Integration wieder her."
+    }
+  },
+  "services": {
+    "plan_target_soc": {
+      "name": "Ziel-Ladestand berechnen",
+      "description": "Berechnet den Ziel-Ladestand für das nächste Fenster aus Prognose, Hausverbrauchsprofil und Sonnenstand und gibt ihn zurück, ohne etwas zu ändern.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wechselrichter",
+          "description": "Für welchen eingerichteten Wechselrichter geplant werden soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
+        }
+      }
+    },
+    "reset_inverter": {
+      "name": "Wechselrichter zurücksetzen",
+      "description": "Setzt Mindestladestand, Ladegrenzen und Schalter auf die vor dem Fenster gemerkten Werte zurück — derselbe Reset wie am Fensterende. Wird bei aktivem Notstrombetrieb abgelehnt.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wechselrichter",
+          "description": "Welcher eingerichtete Wechselrichter zurückgesetzt werden soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
+        }
+      }
     }
   }
 }
