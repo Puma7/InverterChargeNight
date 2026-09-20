@@ -378,3 +378,119 @@ def allowed_charge_power_w(
     # Feeding in (a negative import) does not earn the battery extra budget.
     other_load_w = max(0.0, max(0.0, grid_import_w) - max(0.0, own_charge_w))
     return max(0.0, budget_w - max(0.0, headroom_w) - other_load_w)
+
+
+# The evening outlook (plan 013) ------------------------------------------------
+#
+# The night plan asks "how much must the battery hold by morning". This asks the
+# question the day after a forecast that was too optimistic: "will there still be
+# enough in it when the expensive hours start this evening, and if not, by how
+# much is it short". Pure arithmetic again - the coordinator reads the states.
+
+
+@dataclass(frozen=True)
+class EveningOutlook:
+    """What the battery is heading for at the start of the high-price period."""
+
+    zone_start: datetime
+    zone_end: datetime
+    required_soc: float        # what it has to be at zone_start
+    projected_soc: float       # what it will be if nothing is done
+    missing_kwh: float         # battery side, 0.0 when it will make it
+    pv_to_come_kwh: float      # what the sun is still expected to deliver
+    load_to_come_kwh: float    # what the house will draw before then
+    forecast_available: bool
+
+
+def pv_fraction_between(
+    sunrise: datetime, sunset: datetime, start: datetime, end: datetime
+) -> float:
+    """The share of a day's PV energy produced between two instants.
+
+    A clear-sky bell: output follows ``sin(pi * x)`` across the solar day, so
+    the energy between two points is ``(cos(pi*x1) - cos(pi*x2)) / 2``.
+
+    It is an approximation and is used as one. Clouds, orientation, shading and
+    snow all move it, and it is deliberately not linear: at four in the
+    afternoon a linear model still promises half the day's yield, which is the
+    one error that matters here - it would let the battery run into the evening
+    short while the plan says it is fine.
+    """
+    day_s = (sunset - sunrise).total_seconds()
+    if day_s <= 0:
+        return 0.0
+    first = _clamp((start - sunrise).total_seconds() / day_s, 0.0, 1.0)
+    last = _clamp((end - sunrise).total_seconds() / day_s, 0.0, 1.0)
+    if last <= first:
+        return 0.0
+    return (math.cos(math.pi * first) - math.cos(math.pi * last)) / 2.0
+
+
+def evening_outlook(
+    *,
+    now: datetime,
+    capacity_kwh: float,
+    current_soc: float,
+    user_min_soc: float,
+    user_max_soc: float,
+    house_load_kw_profile: Sequence[float],
+    zone_start: datetime,
+    zone_end: datetime,
+    margin_pct: float,
+    charge_efficiency: float,
+    discharge_efficiency: float,
+    sunrise: datetime,
+    sunset: datetime,
+    forecast_kwh_today: float,
+    forecast_available: bool,
+) -> EveningOutlook:
+    """Project the battery forward to the start of the high-price period.
+
+    What it needs there is the period's own load, grossed up for the way out of
+    the battery, on top of the user minimum - the day's surplus is *not*
+    subtracted here the way it is in the night plan, because the sun between now
+    and then is already in the projection.
+
+    Raises ValueError for a non-positive capacity, like the other entry points.
+    """
+    if capacity_kwh <= 0:
+        raise ValueError("Battery capacity must be positive")
+
+    zone_load_kwh = integrate_load(house_load_kw_profile, zone_start, zone_end) * (
+        1 + max(0.0, margin_pct) / 100.0
+    )
+    required_soc = _clamp(
+        user_min_soc + _from_battery_kwh(zone_load_kwh, discharge_efficiency) / capacity_kwh * 100.0,
+        user_min_soc,
+        user_max_soc,
+    )
+
+    load_to_come = integrate_load(house_load_kw_profile, now, zone_start)
+    pv_to_come = (
+        max(0.0, forecast_kwh_today) * pv_fraction_between(sunrise, sunset, now, zone_start)
+        if forecast_available
+        else 0.0
+    )
+    # The sun serves the house first; only what is left over reaches the
+    # battery, and only a shortfall has to come out of it.
+    net_house_kwh = pv_to_come - load_to_come
+    if net_house_kwh >= 0:
+        delta_battery_kwh = net_house_kwh * min(1.0, max(0.01, charge_efficiency))
+    else:
+        delta_battery_kwh = _from_battery_kwh(net_house_kwh, discharge_efficiency)
+
+    projected_soc = _clamp(
+        current_soc + delta_battery_kwh / capacity_kwh * 100.0, 0.0, user_max_soc
+    )
+    missing_kwh = max(0.0, (required_soc - projected_soc) / 100.0 * capacity_kwh)
+
+    return EveningOutlook(
+        zone_start=zone_start,
+        zone_end=zone_end,
+        required_soc=round(required_soc, 1),
+        projected_soc=round(projected_soc, 1),
+        missing_kwh=missing_kwh,
+        pv_to_come_kwh=pv_to_come,
+        load_to_come_kwh=load_to_come,
+        forecast_available=forecast_available,
+    )

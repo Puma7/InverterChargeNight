@@ -526,6 +526,9 @@
       },
       "next_high_price_window": {
         "name": "Next high-price period"
+      },
+      "evening_outlook": {
+        "name": "Evening outlook"
       }
     },
     "switch": {

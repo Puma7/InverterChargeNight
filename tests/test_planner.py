@@ -18,8 +18,10 @@ from custom_components.inverter_charge_night.planner import (
     REASON_CONFLICT_HEADROOM_WINS,
     REASON_FALLBACK,
     PlanInput,
+    evening_outlook,
     evening_reserve_soc,
     integrate_load,
+    pv_fraction_between,
     plan_target_soc,
     required_charge_power_w,
 )
@@ -424,3 +426,116 @@ def test_an_impossible_discharge_efficiency_cannot_divide_by_zero(efficiency):
     """Clamped into (0, 1], so a bad setting is survivable rather than fatal."""
     plan = plan_target_soc(_plan_input(discharge_efficiency=efficiency))
     assert math.isfinite(plan.target_soc)
+
+
+# The evening outlook (plan 013) -------------------------------------------------
+
+SUNRISE = datetime(2026, 6, 1, 5, 0)
+SUNSET_SUMMER = datetime(2026, 6, 1, 21, 0)
+ZONE = (datetime(2026, 6, 1, 18, 0), datetime(2026, 6, 1, 21, 0))
+
+
+def _outlook(**overrides):
+    values = dict(
+        now=datetime(2026, 6, 1, 14, 0),
+        capacity_kwh=10.0,
+        current_soc=50.0,
+        user_min_soc=8.0,
+        user_max_soc=100.0,
+        house_load_kw_profile=FLAT_500W,
+        zone_start=ZONE[0],
+        zone_end=ZONE[1],
+        margin_pct=0.0,
+        charge_efficiency=1.0,
+        discharge_efficiency=1.0,
+        sunrise=SUNRISE,
+        sunset=SUNSET_SUMMER,
+        forecast_kwh_today=20.0,
+        forecast_available=True,
+    )
+    values.update(overrides)
+    return evening_outlook(**values)
+
+
+def test_the_sun_share_is_a_bell_not_a_line():
+    """At four in the afternoon a linear model still promises half the day.
+
+    That is the error that matters here: it would let the battery walk into
+    the evening short while the projection says it is fine.
+    """
+    remaining = pv_fraction_between(
+        SUNRISE, SUNSET_SUMMER, datetime(2026, 6, 1, 16, 0), SUNSET_SUMMER
+    )
+    linear = (SUNSET_SUMMER - datetime(2026, 6, 1, 16, 0)) / (SUNSET_SUMMER - SUNRISE)
+    assert remaining < linear
+    assert remaining == pytest.approx(0.222, abs=0.005)
+
+
+def test_the_whole_solar_day_is_all_of_it():
+    assert pv_fraction_between(SUNRISE, SUNSET_SUMMER, SUNRISE, SUNSET_SUMMER) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    "start,end",
+    [
+        (SUNSET_SUMMER, SUNSET_SUMMER + timedelta(hours=2)),  # after dark
+        (SUNRISE - timedelta(hours=3), SUNRISE),  # before dawn
+        (datetime(2026, 6, 1, 14, 0), datetime(2026, 6, 1, 14, 0)),  # no span
+    ],
+)
+def test_no_sun_outside_the_solar_day(start, end):
+    assert pv_fraction_between(SUNRISE, SUNSET_SUMMER, start, end) == 0.0
+
+
+def test_a_polar_night_does_not_divide_by_zero():
+    assert pv_fraction_between(SUNRISE, SUNRISE, SUNRISE, SUNSET_SUMMER) == 0.0
+
+
+def test_a_sunny_afternoon_makes_it_to_the_evening():
+    outlook = _outlook()
+    # 1.5 kWh needed for the zone on top of 8 % -> 23 %; the battery is at 50
+    assert outlook.required_soc == pytest.approx(23.0)
+    assert outlook.missing_kwh == 0.0
+    assert outlook.projected_soc > 50.0
+
+
+def test_a_flat_battery_on_a_dull_day_is_short():
+    """Snow on the panels, nobody set the snow nights: the case Pascal named."""
+    outlook = _outlook(current_soc=12.0, forecast_kwh_today=0.5)
+    assert outlook.missing_kwh > 0.0
+    assert outlook.projected_soc < outlook.required_soc
+
+
+def test_without_a_forecast_the_sun_counts_for_nothing():
+    """A projection nobody can check has to be the pessimistic one."""
+    with_sun = _outlook(current_soc=20.0)
+    without = _outlook(current_soc=20.0, forecast_available=False)
+    assert without.pv_to_come_kwh == 0.0
+    assert without.missing_kwh > with_sun.missing_kwh
+
+
+def test_the_house_eats_into_the_battery_when_the_sun_does_not_cover_it():
+    outlook = _outlook(forecast_kwh_today=0.0, forecast_available=True, current_soc=50.0)
+    # 0.5 kW from 14:00 to 18:00 is 2 kWh out of a 10 kWh battery
+    assert outlook.load_to_come_kwh == pytest.approx(2.0)
+    assert outlook.projected_soc == pytest.approx(30.0)
+
+
+def test_the_discharge_loss_raises_what_the_evening_needs():
+    lossless = _outlook()
+    lossy = _outlook(discharge_efficiency=0.9)
+    assert lossy.required_soc > lossless.required_soc
+
+
+def test_the_margin_raises_what_the_evening_needs():
+    assert _outlook(margin_pct=25.0).required_soc > _outlook().required_soc
+
+
+def test_the_projection_cannot_exceed_the_user_maximum():
+    outlook = _outlook(current_soc=95.0, user_max_soc=96.0, forecast_kwh_today=40.0)
+    assert outlook.projected_soc == 96.0
+
+
+def test_an_impossible_capacity_is_rejected():
+    with pytest.raises(ValueError):
+        _outlook(capacity_kwh=0.0)

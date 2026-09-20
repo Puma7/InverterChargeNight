@@ -18,6 +18,9 @@
       },
       "next_high_price_window": {
         "default": "mdi:cash-clock"
+      },
+      "evening_outlook": {
+        "default": "mdi:weather-sunset-down"
       }
     },
     "switch": {

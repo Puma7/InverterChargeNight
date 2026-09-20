@@ -41,6 +41,7 @@ async def async_setup_entry(
             GridChargeHeadroomSensor(coordinator, entry),
             EfficiencySearchSensor(coordinator, entry),
             NextHighPriceWindowSensor(coordinator, entry),
+            EveningOutlookSensor(coordinator, entry),
         ]
     )
 
@@ -124,6 +125,49 @@ class NextHighPriceWindowSensor(InverterChargeNightEntity, SensorEntity):
             # Both come from the last plan, so they are None in headroom mode
             "reserve_kwh": data.get("evening_reserve_kwh"),
             "bought_at_night_kwh": data.get("evening_shortfall_kwh"),
+        }
+
+
+class EveningOutlookSensor(InverterChargeNightEntity, SensorEntity):
+    """How much the battery will be short when the expensive hours start.
+
+    Zero means it will make it. The state is deliberately the *deficit* rather
+    than a projected level: a number that is normally zero and only moves when
+    something is wrong is one you can put a notification on.
+    """
+
+    _attr_translation_key = "evening_outlook"
+    _attr_native_unit_of_measurement = "kWh"
+    # No ENERGY device class: this is a shortfall the planner is predicting,
+    # not energy that flowed, and an energy dashboard would treat it as one.
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "evening_outlook")
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the shortfall in kWh, or None without a high-price period."""
+        outlook = self.coordinator.last_evening_outlook
+        return round(outlook.missing_kwh, 2) if outlook else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the projection the shortfall was derived from."""
+        outlook = self.coordinator.last_evening_outlook
+        if outlook is None:
+            return {}
+        return {
+            "zone_start": outlook.zone_start.isoformat(),
+            "zone_end": outlook.zone_end.isoformat(),
+            "required_soc": outlook.required_soc,
+            "projected_soc": outlook.projected_soc,
+            "pv_to_come_kwh": round(outlook.pv_to_come_kwh, 2),
+            "load_to_come_kwh": round(outlook.load_to_come_kwh, 2),
+            # Without a forecast the sun counts for nothing, so the projection
+            # is the pessimistic one and says so.
+            "forecast_available": outlook.forecast_available,
         }
 
 

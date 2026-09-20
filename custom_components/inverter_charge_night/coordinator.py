@@ -141,9 +141,11 @@ from .const import (
 from .calculation import calculate_required_soc
 from .planner import (
     REASON_FALLBACK,
+    EveningOutlook,
     PlanInput,
     PlanResult,
     allowed_charge_power_w,
+    evening_outlook,
     evening_reserve_soc,
     grid_budget_w,
     plan_target_soc,
@@ -312,6 +314,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_missing_entities_logged = False
         # Planner v2 (plan 006)
         self.last_plan: PlanResult | None = None  # result of the last bridge plan this window
+        # The evening outlook belongs to the day, not to a window, so it is
+        # kept here rather than in the coordinator data, which is empty while
+        # no window runs - which is exactly when this matters (plan 013).
+        self.last_evening_outlook: EveningOutlook | None = None
         self.planned_charge_power_w: float | None = None  # setpoint for the remaining window
         # Whether that setpoint is also ordered from the inverter. The plan is
         # worth showing in every mode, but a number that looks like a command
@@ -1007,6 +1013,58 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             floor,
         )
         return floor
+
+    async def async_evening_outlook(self) -> EveningOutlook | None:
+        """Will the battery still carry the high-price period this evening?
+
+        The night plan buys for the evening in advance; this is the question
+        the day *after* a forecast that was too good - snow on the panels, say,
+        with nobody having set the snow nights. By mid-afternoon it is already
+        decidable, and there is still time to do something about it.
+
+        ``None`` when there is no high-price period configured, when the
+        battery cannot be read, or when the configuration makes the arithmetic
+        impossible. None of those are reasons to act.
+        """
+        zone = self._high_price_window(dt_util.now())
+        if zone is None:
+            return None
+        current_soc = self._current_battery_soc()
+        if current_soc is None:
+            return None
+        now = dt_util.now()
+        sunrise, sunset = self._sun_times(now, now)
+        forecast_kwh, forecast_available = self._parse_forecast_energy(
+            self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)
+            or self.config.get(CONF_PV_FORECAST_ENTITY)
+        )
+        try:
+            return evening_outlook(
+                now=now,
+                capacity_kwh=float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)),
+                current_soc=current_soc,
+                user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
+                user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
+                house_load_kw_profile=await self._house_load_profile(),
+                zone_start=zone[0],
+                zone_end=zone[1],
+                margin_pct=float(
+                    self.config.get(CONF_HIGH_PRICE_MARGIN_PCT, DEFAULT_HIGH_PRICE_MARGIN_PCT)
+                ),
+                charge_efficiency=float(
+                    self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)
+                ),
+                discharge_efficiency=float(
+                    self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)
+                ),
+                sunrise=sunrise,
+                sunset=sunset,
+                forecast_kwh_today=forecast_kwh,
+                forecast_available=forecast_available,
+            )
+        except (ValueError, TypeError) as err:
+            _LOGGER.error("Could not work out the evening outlook: %s", err)
+            return None
 
     async def preview_plan(self) -> tuple[PlanResult, PlanInput] | None:
         """Run the planner on the current inputs and change nothing.
@@ -3554,6 +3612,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "operation_mode": self.operation_mode,
             "skip_next": self.skip_next,
         }
+        # Worked out before every early return below: the question "will the
+        # battery carry this evening" is a daytime one, and by then no window
+        # is running (plan 013).
+        self.last_evening_outlook = (
+            await self.async_evening_outlook() if self.is_enabled else None
+        )
         if not self.is_enabled or not self.is_active:
             return inactive_data
         if self._is_backup_active():

@@ -5,6 +5,26 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 3.4.0, evening rescue (part 1 of 2)
+
+### Added
+
+- **`sensor.…_evening_outlook` — will the battery still carry the expensive hours tonight?**
+  The night plan buys for the evening in advance. This answers the question the day *after* a
+  forecast that was too good — snow on the panels with nobody having set the snow nights — while
+  there is still time to do something about it. The state is the shortfall in kWh, normally 0, so
+  a notification can hang off it. Attributes carry the whole projection: what the period needs,
+  what the battery is heading for, what the sun is still expected to deliver and what the house
+  will draw before then.
+- The sun's remaining share of the day is modelled as a clear-sky bell (`sin(pi*x)` across the
+  solar day) rather than linearly. At four in the afternoon a linear model still promises half
+  the day's yield; that is the one error that matters here, because it would let the battery walk
+  into the evening short while the projection says it is fine.
+
+This is the read-only half. It changes nothing about what the integration writes — the
+interventions (blocking the discharge during the day, topping up from the grid before the period
+starts) follow in the second half, with the top-up behind its own switch.
+
 ## [3.3.1] - 2026-09-20
 
 ### Fixed
