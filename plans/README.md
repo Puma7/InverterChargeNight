@@ -145,7 +145,8 @@ vorliegt; bis dahin bleibt der Kostal-Pfad, aber ohne Markennamen in Keys und La
 | 009 | Entladung im Fenster sperren: Schalter, sonst Leistungsgrenze, sonst Min-SOC anheben | P1 | M | 004, 005, 006 | DONE |
 | 010 | Effizienzsuche messbar machen: Einschwingen, Energiezähler, Annahmekriterien, Sichtbarkeit | P1 | M | 008 | DONE |
 | 011 | Tarifzeitfenster (Perioden, Saison, Jahreswechsel) und Abendreserve für die Hochpreiszone | P1 | M | 006 | TODO (Entwurf) |
-| 012 | Masterplan: allgemeine Lade-/Entladesteuerung — Services, Tarifkalender, Preissignal, Regeln als Subentries | P1 | L | 006 | Stufe 1 DONE (3.1.0), 2–4 TODO |
+| 012 | Masterplan: allgemeine Lade-/Entladesteuerung — Services, Tarifkalender, Preissignal, Regeln als Subentries | P1 | L | 006 | Stufen 1–2 DONE (3.1.0, 3.2.0), 3–4 TODO |
+| 013 | Abendrettung und das Ad-hoc-Fenster, das sie braucht | P1 | L | 009, 011 | Teil 1 DONE (Vorhersage + Sensor), Teil 2 TODO |
 
 Status-Werte: TODO | IN PROGRESS | DONE | BLOCKED (mit Grund) | REJECTED (mit Begründung)
 
