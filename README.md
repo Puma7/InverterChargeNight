@@ -884,9 +884,15 @@ What it currently meets:
 | Tests | 95 % coverage over the whole package enforced in CI, 100 % on the config flow, plus an end-to-end test against a real Home Assistant core |
 | Docs | this file, in English, with a German UI translation shipped in the integration |
 
-All 54 rules are currently met: 38 are implemented and 16 do not apply to an integration that
-talks to other integrations' entities rather than to a device or a cloud service (no polling
-protocol, no discovery, no authentication). The file names the reason for each exemption.
+Measured against all 54 rules: 38 are implemented, 15 do not apply to an integration that talks
+to other integrations' entities rather than to a device or a cloud service (no polling protocol,
+no discovery, no authentication), and one is open — `brands` asks for an entry in the
+home-assistant/brands repository, which has not been submitted. The file names the reason for
+each exemption.
+
+By tier, using Home Assistant's own grouping: Bronze 13 done / 5 not applicable, Silver 8 / 2,
+Gold 16 / 5, Platinum 1 / 2 (`strict-typing` is the one that applies, and it passes; the other
+two are about an external dependency this integration does not have).
 
 ## Technical Details
 

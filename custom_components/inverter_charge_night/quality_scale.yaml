@@ -17,10 +17,13 @@ rules:
       Everything that has to be fast - battery SOC, the inverter's min SOC, the
       grid import - is event driven through state change listeners instead.
   brands:
-    status: exempt
+    status: todo
     comment: |
-      The brands repository only accepts integrations that are part of Home
-      Assistant Core. The integration ships its own icon.svg for HACS.
+      The integration ships brand/icon.png, logo.png and their @2x variants, which
+      is what the HACS check looks for first and what it now passes on. The rule
+      itself asks for an entry in the home-assistant/brands repository, which does
+      accept custom integrations under custom_integrations/; that pull request has
+      not been made.
   common-modules:
     status: done
     comment: |
