@@ -122,7 +122,11 @@
           "discharge_efficiency": "Discharge efficiency",
           "night_price_ct": "Night Price (optional)",
           "day_price_ct": "Day Price (optional)",
-          "feed_in_price_ct": "Feed-in Price (optional)"
+          "feed_in_price_ct": "Feed-in Price (optional)",
+          "price_entity": "Electricity price entity (optional)",
+          "price_unit": "What the prices are in",
+          "price_surcharge_ct": "Surcharge on the exchange price",
+          "price_surcharge_window_ct": "Surcharge inside the window (optional)"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -140,7 +144,11 @@
           "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
           "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom.",
           "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the other two prices).",
-          "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices)."
+          "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices).",
+          "price_entity": "Optional: a sensor whose attributes carry today's and tomorrow's hourly prices — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them. The integration does not need to know which one it is; it recognises the series by its shape and reports what it matched on the price sensor. Leave empty to keep using the three fixed prices above.",
+          "price_unit": "Leave on 'detect automatically' unless the entity carries no unit, or carries one that is wrong. Nothing is ever guessed here: with no unit from the entity, the attribute name or this field, the price entity is refused and the fixed prices are used — a wrong guess would be a factor of a hundred.",
+          "price_surcharge_ct": "What your bill adds on top of what the entity shows — grid fee, levies, taxes, VAT. Tibber already shows the full price, so leave this at 0. aWATTar, EPEX Spot, Nordpool and ENTSO-e usually show the exchange price alone; in Germany the difference is typically 20–25 ct/kWh. Getting this wrong does not look wrong — 6 ct and 32 ct are both plausible numbers, and the evening reserve comes out the other way round on the wrong one.",
+          "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock."
         }
       },
       "reconfigure": {
@@ -264,7 +272,11 @@
           "discharge_efficiency": "Discharge efficiency",
           "night_price_ct": "Night Price (optional)",
           "day_price_ct": "Day Price (optional)",
-          "feed_in_price_ct": "Feed-in Price (optional)"
+          "feed_in_price_ct": "Feed-in Price (optional)",
+          "price_entity": "Electricity price entity (optional)",
+          "price_unit": "What the prices are in",
+          "price_surcharge_ct": "Surcharge on the exchange price",
+          "price_surcharge_window_ct": "Surcharge inside the window (optional)"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -282,7 +294,11 @@
           "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
           "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom.",
           "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the other two prices).",
-          "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices)."
+          "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices).",
+          "price_entity": "Optional: a sensor whose attributes carry today's and tomorrow's hourly prices — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them. The integration does not need to know which one it is; it recognises the series by its shape and reports what it matched on the price sensor. Leave empty to keep using the three fixed prices above.",
+          "price_unit": "Leave on 'detect automatically' unless the entity carries no unit, or carries one that is wrong. Nothing is ever guessed here: with no unit from the entity, the attribute name or this field, the price entity is refused and the fixed prices are used — a wrong guess would be a factor of a hundred.",
+          "price_surcharge_ct": "What your bill adds on top of what the entity shows — grid fee, levies, taxes, VAT. Tibber already shows the full price, so leave this at 0. aWATTar, EPEX Spot, Nordpool and ENTSO-e usually show the exchange price alone; in Germany the difference is typically 20–25 ct/kWh. Getting this wrong does not look wrong — 6 ct and 32 ct are both plausible numbers, and the evening reserve comes out the other way round on the wrong one.",
+          "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock."
         }
       }
     },
@@ -436,7 +452,11 @@
           "discharge_efficiency": "Discharge efficiency",
           "night_price_ct": "Night Price (optional)",
           "day_price_ct": "Day Price (optional)",
-          "feed_in_price_ct": "Feed-in Price (optional)"
+          "feed_in_price_ct": "Feed-in Price (optional)",
+          "price_entity": "Electricity price entity (optional)",
+          "price_unit": "What the prices are in",
+          "price_surcharge_ct": "Surcharge on the exchange price",
+          "price_surcharge_window_ct": "Surcharge inside the window (optional)"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -454,7 +474,11 @@
           "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
           "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom.",
           "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the other two prices).",
-          "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices)."
+          "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh (set together with the other two prices).",
+          "price_entity": "Optional: a sensor whose attributes carry today's and tomorrow's hourly prices — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them. The integration does not need to know which one it is; it recognises the series by its shape and reports what it matched on the price sensor. Leave empty to keep using the three fixed prices above.",
+          "price_unit": "Leave on 'detect automatically' unless the entity carries no unit, or carries one that is wrong. Nothing is ever guessed here: with no unit from the entity, the attribute name or this field, the price entity is refused and the fixed prices are used — a wrong guess would be a factor of a hundred.",
+          "price_surcharge_ct": "What your bill adds on top of what the entity shows — grid fee, levies, taxes, VAT. Tibber already shows the full price, so leave this at 0. aWATTar, EPEX Spot, Nordpool and ENTSO-e usually show the exchange price alone; in Germany the difference is typically 20–25 ct/kWh. Getting this wrong does not look wrong — 6 ct and 32 ct are both plausible numbers, and the evening reserve comes out the other way round on the wrong one.",
+          "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock."
         }
       }
     },
@@ -498,6 +522,14 @@
         "auto": "Automatic (switch, else power limit, else min SOC)",
         "off": "Off (the battery may discharge)"
       }
+    },
+    "price_unit": {
+      "options": {
+        "auto": "Detect automatically",
+        "ct_per_kwh": "Cents per kWh",
+        "eur_per_kwh": "Euros per kWh",
+        "eur_per_mwh": "Euros per MWh"
+      }
     }
   },
   "entity": {
@@ -529,6 +561,9 @@
       },
       "evening_outlook": {
         "name": "Evening outlook"
+      },
+      "price_signal": {
+        "name": "Price signal"
       }
     },
     "switch": {

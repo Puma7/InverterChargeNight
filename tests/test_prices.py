@@ -232,20 +232,22 @@ def test_a_month_of_history_does_not_drown_the_parse():
 # The window surcharge -----------------------------------------------------------
 
 
-def test_the_window_hours_get_their_own_surcharge():
-    """Where the reduced grid fee of a cheap window lives."""
-    window = (MIDNIGHT.replace(hour=23), MIDNIGHT + timedelta(days=1, hours=5))
+def test_a_windows_own_grid_fee_is_the_callers_arithmetic():
+    """A reduced tariff applies to the window's hours only.
+
+    The series carries the day surcharge throughout; swapping it for the
+    window's is one subtraction on the mean over those hours, and it keeps the
+    daily recurrence of a window out of this module entirely.
+    """
     series, _ = _parse(
-        {"data": [{"start": t.isoformat(), "price_ct_per_kwh": 6.0}
-                  for t in _hours(30)]},
+        {"data": [{"start": t.isoformat(), "price_ct_per_kwh": 6.0} for t in _hours()]},
         surcharge_ct=24.0,
-        window_surcharge_ct=16.0,
-        window=window,
     )
     assert series is not None
-    by_hour = {i.start.hour: i.ct_per_kwh for i in series.intervals}
-    assert by_hour[12] == pytest.approx(30.0)   # day
-    assert by_hour[23] == pytest.approx(22.0)   # inside the window
+    day_mean = mean_price_ct(series, MIDNIGHT.replace(hour=1), MIDNIGHT.replace(hour=5))
+    assert day_mean == pytest.approx(30.0)
+    window_mean = day_mean - 24.0 + 16.0
+    assert window_mean == pytest.approx(22.0)
 
 
 # The mean -----------------------------------------------------------------------
@@ -338,3 +340,24 @@ def test_unknown_prices_keep_todays_answer(window_ct, evening_ct):
 @pytest.mark.parametrize("efficiency", [0.0, -1.0, 5.0])
 def test_an_impossible_efficiency_cannot_divide_by_zero(efficiency):
     assert isinstance(evening_reserve_pays(30.0, 30.0, efficiency, 2.0), bool)
+
+
+def test_a_naive_now_does_not_raise():
+    """Never raises means never, including on a caller that hands over a
+    naive clock - the module makes it aware in the zone it was given."""
+    series, reason = parse_price_series(
+        {"raw_today": [{"start": t.isoformat(), "total": 0.30} for t in _hours()]},
+        entity_unit="EUR/kWh",
+        tz=TZ,
+        now=NOW.replace(tzinfo=None),
+    )
+    assert series is not None and reason == ""
+
+
+def test_a_naive_query_does_not_raise():
+    series = _flat_series()
+    assert mean_price_ct(
+        series,
+        MIDNIGHT.replace(hour=18, tzinfo=None),
+        MIDNIGHT.replace(hour=21, tzinfo=None),
+    ) == pytest.approx(30.0)

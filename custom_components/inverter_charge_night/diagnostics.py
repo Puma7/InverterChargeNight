@@ -14,6 +14,7 @@ from .coordinator import InverterChargeNightConfigEntry, InverterChargeNightCoor
 # ``const.py``, so a newly added ``*_entity`` / ``*_switch`` key cannot be
 # forgotten here.
 REDACT_KEYS = {
+    "price_entity",
     "pv_forecast_entity",
     "battery_soc_entity",
     "min_soc_entity",

@@ -5,6 +5,32 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.0] - 2026-09-20
+
+### Added
+
+- **A price entity can be read, and the integration does not need to know which one it is.**
+  Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them all publish
+  tomorrow's hourly prices under their own attribute name with their own keys. Rather than a
+  table of those names — which could not be checked against the real integrations and would
+  quietly match nothing where it was wrong — the series is recognised by its **shape**: a list of
+  items carrying a timestamp and a number, in order, evenly spaced, with values that could be a
+  price. `sensor.…_price_signal` reports what was matched, which unit was resolved and which
+  surcharge was applied, so a wrong pick is visible rather than silent.
+- **Surcharge fields**, and they are load-bearing. An exchange price is not a consumer price:
+  Tibber publishes the full price, the others usually publish the market alone. 6 ct and 32 ct
+  are both plausible numbers, and the evening reserve decision comes out the *other way round* on
+  the wrong one. A second field covers the reduced §14a grid fee inside the cheap window.
+- **Nothing is ever guessed.** No unit from the entity, the attribute name or the setting means
+  the price entity is refused and the fixed prices decide — a guess there is a factor of a
+  hundred, or a thousand for EUR/MWh. Cents the size of euros, an exchange price with no
+  surcharge configured, a stale series, a gap in the middle: all refused, all falling back to
+  exactly the behaviour of an installation with no price entity. A test asserts that contract
+  once per way it can go wrong.
+
+**This release reads and shows; it does not yet decide.** The price gate on the evening reserve
+follows, so the sensor can be watched first — which is the point of shipping it on its own.
+
 ## [3.5.0] - 2026-09-20
 
 ### Added

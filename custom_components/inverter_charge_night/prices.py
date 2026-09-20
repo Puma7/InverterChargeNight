@@ -120,6 +120,16 @@ def _as_datetime(value: Any, tz: tzinfo) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=tz)
 
 
+def _aware(value: datetime, tz: tzinfo) -> datetime:
+    """A naive datetime read in ``tz``; an aware one unchanged.
+
+    Every timestamp in a series is made aware at parse time, so a naive
+    ``now`` or a naive query bound would raise on the first comparison - and
+    this module promises not to raise.
+    """
+    return value if value.tzinfo is not None else value.replace(tzinfo=tz)
+
+
 def _normalized(key: str) -> str:
     """A key without its punctuation or case, for comparing names across integrations."""
     return re.sub(r"[^a-z0-9]", "", key.lower())
@@ -257,8 +267,6 @@ def parse_price_series(
     entity_unit: str = "",
     unit_override: str | None = None,
     surcharge_ct: float = 0.0,
-    window_surcharge_ct: float | None = None,
-    window: tuple[datetime, datetime] | None = None,
     tz: tzinfo,
     now: datetime,
 ) -> tuple[PriceSeries | None, str]:
@@ -269,9 +277,13 @@ def parse_price_series(
     point of refusing is that somebody can see why.
 
     ``surcharge_ct`` is what the bill adds on top of what the entity shows -
-    grid fee, levies, taxes. ``window_surcharge_ct`` is the same for the hours
-    inside ``window``, which is where a reduced grid fee lives.
+    grid fee, levies, taxes - and it is applied to every interval. A window
+    with a *different* grid fee, which is what a reduced tariff is, is handled
+    by the caller instead: it queries the mean over the window's own hours and
+    swaps one surcharge for the other. Doing it that way keeps the recurrence
+    of a daily window out of a module that has no business knowing about it.
     """
+    now = _aware(now, tz)
     for name, items in _candidate_lists(attributes):
         parsed = _read_items(items, tz)
         if parsed is None:
@@ -291,9 +303,6 @@ def parse_price_series(
             return None, "unit_looks_like_eur"
 
         day_surcharge = float(surcharge_ct)
-        in_window = (
-            float(window_surcharge_ct) if window_surcharge_ct is not None else day_surcharge
-        )
         intervals: list[PriceInterval] = []
         horizon = timedelta(hours=PRICE_SERIES_MAX_AGE_H)
         for (start, end, _), ct in zip(closed, raw_ct):
@@ -301,8 +310,7 @@ def parse_price_series(
                 # A month of history is not this integration's business, and
                 # it would only make the plausibility checks meaningless.
                 continue
-            inside = window is not None and window[0] <= start < window[1]
-            total = ct + (in_window if inside else day_surcharge)
+            total = ct + day_surcharge
             if not MIN_PLAUSIBLE_PRICE_CT <= total <= MAX_PLAUSIBLE_PRICE_CT:
                 continue
             intervals.append(PriceInterval(start=start, end=end, ct_per_kwh=total))
@@ -321,7 +329,7 @@ def parse_price_series(
         ]
 
         median_total = _median([interval.ct_per_kwh for interval in unique])
-        if median_total < MIN_PLAUSIBLE_TOTAL_CT and day_surcharge == 0 and in_window == 0:
+        if median_total < MIN_PLAUSIBLE_TOTAL_CT and day_surcharge == 0:
             # An exchange price with the grid fees and taxes still missing. It
             # looks exactly like a price and is short by the larger part of the
             # bill, which is enough to invert the decision it feeds.
@@ -352,7 +360,13 @@ def mean_price_ct(series: PriceSeries | None, start: datetime, end: datetime) ->
     Weighting by real elapsed seconds means a 23:00 to 05:00 stretch that is
     seven hours long on a clock-change night is weighted as seven hours.
     """
-    if series is None or end <= start:
+    if series is None or not series.intervals:
+        return None
+    zone = series.intervals[0].start.tzinfo
+    if zone is not None:
+        start = _aware(start, zone)
+        end = _aware(end, zone)
+    if end <= start:
         return None
     total_seconds = 0.0
     weighted = 0.0

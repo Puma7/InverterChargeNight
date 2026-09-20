@@ -122,7 +122,11 @@
           "discharge_efficiency": "Entladewirkungsgrad",
           "night_price_ct": "Preis im Fenster (optional)",
           "day_price_ct": "Preis außerhalb des Fensters (optional)",
-          "feed_in_price_ct": "Einspeisevergütung (optional)"
+          "feed_in_price_ct": "Einspeisevergütung (optional)",
+          "price_entity": "Strompreis-Entität (optional)",
+          "price_unit": "Worin die Preise angegeben sind",
+          "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
+          "price_surcharge_window_ct": "Zuschlag im Fenster (optional)"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -140,7 +144,11 @@
           "discharge_efficiency": "Wie viel von dem, was den Akku verlässt, im Haus ankommt (0,5–1,0, Vorgabe 0,95). Verbrauchsprofil und Prognose werden auf der Hausseite gemessen; Energie aus dem Akku verliert auf dem Weg durch den Wechselrichter ein paar Prozent. Ohne diesen Wert kauft der Planer für Überbrückung und Abendreserve etwas zu wenig — jede Nacht, immer in dieselbe Richtung.",
           "night_price_ct": "Optional: Arbeitspreis im Fenster in ct/kWh. Alle drei Preise setzen oder keinen; der Überbrückungs-Planer entscheidet damit den Konflikt zwischen Überbrücken und PV-Freiraum.",
           "day_price_ct": "Optional: Arbeitspreis außerhalb des Fensters in ct/kWh.",
-          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh."
+          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh.",
+          "price_entity": "Optional: ein Sensor, dessen Attribute die Stundenpreise für heute und morgen tragen — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e und alles, was so geformt ist. Die Integration muss nicht wissen, welche davon es ist; sie erkennt die Reihe an ihrer Form und zeigt am Preissensor, worauf sie getroffen hat. Leer lassen, dann gelten weiter die drei festen Preise oben.",
+          "price_unit": "Auf „automatisch erkennen“ lassen, außer die Entität trägt keine Einheit oder eine falsche. Geraten wird hier nie: Sagt weder die Entität noch der Attributname noch dieses Feld, was die Zahlen bedeuten, wird die Preisentität abgelehnt und es gelten die festen Preise — ein falscher Tipp wäre Faktor hundert.",
+          "price_surcharge_ct": "Was deine Rechnung auf das drauflegt, was die Entität zeigt — Netzentgelt, Umlagen, Steuern, MwSt. Tibber zeigt bereits den Vollpreis, dort bleibt das auf 0. aWATTar, EPEX Spot, Nordpool und ENTSO-e zeigen meist nur die Börse; in Deutschland sind das typisch 20–25 ct/kWh Unterschied. Ein Fehler hier sieht nicht nach einem Fehler aus — 6 ct und 32 ct sind beide plausible Zahlen, und die Abendreserve fällt auf der falschen genau andersherum aus.",
+          "price_surcharge_window_ct": "Dasselbe für die Stunden deines günstigen Fensters — hier sitzt das reduzierte §14a-Netzentgelt. Leer lassen, wenn der Zuschlag rund um die Uhr derselbe ist."
         }
       },
       "reconfigure": {
@@ -264,7 +272,11 @@
           "discharge_efficiency": "Entladewirkungsgrad",
           "night_price_ct": "Preis im Fenster (optional)",
           "day_price_ct": "Preis außerhalb des Fensters (optional)",
-          "feed_in_price_ct": "Einspeisevergütung (optional)"
+          "feed_in_price_ct": "Einspeisevergütung (optional)",
+          "price_entity": "Strompreis-Entität (optional)",
+          "price_unit": "Worin die Preise angegeben sind",
+          "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
+          "price_surcharge_window_ct": "Zuschlag im Fenster (optional)"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -282,7 +294,11 @@
           "discharge_efficiency": "Wie viel von dem, was den Akku verlässt, im Haus ankommt (0,5–1,0, Vorgabe 0,95). Verbrauchsprofil und Prognose werden auf der Hausseite gemessen; Energie aus dem Akku verliert auf dem Weg durch den Wechselrichter ein paar Prozent. Ohne diesen Wert kauft der Planer für Überbrückung und Abendreserve etwas zu wenig — jede Nacht, immer in dieselbe Richtung.",
           "night_price_ct": "Optional: Arbeitspreis im Fenster in ct/kWh. Alle drei Preise setzen oder keinen; der Überbrückungs-Planer entscheidet damit den Konflikt zwischen Überbrücken und PV-Freiraum.",
           "day_price_ct": "Optional: Arbeitspreis außerhalb des Fensters in ct/kWh.",
-          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh."
+          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh.",
+          "price_entity": "Optional: ein Sensor, dessen Attribute die Stundenpreise für heute und morgen tragen — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e und alles, was so geformt ist. Die Integration muss nicht wissen, welche davon es ist; sie erkennt die Reihe an ihrer Form und zeigt am Preissensor, worauf sie getroffen hat. Leer lassen, dann gelten weiter die drei festen Preise oben.",
+          "price_unit": "Auf „automatisch erkennen“ lassen, außer die Entität trägt keine Einheit oder eine falsche. Geraten wird hier nie: Sagt weder die Entität noch der Attributname noch dieses Feld, was die Zahlen bedeuten, wird die Preisentität abgelehnt und es gelten die festen Preise — ein falscher Tipp wäre Faktor hundert.",
+          "price_surcharge_ct": "Was deine Rechnung auf das drauflegt, was die Entität zeigt — Netzentgelt, Umlagen, Steuern, MwSt. Tibber zeigt bereits den Vollpreis, dort bleibt das auf 0. aWATTar, EPEX Spot, Nordpool und ENTSO-e zeigen meist nur die Börse; in Deutschland sind das typisch 20–25 ct/kWh Unterschied. Ein Fehler hier sieht nicht nach einem Fehler aus — 6 ct und 32 ct sind beide plausible Zahlen, und die Abendreserve fällt auf der falschen genau andersherum aus.",
+          "price_surcharge_window_ct": "Dasselbe für die Stunden deines günstigen Fensters — hier sitzt das reduzierte §14a-Netzentgelt. Leer lassen, wenn der Zuschlag rund um die Uhr derselbe ist."
         }
       }
     },
@@ -436,7 +452,11 @@
           "discharge_efficiency": "Entladewirkungsgrad",
           "night_price_ct": "Preis im Fenster (optional)",
           "day_price_ct": "Preis außerhalb des Fensters (optional)",
-          "feed_in_price_ct": "Einspeisevergütung (optional)"
+          "feed_in_price_ct": "Einspeisevergütung (optional)",
+          "price_entity": "Strompreis-Entität (optional)",
+          "price_unit": "Worin die Preise angegeben sind",
+          "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
+          "price_surcharge_window_ct": "Zuschlag im Fenster (optional)"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -454,7 +474,11 @@
           "discharge_efficiency": "Wie viel von dem, was den Akku verlässt, im Haus ankommt (0,5–1,0, Vorgabe 0,95). Verbrauchsprofil und Prognose werden auf der Hausseite gemessen; Energie aus dem Akku verliert auf dem Weg durch den Wechselrichter ein paar Prozent. Ohne diesen Wert kauft der Planer für Überbrückung und Abendreserve etwas zu wenig — jede Nacht, immer in dieselbe Richtung.",
           "night_price_ct": "Optional: Arbeitspreis im Fenster in ct/kWh. Alle drei Preise setzen oder keinen; der Überbrückungs-Planer entscheidet damit den Konflikt zwischen Überbrücken und PV-Freiraum.",
           "day_price_ct": "Optional: Arbeitspreis außerhalb des Fensters in ct/kWh.",
-          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh."
+          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh.",
+          "price_entity": "Optional: ein Sensor, dessen Attribute die Stundenpreise für heute und morgen tragen — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e und alles, was so geformt ist. Die Integration muss nicht wissen, welche davon es ist; sie erkennt die Reihe an ihrer Form und zeigt am Preissensor, worauf sie getroffen hat. Leer lassen, dann gelten weiter die drei festen Preise oben.",
+          "price_unit": "Auf „automatisch erkennen“ lassen, außer die Entität trägt keine Einheit oder eine falsche. Geraten wird hier nie: Sagt weder die Entität noch der Attributname noch dieses Feld, was die Zahlen bedeuten, wird die Preisentität abgelehnt und es gelten die festen Preise — ein falscher Tipp wäre Faktor hundert.",
+          "price_surcharge_ct": "Was deine Rechnung auf das drauflegt, was die Entität zeigt — Netzentgelt, Umlagen, Steuern, MwSt. Tibber zeigt bereits den Vollpreis, dort bleibt das auf 0. aWATTar, EPEX Spot, Nordpool und ENTSO-e zeigen meist nur die Börse; in Deutschland sind das typisch 20–25 ct/kWh Unterschied. Ein Fehler hier sieht nicht nach einem Fehler aus — 6 ct und 32 ct sind beide plausible Zahlen, und die Abendreserve fällt auf der falschen genau andersherum aus.",
+          "price_surcharge_window_ct": "Dasselbe für die Stunden deines günstigen Fensters — hier sitzt das reduzierte §14a-Netzentgelt. Leer lassen, wenn der Zuschlag rund um die Uhr derselbe ist."
         }
       }
     },
@@ -498,6 +522,14 @@
         "auto": "Automatisch (Schalter, sonst Leistungsgrenze, sonst Min-SOC)",
         "off": "Aus (der Speicher darf entladen)"
       }
+    },
+    "price_unit": {
+      "options": {
+        "auto": "Automatisch erkennen",
+        "ct_per_kwh": "Cent pro kWh",
+        "eur_per_kwh": "Euro pro kWh",
+        "eur_per_mwh": "Euro pro MWh"
+      }
     }
   },
   "entity": {
@@ -529,6 +561,9 @@
       },
       "evening_outlook": {
         "name": "Abendvorschau"
+      },
+      "price_signal": {
+        "name": "Preissignal"
       }
     },
     "switch": {

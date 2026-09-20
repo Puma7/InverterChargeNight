@@ -21,6 +21,9 @@
       },
       "evening_outlook": {
         "default": "mdi:weather-sunset-down"
+      },
+      "price_signal": {
+        "default": "mdi:currency-eur"
       }
     },
     "switch": {

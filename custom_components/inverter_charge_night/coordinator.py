@@ -73,6 +73,10 @@ from .const import (
     CONF_HIGH_PRICE_MARGIN_PCT,
     CONF_HIGH_PRICE_START,
     CONF_PV_FORECAST_ENTITY,
+    CONF_PRICE_ENTITY,
+    CONF_PRICE_SURCHARGE_CT,
+    CONF_PRICE_SURCHARGE_WINDOW_CT,
+    CONF_PRICE_UNIT,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_PLANNER_MODE,
@@ -97,6 +101,7 @@ from .const import (
     HOUSE_LOAD_PROFILE_CACHE_S,
     PLANNED_POWER_WRITE_THRESHOLD_W,
     PLANNER_MODE_BRIDGE,
+    PRICE_UNIT_AUTO,
     DEFAULT_END_TIME,
     DEFAULT_MAX_SOC,
     DEFAULT_OPERATION_MODE,
@@ -134,6 +139,8 @@ from .const import (
     EFFICIENCY_BAND_WIDTH_PCT,
     EVENING_RESCUE_CHARGE_LEAD_H,
     DEFAULT_HIGH_PRICE_MARGIN_PCT,
+    DEFAULT_PRICE_SURCHARGE_CT,
+    DEFAULT_PRICE_UNIT,
     DEFAULT_GRID_CONTINUOUS_PCT,
     DEFAULT_GRID_HEADROOM_W,
     DEFAULT_MIN_CHARGE_POWER_W,
@@ -142,6 +149,7 @@ from .const import (
     GRID_LIMIT_MIN_WRITE_INTERVAL_S,
 )
 from .calculation import calculate_required_soc
+from .prices import PriceSeries, mean_price_ct, parse_price_series
 from .planner import (
     REASON_FALLBACK,
     EveningOutlook,
@@ -275,6 +283,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The end date of the expired range the repair issue currently names,
         # so the registry is only written when that changes.
         self._expired_range_issue: date | None = None
+        # The last reason a price entity was refused, so the warning is written
+        # once rather than every fifteen minutes.
+        self._price_refusal_logged: str | None = None
         # An ad-hoc window (plan 013): a window like any other - same capture,
         # restore, retry ladder and interlocks - whose start came from a call
         # rather than from the clock. None means no ad-hoc window is running.
@@ -681,6 +692,97 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if end_dt <= start_dt:
             end_dt += timedelta(days=1)
         return start_dt, end_dt
+
+    def _price_series(self) -> PriceSeries | None:
+        """Read the configured price entity, or None with a reason logged once.
+
+        Every refusal falls back to the static price fields, which is to say
+        to the behaviour of an installation with no price entity at all. That
+        is the whole contract: a price that cannot be trusted must never
+        produce a worse decision than having no price.
+        """
+        entity_id = self.config.get(CONF_PRICE_ENTITY)
+        if not entity_id:
+            return None
+        state = self.hass.states.get(str(entity_id))
+        if not state or state.state in ("unknown", "unavailable", None):
+            return None
+        unit_override = str(self.config.get(CONF_PRICE_UNIT, DEFAULT_PRICE_UNIT))
+        series, reason = parse_price_series(
+            state.attributes,
+            entity_unit=_unit_of(state),
+            unit_override=None if unit_override == PRICE_UNIT_AUTO else unit_override,
+            surcharge_ct=float(
+                self.config.get(CONF_PRICE_SURCHARGE_CT, DEFAULT_PRICE_SURCHARGE_CT)
+            ),
+            tz=dt_util.DEFAULT_TIME_ZONE,
+            now=dt_util.now(),
+        )
+        if series is None:
+            if self._price_refusal_logged != reason:
+                _LOGGER.warning(
+                    "Cannot use the price entity %s (%s) - the configured prices are used "
+                    "instead. Attributes seen: %s",
+                    entity_id,
+                    reason,
+                    ", ".join(sorted(state.attributes)) or "(none)",
+                )
+                self._price_refusal_logged = reason
+            return None
+        if self._price_refusal_logged is not None:
+            _LOGGER.info("The price entity %s is usable again", entity_id)
+            self._price_refusal_logged = None
+        return series
+
+    def _window_price_ct(self, series: PriceSeries | None, now: datetime) -> float | None:
+        """The mean price over the charge window, with the window's own grid fee.
+
+        A reduced tariff applies to those hours only, so the day surcharge that
+        every interval carries is swapped for the window one here.
+        """
+        if series is None:
+            return None
+        start = self._window_start_datetime(now)
+        end = start + timedelta(seconds=self._window_length_s())
+        mean = mean_price_ct(series, start, end)
+        if mean is None:
+            return None
+        window_surcharge = self.config.get(CONF_PRICE_SURCHARGE_WINDOW_CT)
+        if window_surcharge is None:
+            return mean
+        day = float(self.config.get(CONF_PRICE_SURCHARGE_CT, DEFAULT_PRICE_SURCHARGE_CT))
+        return mean - day + float(window_surcharge)
+
+    def price_snapshot(self) -> dict[str, Any]:
+        """What was parsed and what it says, for the sensor and diagnostics."""
+        series = self._price_series()
+        now = dt_util.now()
+        zone = self._high_price_window(now)
+        # The series is always aware; the clock here need not be (the test
+        # suite runs on a naive one deliberately), and comparing the two
+        # raises rather than answering.
+        reading_now = self._align_tz(now, series.intervals[0].start) if series else now
+        current = (
+            next(
+                (i.ct_per_kwh for i in series.intervals if i.start <= reading_now < i.end),
+                None,
+            )
+            if series
+            else None
+        )
+        horizon = series.horizon_end() if series else None
+        return {
+            "current_ct": round(current, 2) if current is not None else None,
+            "source_attribute": series.source_attribute if series else None,
+            "value_key": series.value_key if series else None,
+            "unit_resolved": series.unit if series else None,
+            "surcharge_ct": series.surcharge_ct if series else None,
+            "intervals": len(series.intervals) if series else 0,
+            "horizon_end": horizon.isoformat() if horizon else None,
+            "window_ct": self._window_price_ct(series, now),
+            "evening_ct": mean_price_ct(series, zone[0], zone[1]) if (series and zone) else None,
+            "reason": self._price_refusal_logged,
+        }
 
     def next_high_price_window(self) -> tuple[datetime, datetime] | None:
         """The next high-price period from now, for the sensor."""

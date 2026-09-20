@@ -42,6 +42,7 @@ async def async_setup_entry(
             EfficiencySearchSensor(coordinator, entry),
             NextHighPriceWindowSensor(coordinator, entry),
             EveningOutlookSensor(coordinator, entry),
+            PriceSignalSensor(coordinator, entry),
         ]
     )
 
@@ -169,6 +170,43 @@ class EveningOutlookSensor(InverterChargeNightEntity, SensorEntity):
             # is the pessimistic one and says so.
             "forecast_available": outlook.forecast_available,
         }
+
+
+class PriceSignalSensor(InverterChargeNightEntity, SensorEntity):
+    """What the price entity was read as, and what it says.
+
+    This exists to be looked at before anything decides on the numbers. A
+    price that is out by a factor of a hundred, or that is the exchange price
+    with the grid fees missing, does not look wrong - so the sensor publishes
+    what was matched, which unit was resolved and which surcharge was applied,
+    and a human can see 32 ct and nod, or see 6 ct and not.
+    """
+
+    _attr_translation_key = "price_signal"
+    _attr_native_unit_of_measurement = "ct/kWh"
+    # No MONETARY device class: that would drag it into the energy dashboard
+    # as a cost, and this is a tariff, not a sum of money spent.
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "price_signal")
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the price of the interval covering now."""
+        value = self.coordinator.price_snapshot()["current_ct"]
+        return float(value) if value is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return everything needed to judge whether it was read right."""
+        snapshot = dict(self.coordinator.price_snapshot())
+        snapshot.pop("current_ct", None)
+        for key in ("window_ct", "evening_ct"):
+            if snapshot.get(key) is not None:
+                snapshot[key] = round(float(snapshot[key]), 2)
+        return snapshot
 
 
 class BestChargePowerSensor(InverterChargeNightEntity, SensorEntity):

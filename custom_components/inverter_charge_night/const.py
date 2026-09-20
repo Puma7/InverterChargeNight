@@ -301,10 +301,16 @@ EVENING_RESCUE_CHARGE_LEAD_H = 2.0
 ADHOC_REASON_EVENING_RESCUE = "evening_rescue"
 
 # Reading a price entity (plan 012, stage 3) ----------------------------------
+CONF_PRICE_ENTITY = "price_entity"
+CONF_PRICE_UNIT = "price_unit"
+CONF_PRICE_SURCHARGE_CT = "price_surcharge_ct"
+CONF_PRICE_SURCHARGE_WINDOW_CT = "price_surcharge_window_ct"
+DEFAULT_PRICE_SURCHARGE_CT = 0.0
 PRICE_UNIT_AUTO = "auto"
 PRICE_UNIT_CT_KWH = "ct_per_kwh"
 PRICE_UNIT_EUR_KWH = "eur_per_kwh"
 PRICE_UNIT_EUR_MWH = "eur_per_mwh"
+DEFAULT_PRICE_UNIT = PRICE_UNIT_AUTO
 # One list per unit, for the same reason as the energy units: two that
 # disagree silently change which sensors work where.
 PRICE_UNITS_CT: frozenset[str] = frozenset(

@@ -60,6 +60,10 @@ from .const import (
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
     CONF_NIGHT_PRICE_CT,
+    CONF_PRICE_ENTITY,
+    CONF_PRICE_SURCHARGE_CT,
+    CONF_PRICE_SURCHARGE_WINDOW_CT,
+    CONF_PRICE_UNIT,
     CONF_OPERATION_MODE,
     CONF_PLANNER_MODE,
     CONF_PV_CROSSOVER_DELAY_MIN,
@@ -85,6 +89,8 @@ from .const import (
     DEFAULT_MIN_SOC,
     DEFAULT_OPERATION_MODE,
     DEFAULT_PLANNER_MODE,
+    DEFAULT_PRICE_SURCHARGE_CT,
+    DEFAULT_PRICE_UNIT,
     DEFAULT_PV_CROSSOVER_DELAY_MIN,
     DEFAULT_START_TIME,
     DEFAULT_UPDATE_INTERVAL,
@@ -94,6 +100,10 @@ from .const import (
     MODE_MORNING_DISCHARGE,
     MODE_NIGHT_CHARGE,
     PLANNER_MODE_BRIDGE,
+    PRICE_UNIT_AUTO,
+    PRICE_UNIT_CT_KWH,
+    PRICE_UNIT_EUR_KWH,
+    PRICE_UNIT_EUR_MWH,
     PLANNER_MODE_HEADROOM,
     # House connection limit (plan 008)
     CONF_GRID_IMPORT_ENTITY,
@@ -178,6 +188,10 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
     CONF_NIGHT_PRICE_CT,
+    CONF_PRICE_ENTITY,
+    CONF_PRICE_UNIT,
+    CONF_PRICE_SURCHARGE_CT,
+    CONF_PRICE_SURCHARGE_WINDOW_CT,
     CONF_DAY_PRICE_CT,
     CONF_FEED_IN_PRICE_CT,
 )
@@ -239,6 +253,7 @@ def _normalize_date_value(value: str | date | None) -> str | None:
 
 
 _ENTITY_KEYS_TO_VALIDATE = [
+    CONF_PRICE_ENTITY,
     CONF_MIN_SOC_ENTITY,
     CONF_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
@@ -490,6 +505,25 @@ def _time_selector() -> Any:
     return cast(Any, selector.TimeSelector())
 
 
+def _price_unit_selector() -> Any:
+    """What the price entity's numbers mean, when nothing else says."""
+    return cast(
+        Any,
+        selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    PRICE_UNIT_AUTO,
+                    PRICE_UNIT_CT_KWH,
+                    PRICE_UNIT_EUR_KWH,
+                    PRICE_UNIT_EUR_MWH,
+                ],
+                translation_key="price_unit",
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+    )
+
+
 def _date_selector() -> Any:
     return cast(Any, selector.DateSelector())
 
@@ -736,6 +770,16 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
             _optional(
                 CONF_FEED_IN_PRICE_CT, defaults.get(CONF_FEED_IN_PRICE_CT)
             ): _number_selector(0, 200, 0.1, "ct/kWh"),
+            _optional(CONF_PRICE_ENTITY, defaults.get(CONF_PRICE_ENTITY)): _entity_selector(
+                "sensor"
+            ),
+            _required(CONF_PRICE_UNIT, defaults, DEFAULT_PRICE_UNIT): _price_unit_selector(),
+            _required(
+                CONF_PRICE_SURCHARGE_CT, defaults, DEFAULT_PRICE_SURCHARGE_CT
+            ): _number_selector(0, 100, 0.1, "ct/kWh"),
+            _optional(
+                CONF_PRICE_SURCHARGE_WINDOW_CT, defaults.get(CONF_PRICE_SURCHARGE_WINDOW_CT)
+            ): _number_selector(0, 100, 0.1, "ct/kWh"),
         }
     )
 
