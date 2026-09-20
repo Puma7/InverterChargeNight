@@ -12,16 +12,16 @@ from custom_components.inverter_charge_night import (
 from custom_components.inverter_charge_night.const import (
     CONF_BACKUP_MODE_ENTITY,
     CONF_BATTERY_SOC_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_UPDATE_INTERVAL,
     DOMAIN,
 )
 
 REQUIRED_ENTITY_KEYS = (
     CONF_BATTERY_SOC_ENTITY,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
 )
 
 
@@ -113,7 +113,7 @@ async def test_async_update_entry_updates_backup_listener(mock_hass, mock_config
 @pytest.mark.asyncio
 async def test_async_setup_entry_missing_entity_creates_issue_and_raises(mock_hass, mock_config_entry):
     """A required entity unknown to HA raises ConfigEntryNotReady and files a repair issue."""
-    missing = mock_config_entry.data[CONF_KOSTAL_MIN_SOC_ENTITY]
+    missing = mock_config_entry.data[CONF_MIN_SOC_ENTITY]
     _register_required_entities(mock_hass, mock_config_entry, skip=missing)
     mock_hass.config_entries.async_forward_entry_setups = AsyncMock()
 

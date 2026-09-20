@@ -25,6 +25,7 @@ from .const import (
     CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
     CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_RANGE_YEARLY,
     CONF_ACTIVE_START_DATE,
     CONF_AUTO_EFFICIENT_CHARGE,
     CONF_AVG_HOUSE_LOAD_KW,
@@ -49,9 +50,12 @@ from .const import (
     CONF_FEED_IN_PRICE_CT,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_FORECAST_ERROR_MARGIN,
+    CONF_HIGH_PRICE_END,
+    CONF_HIGH_PRICE_MARGIN_PCT,
+    CONF_HIGH_PRICE_START,
     CONF_HOUSE_LOAD_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
     CONF_NIGHT_PRICE_CT,
@@ -64,6 +68,7 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
+    DEFAULT_ACTIVE_RANGE_YEARLY,
     DEFAULT_AVG_HOUSE_LOAD_KW,
     DEFAULT_BRIDGE_RESERVE_KWH,
     DEFAULT_CHARGE_EFFICIENCY,
@@ -71,6 +76,7 @@ from .const import (
     DEFAULT_DISCHARGE_BLOCK_MODE,
     DEFAULT_END_TIME,
     DEFAULT_FORECAST_ERROR_MARGIN,
+    DEFAULT_HIGH_PRICE_MARGIN_PCT,
     DEFAULT_MAX_CHARGE_POWER_W,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_CHARGE_POWER_W,
@@ -112,8 +118,8 @@ DEFAULT_BATTERY_CAPACITY = 10.0
 STEP_USER_KEYS: tuple[str, ...] = (
     CONF_NAME,
     CONF_OPERATION_MODE,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_BATTERY_SOC_ENTITY,
@@ -127,6 +133,9 @@ STEP_TIME_SOC_KEYS: tuple[str, ...] = (
     CONF_DEFAULT_MIN_SOC,
     CONF_FORECAST_ERROR_MARGIN,
     CONF_PLANNER_MODE,
+    CONF_HIGH_PRICE_START,
+    CONF_HIGH_PRICE_END,
+    CONF_HIGH_PRICE_MARGIN_PCT,
 )
 STEP_POWER_KEYS: tuple[str, ...] = (
     CONF_MIN_CHARGE_POWER_W,
@@ -157,6 +166,7 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_COMMAND_DELAY,
     CONF_ACTIVE_START_DATE,
     CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_RANGE_YEARLY,
     CONF_BACKUP_MODE_ENTITY,
     CONF_BACKUP_MODE_STATES,
     CONF_HOUSE_LOAD_ENTITY,
@@ -226,8 +236,8 @@ def _normalize_date_value(value: str | date | None) -> str | None:
 
 
 _ENTITY_KEYS_TO_VALIDATE = [
-    CONF_KOSTAL_MIN_SOC_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_BACKUP_MODE_ENTITY,
@@ -261,6 +271,24 @@ def _validate_user_input(
     elif start_time == end_time:
         # Compare parsed values so that e.g. "2:00" and "02:00" count as equal
         errors[CONF_END_TIME] = "start_end_time_must_differ"
+
+    # The high-price period is optional, and only a pair of times is a period.
+    high_start_raw = user_input.get(CONF_HIGH_PRICE_START)
+    high_end_raw = user_input.get(CONF_HIGH_PRICE_END)
+    high_start = parse_time_str(high_start_raw) if high_start_raw else None
+    high_end = parse_time_str(high_end_raw) if high_end_raw else None
+    if high_start_raw and high_start is None:
+        errors[CONF_HIGH_PRICE_START] = "invalid_time"
+    if high_end_raw and high_end is None:
+        errors[CONF_HIGH_PRICE_END] = "invalid_time"
+    if bool(high_start_raw) != bool(high_end_raw):
+        # One end alone says when it starts but never when it is over, which
+        # would leave the reserve either endless or zero.
+        errors[CONF_HIGH_PRICE_END if high_start_raw else CONF_HIGH_PRICE_START] = (
+            "high_price_needs_both_times"
+        )
+    elif high_start is not None and high_start == high_end:
+        errors[CONF_HIGH_PRICE_END] = "start_end_time_must_differ"
 
     user_min_soc = user_input.get(CONF_USER_MIN_SOC, 0)
     user_max_soc = user_input.get(CONF_USER_MAX_SOC, 0)
@@ -311,6 +339,15 @@ def _validate_user_input(
             else CONF_CHARGE_ENERGY_SENT_ENTITY
         )
         errors[missing] = "required_entity"
+
+    # Morning discharge only discharges through this switch. Without it the mode
+    # raises the min SOC floor and turns grid charging off - and then waits, night
+    # after night, for a discharge that cannot start. The switch is genuinely
+    # optional in night charge mode, so the requirement is tied to the mode.
+    if user_input.get(CONF_OPERATION_MODE) == MODE_MORNING_DISCHARGE and not user_input.get(
+        CONF_FORCE_DISCHARGE_SWITCH
+    ):
+        errors[CONF_FORCE_DISCHARGE_SWITCH] = "required_for_discharge_mode"
 
     if user_input.get(CONF_AUTO_EFFICIENT_CHARGE):
         if not user_input.get(CONF_CHARGE_POWER_ENTITY):
@@ -536,8 +573,8 @@ def _schema_entities(defaults: Mapping[str, Any]) -> vol.Schema:
         {
             _required(CONF_NAME, defaults, DEFAULT_NAME): _text_selector(),
             _required(CONF_OPERATION_MODE, defaults, DEFAULT_OPERATION_MODE): _mode_selector(),
-            _required(CONF_KOSTAL_MIN_SOC_ENTITY, defaults): _entity_selector("number"),
-            _required(CONF_KOSTAL_GRID_CHARGE_SWITCH, defaults): _entity_selector("switch"),
+            _required(CONF_MIN_SOC_ENTITY, defaults): _entity_selector("number"),
+            _required(CONF_GRID_CHARGE_SWITCH, defaults): _entity_selector("switch"),
             _required(CONF_PV_FORECAST_ENTITY, defaults): _entity_selector("sensor"),
             _optional(
                 CONF_PV_FORECAST_TODAY_ENTITY, defaults.get(CONF_PV_FORECAST_TODAY_ENTITY)
@@ -563,6 +600,11 @@ def _schema_time_soc(defaults: Mapping[str, Any]) -> vol.Schema:
                 CONF_FORECAST_ERROR_MARGIN, defaults, DEFAULT_FORECAST_ERROR_MARGIN
             ): _number_selector(**_PERCENT),
             _required(CONF_PLANNER_MODE, defaults, DEFAULT_PLANNER_MODE): _planner_mode_selector(),
+            _optional(CONF_HIGH_PRICE_START, defaults.get(CONF_HIGH_PRICE_START)): _time_selector(),
+            _optional(CONF_HIGH_PRICE_END, defaults.get(CONF_HIGH_PRICE_END)): _time_selector(),
+            _required(
+                CONF_HIGH_PRICE_MARGIN_PCT, defaults, DEFAULT_HIGH_PRICE_MARGIN_PCT
+            ): _number_selector(0, 100, 1, "%"),
         }
     )
 
@@ -655,6 +697,9 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
             _optional(
                 CONF_ACTIVE_END_DATE, _normalize_date_value(defaults.get(CONF_ACTIVE_END_DATE))
             ): _date_selector(),
+            _required(
+                CONF_ACTIVE_RANGE_YEARLY, defaults, DEFAULT_ACTIVE_RANGE_YEARLY
+            ): _bool_selector(),
             _optional(
                 CONF_BACKUP_MODE_ENTITY, defaults.get(CONF_BACKUP_MODE_ENTITY)
             ): _entity_selector(["binary_sensor", "switch", "sensor"]),
@@ -701,7 +746,7 @@ def _entry_using_min_soc_entity(
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.entry_id == except_entry_id:
             continue
-        if entity_id in (entry.unique_id, entry.data.get(CONF_KOSTAL_MIN_SOC_ENTITY)):
+        if entity_id in (entry.unique_id, entry.data.get(CONF_MIN_SOC_ENTITY)):
             return entry
     return None
 
@@ -771,7 +816,7 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _async_create(self) -> ConfigFlowResult:
         data = _finalize_data(self._data)
-        await self.async_set_unique_id(data[CONF_KOSTAL_MIN_SOC_ENTITY])
+        await self.async_set_unique_id(data[CONF_MIN_SOC_ENTITY])
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title=data[CONF_NAME], data=data)
 
@@ -836,12 +881,12 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # (a replaced device, a renamed entity) must stay possible, which is
         # why this is not _abort_if_unique_id_mismatch: that one compares
         # against this entry's own id and would refuse every change.
-        min_soc_entity = data[CONF_KOSTAL_MIN_SOC_ENTITY]
+        min_soc_entity = data[CONF_MIN_SOC_ENTITY]
         if _entry_using_min_soc_entity(self.hass, min_soc_entity, entry.entry_id):
             return self.async_show_form(
                 step_id="reconfigure",
                 data_schema=_schema_entities(self._data),
-                errors={CONF_KOSTAL_MIN_SOC_ENTITY: "entity_used_by_other_entry"},
+                errors={CONF_MIN_SOC_ENTITY: "entity_used_by_other_entry"},
             )
         # The unique id follows the inverter, so a later entry for the old
         # entity is not blocked and a later one for the new entity is. It has
@@ -949,21 +994,21 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         return data
 
     async def _async_save(self) -> ConfigFlowResult:
-        min_soc_entity = self._data.get(CONF_KOSTAL_MIN_SOC_ENTITY)
+        min_soc_entity = self._data.get(CONF_MIN_SOC_ENTITY)
         if min_soc_entity and _entry_using_min_soc_entity(
             self.hass, min_soc_entity, self._config_entry.entry_id
         ):
             return self.async_show_form(
                 step_id="init",
                 data_schema=_schema_entities(self._data),
-                errors={CONF_KOSTAL_MIN_SOC_ENTITY: "entity_used_by_other_entry"},
+                errors={CONF_MIN_SOC_ENTITY: "entity_used_by_other_entry"},
             )
         # The settings live in entry.data (unchanged for existing installations);
         # entry.options only holds the auto-efficiency history, which is preserved.
         data = self._merged_data()
         # Keep the unique id on the inverter this entry now drives; otherwise a
         # second entry could be created for the new entity without being caught.
-        unique_id = data.get(CONF_KOSTAL_MIN_SOC_ENTITY, self._config_entry.unique_id)
+        unique_id = data.get(CONF_MIN_SOC_ENTITY, self._config_entry.unique_id)
         self.hass.config_entries.async_update_entry(
             self._config_entry, data=data, unique_id=unique_id
         )

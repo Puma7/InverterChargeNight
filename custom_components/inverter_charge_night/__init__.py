@@ -6,17 +6,21 @@ from datetime import timedelta
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import config_validation as cv, issue_registry as ir
+from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     AUTO_EFFICIENCY_KEYS,
+    CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_RANGE_YEARLY,
+    CONF_ACTIVE_START_DATE,
     CONF_AUTO_EFFICIENCY_DATA,
     CONF_AUTO_EFFICIENT_CHARGE,
     CONF_BATTERY_SOC_ENTITY,
     CONF_END_TIME,
     CONF_HOUSE_LOAD_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_OPERATION_MODE,
     CONF_START_TIME,
     CONF_UPDATE_INTERVAL,
@@ -26,6 +30,7 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     LEGACY_HOUSE_LOAD_ENERGY_ENTITY,
+    LEGACY_INVERTER_KEYS,
     LEGACY_UNUSED_DATA_KEYS,
     LEGACY_UNUSED_OPTION_KEYS,
 )
@@ -33,6 +38,7 @@ from .coordinator import (
     InverterChargeNightConfigEntry,
     InverterChargeNightCoordinator,
 )
+from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,14 +50,29 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
 ]
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 __all__ = [
+    "CONFIG_SCHEMA",
     "PLATFORMS",
     "InverterChargeNightConfigEntry",
     "InverterChargeNightCoordinator",
+    "async_setup",
     "async_setup_entry",
     "async_unload_entry",
     "async_update_entry",
 ]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the actions once, before any entry is set up.
+
+    The quality scale asks for this: an action that only exists while an entry
+    happens to be loaded disappears from an automation's reach exactly when
+    something went wrong. The handlers check the entry themselves instead.
+    """
+    async_setup_services(hass)
+    return True
 
 
 def _clear_stale_entity_issues(hass: HomeAssistant) -> None:
@@ -94,6 +115,17 @@ def _migrate_entry_data(hass: HomeAssistant, entry: InverterChargeNightConfigEnt
     options = dict(entry.options)
     changed = False
 
+    for legacy_key, new_key in LEGACY_INVERTER_KEYS.items():
+        legacy_entity = data.pop(legacy_key, None)
+        if legacy_entity is None:
+            continue
+        changed = True
+        if not data.get(new_key):
+            # Same entity under a name that does not carry a vendor: the wizard
+            # writes the new key from 3.0.2 on, and everything reads only that.
+            data[new_key] = legacy_entity
+            _LOGGER.info("Carried %s over to %s", legacy_key, new_key)
+
     legacy_load_meter = data.pop(LEGACY_HOUSE_LOAD_ENERGY_ENTITY, None)
     if legacy_load_meter and not data.get(CONF_HOUSE_LOAD_ENTITY):
         # Same quantity under a new name: a cumulative kWh meter of the house.
@@ -116,6 +148,22 @@ def _migrate_entry_data(hass: HomeAssistant, entry: InverterChargeNightConfigEnt
                     key,
                     value,
                 )
+
+    if CONF_ACTIVE_RANGE_YEARLY not in data:
+        # From 3.2.0 on an active date range repeats every year, which is what a
+        # tariff season is. An entry written before that meant the dates
+        # absolutely, so it keeps that meaning unless the user says otherwise -
+        # a range nobody re-enters must not suddenly come back next winter.
+        # Only a range that crosses the new year is read as a season either way:
+        # absolutely it would be start > end, which no day can satisfy.
+        has_range = bool(data.get(CONF_ACTIVE_START_DATE) or data.get(CONF_ACTIVE_END_DATE))
+        data[CONF_ACTIVE_RANGE_YEARLY] = not has_range
+        changed = True
+        if has_range:
+            _LOGGER.info(
+                "Keeping the configured date range absolute; switch on "
+                "\"Repeat the date range every year\" in the options to make it a season"
+            )
 
     for key in LEGACY_UNUSED_OPTION_KEYS:
         if key in options:
@@ -144,7 +192,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
     # Test-before-setup: verify critical entities are available
     required_entities = [
         entry.data.get(key)
-        for key in (CONF_BATTERY_SOC_ENTITY, CONF_KOSTAL_MIN_SOC_ENTITY, CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        for key in (CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH)
     ]
     for entity_id in required_entities:
         if entity_id and hass.states.get(entity_id) is None:

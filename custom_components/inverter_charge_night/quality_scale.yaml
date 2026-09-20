@@ -8,8 +8,11 @@
 rules:
   # Bronze
   action-setup:
-    status: exempt
-    comment: The integration registers no service actions; everything is controlled through entities.
+    status: done
+    comment: >-
+      plan_target_soc and reset_inverter are registered from async_setup in
+      services.py, so they exist independently of any entry being loaded; each
+      handler resolves its entry and reports an unloaded one as an error.
   appropriate-polling:
     status: done
     comment: |
@@ -17,10 +20,18 @@ rules:
       Everything that has to be fast - battery SOC, the inverter's min SOC, the
       grid import - is event driven through state change listeners instead.
   brands:
-    status: exempt
+    status: done
     comment: |
-      The brands repository only accepts integrations that are part of Home
-      Assistant Core. The integration ships its own icon.svg for HACS.
+      The integration ships brand/icon.png (256x256) and brand/icon@2x.png
+      (512x512): PNG, square, transparent and trimmed, per the image
+      specification in the home-assistant/brands README. No logo files, because
+      the same square image serves as both and that README says to add only the
+      icon then.
+
+      It is deliberately not a pull request against that repository: its README
+      marks custom_integrations/ as a legacy folder and states that since Home
+      Assistant 2026.3.0 custom components include their brand icons directly.
+      The HACS brands check looks for exactly this path and passes on it.
   common-modules:
     status: done
     comment: |
@@ -82,8 +93,11 @@ rules:
 
   # Silver
   action-exceptions:
-    status: exempt
-    comment: No service actions are registered.
+    status: done
+    comment: >-
+      Bad input (missing, unknown or unloaded entry) raises
+      ServiceValidationError, a failed plan or reset raises HomeAssistantError,
+      both with translated messages.
   config-entry-unloading:
     status: done
     comment: |
@@ -176,8 +190,15 @@ rules:
       Device classes where they are true (power, energy, enum). Deliberately not
       on the target SOC: it is a plan, not a battery reading.
   entity-disabled-by-default:
-    status: exempt
-    comment: All entities are either controls the user needs or the few diagnostics that explain a night.
+    status: done
+    comment: |
+      best_charge_power and efficiency_search are disabled by default: both
+      belong to the efficiency search, which is off unless the user turns it
+      on, and the second carries the whole measurement series in its
+      attributes. Everything else is either a control the user needs or a
+      diagnostic that explains a night, including the two that report the
+      house connection limit - hiding a protection indicator by default would
+      be the worse trade.
   entity-translations: done
   exception-translations:
     status: done

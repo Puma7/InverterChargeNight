@@ -1,0 +1,14 @@
+plan_target_soc:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: inverter_charge_night
+reset_inverter:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: inverter_charge_night

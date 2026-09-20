@@ -144,6 +144,8 @@ vorliegt; bis dahin bleibt der Kostal-Pfad, aber ohne Markennamen in Keys und La
 | 008 | Ladeleistung gegen den Hausanschluss begrenzen (Dauerlast, Sicherungsgröße, Netzbezug) | P1 | M | 006 | DONE |
 | 009 | Entladung im Fenster sperren: Schalter, sonst Leistungsgrenze, sonst Min-SOC anheben | P1 | M | 004, 005, 006 | DONE |
 | 010 | Effizienzsuche messbar machen: Einschwingen, Energiezähler, Annahmekriterien, Sichtbarkeit | P1 | M | 008 | DONE |
+| 011 | Tarifzeitfenster (Perioden, Saison, Jahreswechsel) und Abendreserve für die Hochpreiszone | P1 | M | 006 | TODO (Entwurf) |
+| 012 | Masterplan: allgemeine Lade-/Entladesteuerung — Services, Tarifkalender, Preissignal, Regeln als Subentries | P1 | L | 006 | Stufe 1 DONE (3.1.0), 2–4 TODO |
 
 Status-Werte: TODO | IN PROGRESS | DONE | BLOCKED (mit Grund) | REJECTED (mit Begründung)
 
@@ -322,17 +324,77 @@ beide Stellen prüfen jetzt explizit auf `None`.
 
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 
-- **010 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des Config-Entrys, tägliche Neubestimmung.
-- **011 Wechselrichter-Profile** (L8): erst Spike gegen die realen Entitäten der Fronius- und SMA-Integrationen, dann Fähigkeitsschnittstelle; Umbenennung `kostal_*` → `min_soc_entity` / `grid_charge_switch` mit `async_migrate_entry`.
-- **012 Morning-Discharge entscheiden** (L9): entweder als "dynamischer Tarif"-Funktion dokumentieren oder zum Überbrückungsmodus umbauen. Bis dahin mindestens Override-Pfad korrigieren (in 004 enthalten).
-- **013 Preissignal** (L5): Tibber/aWATTar/EPEX-Sensor als Eingang, ersetzt den festen Zeitplan durch Kostenoptimierung.
+- ~~**010 Zeitplanmodell für §14a-Fenster** (L5)~~ — hat jetzt einen eigenen Plan:
+  `plans/011-tarifzeitfenster-und-abendreserve.md`. Dort stehen der Defekt im heutigen
+  Datumsbereich (absolute Daten laufen ab, eine Winter-Saison wird still ignoriert), das
+  Datenmodell als Periodenliste, die Antwort auf die Wiederholungsfrage (`MM-DD` wiederholt sich
+  jährlich, `YYYY-MM-DD` einmalig, Jahreswechsel wie Mitternacht behandelt), der `ObjectSelector`
+  als Oberfläche — und die **Abendreserve** für Pascals Hochpreiszone 18–21 Uhr.
+
+- **011 Wechselrichter-Profile** (L8): erst Spike gegen die realen Entitäten der Fronius- und
+  SMA-Integrationen, dann Fähigkeitsschnittstelle. Die Umbenennung `kostal_*` →
+  `min_soc_entity` / `grid_charge_switch` samt Migration ist mit 3.0.2 erledigt; offen bleibt die
+  Fähigkeitsschnittstelle, also die Frage, welche Steuergrößen ein Wechselrichter überhaupt
+  anbietet und was die Integration tut, wenn eine davon fehlt.
+- ~~**012 Morning-Discharge entscheiden** (L9)~~ — entschieden von Pascal am 20.09.: der Modus
+  bleibt, als **Netzentlastungs- und Arbitragefunktion**, nicht als "Platz für die Sonne
+  schaffen". Zweck: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, den Speicher in
+  die Morgenspitze (etwa 5–8 Uhr) entladen — dort zieht der Haushalt am meisten, die Sonne
+  liefert noch nicht, der dynamische Tarif ist am teuersten und das Netz am engsten. Hochoptional
+  und ausdrücklich **experimentell**; so ist er jetzt auch in der Oberfläche benannt und in
+  `docs/morning-discharge.md` beschrieben. Der Zwangsentlade-Schalter ist seit 3.0.2 Pflicht für
+  den Modus.
+- **017 PV-Ladung über den Tag strecken (Abregelung vermeiden)**: Pascal am 20.09. — wenn
+  mittags das Netz voll ist, darf nicht mehr eingespeist werden. Ein Speicher, der um zwölf Uhr
+  schon voll ist, kann dann nichts mehr aufnehmen und die Anlage wird abgeregelt. Beispiel:
+  100 kWh Prognose für den Tag, 35 kWh Speicher — der ist bis mittags voll, und der Rest der
+  Mittagsspitze geht verloren. Die Ladung müsste so gestreckt werden, dass der Speicher erst am
+  Nachmittag voll ist und die Spitze noch aufnehmen kann.
+
+  Was dafür spricht, dass es geht: die Steuergröße gibt es schon. Ein Limit, das auch die
+  **DC-seitige PV-Ladung** begrenzt, ist bei einem Kostal G3 Register 1280
+  (`Battery Max Charge Power (G3)`, AC+DC) — genau die Entität, die diese Integration bereits als
+  „absolutes Maximum" kennt. Das AC-Ladelimit allein würde nicht reichen, das begrenzt nur den
+  Netzbezug.
+
+  Was noch offen ist:
+  - **Die Integration ist heute ein Nachtfenster-Programm.** Eine Ladekurve über den Tag hieße,
+    dass sie auch tagsüber rechnet und schreibt — das ist eine echte Erweiterung, kein Parameter.
+  - **1280 fällt zurück.** Ohne regelmäßiges Nachschreiben springt das Register nach
+    `Battery Time Until Fallback (G3)` auf die Werkseinstellung (siehe `docs/kostal-kore.md`).
+    Eine Kurve muss also in jedem Poll erneuert werden.
+  - **Die Prognose für *heute*** ist heute ein optionales Feld (`pv_forecast_today_entity`). Für
+    diese Funktion wäre sie Pflicht.
+  - Zusammenspiel mit 011: die Abendreserve sagt, wie voll der Speicher am Abend sein muss — zu
+    scharf gestreckt wird er das nicht mehr.
+
+  Einfachste tragfähige Fassung: kein SOC-Fahrplan, sondern eine Leistungsobergrenze aus
+  „verbleibende Prognose / verbleibende Kapazität / Stunden bis PV-Ende", bei jedem Poll neu
+  geschrieben.
+
+- **013 Preissignal** (L5): Tibber/aWATTar/EPEX-Sensor als Eingang, ersetzt den festen Zeitplan
+  durch Kostenoptimierung. Von Pascal bestätigt: wer einen dynamischen Tarif hat, würde darüber
+  laden *und* entladen — das ist derselbe Eingang für Nachtladung und Morgenentladung, und es ist
+  das, was 012 von "Modus von Hand umschalten" zu "rechnet selbst" machen würde.
 - ~~**016 Coordinator aufteilen** (`common-modules`)~~ — erledigt: der Coordinator liegt in
   `coordinator.py`, `__init__.py` ist nur noch Setup, Update und Unload. Eine feinere Aufteilung
   (Limits, Effizienzsuche, Zeitplan, Persistenz) bleibt möglich, ist aber von keiner Regel
   gefordert.
+- ~~**015 Effizienz je Ladestandsband**~~ — erledigt mit 3.3.0. Nachtrag zum Eintrag unten: die
+  Annahme, die Messung trage Start- und End-SOC schon mit, war **falsch** — im gesamten Messpfad
+  kam `_current_battery_soc()` nicht vor. Die Aufnahme des SOC war der eigentliche Teil der Arbeit.
+  Bänder à 20 Punkte, Mittelwert der Messung entscheidet, ab drei gemessenen Leistungen sticht das
+  Band das globale Optimum, breitere Messungen bleiben global.
+
 - **015 Effizienz je Ladestandsband**: Verluste hängen auch vom SOC ab; die Suche bucht heute nur
   auf die Leistung. Wer das verfeinern will, misst pro SOC-Band (Plan 010, Wartungshinweise).
-- **014 Doku-Bereinigung**: README auf 2.0 und 28 Felder bringen (Forecast-Entität für MORGEN, nicht heute), Platzhalter-URLs, elf Audit-Dateien im Wurzelverzeichnis nach `docs/history/`, `de.json` anlegen.
+  Von Pascal als sinnvoll und direkt umsetzbar eingestuft. Umfang: die Messung trägt den SOC
+  ohnehin schon (Start- und End-SOC stehen im Sample), es fehlt die Ablage je Band und ein
+  Optimum je Band statt eines globalen. Der Rahmen dafür — golden-section über die Leistung,
+  Verwerfen unbrauchbarer Messungen — bleibt wie er ist.
+- ~~**014 Doku-Bereinigung**~~ — erledigt: die README beschreibt die Prognose-Entität für den
+  nächsten Tag und alle Felder, die Platzhalter-URLs sind durch die echten ersetzt, die
+  Audit-Dateien liegen unter `docs/history/`, und `translations/de.json` existiert.
 
 ### Abhängigkeiten
 

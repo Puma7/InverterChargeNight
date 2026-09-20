@@ -38,6 +38,7 @@ from .const import (
     CONF_BACKUP_MODE_STATES,
     CONF_ACTIVE_START_DATE,
     CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_RANGE_YEARLY,
     CONF_MIN_CHARGE_POWER_W,
     CONF_MAX_CHARGE_POWER_W,
     CONF_CHARGE_POWER_ENTITY,
@@ -66,8 +67,11 @@ from .const import (
     CONF_USER_MIN_SOC,
     CONF_USER_MAX_SOC,
     CONF_FORECAST_ERROR_MARGIN,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_HIGH_PRICE_END,
+    CONF_HIGH_PRICE_MARGIN_PCT,
+    CONF_HIGH_PRICE_START,
     CONF_PV_FORECAST_ENTITY,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
@@ -100,6 +104,7 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_ACTIVE_START_DATE,
     DEFAULT_ACTIVE_END_DATE,
+    DEFAULT_ACTIVE_RANGE_YEARLY,
     DEFAULT_DISCHARGE_BLOCK_MODE,
     DISCHARGE_BLOCK_OFF,
     DISCHARGE_BLOCK_VIA_SWITCH,
@@ -120,6 +125,10 @@ from .const import (
     CONF_GRID_HEADROOM_W,
     DEFAULT_GRID_PHASES,
     DEFAULT_GRID_VOLTAGE_V,
+    EFFICIENCY_BAND_MAX_SPAN,
+    EFFICIENCY_BAND_MIN_SAMPLES,
+    EFFICIENCY_BAND_WIDTH_PCT,
+    DEFAULT_HIGH_PRICE_MARGIN_PCT,
     DEFAULT_GRID_CONTINUOUS_PCT,
     DEFAULT_GRID_HEADROOM_W,
     DEFAULT_MIN_CHARGE_POWER_W,
@@ -133,6 +142,7 @@ from .planner import (
     PlanInput,
     PlanResult,
     allowed_charge_power_w,
+    evening_reserve_soc,
     grid_budget_w,
     plan_target_soc,
     required_charge_power_w,
@@ -250,6 +260,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.skip_next = False
         self._skip_next_until: datetime | None = None
         self._skip_next_unsub: CALLBACK_TYPE | None = None
+        # Set by the reset_inverter action: until this moment the running window
+        # is not taken up again. Without it the action would be a no-op - the min
+        # SOC listener writes the window's floor back within milliseconds, and
+        # the window check restarts the window on the next update.
+        self._hands_off_until: datetime | None = None
+        # The end date of the expired range the repair issue currently names,
+        # so the registry is only written when that changes.
+        self._expired_range_issue: date | None = None
         self.calculated_soc: float | None = None
         self.initial_calculated_soc: float | None = None  # Store SOC calculated at window start
         self.minimum_calculated_soc: float | None = None  # Store minimum SOC value (always <= initial)
@@ -286,10 +304,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_last_sample_time: datetime | None = None
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
+        # The state of charge the running measurement started at, so its loss
+        # can be filed under the part of the battery it was measured in.
+        self._auto_start_soc: float | None = None
         self._auto_missing_entities_logged = False
         # Planner v2 (plan 006)
         self.last_plan: PlanResult | None = None  # result of the last bridge plan this window
         self.planned_charge_power_w: float | None = None  # setpoint for the remaining window
+        # Whether that setpoint is also ordered from the inverter. The plan is
+        # worth showing in every mode, but a number that looks like a command
+        # and is not would be the worse kind of wrong (see the sensor).
+        self.planned_power_is_applied = False
         self._pv_crossover: datetime | None = None
         self._original_discharge_limit: float | None = None  # raw value in the entity's unit
         self._planned_setpoint_written_w: float | None = None
@@ -351,6 +376,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "original_discharge_block": self._original_discharge_block,
             "original_absolute_charge_power": self._original_absolute_charge_power,
             "pending_reset": self._pending_reset,
+            "hands_off_until": (
+                self._hands_off_until.isoformat() if self._hands_off_until else None
+            ),
             "snow_nights": self.snow_nights,
         }
         self.hass.config_entries.async_update_entry(self.entry, options=options)
@@ -395,6 +423,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
             self.snow_nights = snow_raw
+
+        hands_off_raw = state.get("hands_off_until")
+        if isinstance(hands_off_raw, str):
+            try:
+                hands_off = datetime.fromisoformat(hands_off_raw)
+            except (ValueError, TypeError):
+                _LOGGER.warning("Ignoring invalid persisted hands_off_until %r", hands_off_raw)
+            else:
+                # A deadline in the past is simply over; no timer is needed
+                # either way, because the window check looks at the clock.
+                if hands_off > dt_util.now():
+                    self._hands_off_until = hands_off
 
         until_raw = state.get("skip_next_until")
         if isinstance(until_raw, str):
@@ -491,7 +531,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         user_min_soc = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
         user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC))
         if not user_min_soc <= target_soc <= user_max_soc:
-            # The target itself is out of bounds; _control_kostal refuses it and
+            # The target itself is out of bounds; _control_charge refuses it and
             # logs why. Raising it here would paper over that.
             return target_soc
         return max(user_min_soc, min(user_max_soc, floor))
@@ -536,6 +576,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         remaining = max(0.0, (until - now).total_seconds())
         self._skip_next_unsub = async_call_later(self.hass, remaining, _expire_skip_next)
 
+    def clear_hands_off(self) -> None:
+        """Let the integration drive the running window again.
+
+        The ``reset_inverter`` action keeps it off the inverter until the
+        window's end time; switching the integration back on is the user saying
+        otherwise. The caller persists.
+        """
+        if self._hands_off_until is not None:
+            _LOGGER.info("Driving the window again - the inverter is no longer handed back")
+            self._hands_off_until = None
+
     def _cancel_skip_next_expiry(self) -> None:
         """Cancel the skip_next expiry timer."""
         self._skip_next_until = None
@@ -550,6 +601,31 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         end_minutes = end.hour * 60 + end.minute
         span = (end_minutes - start_minutes) % (24 * 60)
         return float(span * 60) if span else 24 * 3600.0
+
+    def _high_price_window(self, after: datetime) -> tuple[datetime, datetime] | None:
+        """The next high-price period that starts at or after ``after``.
+
+        ``None`` when none is configured. The period may cross midnight, the
+        same way the charge window may; its end is then on the following day.
+        Everything the battery is meant to carry through it has to be in there
+        by its start, which is why the planner is given the pair and not a
+        duration.
+        """
+        start = parse_time_str(self.config.get(CONF_HIGH_PRICE_START))
+        end = parse_time_str(self.config.get(CONF_HIGH_PRICE_END))
+        if start is None or end is None or start == end:
+            return None
+        start_dt = after.replace(hour=start[0], minute=start[1], second=0, microsecond=0)
+        if start_dt < after:
+            start_dt += timedelta(days=1)
+        end_dt = start_dt.replace(hour=end[0], minute=end[1])
+        if end_dt <= start_dt:
+            end_dt += timedelta(days=1)
+        return start_dt, end_dt
+
+    def next_high_price_window(self) -> tuple[datetime, datetime] | None:
+        """The next high-price period from now, for the sensor."""
+        return self._high_price_window(dt_util.now())
 
     def _window_end_datetime(self, now: datetime) -> datetime:
         """Return the end of the window that is running or comes next, at minute resolution.
@@ -830,6 +906,120 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         return [sums[hour] / counts[hour] if counts[hour] else avg_kw for hour in range(24)]
 
+    async def _build_plan_input(
+        self, forecast_kwh: float, forecast_available: bool
+    ) -> tuple[PlanInput, datetime]:
+        """Gather every state the planner needs; returns the input and the crossover.
+
+        Split out of :meth:`_plan_target` so that a caller can run the planner
+        without the side effects - the ``plan_target_soc`` action answers with a
+        plan and must not move the window's target while it does so.
+        """
+        capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
+        now = dt_util.now()
+        window_end = self._window_end_datetime(now)
+        sunrise, sunset = self._sun_times(now, window_end)
+        delay_min = int(float(self.config.get(CONF_PV_CROSSOVER_DELAY_MIN, DEFAULT_PV_CROSSOVER_DELAY_MIN)))
+        pv_crossover = sunrise + timedelta(minutes=delay_min)
+        if pv_crossover < window_end:
+            # The sun is already up when the window ends (morning discharge,
+            # or a spring window ending after sunrise): there is nothing to
+            # bridge, PV carries the house from the window end onwards.
+            _LOGGER.debug(
+                "PV crossover %s is before the window end %s - no bridge needed",
+                pv_crossover,
+                window_end,
+            )
+            pv_crossover = window_end
+        bridge_hours = (pv_crossover - window_end).total_seconds() / 3600.0
+        if bridge_hours > MAX_PLAUSIBLE_BRIDGE_HOURS:
+            _LOGGER.warning(
+                "Bridging %.1f h from the window end %s to the PV crossover %s - check "
+                "%s and the crossover delay; the target will be very high",
+                bridge_hours,
+                window_end,
+                pv_crossover,
+                SUN_ENTITY_ID,
+            )
+        current_soc = self._current_battery_soc()
+        return (
+            PlanInput(
+                capacity_kwh=capacity,
+                current_soc=current_soc if current_soc is not None else 0.0,
+                user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
+                user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
+                forecast_kwh_next_day=forecast_kwh,
+                forecast_available=forecast_available,
+                error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
+                window_end=window_end,
+                pv_crossover=pv_crossover,
+                sunset=sunset,
+                house_load_kw_profile=await self._house_load_profile(),
+                reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
+                charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
+                prices_ct=self._prices_ct(),
+                # Measured from the window end: the evening the battery has to
+                # reach is the one on the solar day this window is planning for.
+                high_price_window=self._high_price_window(window_end),
+                reserve_margin_pct=float(
+                    self.config.get(CONF_HIGH_PRICE_MARGIN_PCT, DEFAULT_HIGH_PRICE_MARGIN_PCT)
+                ),
+            ),
+            pv_crossover,
+        )
+
+    async def _evening_reserve_floor(
+        self, forecast_kwh: float, forecast_available: bool
+    ) -> float | None:
+        """The SOC a morning discharge must not go below, or None.
+
+        Morning discharge empties the battery into the morning peak. What the
+        evening's high-price period will need must not be sold there - the same
+        reserve the night charge buys, seen from the other direction. What
+        today's sun is forecast to deliver is subtracted first, so a summer day
+        leaves the discharge untouched.
+        """
+        if not self.is_discharge_mode or self._high_price_window(dt_util.now()) is None:
+            return None
+        try:
+            plan_input, _ = await self._build_plan_input(forecast_kwh, forecast_available)
+            return evening_reserve_soc(plan_input)
+        except (ValueError, TypeError) as err:
+            _LOGGER.error("Could not work out the evening reserve: %s", err)
+            return None
+
+    async def _floor_discharge_at_the_evening_reserve(
+        self, calculated_soc: float, forecast_kwh: float, forecast_available: bool
+    ) -> float:
+        """Raise a discharge target that would sell the evening's energy."""
+        floor = await self._evening_reserve_floor(forecast_kwh, forecast_available)
+        if floor is None or floor <= calculated_soc:
+            return calculated_soc
+        _LOGGER.info(
+            "Morning discharge target raised from %.1f%% to %.1f%% - the high-price "
+            "period this evening needs that much in the battery",
+            calculated_soc,
+            floor,
+        )
+        return floor
+
+    async def preview_plan(self) -> tuple[PlanResult, PlanInput] | None:
+        """Run the planner on the current inputs and change nothing.
+
+        For the ``plan_target_soc`` action: an automation may ask what the
+        planner would do at any time, including outside a window, without the
+        answer becoming the window's target.
+        """
+        forecast_kwh, forecast_available = self._parse_forecast_energy(
+            self._get_active_forecast_entity()
+        )
+        try:
+            plan_input, _ = await self._build_plan_input(forecast_kwh, forecast_available)
+            return plan_target_soc(plan_input), plan_input
+        except (ValueError, TypeError) as err:
+            _LOGGER.error("Bridge planner failed: %s", err)
+            return None
+
     async def _plan_target(self, forecast_kwh: float, forecast_available: bool) -> PlanResult | None:
         """Run the bridge planner on the current inputs; None when it cannot plan.
 
@@ -837,51 +1027,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         (invalid configuration) is logged and the caller uses the headroom formula.
         """
         try:
-            capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
-            now = dt_util.now()
-            window_end = self._window_end_datetime(now)
-            sunrise, sunset = self._sun_times(now, window_end)
-            delay_min = int(float(self.config.get(CONF_PV_CROSSOVER_DELAY_MIN, DEFAULT_PV_CROSSOVER_DELAY_MIN)))
-            pv_crossover = sunrise + timedelta(minutes=delay_min)
-            if pv_crossover < window_end:
-                # The sun is already up when the window ends (morning discharge,
-                # or a spring window ending after sunrise): there is nothing to
-                # bridge, PV carries the house from the window end onwards.
-                _LOGGER.debug(
-                    "PV crossover %s is before the window end %s - no bridge needed",
-                    pv_crossover,
-                    window_end,
-                )
-                pv_crossover = window_end
-            bridge_hours = (pv_crossover - window_end).total_seconds() / 3600.0
-            if bridge_hours > MAX_PLAUSIBLE_BRIDGE_HOURS:
-                _LOGGER.warning(
-                    "Bridging %.1f h from the window end %s to the PV crossover %s - check "
-                    "%s and the crossover delay; the target will be very high",
-                    bridge_hours,
-                    window_end,
-                    pv_crossover,
-                    SUN_ENTITY_ID,
-                )
-            current_soc = self._current_battery_soc()
-            plan = plan_target_soc(
-                PlanInput(
-                    capacity_kwh=capacity,
-                    current_soc=current_soc if current_soc is not None else 0.0,
-                    user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
-                    user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
-                    forecast_kwh_next_day=forecast_kwh,
-                    forecast_available=forecast_available,
-                    error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
-                    window_end=window_end,
-                    pv_crossover=pv_crossover,
-                    sunset=sunset,
-                    house_load_kw_profile=await self._house_load_profile(),
-                    reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
-                    charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
-                    prices_ct=self._prices_ct(),
-                )
+            plan_input, pv_crossover = await self._build_plan_input(
+                forecast_kwh, forecast_available
             )
+            plan = plan_target_soc(plan_input)
         except (ValueError, TypeError) as err:
             _LOGGER.error("Bridge planner failed, using the headroom formula instead: %s", err)
             return None
@@ -935,6 +1084,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lower_bound_soc": plan.lower_bound_soc,
             "upper_bound_soc": plan.upper_bound_soc,
             "pv_crossover": self._pv_crossover.isoformat() if self._pv_crossover else None,
+            # Plan 011: what the high-price period is expected to draw, and how
+            # much of that this window has to buy because the sun will not.
+            "evening_reserve_kwh": round(plan.evening_reserve_kwh, 2),
+            "evening_shortfall_kwh": round(plan.evening_shortfall_kwh, 2),
             "planned_charge_power_w": self.planned_charge_power_w,
         }
 
@@ -954,6 +1107,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         setpoint from ever exceeding what the connection can carry.
         """
         self.planned_charge_power_w = None
+        self.planned_power_is_applied = False
         if self.target_reached:
             self.planned_charge_power_w = 0.0
             return
@@ -984,8 +1138,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         min_w = float(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000))
         max_w = float(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000))
         ceiling = max_w
-        best = self.get_auto_efficiency_data().get("best_power_w")
-        if isinstance(best, int) and required <= best:
+        # Per band where one has been searched, battery-wide otherwise (plan 015)
+        best = self.best_charge_power_w(current_soc)
+        if best is not None and required <= best:
             ceiling = max(min_w, min(max_w, float(best)))
         setpoint = float(round(max(min_w, min(required, ceiling))))
         # What the battery would draw without the house connection limit. Kept
@@ -1001,9 +1156,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # connection limit is a protection and must not depend on the mode.
             return
         if self._ac_charge_limit_target() is None:
+            # Bridge mode without a charge limit entity: the plan is computed and
+            # shown, but there is nothing to write it to.
             return
         written = self._planned_setpoint_written_w
         if written is not None and abs(setpoint - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
+            # Near enough to what already stands on the inverter: that value is
+            # in force, so the plan is applied without another write.
+            self.planned_power_is_applied = True
             return
         _LOGGER.info(
             "Planned charge power %.0f W (%.2f kWh missing in %.2f h, required %.0f W)",
@@ -1012,8 +1172,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             hours_remaining,
             required,
         )
+        # Only a write that reached the inverter counts. _set_ac_charge_limit_w
+        # returns False when the service call failed or when the current limit
+        # could not be read - and then the number on the sensor is a plan, not
+        # an order, which is the whole point of the attribute.
         if await self._set_ac_charge_limit_w(int(setpoint)):
             self._planned_setpoint_written_w = setpoint
+            self.planned_power_is_applied = True
 
     # Discharge block (plan 006, step 5) --------------------------------------
 
@@ -1104,7 +1269,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _grid_charging_is_on(self) -> bool:
         """True while the inverter is charging the battery from the grid on our order."""
-        switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
         if not switch:
             # Without the switch the integration cannot tell; the charge target
             # is the honest assumption while the target is not reached yet.
@@ -1228,14 +1393,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Write the floor to the min SOC entity when it sits above the target.
 
         Only then: with floor == charge target nothing about the existing
-        control flow changes, and _control_kostal writes it on the next update
+        control flow changes, and _control_charge writes it on the next update
         as it always did.
         """
         target_soc = self.current_target_soc()
         floor_soc = self.inverter_floor_soc(target_soc)
         if target_soc is None or floor_soc is None or floor_soc <= target_soc:
             return
-        entity_id = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
+        entity_id = self.config.get(CONF_MIN_SOC_ENTITY)
         if not entity_id:
             return
         state = self.hass.states.get(entity_id)
@@ -1301,7 +1466,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._apply_discharge_block_switch()
             return
         if method == DISCHARGE_BLOCK_VIA_MIN_SOC:
-            # The floor is written by _control_kostal and _verify_and_restore_min_soc,
+            # The floor is written by _control_charge and _verify_and_restore_min_soc,
             # which both read it back through inverter_floor_soc().
             self._update_window_floor()
             return
@@ -1390,29 +1555,117 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
 
     def _is_within_date_range(self) -> bool:
-        """Check if today's date is within the optional active date range."""
-        start_date_str = self.config.get(CONF_ACTIVE_START_DATE, DEFAULT_ACTIVE_START_DATE)
-        end_date_str = self.config.get(CONF_ACTIVE_END_DATE, DEFAULT_ACTIVE_END_DATE)
-        start_date = self._parse_date_optional(start_date_str)
-        end_date = self._parse_date_optional(end_date_str)
+        """Is today inside the optional active date range?
+
+        The range means one of two things, and the difference is the
+        "repeat every year" setting:
+
+        * **Yearly** - only month and day count, so 11-01 to 03-31 is every
+          winter. A range whose start falls after its end crosses the new year
+          and is matched the same way a window crossing midnight is: inside
+          when today is on or after the start *or* on or before the end.
+        * **Absolute** - the years count too, and the range is over when its
+          end has passed. That is a silent stop, so it raises a repair issue
+          instead of leaving the user to wonder why nothing charges.
+
+        A range that crosses the new year is always yearly, whatever the
+        setting says: read absolutely it would be start > end, which cannot
+        contain any day at all. It used to be logged as invalid and then
+        dropped entirely, which turned "every winter" into "all year round".
+        """
+        start_date = self._parse_date_optional(
+            self.config.get(CONF_ACTIVE_START_DATE, DEFAULT_ACTIVE_START_DATE)
+        )
+        end_date = self._parse_date_optional(
+            self.config.get(CONF_ACTIVE_END_DATE, DEFAULT_ACTIVE_END_DATE)
+        )
 
         if start_date is None and end_date is None:
+            self._update_expired_range_issue(None)
             return True
 
-        if start_date and end_date and start_date > end_date:
+        today = dt_util.now().date()
+        wraps = (
+            start_date is not None
+            and end_date is not None
+            and (start_date.month, start_date.day) > (end_date.month, end_date.day)
+        )
+        yearly = wraps or bool(
+            self.config.get(CONF_ACTIVE_RANGE_YEARLY, DEFAULT_ACTIVE_RANGE_YEARLY)
+        )
+
+        if yearly:
+            self._update_expired_range_issue(None)
+            return self._is_within_yearly_range(today, start_date, end_date, wraps)
+
+        if start_date is not None and end_date is not None and start_date > end_date:
+            # Not a season crossing the new year (that is handled above) but the
+            # same year the wrong way round, e.g. 2026-06-01 to 2026-05-31.
             _LOGGER.warning(
                 "Active date range is invalid (%s > %s), ignoring date restriction",
                 start_date,
                 end_date,
             )
+            self._update_expired_range_issue(None)
             return True
 
-        today = dt_util.now().date()
+        self._update_expired_range_issue(end_date if end_date and today > end_date else None)
         if start_date and today < start_date:
             return False
         if end_date and today > end_date:
             return False
         return True
+
+    @staticmethod
+    def _is_within_yearly_range(
+        today: date, start_date: date | None, end_date: date | None, wraps: bool
+    ) -> bool:
+        """Match month and day only, so the range comes back every year.
+
+        Comparing (month, day) tuples rather than constructing dates keeps a
+        29 February boundary usable in a year that does not have one.
+        """
+        now_md = (today.month, today.day)
+        start_md = (start_date.month, start_date.day) if start_date else None
+        end_md = (end_date.month, end_date.day) if end_date else None
+        if wraps and start_md is not None and end_md is not None:
+            return now_md >= start_md or now_md <= end_md
+        if start_md is not None and now_md < start_md:
+            return False
+        if end_md is not None and now_md > end_md:
+            return False
+        return True
+
+    def _update_expired_range_issue(self, ended_on: date | None) -> None:
+        """Say out loud that an absolute date range has run out.
+
+        Without this the integration simply stops working one morning and
+        nothing anywhere says why - the log line it used to write is gone by
+        the time anyone looks.
+
+        The date range is checked on every poll and on every window trigger,
+        so the registry is only touched when something actually changed.
+        """
+        if ended_on == self._expired_range_issue:
+            return
+        issue_id = f"active_range_expired_{self.entry.entry_id}"
+        self._expired_range_issue = ended_on
+        if ended_on is None:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            issue_domain=DOMAIN,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="active_range_expired",
+            translation_placeholders={
+                "name": str(self.entry.title),
+                "end_date": ended_on.isoformat(),
+            },
+        )
 
     def _backup_mode_states(self) -> frozenset[str]:
         """The states the user declared as "backup mode", lowercased."""
@@ -1873,6 +2126,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_meter_start = None
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
+        self._auto_start_soc = None
 
     async def _limit_the_efficiency_finder(self) -> None:
         """Hold the finder's setpoint inside what the connection carries.
@@ -1985,6 +2239,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "measured_energy_kwh": round(self._auto_energy_sent_wh / 1000.0, 3),
             "last_result": self._auto_last_result,
             "measurement_source": "energy meters" if self._energy_meter_entities() else "power sensors",
+            # Plan 015: what has been measured where on the battery, and which
+            # of those bands is far enough along to overrule the overall best.
+            "loss_by_band_pct": {
+                key: {
+                    "best_power_w": band.get("best_power_w"),
+                    "best_loss_pct": (
+                        round(float(band["best_loss"]) * 100.0, 2)
+                        if band.get("best_loss") is not None
+                        else None
+                    ),
+                    "measured_powers": len(band.get("history") or {}),
+                    "in_use": len(band.get("history") or {}) >= EFFICIENCY_BAND_MIN_SAMPLES,
+                }
+                for key, band in sorted(
+                    (dict(data.get("bands") or {})).items(), key=lambda item: int(item[0])
+                )
+                if isinstance(band, dict)
+            },
+            "band_width_pct": EFFICIENCY_BAND_WIDTH_PCT,
         }
         if self._auto_measure_start is not None:
             attributes["measuring_for_min"] = round(
@@ -2029,6 +2302,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _begin_auto_measurement(self, now: datetime) -> None:
         """Start counting: the inverter has had its settling time."""
         self._auto_measure_start = now
+        # Where on the battery this measurement is taken. A loss measured from
+        # a third full is not the loss measured near the top, and until now
+        # every sample was filed as if it were (plan 015).
+        self._auto_start_soc = self._current_battery_soc()
         self._auto_last_sample_time = now
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
@@ -2193,6 +2470,91 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
         self._save_auto_efficiency_data(data)
 
+    @staticmethod
+    def _efficiency_band(soc: float) -> str:
+        """The band key a state of charge falls into, e.g. 60.0 -> "60".
+
+        100 % belongs to the top band rather than one of its own: a battery is
+        only briefly full, and a band that can only ever hold the last moments
+        of a charge would never gather enough samples to be used.
+        """
+        clamped = max(0.0, min(100.0, soc))
+        index = min(
+            int(clamped // EFFICIENCY_BAND_WIDTH_PCT),
+            100 // EFFICIENCY_BAND_WIDTH_PCT - 1,
+        )
+        return str(index * EFFICIENCY_BAND_WIDTH_PCT)
+
+    def _band_for_measurement(self, start_soc: float | None, end_soc: float | None) -> str | None:
+        """The band a finished measurement belongs to, or None.
+
+        None when either end is unknown, or when the charge ran across more
+        bands than EFFICIENCY_BAND_MAX_SPAN: such a sample is a blend of
+        several bands and says nothing reliable about any one of them. It is
+        still kept battery-wide, which is exactly what it is evidence for.
+        """
+        if start_soc is None or end_soc is None:
+            return None
+        span_pct = abs(end_soc - start_soc)
+        if span_pct > EFFICIENCY_BAND_MAX_SPAN * EFFICIENCY_BAND_WIDTH_PCT:
+            _LOGGER.debug(
+                "Measurement ran from %.0f%% to %.0f%% - too wide for a band, keeping it "
+                "battery-wide only",
+                start_soc,
+                end_soc,
+            )
+            return None
+        return self._efficiency_band((start_soc + end_soc) / 2.0)
+
+    def best_charge_power_w(self, soc: float | None = None) -> int | None:
+        """The most efficient charge power, for this part of the battery if known.
+
+        A band only overrules the battery-wide optimum once it has been
+        searched rather than merely sampled - EFFICIENCY_BAND_MIN_SAMPLES
+        distinct powers. Everything else falls back to the battery-wide value,
+        so an installation that measured before this existed keeps its result.
+        """
+        data = self.get_auto_efficiency_data()
+        overall = data.get("best_power_w")
+        overall_w = overall if isinstance(overall, int) else None
+        if soc is None:
+            return overall_w
+        bands = data.get("bands")
+        if not isinstance(bands, dict):
+            return overall_w
+        band = bands.get(self._efficiency_band(soc))
+        if not isinstance(band, dict):
+            return overall_w
+        history = band.get("history")
+        best = band.get("best_power_w")
+        if not isinstance(history, dict) or len(history) < EFFICIENCY_BAND_MIN_SAMPLES:
+            return overall_w
+        return best if isinstance(best, int) else overall_w
+
+    def _record_band_sample(self, data: dict[str, Any], power_w: int, loss: float) -> None:
+        """File a finished measurement under the band it was taken in."""
+        band_key = self._band_for_measurement(self._auto_start_soc, self._current_battery_soc())
+        if band_key is None:
+            return
+        bands = dict(data.get("bands") or {})
+        band = dict(bands.get(band_key) or {})
+        history = dict(band.get("history") or {})
+        history[str(power_w)] = loss
+        band["history"] = history
+        best_loss = band.get("best_loss")
+        if not isinstance(best_loss, (int, float)) or loss < best_loss:
+            band["best_loss"] = loss
+            band["best_power_w"] = power_w
+            _LOGGER.info(
+                "New best charge power for the %s-%d %% band: %.2f %% loss at %d W",
+                band_key,
+                int(band_key) + EFFICIENCY_BAND_WIDTH_PCT,
+                loss * 100.0,
+                power_w,
+            )
+        bands[band_key] = band
+        data["bands"] = bands
+
     def _finalize_auto_test(self) -> None:
         """Turn the running measurement into a sample, or discard it.
 
@@ -2256,6 +2618,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         history = dict(data.get("history", {}))
         history[str(power_w)] = loss
         data["history"] = history
+        self._record_band_sample(data, power_w, loss)
         data["bounds_w"] = [
             int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000)),
             int(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000)),
@@ -2321,7 +2684,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._auto_missing_entities_logged = True
             return
 
-        grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
         grid_on = False
         if grid_charge_switch:
             state = self.hass.states.get(grid_charge_switch)
@@ -2507,6 +2870,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await self._on_window_end(dt_util.now())
                 return
 
+            if self._hands_off_until is not None:
+                if dt_util.now() < self._hands_off_until:
+                    # The reset_inverter action gave the inverter back for the
+                    # rest of this window. Starting it again here would undo
+                    # exactly what the caller asked for.
+                    _LOGGER.debug(
+                        "Inverter handed back until %s - leaving it alone",
+                        self._hands_off_until.isoformat(),
+                    )
+                    if self.is_active:
+                        await self._on_window_end(dt_util.now())
+                    return
+                _LOGGER.info("The window may be driven again")
+                self._hands_off_until = None
+                self._persist_state()
+
             if self._is_backup_active():
                 if self.is_active:
                     _LOGGER.info("Backup mode active - stopping window and resetting settings")
@@ -2604,7 +2983,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Arm the listeners and the verification first. The target calculation
         # no longer waits for the inverter; if the min SOC entity is not
-        # available yet, _control_kostal skips the write and the verification
+        # available yet, _control_charge skips the write and the verification
         # applies the target as soon as the entity reports a value.
         self._setup_battery_soc_listener()
         self._setup_inverter_min_soc_listener()
@@ -2619,7 +2998,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._apply_discharge_block(announce=True)
             # A floor above the charge target has to reach the inverter now:
             # with the battery already above the target the update below returns
-            # early ("target reached") and _control_kostal never runs - which is
+            # early ("target reached") and _control_charge never runs - which is
             # exactly the case this block exists for.
             await self._write_raised_min_soc_floor()
 
@@ -2698,8 +3077,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "SOC calculation failed, using safe fallback: %.1f%% (prevents charging to 100%%)",
                     safe_fallback
                 )
-            elif not forecast_available and calculated_soc >= user_max_soc - 1.0:
-                # Forecast entity UNAVAILABLE (not just 0 kWh) and would charge to max - use safe fallback
+            elif (
+                plan is None
+                and not forecast_available
+                and calculated_soc >= user_max_soc - 1.0
+            ):
+                # Forecast entity UNAVAILABLE (not just 0 kWh) and would charge to max - use safe fallback.
+                # Only for the headroom formula: it charges to the maximum precisely
+                # because it read no forecast. The bridge planner has its own
+                # fallback and derives its target from the house load, so cutting
+                # it back to 50 % here would drop a need it just worked out.
                 safe_fallback = max(user_min_soc, min(DEFAULT_SAFE_FALLBACK_SOC, user_max_soc))
                 calculated_soc = safe_fallback
                 _LOGGER.warning(
@@ -2708,6 +3095,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     user_max_soc,
                     safe_fallback
                 )
+
+            calculated_soc = await self._floor_discharge_at_the_evening_reserve(
+                calculated_soc, forecast_energy, forecast_available
+            )
 
             self.initial_calculated_soc = calculated_soc
             self.minimum_calculated_soc = calculated_soc  # Initialize minimum with initial value
@@ -2770,6 +3161,42 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.operation_mode = mode
         finally:
             self._switching_mode = False
+
+    async def async_reset_inverter(self) -> bool:
+        """Put the inverter back to the settings captured before the window.
+
+        The public way into :meth:`_reset_settings`, for the ``reset_inverter``
+        action. Backup mode refuses: there the house runs on the battery and the
+        inverter is not ours to write to, and a reset that "succeeded" by doing
+        nothing would clear the captures we still need afterwards.
+
+        Inside a running window the window is ended first, and not taken up
+        again before its end time. A bare reset would not survive the second it
+        was written in: the min SOC listener and the verification task exist to
+        put the window's floor straight back whenever something else moves it.
+        The next window runs as usual - this hands the inverter back for the
+        window it is called in, it does not switch the integration off.
+
+        The result is the reset's own: False also arms the retry ladder, because
+        _reset_settings records its outcome itself.
+        """
+        if self._is_backup_active():
+            _LOGGER.info("Backup mode active - not resetting the inverter on request")
+            return False
+        if self.is_active:
+            now = dt_util.now()
+            self._hands_off_until = self._window_end_datetime(now)
+            _LOGGER.info(
+                "Resetting the inverter settings on request - ending the window and "
+                "leaving the inverter alone until %s",
+                self._hands_off_until.isoformat(),
+            )
+            # The deadline is set before the end runs, so the end's own
+            # _persist_state carries it.
+            await self._on_window_end(now)
+            return not self._pending_reset
+        _LOGGER.info("Resetting the inverter settings on request")
+        return await self._reset_settings()
 
     async def async_disable(self) -> None:
         """Switch the integration off and hand the inverter back.
@@ -3003,8 +3430,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         # CRITICAL: Use stored original value if available, otherwise use configured default
         reset_min_soc = self.original_min_soc if self.original_min_soc is not None else float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
-        kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-        if kostal_min_soc_entity and self.original_min_soc is None:
+        min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+        if min_soc_entity and self.original_min_soc is None:
             # No floor was captured, so this integration never changed it:
             # writing the configured default would clobber a min SOC the user
             # set by hand (reachable by disabling the integration outside a
@@ -3013,25 +3440,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # as do the limit restores, which carry their own captures.
             _LOGGER.debug(
                 "Min SOC restore skipped for %s - no original value was captured",
-                kostal_min_soc_entity,
+                min_soc_entity,
             )
-            kostal_min_soc_entity = None
-        kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+            min_soc_entity = None
+        grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
 
         ok = True
 
         # Reset min SOC
-        if kostal_min_soc_entity:
+        if min_soc_entity:
             try:
-                state = self.hass.states.get(kostal_min_soc_entity)
+                state = self.hass.states.get(min_soc_entity)
                 if state and state.state not in ("unknown", "unavailable"):
                     await self.hass.services.async_call(
                         "number",
                         "set_value",
-                        {"entity_id": kostal_min_soc_entity, "value": reset_min_soc},
+                        {"entity_id": min_soc_entity, "value": reset_min_soc},
                     )
                     _LOGGER.info(
-                        "Reset Kostal min SOC to %.1f%% (original: %s)",
+                        "Reset the inverter min SOC to %.1f%% (original: %s)",
                         reset_min_soc,
                         "stored" if self.original_min_soc is not None else "configured default",
                     )
@@ -3041,23 +3468,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as e:
                 _LOGGER.error("Error resetting min SOC: %s", e, exc_info=True)
                 ok = False
-        elif not self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY):
+        elif not self.config.get(CONF_MIN_SOC_ENTITY):
             # Reaching here with one configured means the guard above skipped the
             # restore, which already logged why.
             _LOGGER.warning("No min SOC entity configured - cannot reset")
 
         # Turn off grid charge
-        if kostal_grid_charge_switch:
+        if grid_charge_switch:
             try:
-                state = self.hass.states.get(kostal_grid_charge_switch)
+                state = self.hass.states.get(grid_charge_switch)
                 if state and state.state not in ("unknown", "unavailable"):
                     if state.state == "on":
                         await self.hass.services.async_call(
                             "switch",
                             "turn_off",
-                            {"entity_id": kostal_grid_charge_switch},
+                            {"entity_id": grid_charge_switch},
                         )
-                        _LOGGER.info("Turned off Kostal grid charge switch")
+                        _LOGGER.info("Turned off the grid charge switch")
                     else:
                         _LOGGER.debug("Grid charge switch already off")
                 else:
@@ -3203,8 +3630,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "SOC calculation failed, using safe fallback: %.1f%% (prevents charging to 100%%)",
                     safe_fallback
                 )
-            elif not forecast_available and calculated_soc >= user_max_soc - 1.0:
-                # Forecast entity UNAVAILABLE (not just 0 kWh) and would charge to max - use safe fallback
+            elif (
+                plan is None
+                and not forecast_available
+                and calculated_soc >= user_max_soc - 1.0
+            ):
+                # Forecast entity UNAVAILABLE (not just 0 kWh) and would charge to max - use safe fallback.
+                # Only for the headroom formula: it charges to the maximum precisely
+                # because it read no forecast. The bridge planner has its own
+                # fallback and derives its target from the house load, so cutting
+                # it back to 50 % here would drop a need it just worked out.
                 safe_fallback = max(user_min_soc, min(DEFAULT_SAFE_FALLBACK_SOC, user_max_soc))
                 calculated_soc = safe_fallback
                 _LOGGER.warning(
@@ -3213,6 +3648,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     user_max_soc,
                     safe_fallback
                 )
+
+            calculated_soc = await self._floor_discharge_at_the_evening_reserve(
+                calculated_soc, forecast_energy, forecast_available
+            )
 
             # Store the successful fallback calculation
             self.initial_calculated_soc = calculated_soc
@@ -3235,7 +3674,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "override" if self.override_soc is not None else "calculated",
             )
 
-        # SAFETY: Before controlling Kostal, verify we can check battery SOC
+        # SAFETY: Before touching the inverter, verify we can check battery SOC
         # This prevents turning on grid charge switch if battery SOC is unavailable
         # (e.g., after restart when battery entity hasn't loaded yet)
         battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
@@ -3278,13 +3717,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 except (ValueError, TypeError):
                     pass
 
-        # Control Kostal entities based on operation mode
+        # Control the inverter entities based on operation mode
         if not self.target_reached:
             if can_check_soc:
                 if self.is_discharge_mode:
                     await self._control_discharge(target_soc)
                 else:
-                    await self._control_kostal(target_soc)
+                    await self._control_charge(target_soc)
             else:
                 _LOGGER.warning(
                     "Battery SOC entity %s is unavailable - skipping control to prevent "
@@ -3355,10 +3794,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         self._persist_state()
 
-    async def _control_kostal(self, target_soc: float) -> None:
-        """Control Kostal entities based on calculated SOC."""
+    async def _control_charge(self, target_soc: float) -> None:
+        """Control the inverter entities for night charging, from the calculated SOC."""
         if self._is_backup_active():
-            _LOGGER.info("Backup mode active - skipping Kostal control")
+            _LOGGER.info("Backup mode active - skipping inverter control")
             return
         # CRITICAL: Validate target_soc before applying
         user_min_soc = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
@@ -3373,8 +3812,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             return
 
-        kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-        kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+        grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
 
         # Check current SOC before starting charging (doesn't delay commands)
         # CRITICAL: If battery SOC is unavailable, we should NOT turn on grid charge
@@ -3417,9 +3856,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         min_soc_current_value = None
 
         # Prepare min SOC setting (check if needed, store original value)
-        if kostal_min_soc_entity:
+        if min_soc_entity:
             try:
-                state = self.hass.states.get(kostal_min_soc_entity)
+                state = self.hass.states.get(min_soc_entity)
                 if not state or state.state in ("unknown", "unavailable"):
                     # Without the entity the floor cannot be set, so charging must
                     # not start either. Nothing has been written yet, so no original
@@ -3428,7 +3867,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.warning(
                         "Min SOC entity %s is unavailable - deferring min SOC and grid "
                         "charge until it reports a value",
-                        kostal_min_soc_entity,
+                        min_soc_entity,
                     )
                     should_skip_charging = True
                 else:
@@ -3449,19 +3888,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # CRITICAL: Send commands together to avoid double DC checks
         # If both min SOC and grid charge need to be set, send them with minimal delay (0.1s)
         # so the inverter processes them together and only does DC checks once
-        if need_to_set_min_soc and kostal_min_soc_entity:
+        if need_to_set_min_soc and min_soc_entity:
             # Set min SOC first
             min_soc_set = False
             try:
                 await self.hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": kostal_min_soc_entity, "value": floor_soc},
+                    {"entity_id": min_soc_entity, "value": floor_soc},
                 )
                 self._last_soc_set = floor_soc
                 min_soc_set = True
                 _LOGGER.info(
-                    "Set Kostal min SOC to %.1f%% (was %s)",
+                    "Set the inverter min SOC to %.1f%% (was %s)",
                     floor_soc,
                     f"{min_soc_current_value:.1f}%" if min_soc_current_value is not None else "unknown",
                 )
@@ -3471,7 +3910,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.error("Error setting min SOC: %s", e, exc_info=True)
 
             # Immediately send grid charge command (configurable delay) so inverter processes both together
-            if min_soc_set and kostal_grid_charge_switch and not should_skip_charging:
+            if min_soc_set and grid_charge_switch and not should_skip_charging:
                 delay = _as_float(self.config.get(CONF_COMMAND_DELAY))
                 # A configured 0 is a valid answer ("no delay"), so it must not
                 # fall through to the default the way a falsy check would.
@@ -3479,40 +3918,40 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await asyncio.sleep(command_delay)  # Configurable delay
 
                 try:
-                    state = self.hass.states.get(kostal_grid_charge_switch)
+                    state = self.hass.states.get(grid_charge_switch)
                     if state and state.state == "off":
                         await self.hass.services.async_call(
                             "switch",
                             "turn_on",
-                            {"entity_id": kostal_grid_charge_switch},
+                            {"entity_id": grid_charge_switch},
                         )
-                        _LOGGER.info("Turned on Kostal grid charge switch (immediately after min SOC)")
+                        _LOGGER.info("Turned on the grid charge switch (immediately after min SOC)")
                     elif state and state.state == "on":
                         _LOGGER.debug("Grid charge switch already on")
                 except Exception as e:
                     _LOGGER.error("Error turning on grid charge: %s", e, exc_info=True)
-        elif kostal_grid_charge_switch and not should_skip_charging:
+        elif grid_charge_switch and not should_skip_charging:
             # Only grid charge needs to be turned on (min SOC already set or not needed)
             try:
-                state = self.hass.states.get(kostal_grid_charge_switch)
+                state = self.hass.states.get(grid_charge_switch)
                 if state and state.state == "off":
                     await self.hass.services.async_call(
                         "switch",
                         "turn_on",
-                        {"entity_id": kostal_grid_charge_switch},
+                        {"entity_id": grid_charge_switch},
                     )
-                    _LOGGER.info("Turned on Kostal grid charge switch")
+                    _LOGGER.info("Turned on the grid charge switch")
                 elif state and state.state == "on":
                     _LOGGER.debug("Grid charge switch already on")
             except Exception as e:
                 _LOGGER.error("Error turning on grid charge: %s", e, exc_info=True)
 
         # Apply absolute AC+DC charge limit during AC charging
-        if kostal_grid_charge_switch and not should_skip_charging:
+        if grid_charge_switch and not should_skip_charging:
             await self._apply_absolute_charge_power_limit()
 
     async def _control_discharge(self, target_soc: float) -> None:
-        """Control Kostal entities for morning discharge mode.
+        """Control the inverter entities for morning discharge mode.
 
         Sets min SOC to the discharge target (floor), ensures grid charging is off,
         and activates the force-discharge switch (if configured) to push battery
@@ -3534,8 +3973,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             return
 
-        kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-        kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+        grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
         force_discharge_switch = self.config.get(CONF_FORCE_DISCHARGE_SWITCH)
 
         battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
@@ -3582,14 +4021,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # for the periodic verification to apply the target (finding F6).
         min_soc_available = True
 
-        if kostal_min_soc_entity:
+        if min_soc_entity:
             try:
-                state = self.hass.states.get(kostal_min_soc_entity)
+                state = self.hass.states.get(min_soc_entity)
                 if not state or state.state in ("unknown", "unavailable"):
                     _LOGGER.warning(
                         "Min SOC entity %s is unavailable - deferring discharge floor and "
                         "force discharge until it reports a value",
-                        kostal_min_soc_entity,
+                        min_soc_entity,
                     )
                     min_soc_available = False
                 else:
@@ -3601,14 +4040,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     else:
                         self._last_soc_set = target_soc
             except Exception as e:
+                # Same reasoning as the failed write below: preparation is where
+                # the floor is read and captured, so after a failure here nobody
+                # knows what the inverter's floor is - and a forced discharge
+                # against an unknown floor can run the battery past the user
+                # minimum. Without this the discharge started anyway, because
+                # nothing had set the flag.
                 _LOGGER.error("Error preparing min SOC for discharge: %s", e, exc_info=True)
+                min_soc_available = False
 
-        if need_to_set_min_soc and kostal_min_soc_entity:
+        if need_to_set_min_soc and min_soc_entity:
             try:
                 await self.hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": kostal_min_soc_entity, "value": target_soc},
+                    {"entity_id": min_soc_entity, "value": target_soc},
                 )
             except Exception as e:
                 # Every other call in this method is wrapped; this one was not,
@@ -3623,14 +4069,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.info("Set min SOC to %.1f%% for discharge (floor)", target_soc)
 
         # Ensure grid charging is OFF during discharge
-        if kostal_grid_charge_switch:
+        if grid_charge_switch:
             try:
-                state = self.hass.states.get(kostal_grid_charge_switch)
+                state = self.hass.states.get(grid_charge_switch)
                 if state and state.state == "on":
                     await self.hass.services.async_call(
                         "switch",
                         "turn_off",
-                        {"entity_id": kostal_grid_charge_switch},
+                        {"entity_id": grid_charge_switch},
                     )
                     _LOGGER.info("Turned off grid charge for discharge mode")
             except Exception as e:
@@ -3670,15 +4116,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _stop_grid_charging(self) -> None:
         """Stop grid charging when target is reached."""
-        kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
-        if kostal_grid_charge_switch:
+        grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        if grid_charge_switch:
             try:
-                state = self.hass.states.get(kostal_grid_charge_switch)
+                state = self.hass.states.get(grid_charge_switch)
                 if state and state.state == "on":
                     await self.hass.services.async_call(
                         "switch",
                         "turn_off",
-                        {"entity_id": kostal_grid_charge_switch},
+                        {"entity_id": grid_charge_switch},
                     )
                     _LOGGER.info("Stopped grid charging - target SOC reached")
                 elif state and state.state == "off":
@@ -3771,8 +4217,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Set up a listener for inverter min SOC changes to detect external modifications."""
         self._remove_inverter_min_soc_listener()  # Remove any existing listener
 
-        kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-        if not kostal_min_soc_entity:
+        min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+        if not min_soc_entity:
             return
 
         async def _on_inverter_min_soc_change(
@@ -3810,10 +4256,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._inverter_min_soc_listener = async_track_state_change_event(
             self.hass,
-            kostal_min_soc_entity,
+            min_soc_entity,
             _on_inverter_min_soc_change,
         )
-        _LOGGER.debug("Set up inverter min SOC listener for %s", kostal_min_soc_entity)
+        _LOGGER.debug("Set up inverter min SOC listener for %s", min_soc_entity)
 
     def _remove_inverter_min_soc_listener(self) -> None:
         """Remove the inverter min SOC listener."""
@@ -3938,18 +4384,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if floor_soc is None:
                 return
 
-            kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-            if not kostal_min_soc_entity:
+            min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+            if not min_soc_entity:
                 return
 
-            state = self.hass.states.get(kostal_min_soc_entity)
+            state = self.hass.states.get(min_soc_entity)
             if not state or state.state in ("unknown", "unavailable"):
                 _LOGGER.debug("Cannot verify min SOC - entity unavailable")
                 return
 
             current_inverter_soc = _as_float(state.state)
             if current_inverter_soc is None:
-                _LOGGER.debug("Cannot verify min SOC - %s is not a usable number", kostal_min_soc_entity)
+                _LOGGER.debug("Cannot verify min SOC - %s is not a usable number", min_soc_entity)
                 return
 
             # Check if inverter min SOC doesn't match the floor (with tolerance)
@@ -3969,7 +4415,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": kostal_min_soc_entity, "value": floor_soc},
+                    {"entity_id": min_soc_entity, "value": floor_soc},
                 )
                 self._last_soc_set = floor_soc
                 _LOGGER.info("Restored inverter min SOC to %.1f%%", floor_soc)
@@ -4184,6 +4630,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # an unchanged load does not write the same value over and over.
         self._planned_setpoint_written_w = allowed
         self.planned_charge_power_w = allowed
+        self.planned_power_is_applied = True
 
     def _grid_write_is_debounced(self) -> bool:
         """True while the last charge-limit write is too recent to follow up.
@@ -4382,3 +4829,4 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._planned_setpoint_written_w = limited
         self.planned_charge_power_w = limited
+        self.planned_power_is_applied = True

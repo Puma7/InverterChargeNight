@@ -8,7 +8,7 @@ from custom_components.inverter_charge_night.coordinator import (
 )
 from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_SOC_ENTITY,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_MIN_SOC_ENTITY,
 )
 
 
@@ -97,7 +97,7 @@ def test_remove_battery_soc_listener(mock_hass):
 @pytest.mark.asyncio
 async def test_inverter_min_soc_listener_triggers_restore(mock_hass):
     coordinator = _make_coordinator(
-        mock_hass, {CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc"}
+        mock_hass, {CONF_MIN_SOC_ENTITY: "number.min_soc"}
     )
     coordinator.is_active = True
     coordinator.is_enabled = True

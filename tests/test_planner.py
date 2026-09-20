@@ -18,6 +18,7 @@ from custom_components.inverter_charge_night.planner import (
     REASON_CONFLICT_HEADROOM_WINS,
     REASON_FALLBACK,
     PlanInput,
+    evening_reserve_soc,
     integrate_load,
     plan_target_soc,
     required_charge_power_w,
@@ -172,11 +173,101 @@ def test_missing_forecast_uses_safe_fallback():
     assert plan.lower_bound_soc == _lower_bound(BRIDGE_KWH)
 
 
-def test_missing_forecast_fallback_is_clamped_to_user_range():
+def test_missing_forecast_fallback_still_covers_the_bridge():
+    """The bridge is house load, not forecast: a missing forecast does not shrink it.
+
+    The fallback decides how much to buy for a PV day nobody can see yet. What
+    the house will draw after the window is known either way, so the lower
+    bound still holds - buying less than that means buying the rest by day.
+    """
     plan = plan_target_soc(
         _plan_input(forecast_available=False, user_min_soc=60.0, user_max_soc=90.0)
     )
-    assert plan.target_soc == 60.0
+    assert plan.lower_bound_soc == pytest.approx(60.0 + BRIDGE_KWH / CAPACITY * 100, abs=0.05)
+    assert plan.target_soc == plan.lower_bound_soc
+
+
+def test_the_fallback_is_clamped_to_the_user_maximum():
+    plan = plan_target_soc(
+        _plan_input(forecast_available=False, user_min_soc=60.0, user_max_soc=62.0)
+    )
+    assert plan.target_soc == 62.0
+
+
+# The evening reserve (plan 011) -------------------------------------------------
+
+EVENING = (datetime(2026, 1, 15, 18, 0), datetime(2026, 1, 15, 21, 0))
+EVENING_KWH = 0.5 * 3  # the flat 500 W profile over three hours
+
+
+def test_without_a_high_price_window_nothing_changes():
+    plan = plan_target_soc(_plan_input())
+    assert plan.evening_reserve_kwh == 0.0
+    assert plan.evening_shortfall_kwh == 0.0
+    assert plan.target_soc == _lower_bound(BRIDGE_KWH)
+
+
+def test_a_sunny_day_covers_the_evening_by_itself():
+    """5 kWh forecast against 4 kWh of daytime load leaves more than the evening needs."""
+    plan = plan_target_soc(_plan_input(forecast_kwh_next_day=10.0, high_price_window=EVENING))
+    assert plan.evening_reserve_kwh == pytest.approx(EVENING_KWH)
+    assert plan.evening_shortfall_kwh == 0.0
+    assert plan.target_soc == _lower_bound(BRIDGE_KWH)
+
+
+def test_a_dull_day_buys_the_evening_at_the_cheap_tariff():
+    """No surplus at all, so the whole evening has to come from the night."""
+    plan = plan_target_soc(_plan_input(forecast_kwh_next_day=0.0, high_price_window=EVENING))
+    assert plan.evening_shortfall_kwh == pytest.approx(EVENING_KWH)
+    assert plan.target_soc == _lower_bound(BRIDGE_KWH + EVENING_KWH)
+
+
+def test_a_partly_covered_evening_buys_only_the_rest():
+    # 5.5 kWh with margin against 4 kWh of daytime load: 1.5 kWh surplus
+    plan = plan_target_soc(_plan_input(forecast_kwh_next_day=5.0, high_price_window=EVENING))
+    surplus = 5.0 * 1.1 - DAYTIME_LOAD_KWH
+    assert plan.evening_shortfall_kwh == pytest.approx(max(0.0, EVENING_KWH - surplus))
+
+
+def test_the_margin_allows_for_an_evening_above_the_average():
+    plan = plan_target_soc(
+        _plan_input(
+            forecast_kwh_next_day=0.0, high_price_window=EVENING, reserve_margin_pct=20.0
+        )
+    )
+    assert plan.evening_reserve_kwh == pytest.approx(EVENING_KWH * 1.2)
+
+
+def test_a_missing_forecast_buys_the_whole_evening():
+    """A surplus nobody can see is a surplus nobody may plan on."""
+    plan = plan_target_soc(
+        _plan_input(
+            forecast_available=False, forecast_kwh_next_day=20.0, high_price_window=EVENING
+        )
+    )
+    assert plan.evening_shortfall_kwh == pytest.approx(EVENING_KWH)
+
+
+def test_an_evening_window_crossing_midnight_is_integrated_whole():
+    plan = plan_target_soc(
+        _plan_input(
+            forecast_kwh_next_day=0.0,
+            high_price_window=(datetime(2026, 1, 15, 22, 0), datetime(2026, 1, 16, 1, 0)),
+        )
+    )
+    assert plan.evening_reserve_kwh == pytest.approx(1.5)
+
+
+def test_the_evening_reserve_cannot_push_past_the_user_maximum():
+    plan = plan_target_soc(
+        _plan_input(
+            forecast_kwh_next_day=0.0,
+            capacity_kwh=2.0,
+            user_max_soc=80.0,
+            high_price_window=EVENING,
+        )
+    )
+    assert plan.target_soc == 80.0
 
 
 def test_window_end_after_pv_crossover_bridge_is_only_the_reserve():
@@ -250,3 +341,37 @@ def test_required_charge_power_scales_with_remaining_time():
     fast = required_charge_power_w(60.0, 40.0, CAPACITY, 0.5, 1.0)
     assert fast == pytest.approx(slow * 8)
     assert (WINDOW_END + timedelta(hours=4)).hour == 9  # sanity on the fixtures used above
+
+
+# The same reserve, seen from the discharge direction ----------------------------
+
+
+def test_the_discharge_floor_is_the_user_minimum_without_a_period():
+    plan_input = _plan_input()
+    assert evening_reserve_soc(plan_input) == USER_MIN
+
+
+def test_the_discharge_floor_holds_back_what_the_evening_needs():
+    """1.5 kWh on a 10 kWh battery is 15 points above the user minimum."""
+    plan_input = _plan_input(forecast_kwh_next_day=0.0, high_price_window=EVENING)
+    assert evening_reserve_soc(plan_input) == pytest.approx(USER_MIN + 15.0)
+
+
+def test_a_sunny_day_leaves_the_discharge_alone():
+    plan_input = _plan_input(forecast_kwh_next_day=10.0, high_price_window=EVENING)
+    assert evening_reserve_soc(plan_input) == USER_MIN
+
+
+def test_the_discharge_floor_never_passes_the_user_maximum():
+    plan_input = _plan_input(
+        forecast_kwh_next_day=0.0,
+        capacity_kwh=2.0,
+        user_max_soc=40.0,
+        high_price_window=EVENING,
+    )
+    assert evening_reserve_soc(plan_input) == 40.0
+
+
+def test_the_discharge_floor_rejects_an_impossible_capacity():
+    with pytest.raises(ValueError):
+        evening_reserve_soc(_plan_input(capacity_kwh=0.0, high_price_window=EVENING))

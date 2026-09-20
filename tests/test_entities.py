@@ -102,7 +102,7 @@ async def test_min_soc_override_number_set_value():
     coordinator.is_active = True
     coordinator.is_enabled = True
     coordinator.minimum_calculated_soc = None
-    coordinator._control_kostal = AsyncMock()
+    coordinator._control_charge = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
     entry = _make_entry()
     number = MinSOCOverrideNumber(coordinator, entry)
@@ -114,7 +114,7 @@ async def test_min_soc_override_number_set_value():
     assert coordinator.target_reached is False
     # The override is applied by the refresh through the mode-correct control
     # path; the entity never calls the charge path directly
-    coordinator._control_kostal.assert_not_awaited()
+    coordinator._control_charge.assert_not_awaited()
     coordinator.async_request_refresh.assert_awaited()
 
 
@@ -127,7 +127,7 @@ async def test_min_soc_override_number_set_value_in_discharge_mode():
     coordinator.is_enabled = True
     coordinator.is_discharge_mode = True
     coordinator.minimum_calculated_soc = None
-    coordinator._control_kostal = AsyncMock()
+    coordinator._control_charge = AsyncMock()
     coordinator._control_discharge = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
     entry = _make_entry()
@@ -138,7 +138,7 @@ async def test_min_soc_override_number_set_value_in_discharge_mode():
 
     assert coordinator.override_soc == 30.0
     assert coordinator.target_reached is False
-    coordinator._control_kostal.assert_not_awaited()
+    coordinator._control_charge.assert_not_awaited()
     coordinator._control_discharge.assert_not_awaited()
     coordinator.async_request_refresh.assert_awaited_once()
 
@@ -279,7 +279,7 @@ async def test_inverter_charge_night_switch_reset_error_handled(mock_hass):
 
     mock_hass.states.async_set("number.min_soc", "8")
     entry = _make_entry()
-    entry.data = {"kostal_min_soc_entity": "number.min_soc"}
+    entry.data = {"min_soc_entity": "number.min_soc"}
     entry.options = {}
     coordinator = InverterChargeNightCoordinator(mock_hass, entry)
     coordinator.original_min_soc = 8.0
@@ -399,3 +399,52 @@ def test_calculated_soc_sensor_exposes_plan_attributes():
     attrs = CalculatedSOCSensor(coordinator, entry).extra_state_attributes
     assert attrs["plan_reason"] is None
     assert attrs["bridge_kwh"] is None
+
+
+# --- which entities a new install starts with --------------------------------
+
+
+def test_only_the_efficiency_search_entities_are_disabled_by_default():
+    """A new install shows everything except the two that report on a feature it is not running.
+
+    Pinned as a test because the decision is easy to undo by accident: adding
+    a diagnostic sensor without thinking about it lands it on every user's
+    device page, and hiding one of the house connection sensors would hide a
+    protection indicator.
+
+    The value has to be read off an instance: Home Assistant's entity
+    metaclass turns a ``_attr_…`` class attribute into a property, so reading
+    it off the class hands back the property object rather than True or False.
+    """
+    from custom_components.inverter_charge_night import (
+        binary_sensor,
+        number,
+        select,
+        sensor,
+        switch,
+    )
+    from custom_components.inverter_charge_night.entity import InverterChargeNightEntity
+
+    coordinator = MagicMock()
+    coordinator.config = {}
+    entry = _make_entry()
+
+    disabled: set[str] = set()
+    enabled: set[str] = set()
+    for module in (sensor, binary_sensor, switch, number, select):
+        for name in dir(module):
+            cls = getattr(module, name)
+            if not isinstance(cls, type) or not issubclass(cls, InverterChargeNightEntity):
+                continue
+            if cls.__module__ != module.__name__:
+                continue  # imported here, defined elsewhere
+            entity = cls(coordinator, entry)
+            if entity.translation_key is None:
+                continue
+            target = enabled if entity.entity_registry_enabled_default else disabled
+            target.add(entity.translation_key)
+
+    assert disabled == {"best_charge_power", "efficiency_search"}
+    assert {"calculated_soc", "active", "enabled", "operation_mode"} <= enabled
+    # The house connection limit stays visible: it is a protection, not a detail
+    assert {"grid_charge_headroom", "planned_charge_power"} <= enabled

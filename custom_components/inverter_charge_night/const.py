@@ -18,13 +18,23 @@ DEFAULT_COMMAND_DELAY = 0.1  # 0.1 seconds
 DEFAULT_SAFE_FALLBACK_SOC = 50.0  # Safe fallback SOC when forecast unavailable (prevents charging to 100%)
 DEFAULT_ACTIVE_START_DATE = ""  # Optional YYYY-MM-DD
 DEFAULT_ACTIVE_END_DATE = ""  # Optional YYYY-MM-DD
+# A tariff season is written in a price sheet and holds until further notice, so
+# a range entered once is meant to come back every year. Existing entries keep
+# the old absolute meaning; the migration sets the flag for them (F-011).
+DEFAULT_ACTIVE_RANGE_YEARLY = True
+# The house load profile is an average over the last days; an evening with the
+# oven on lies above it. 0 % takes the average at face value.
+DEFAULT_HIGH_PRICE_MARGIN_PCT = 0.0
 DEFAULT_MIN_CHARGE_POWER_W = 1000  # Default min charge power (W)
 DEFAULT_MAX_CHARGE_POWER_W = 10000  # Default max charge power (W)
 
 # Configuration keys
 CONF_OPERATION_MODE = "operation_mode"
-CONF_KOSTAL_MIN_SOC_ENTITY = "kostal_min_soc_entity"
-CONF_KOSTAL_GRID_CHARGE_SWITCH = "kostal_grid_charge_switch"
+# The two entities that identify the inverter. They carried a kostal_ prefix
+# until 3.0.2, from the first version of this integration; nothing in the code
+# has ever been Kostal-specific. LEGACY_INVERTER_KEYS below migrates them.
+CONF_MIN_SOC_ENTITY = "min_soc_entity"
+CONF_GRID_CHARGE_SWITCH = "grid_charge_switch"
 CONF_PV_FORECAST_ENTITY = "pv_forecast_entity"
 CONF_BATTERY_SOC_ENTITY = "battery_soc_entity"
 CONF_BATTERY_CAPACITY = "battery_capacity"
@@ -38,6 +48,12 @@ CONF_UPDATE_INTERVAL = "update_interval"
 CONF_COMMAND_DELAY = "command_delay"
 CONF_ACTIVE_START_DATE = "active_start_date"
 CONF_ACTIVE_END_DATE = "active_end_date"
+# A period in which buying from the grid costs more than usual (plan 011). Both
+# ends empty means there is none.
+CONF_HIGH_PRICE_START = "high_price_start"
+CONF_HIGH_PRICE_END = "high_price_end"
+CONF_HIGH_PRICE_MARGIN_PCT = "high_price_margin_pct"
+CONF_ACTIVE_RANGE_YEARLY = "active_range_yearly"
 CONF_BACKUP_MODE_ENTITY = "backup_mode_entity"
 CONF_MIN_CHARGE_POWER_W = "min_charge_power_w"
 CONF_MAX_CHARGE_POWER_W = "max_charge_power_w"
@@ -209,11 +225,24 @@ BACKUP_INACTIVE_STATES: frozenset[str] = frozenset(
     }
 )
 
+# Service actions (plan 012, stage 1). Registered in async_setup so an
+# automation can call them even while an entry is reloading; each handler
+# checks the entry's state itself and says so rather than failing silently.
+SERVICE_PLAN_TARGET_SOC = "plan_target_soc"
+SERVICE_RESET_INVERTER = "reset_inverter"
+ATTR_CONFIG_ENTRY_ID = "config_entry_id"
+
 # Settings and stored data of earlier versions. Installations that have been
 # through several releases carry keys nobody reads any more; one real entry
 # held 500 dead measurement records, about a hundred kilobytes that Home
 # Assistant loads and rewrites on every change.
 LEGACY_HOUSE_LOAD_ENERGY_ENTITY = "home_consumption_energy_entity"  # -> house_load_entity
+# Renamed in 3.0.2: {old key: new key}. The integration drives whatever entities
+# another integration provides, so the vendor name did not belong in them.
+LEGACY_INVERTER_KEYS: dict[str, str] = {
+    "kostal_min_soc_entity": CONF_MIN_SOC_ENTITY,
+    "kostal_grid_charge_switch": CONF_GRID_CHARGE_SWITCH,
+}
 LEGACY_UNUSED_DATA_KEYS: tuple[str, ...] = (
     "battery_charge_energy_entity",  # kWh counter of grid energy into the battery
     "grid_import_energy_entity",  # kWh counter of the grid import
@@ -222,8 +251,32 @@ LEGACY_UNUSED_OPTION_KEYS: tuple[str, ...] = ("charge_session_data",)
 # What the efficiency search itself stores; everything else in that option is
 # from a version that no longer exists and is dropped on setup.
 AUTO_EFFICIENCY_KEYS: frozenset[str] = frozenset(
-    {"history", "best_power_w", "best_loss", "range_min_w", "range_max_w", "failed", "bounds_w"}
+    {
+        "history",
+        "best_power_w",
+        "best_loss",
+        "range_min_w",
+        "range_max_w",
+        "failed",
+        "bounds_w",
+        # Per state-of-charge band (plan 015). Missing from this set the whole
+        # band store would be dropped on every setup by _migrate_entry_data.
+        "bands",
+    }
 )
+
+# Charging losses depend on the state of charge, not only on the power: a cell
+# near the top takes current differently from one at a third full. The search
+# files every measurement under the band it was measured in, and falls back to
+# the battery-wide optimum until a band has seen enough of them.
+EFFICIENCY_BAND_WIDTH_PCT = 20
+# Distinct powers a band needs before its own optimum is preferred. Below this
+# the band has not been searched, only sampled, and the battery-wide optimum is
+# the better guess.
+EFFICIENCY_BAND_MIN_SAMPLES = 3
+# A measurement that runs across more than this many bands is a blend and is
+# filed battery-wide only.
+EFFICIENCY_BAND_MAX_SPAN = 2
 
 
 # Units this integration accepts on an energy sensor. One list, because two

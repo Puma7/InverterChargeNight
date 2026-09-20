@@ -35,8 +35,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_DEFAULT_MIN_SOC,
     CONF_END_TIME,
     CONF_FORECAST_ERROR_MARGIN,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
     CONF_OPERATION_MODE,
@@ -55,8 +55,8 @@ COMPONENT_DIR = Path(config_flow.__file__).parent
 ENTITIES_INPUT = {
     CONF_NAME: "Test",
     CONF_OPERATION_MODE: MODE_NIGHT_CHARGE,
-    CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-    CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+    CONF_MIN_SOC_ENTITY: "number.min_soc",
+    CONF_GRID_CHARGE_SWITCH: "switch.grid",
     CONF_PV_FORECAST_ENTITY: "sensor.forecast",
     CONF_BATTERY_SOC_ENTITY: "sensor.soc",
     CONF_BATTERY_CAPACITY: 10.0,
@@ -82,7 +82,7 @@ ADVANCED_INPUT = {
 # for: changing it would trip the unique-id check of the reconfigure flow.
 RECONFIGURE_ENTITIES_INPUT = {
     **ENTITIES_INPUT,
-    CONF_KOSTAL_MIN_SOC_ENTITY: "number.kostal_min_soc",
+    CONF_MIN_SOC_ENTITY: "number.kostal_min_soc",
 }
 
 
@@ -218,12 +218,12 @@ async def test_config_flow_reports_errors_in_their_own_step(mock_hass, entity_re
     mock_hass.states.get.return_value = None
 
     result = await flow.async_step_user(
-        {**ENTITIES_INPUT, CONF_KOSTAL_MIN_SOC_ENTITY: "number.missing"}
+        {**ENTITIES_INPUT, CONF_MIN_SOC_ENTITY: "number.missing"}
     )
     # only this step's field is flagged; the not-yet-entered time/power fields are not
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "user"
-    assert result["errors"] == {CONF_KOSTAL_MIN_SOC_ENTITY: "invalid_entity"}
+    assert result["errors"] == {CONF_MIN_SOC_ENTITY: "invalid_entity"}
     # the submitted values are kept as defaults so nothing has to be retyped
     assert _defaults(result)[CONF_NAME] == "Test"
 
@@ -263,7 +263,7 @@ async def test_reconfigure_flow_updates_entry(mock_hass, mock_config_entry, enti
     result = await flow.async_step_reconfigure()
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "reconfigure"
-    assert _defaults(result)[CONF_KOSTAL_MIN_SOC_ENTITY] == "number.kostal_min_soc"
+    assert _defaults(result)[CONF_MIN_SOC_ENTITY] == "number.kostal_min_soc"
     assert _defaults(result)[CONF_BATTERY_CAPACITY] == 10.0
 
     result = await flow.async_step_reconfigure(
@@ -305,8 +305,8 @@ async def test_reconfigure_flow_rejects_an_inverter_another_entry_drives(
     """Two entries must never drive the same min SOC entity towards opposite targets."""
     other = MagicMock(spec=ConfigEntry)
     other.entry_id = "other_entry"
-    other.unique_id = ENTITIES_INPUT[CONF_KOSTAL_MIN_SOC_ENTITY]
-    other.data = {CONF_KOSTAL_MIN_SOC_ENTITY: ENTITIES_INPUT[CONF_KOSTAL_MIN_SOC_ENTITY]}
+    other.unique_id = ENTITIES_INPUT[CONF_MIN_SOC_ENTITY]
+    other.data = {CONF_MIN_SOC_ENTITY: ENTITIES_INPUT[CONF_MIN_SOC_ENTITY]}
     mock_hass.config_entries.async_entries.return_value = [mock_config_entry, other]
     mock_hass.config_entries.async_get_known_entry.return_value = mock_config_entry
     flow = _config_flow(
@@ -319,7 +319,7 @@ async def test_reconfigure_flow_rejects_an_inverter_another_entry_drives(
     result = await flow.async_step_reconfigure_advanced(ADVANCED_INPUT)
 
     assert result["type"] == FlowResultType.FORM
-    assert result["errors"] == {CONF_KOSTAL_MIN_SOC_ENTITY: "entity_used_by_other_entry"}
+    assert result["errors"] == {CONF_MIN_SOC_ENTITY: "entity_used_by_other_entry"}
     mock_hass.config_entries.async_update_entry.assert_not_called()
 
 
@@ -346,11 +346,11 @@ async def test_reconfigure_flow_accepts_a_free_inverter(
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     kwargs = mock_hass.config_entries.async_update_entry.call_args.kwargs
-    assert kwargs["data"][CONF_KOSTAL_MIN_SOC_ENTITY] == ENTITIES_INPUT[CONF_KOSTAL_MIN_SOC_ENTITY]
+    assert kwargs["data"][CONF_MIN_SOC_ENTITY] == ENTITIES_INPUT[CONF_MIN_SOC_ENTITY]
     # The unique id has to follow the inverter, otherwise a second entry for the
     # new entity is not caught and the freed old one is wrongly blocked.
     # async_set_unique_id alone only writes the flow context, not the entry.
-    assert kwargs["unique_id"] == ENTITIES_INPUT[CONF_KOSTAL_MIN_SOC_ENTITY]
+    assert kwargs["unique_id"] == ENTITIES_INPUT[CONF_MIN_SOC_ENTITY]
 
 
 # --- options -----------------------------------------------------------------
@@ -419,7 +419,7 @@ async def test_options_flow_rejects_entity_of_another_entry(
     other = MagicMock()
     other.entry_id = "other_entry_id"
     other.unique_id = "number.min_soc"
-    other.data = {CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc"}
+    other.data = {CONF_MIN_SOC_ENTITY: "number.min_soc"}
     mock_hass.config_entries.async_entries.return_value = [mock_config_entry, other]
     flow = OptionsFlowHandler(mock_config_entry)
     flow.hass = mock_hass
@@ -431,7 +431,7 @@ async def test_options_flow_rejects_entity_of_another_entry(
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "init"
-    assert result["errors"] == {CONF_KOSTAL_MIN_SOC_ENTITY: "entity_used_by_other_entry"}
+    assert result["errors"] == {CONF_MIN_SOC_ENTITY: "entity_used_by_other_entry"}
     mock_hass.config_entries.async_update_entry.assert_not_called()
 
 

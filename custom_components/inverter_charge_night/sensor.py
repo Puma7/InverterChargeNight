@@ -1,6 +1,7 @@
 """Sensor platform for Inverter Charge Night."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -39,6 +40,7 @@ async def async_setup_entry(
             PlannedChargePowerSensor(coordinator, entry),
             GridChargeHeadroomSensor(coordinator, entry),
             EfficiencySearchSensor(coordinator, entry),
+            NextHighPriceWindowSensor(coordinator, entry),
         ]
     )
 
@@ -88,14 +90,57 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
         }
 
 
+class NextHighPriceWindowSensor(InverterChargeNightEntity, SensorEntity):
+    """When the next high-price period starts, and what it is expected to cost.
+
+    Without a configured period the sensor is unknown rather than absent: the
+    setting can be filled in at any time, and an entity that appears and
+    disappears breaks every dashboard that mentions it.
+    """
+
+    _attr_translation_key = "next_high_price_window"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "next_high_price_window")
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the start of the next high-price period."""
+        window = self.coordinator.next_high_price_window()
+        return window[0] if window else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the period's end and the reserve the planner derived from it."""
+        window = self.coordinator.next_high_price_window()
+        data = self.coordinator.data
+        return {
+            "end": window[1].isoformat() if window else None,
+            "duration_h": (
+                round((window[1] - window[0]).total_seconds() / 3600.0, 2) if window else None
+            ),
+            # Both come from the last plan, so they are None in headroom mode
+            "reserve_kwh": data.get("evening_reserve_kwh"),
+            "bought_at_night_kwh": data.get("evening_shortfall_kwh"),
+        }
+
+
 class BestChargePowerSensor(InverterChargeNightEntity, SensorEntity):
-    """Sensor for best charge power found by auto efficient charge."""
+    """Sensor for best charge power found by auto efficient charge.
+
+    Disabled by default: it belongs to the efficiency search, which is off
+    unless the user turns it on, and reports nothing until that search has
+    finished. Whoever runs the search enables it from the device page.
+    """
 
     _attr_translation_key = "best_charge_power"
     _attr_native_unit_of_measurement = "W"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
         """Initialize the sensor."""
@@ -112,7 +157,15 @@ class BestChargePowerSensor(InverterChargeNightEntity, SensorEntity):
 
 
 class PlannedChargePowerSensor(InverterChargeNightEntity, SensorEntity):
-    """The AC charge power planned for the remaining window (plan 006, step 6)."""
+    """The AC charge power planned for the remaining window (plan 006, step 6).
+
+    The plan is shown in every mode, because what the window would need is
+    worth knowing on its own. Whether it is also ordered from the inverter
+    depends on the configuration - the planner only owns the setpoint in
+    bridge mode or behind a house connection limit, and only with an AC charge
+    limit entity to write to. ``applied`` says which of the two this is, so a
+    plan that reaches nothing cannot be read as a command.
+    """
 
     _attr_translation_key = "planned_charge_power"
     _attr_native_unit_of_measurement = "W"
@@ -129,6 +182,11 @@ class PlannedChargePowerSensor(InverterChargeNightEntity, SensorEntity):
         """Return the planned setpoint, or None outside a night charge window."""
         value = self.coordinator.planned_charge_power_w
         return float(value) if value is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Say whether this number is reaching the inverter."""
+        return {"applied": self.coordinator.planned_power_is_applied}
 
 
 class GridChargeHeadroomSensor(InverterChargeNightEntity, SensorEntity):
@@ -167,11 +225,16 @@ class EfficiencySearchSensor(InverterChargeNightEntity, SensorEntity):
     The search takes one measurement per night and needs several nights, so
     without this sensor there is no way to tell a search that is working from
     one that is quietly discarding every sample.
+
+    Disabled by default for the same reason as the sensor above, and because
+    its attributes carry the whole measurement series: state that the recorder
+    would keep for every user, including the ones who never run a search.
     """
 
     _attr_translation_key = "efficiency_search"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
     _attr_options = [
         AUTO_TEST_STATE_IDLE,
         AUTO_TEST_STATE_WAITING,

@@ -15,8 +15,8 @@ async def test_skip_charging_when_current_soc_equals_target():
     entry = Mock()
     entry.data = {
         "battery_soc_entity": "sensor.battery_soc",
-        "kostal_grid_charge_switch": "switch.grid_charge",
-        "kostal_min_soc_entity": "number.min_soc",
+        "grid_charge_switch": "switch.grid_charge",
+        "min_soc_entity": "number.min_soc",
         "battery_capacity": 10.0,
         "forecast_error_margin": 10.0,
         "user_min_soc": 8.0,
@@ -52,7 +52,7 @@ async def test_skip_charging_when_current_soc_equals_target():
 
     # Test: currentSOC = 75, targetSOC = 75 → should skip charging
     target_soc = 75.0
-    await coordinator._control_kostal(target_soc)
+    await coordinator._control_charge(target_soc)
 
     # Verify grid charge was NOT turned on
     grid_charge_calls = [
@@ -81,8 +81,8 @@ async def test_skip_charging_when_current_soc_greater_than_target():
     entry = Mock()
     entry.data = {
         "battery_soc_entity": "sensor.battery_soc",
-        "kostal_grid_charge_switch": "switch.grid_charge",
-        "kostal_min_soc_entity": "number.min_soc",
+        "grid_charge_switch": "switch.grid_charge",
+        "min_soc_entity": "number.min_soc",
         "battery_capacity": 10.0,
         "forecast_error_margin": 10.0,
         "user_min_soc": 8.0,
@@ -118,7 +118,7 @@ async def test_skip_charging_when_current_soc_greater_than_target():
 
     # Test: currentSOC = 80, targetSOC = 75 → should skip charging
     target_soc = 75.0
-    await coordinator._control_kostal(target_soc)
+    await coordinator._control_charge(target_soc)
 
     # Verify grid charge was NOT turned on
     grid_charge_calls = [
@@ -136,8 +136,8 @@ async def test_start_charging_when_current_soc_less_than_target():
     entry = Mock()
     entry.data = {
         "battery_soc_entity": "sensor.battery_soc",
-        "kostal_grid_charge_switch": "switch.grid_charge",
-        "kostal_min_soc_entity": "number.min_soc",
+        "grid_charge_switch": "switch.grid_charge",
+        "min_soc_entity": "number.min_soc",
         "battery_capacity": 10.0,
         "forecast_error_margin": 10.0,
         "user_min_soc": 8.0,
@@ -173,7 +173,7 @@ async def test_start_charging_when_current_soc_less_than_target():
 
     # Test: currentSOC = 70, targetSOC = 75 → should start charging
     target_soc = 75.0
-    await coordinator._control_kostal(target_soc)
+    await coordinator._control_charge(target_soc)
 
     # Verify both min SOC was set AND grid charge was turned on
     assert hass.services.async_call.call_count == 2, "Both min SOC and grid charge should be called"
@@ -209,8 +209,8 @@ async def test_soc_guard_handles_unavailable_battery_soc():
     entry = Mock()
     entry.data = {
         "battery_soc_entity": "sensor.battery_soc",
-        "kostal_grid_charge_switch": "switch.grid_charge",
-        "kostal_min_soc_entity": "number.min_soc",
+        "grid_charge_switch": "switch.grid_charge",
+        "min_soc_entity": "number.min_soc",
         "battery_capacity": 10.0,
         "forecast_error_margin": 10.0,
         "user_min_soc": 8.0,
@@ -246,7 +246,7 @@ async def test_soc_guard_handles_unavailable_battery_soc():
 
     # Test: unavailable SOC should proceed with charging
     target_soc = 75.0
-    await coordinator._control_kostal(target_soc)
+    await coordinator._control_charge(target_soc)
 
     # Verify min SOC was set but grid charge was NOT turned on (safety on unavailable SOC)
     min_soc_calls = [

@@ -5,6 +5,182 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-09-20
+
+### Added
+
+- **The efficiency search measures per state of charge.** Losses depend on how full the battery
+  is, not only on the charge power, but every measurement was filed as if it did not. Each one now
+  goes under the 20-point band it was taken in, and the charge power plan asks for the band the
+  battery is actually in. A band only overrules the battery-wide optimum once it has been searched
+  rather than sampled (three distinct powers), so an installation that measured before this keeps
+  its result until the bands fill in. A measurement running across more than two bands is a blend
+  and is kept battery-wide only.
+- `sensor.…_efficiency_search` gained `loss_by_band_pct` — what was measured where, how many
+  powers each band has seen, and which bands are in use — plus `band_width_pct`.
+
+### Fixed
+
+- **The measurement never recorded the state of charge it ran at.** The backlog entry for this
+  work assumed it did. It does not: the state of charge is now captured when the measurement
+  starts and when it finishes, which is what makes the bands possible at all.
+
+## [3.2.0] - 2026-09-20
+
+A tariff season now behaves like a season. The optional date range was absolute-only, and the
+one shape a §14a season usually has — winter, crossing the new year — did not work at all.
+
+### Fixed
+
+- **A date range crossing the new year no longer disables the restriction.** `2026-11-01` to
+  `2027-03-31` was logged as invalid and then *ignored entirely*, so the window ran all year —
+  the opposite of what was configured. Such a range is now read the way a time window crossing
+  midnight has always been read: inside when today is on or after the start **or** on or before
+  the end.
+
+### Added
+
+- **A high-price period, and the reserve that comes with it.** Many §14a tariffs do not only
+  have a cheap window but also a peak period — commonly 18:00–21:00, the hours a household draws
+  most and the sun delivers nothing — where a kilowatt-hour costs *more* than the normal day
+  tariff. Set **High-price period, start / end** in step 2 and the planner works out what the
+  house will draw in those hours, from the same load profile the Bridge planner uses, and makes
+  sure it is in the battery by then. It buys only what tomorrow's sun will not cover: the
+  evening's load minus the day's surplus, never below zero. A dull winter day therefore raises
+  the night target by the whole evening; a summer day changes nothing. Without a usable forecast
+  the surplus is not counted — a surplus nobody can see is one nobody may plan on.
+- **Morning discharge stops at the evening reserve.** The experimental mode empties the battery
+  into the 05:00–08:00 peak; with a high-price period configured it now keeps back what that
+  evening will need — minus what today's sun is forecast to deliver, so a summer day is
+  untouched. Selling in the morning what has to be bought back at the evening's peak tariff is
+  the one trade that mode must not make.
+- **Allowance on the evening's consumption** (step 2, default 0 %): the load profile is an
+  average of the last days, and an evening with the oven on lies above it.
+- **`sensor.…_next_high_price_window`**: when the next peak period starts, how long it lasts,
+  the reserve put aside for it and how much of that the current window is buying. The target SOC
+  sensor gained `evening_reserve_kwh` and `evening_shortfall_kwh` alongside it.
+- **Repeat the date range every year** (step 4, on by default). Only day and month of the two
+  dates count, so the season comes back every year; a price sheet holds until further notice.
+  Switched off, the years count and the range expires as before. A range crossing the new year
+  is always read as a season, because absolutely it could not contain a single day.
+- **A repair issue when an absolute range has expired.** Until now the integration simply stopped
+  one morning and nothing said why. It names the end date and the three ways out.
+
+### Changed
+
+- **A missing forecast no longer cuts the planner's target back to 50 %.** The guard that stops
+  the headroom formula charging to the maximum when it read no forecast was applied to the
+  bridge plan as well. Headroom charges to the maximum *because* it read no forecast — that is
+  what the guard is for — while the planner derives its target from the house load and has its
+  own fallback. On a cold night with a long bridge, a forecast entity that happened to be
+  unavailable therefore dropped a target that had just been worked out properly.
+- **A missing forecast no longer undercuts the bridge.** The safe fallback (50 %) was used as
+  the target outright, even when the house load after the window needed more than that — so the
+  rest was bought by day at the day tariff. The fallback now decides how much to buy *on top of*
+  what is needed, not instead of it: the target is the higher of the two. What the house will
+  draw after the window does not depend on the forecast.
+- Entries written before 3.2.0 that have a date set **keep the absolute meaning**: a range
+  nobody re-entered must not come back next winter on its own. The migration records that
+  choice, and the log line says where to change it. Entries without dates get the new default.
+
+## [3.1.0] - 2026-09-20
+
+The integration can be talked to. Until now the only way in from an automation was to toggle
+its entities; it registered no actions at all.
+
+### Added
+
+- **`inverter_charge_night.plan_target_soc`** — a response action. It runs the planner on the
+  current inputs and answers with the target, the reason, both bounds and the energies they came
+  from, **without writing anything to the inverter**. An automation can now decide whether
+  tonight is worth charging at all.
+- **`inverter_charge_night.reset_inverter`** — hands the inverter back: minimum SOC, charge
+  limits and switches return to the values captured before the window. Inside a running window
+  it ends that window and stays off the inverter until the window's end time, because a bare
+  reset would not survive the second it was written in — the min SOC watchdog puts the window's
+  floor straight back. The next window runs as usual, and switching the integration off and on
+  again takes control back immediately. Backup mode refuses the call.
+- Both actions are registered from `async_setup`, so they exist even while no entry is loaded,
+  and both report a bad or unloaded entry, a failed plan and a refused reset as translated
+  errors an automation can catch. `action-setup` and `action-exceptions` in `quality_scale.yaml`
+  moved from `exempt` to `done`.
+- Diagnostics gained `hands_off_until`, which answers "why is it not charging tonight" after a
+  `reset_inverter` call.
+
+### Fixed
+
+- The end-to-end smoke test against a real Home Assistant now also calls both actions. It caught
+  two things a unit test would not have: the exception strings were written as plain text rather
+  than as `{"message": ...}` objects, so Home Assistant would have shown the raw translation key
+  to the user, and a reset inside a window was undone within milliseconds by the integration's
+  own watchdog.
+
+## [3.0.2] - 2026-09-20
+
+Follow-ups from a review of 3.0.1. One of them is a safety fix, and one setting changes.
+
+### Added
+
+- `sensor.…_planned_charge_power` gained an `applied` attribute. The plan is computed in every
+  mode, but it is only written to the inverter in bridge mode or behind a house connection
+  limit, and only with an AC charge limit entity configured. The attribute says which of the
+  two it is, so a plan that reaches nothing is not read as a command.
+
+### Changed
+
+- **The two inverter entities lost their `kostal_` prefix.** `kostal_min_soc_entity` and
+  `kostal_grid_charge_switch` are now `min_soc_entity` and `grid_charge_switch`; the labels, help
+  texts and log messages say "inverter" instead of "Kostal". Nothing in this integration was ever
+  Kostal-specific. **Existing entries are migrated on startup** and keep working untouched —
+  verified against a real Home Assistant. Anything of your own that reads the config keys (a
+  template, a script) has to follow.
+- **Morning discharge is declared experimental** and its purpose is stated properly. It is not
+  "make room for the sun": on a summer day whose forecast covers the house anyway, it empties the
+  battery into the 05:00–08:00 household peak, for the spread on a dynamic tariff and to take
+  that load off the grid at its tightest hour. New page:
+  [docs/morning-discharge.md](docs/morning-discharge.md).
+- **Morning discharge now requires the force discharge switch.** It is the only thing that
+  actually discharges the battery; without it the mode raised the min SOC floor, turned grid
+  charging off and then waited for a discharge that could never start. The field said
+  "optional" while the grid charge switch, which that mode only ever turns off, was demanded.
+  Existing entries keep working until the settings are saved again, which is where the
+  requirement is now enforced.
+- **`best_charge_power` and `efficiency_search` are disabled by default.** Both report on the
+  efficiency search, which is off unless it is switched on, and the second carries the whole
+  measurement series in its attributes. Existing installations are unaffected — the entities
+  are already registered there; new ones enable them from the device page if they run a search.
+
+### Fixed
+
+- **Morning discharge could start against an unknown floor.** If reading and capturing the
+  inverter's min SOC failed, the error was logged and the forced discharge was switched on
+  anyway — with no idea where the battery's floor was, which is how a discharge runs past the
+  user minimum. The failed *write* of the floor already blocked the discharge for exactly that
+  reason; the failed *read* now does too.
+- **hassfest** rejected the manifest a second time once the recorder dependency was declared:
+  its keys have to be `domain`, `name`, then alphabetical. A test now checks the order.
+- **mypy and pyright were pinned to Python 3.13** in their config files. Both parse Home
+  Assistant's own sources, and 2026.9 uses an unparenthesised `except` expression — 3.14-only
+  syntax — so mypy stopped on `homeassistant/core.py` before reaching this package. CI passes
+  the matrix version to both now.
+- `validate_date_optional` and `_normalize_date_value` spell the empty check out instead of
+  using `value in (None, "")`, which only mypy 2.x narrows. On the older mypy that
+  `requirements-dev.txt` still allows, both reported `str | None` reaching
+  `date.fromisoformat`.
+
+### Internal
+
+- The brand icons are rebuilt to the image specification in the home-assistant/brands README:
+  square, trimmed to the subject, 256 and 512 pixels. The duplicate `logo.png` files are gone,
+  because that README says to add only the icon when the same image serves as both. No pull
+  request against that repository: it marks `custom_integrations/` a legacy folder and states
+  that since Home Assistant 2026.3.0 custom components carry their brand icons themselves.
+- All 54 quality-scale rules are now done (39) or exempt (15), with nothing open.
+- Coverage 95 % → 96 % (ratchet raised), with the new tests on the paths where a failure costs
+  something: a reset that cannot report its own failure, a house connection limit that assumes
+  a write landed, every service call in the discharge path, and a verification that could leave
+  its own lock held.
+
 ## [3.0.1] - 2026-09-19
 
 A maintenance release: no new settings, no changed behaviour on the inverter.

@@ -13,8 +13,8 @@ from homeassistant.helpers.entity_registry import EntityRegistry
 
 from custom_components.inverter_charge_night.const import (
     DOMAIN,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_BATTERY_CAPACITY,
@@ -54,8 +54,8 @@ def mock_config_entry() -> ConfigEntry:
     # The min SOC entity identifies the inverter and is the entry's unique id.
     entry.unique_id = "number.kostal_min_soc"
     entry.data = {
-        CONF_KOSTAL_MIN_SOC_ENTITY: "number.kostal_min_soc",
-        CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.kostal_grid_charge",
+        CONF_MIN_SOC_ENTITY: "number.kostal_min_soc",
+        CONF_GRID_CHARGE_SWITCH: "switch.kostal_grid_charge",
         CONF_PV_FORECAST_ENTITY: "sensor.pv_forecast",
         CONF_BATTERY_SOC_ENTITY: "sensor.battery_soc",
         CONF_BATTERY_CAPACITY: 10.0,
@@ -131,7 +131,7 @@ def mock_coordinator(mock_hass: HomeAssistant, mock_config_entry: ConfigEntry):
         coordinator._time_triggers = []
         coordinator.async_request_refresh = AsyncMock()
         coordinator._reset_settings = AsyncMock()
-        coordinator._control_kostal = AsyncMock()
+        coordinator._control_charge = AsyncMock()
         coordinator._stop_grid_charging = AsyncMock()
         yield coordinator
 

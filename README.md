@@ -66,9 +66,11 @@ day will do.
 - **Two planner modes** — `Headroom` keeps room in the battery for tomorrow's PV forecast;
   `Bridge` additionally covers the house load from the window end until solar output exceeds it.
   See [Planner Modes](#planner-modes).
-- **Two operation modes** — `Night Charge` fills the battery from the grid during the window;
-  `Morning Discharge` empties it towards the grid before sunrise (for dynamic tariffs). Switchable
-  at runtime.
+- **Two operation modes** — `Night Charge` fills the battery from the grid during the window.
+  `Morning discharge` does the opposite and is **experimental**: on a summer day it empties the
+  battery into the 05:00–08:00 household peak, for the spread on a dynamic tariff and to take
+  that load off the grid. See [Morning discharge](docs/morning-discharge.md). Switchable at
+  runtime.
 - **Any time window**, including one that spans midnight, and an optional date range for tariffs
   that only apply in certain months.
 - **Charge power planning** — the constant power that reaches the target exactly at the end of the
@@ -175,8 +177,9 @@ To find entities:
 
    **Step 1 -- Entities**
    - **Name**: Name for this integration instance
-   - **Operation Mode**: `Night Charge` (charge from the grid overnight) or `Morning Discharge`
-     (discharge before sunrise to make room for solar)
+   - **Operation Mode**: `Night Charge` (charge from the grid overnight) or
+     `Morning discharge (experimental)` (empty the battery into the morning peak on a summer day;
+     needs a force discharge switch — see [Morning discharge](docs/morning-discharge.md))
    - **Minimum SOC entity**: The number entity that controls min SOC. It also identifies
      this instance, so each inverter can only be configured once.
    - **Grid charge switch**: The switch that enables or disables charging from the grid
@@ -194,6 +197,11 @@ To find entities:
      (8 % on a Kostal, for example)
    - **Forecast Error Margin**: Safety buffer added to the forecast before the calculation
    - **Planner Mode**: `Headroom` (default) or `Bridge`, see [Planner Modes](#planner-modes)
+   - **High-price period, start / end** (optional): A period in which buying from the grid costs
+     *more* than usual — a §14a peak period, or the evening block of a dynamic tariff. See
+     [The evening reserve](#the-evening-reserve). Set both or neither.
+   - **Allowance on the evening's consumption** (default `0` %): Surcharge on the learned load
+     profile, which is an average — an evening with the oven on lies above it
 
    **Step 3 -- Charge Power**
    - **Min Charge Power** / **Max Charge Power**: The band the planner and the efficiency finder
@@ -219,6 +227,10 @@ To find entities:
    - **Update Interval**: How often the coordinator refreshes (default `900` s)
    - **Command Delay**: Delay between the min SOC and the grid charge command (default `0.1` s)
    - **Active Start Date** / **Active End Date** (optional): Restrict the integration to a season
+   - **Repeat the date range every year** (default on): only the day and month of the two dates
+     count, so the season comes back every year. Switch it off to mean the years literally — the
+     integration then stops for good once the end date has passed, and says so in the repairs
+     page. A range crossing the new year (1 November to 31 March) is always read as a season.
    - **Backup Mode Entity** (optional): While it is active, nothing is written to the inverter
    - **House Consumption Energy Meter** (optional): Cumulative kWh meter; the Bridge planner
      learns an hourly load profile from the last 14 days of recorder statistics
@@ -331,6 +343,42 @@ Snow nights beat everything, then the manual override, then the planner:
 3. the SOC the planner calculated at the window start (re-planned during the window, but in
    Night Charge mode the target never drops below what was already reached)
 
+### The evening reserve
+
+A §14a tariff is rarely just "cheap at night". Many grid operators also define a **peak period**
+in which a kilowatt-hour costs *more* than the normal day tariff — commonly 18:00 to 21:00, the
+hours in which a household draws most and the sun delivers nothing. Buying there is the most
+expensive energy of the day, and it is energy that could have been bought overnight for a
+fraction.
+
+With **High-price period** set, the planner works out what the house will draw between those two
+times, from the same hourly load profile the Bridge planner uses, and makes sure it is in the
+battery by the time the period starts. It does not simply buy all of it:
+
+```
+evening reserve   = house load over the period   (+ your allowance)
+covered by the PV = tomorrow's surplus           (forecast − daytime load)
+bought at night   = evening reserve − covered by the PV, never below zero
+```
+
+On a summer day whose forecast covers the house anyway, this changes nothing: the sun fills the
+battery long before the evening. On a dull winter day the whole evening is added to the night's
+target, at the cheap tariff. Without a usable forecast the surplus is not counted at all — a
+surplus nobody can see is one nobody may plan on.
+
+The period may cross midnight, and the reserve is bounded by your maximum SOC like every other
+target. `sensor.…_next_high_price_window` shows when the next one starts, how long it lasts, how
+much was reserved and how much of that this window is buying.
+
+The same reserve bounds the other direction: in `Morning Discharge` mode the target the battery
+is emptied to is raised to the reserve, so the mode cannot sell in the morning what has to be
+bought back at the evening's peak tariff. Today's forecast is subtracted there as well, so a
+summer morning discharges as before.
+
+> The reserve raises the **night charge target** and floors the **morning discharge**. It does
+> not, by itself, stop the battery from being emptied before the evening by the house — that is
+> what the discharge block in step 3 is for.
+
 ### Backup and island operation
 
 A power cut is the one situation in which this integration must let go of the inverter
@@ -397,6 +445,14 @@ battery side.
 > The search needs the AC charge limit entity and both charge power sensors. Two kWh meters are
 > optional, but they make the result exact: a difference of two meter readings is the energy
 > that really flowed, with no assumption about what the power did in between.
+
+> **Per state of charge.** Losses depend on how full the battery already is, not only on the
+> power, so each measurement is filed under the 20-point band it was taken in (0–20, 20–40, …).
+> A band takes over from the battery-wide optimum once it has been *searched* rather than merely
+> sampled — three distinct powers — so an installation that measured before this existed keeps
+> working on its old result until the bands fill in. A measurement that runs across more than two
+> bands is a blend and is kept battery-wide only. `sensor.…_efficiency_search` shows what has been
+> measured where, and which bands are in use.
 
 ### House connection
 
@@ -531,9 +587,11 @@ Morning Discharge windows are never blocked -- there the point is to empty the b
    it, measured against the inverter floor, not the charge target
 8. Nothing is written while backup/island mode is active
 
-**In Morning Discharge mode** the same window drives the battery *down* to the target instead:
-the min SOC acts as a floor, grid charging is kept off, and the optional force discharge switch
-is turned on until the target is reached.
+**In Morning discharge mode** the same window drives the battery *down* to the target instead:
+the min SOC acts as a floor, grid charging is kept off, and the force discharge switch is turned
+on until the target is reached. That switch is required in this mode — it is the only thing that
+discharges. The mode is experimental; [docs/morning-discharge.md](docs/morning-discharge.md)
+explains what it is for and when it pays.
 
 **At Window End (e.g., 05:59):**
 
@@ -578,6 +636,7 @@ as "Inverter Charge Night <name>". The entity ids are stable; the display names 
 | Most efficient charge power | `sensor.…_best_charge_power` | The result of the efficiency search. |
 | Efficiency search | `sensor.…_efficiency_search` | What the search is doing and what it has measured. |
 | Charge power left by the house connection | `sensor.…_grid_charge_headroom` | What the connection still allows the battery. |
+| Next high-price period | `sensor.…_next_high_price_window` | When the next peak period starts, how long it lasts, and the reserve the planner put aside for it. |
 
 > **The three entities that all used to be called "Inverter Charge Night".** Before this
 > version the operation mode select and the skip switch had no translated name, so Home
@@ -662,6 +721,63 @@ as "Inverter Charge Night <name>". The entity ids are stable; the display names 
   it expires by itself after 24 hours.
 - **House load after the window**: Switch the planner to `Bridge` so the battery also carries
   the house until the PV output takes over in the morning.
+
+## Actions
+
+Two actions make the integration reachable from an automation or a script. Both take an
+optional `config_entry_id` (a picker in the UI); with a single inverter configured it can be
+left out.
+
+### `inverter_charge_night.plan_target_soc`
+
+Runs the planner on the current inputs and **answers with the result without writing anything**.
+Useful to decide in an automation whether tonight is worth charging at all, and to see why a
+target came out as it did.
+
+```yaml
+alias: Tell me tonight's target
+trigger:
+  - platform: time
+    at: "22:30:00"
+action:
+  - service: inverter_charge_night.plan_target_soc
+    response_variable: plan
+  - service: notify.persistent_notification
+    data:
+      message: >-
+        Tonight: {{ plan.target_soc }} % ({{ plan.reason }}),
+        bridge {{ plan.bridge_kwh }} kWh, surplus {{ plan.surplus_kwh }} kWh
+```
+
+The response carries `target_soc`, `reason` (`bridge`, `headroom`, `conflict_bridge_wins`,
+`conflict_headroom_wins` or `fallback`), the two bounds `lower_bound_soc` / `upper_bound_soc`,
+the energies `bridge_kwh` / `surplus_kwh`, and the inputs they came from: `current_soc`,
+`forecast_kwh`, `forecast_available`, `window_end`, `pv_crossover`, `sunset`.
+
+### `inverter_charge_night.reset_inverter`
+
+Puts the minimum SOC, the charge limits and the switches back to the values captured before the
+window — the same reset the window end performs.
+
+Called **inside a running window it ends that window** and leaves the inverter alone until the
+window's end time. That is deliberate: without it the reset would not survive the second it was
+written in, because the min SOC watchdog puts the window's floor straight back whenever
+something else moves it. The next window runs as usual; switching the integration off and on
+again takes control back immediately. Backup mode refuses the call.
+
+```yaml
+alias: Hand the inverter over to the wallbox
+trigger:
+  - platform: state
+    entity_id: binary_sensor.wallbox_charging
+    to: "on"
+action:
+  - service: inverter_charge_night.reset_inverter
+```
+
+Both actions report failure as an error the automation can catch: an unknown or unloaded entry,
+a plan the planner could not produce, or an inverter that did not accept the reset (which is
+retried by the integration regardless).
 
 ## Example Automations
 
@@ -812,8 +928,10 @@ The integration updates every **15 minutes** (900 seconds) by default. This is d
   `binary_sensor.…_active` is `off` and nothing is written to the inverter — that is the normal
   state for most of the day.
 - **Active start/end date** (step 4) is empty by default, which means the window runs all year.
-  If your reduced grid fee only applies in certain months (§14a windows often do), enter the
-  date range there; outside it the integration stays out of the way.
+  With dates set and **Repeat the date range every year** on (the default), only day and month
+  count and the season comes back every year, including one that crosses the new year. With it
+  off the dates are absolute, and once the end date has passed the integration stops for good —
+  which it now reports in the repairs page instead of going quiet.
 - `sensor.…_calculated_soc` shows the target of the *running* window and its `is_active`
   attribute says whether one is running at all.
 
@@ -881,12 +999,27 @@ What it currently meets:
 | Code | `runtime_data` instead of `hass.data`, `PARALLEL_UPDATES` on every platform, fully async, no third-party dependencies |
 | Typing | `mypy --strict` and `pyright` strict over the whole package, no exclusions |
 | Entities | unique ids, `has_entity_name`, entity categories, translated names and states, icon translations |
-| Tests | 627 tests, 95 % coverage enforced in CI, 100 % on the config flow, plus an end-to-end test against a real Home Assistant core |
+| Tests | 96 % coverage over the whole package enforced in CI, 100 % on the config flow, plus an end-to-end test against a real Home Assistant core |
 | Docs | this file, in English, with a German UI translation shipped in the integration |
 
-All 54 rules are currently met: 34 are implemented and 16 do not apply to an integration that
+Measured against all 54 rules: 39 are implemented and 15 do not apply to an integration that
 talks to other integrations' entities rather than to a device or a cloud service (no polling
-protocol, no discovery, no authentication). The file names the reason for each exemption.
+protocol, no discovery, no authentication). Nothing is left open. The file names the reason for
+each exemption.
+
+| Tier | Implemented | Not applicable |
+|---|---|---|
+| 🥉 Bronze | 14 | 4 |
+| 🥈 Silver | 8 | 2 |
+| 🥇 Gold | 16 | 7 |
+| 🏆 Platinum | 1 | 2 |
+
+Platinum has three rules. `strict-typing` is the one that applies here, and it passes over the
+whole package with both checkers; the other two are about an external dependency and a shared
+HTTP session, neither of which this integration has. That still does not make it a Platinum
+integration: Home Assistant reports `custom` for every integration it did not ship itself
+(`homeassistant/loader.py`, `Integration.quality_scale`), so the tiers are for Core
+integrations only. The rules are a useful yardstick either way.
 
 ## Technical Details
 
@@ -937,13 +1070,14 @@ efficiency history (`auto_efficiency_data`) and the persisted runtime state (`ru
 The full list with labels and help texts lives in `strings.json`.
 
 Step 1 -- entities:
-- `operation_mode` - `night_charge` or `morning_discharge`
-- `kostal_min_soc_entity` - the minimum SOC number entity (also the entry's unique id)
-- `kostal_grid_charge_switch` - the grid charge switch entity
+- `operation_mode` - `night_charge` or `morning_discharge` (experimental, see
+  [docs/morning-discharge.md](docs/morning-discharge.md))
+- `min_soc_entity` - the minimum SOC number entity (also the entry's unique id)
+- `grid_charge_switch` - the grid charge switch entity
 
-  Both keys carry `kostal_` for historical reasons: the first version of this integration only
-  spoke to a Kostal. They accept any inverter's entities and will be renamed in a future release
-  with a migration.
+  Both carried a `kostal_` prefix until 3.0.2, from the first version of this integration.
+  Nothing in the code was ever Kostal-specific; entries configured earlier are migrated on
+  startup and keep working.
 - `pv_forecast_entity` - PV forecast entity ID for the next day (Solcast)
 - `pv_forecast_today_entity` - optional forecast entity ID for today
 - `battery_soc_entity` - Battery SOC sensor entity ID
@@ -981,6 +1115,16 @@ Step 4 -- advanced:
 - `update_interval` - Coordinator refresh interval in seconds (default 900)
 - `command_delay` - Delay between min SOC and grid charge commands in seconds
 - `active_start_date` / `active_end_date` - Optional seasonal restriction (YYYY-MM-DD)
+
+- `active_range_yearly` - Repeat the range every year (default `true`)
+
+  > The dates are entered with the calendar picker, so they always carry a year. With
+  > `active_range_yearly` on, that year is ignored: only day and month count and the season
+  > returns every year. A range whose start falls after its end (`2026-11-01` to `2027-03-31`)
+  > crosses the new year and is read as a season either way — absolutely it could not contain a
+  > single day, which is why it used to be dropped altogether and the window then ran all year.
+  > Entries written before 3.2.0 keep the absolute meaning if they have a range set; the setting
+  > is theirs to switch on.
 - `backup_mode_entity` - Optional backup/island mode entity
 - `house_load_entity` - Optional cumulative house consumption meter (kWh)
 - `avg_house_load_kw` - Fallback average house load in kW
@@ -1069,7 +1213,7 @@ pass:
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                                        # 627 tests, 95 % coverage gate
+pytest                                        # full suite, 96 % coverage gate
 mypy custom_components/inverter_charge_night  # strict
 pyright                                       # strict
 python scripts/smoke_real_ha.py               # end-to-end against a real HA core

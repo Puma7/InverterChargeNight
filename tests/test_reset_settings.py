@@ -1,5 +1,6 @@
 """Tests for reset settings, the reset retry (finding F3) and the AC charge limit restore (F7)."""
 import asyncio
+import logging
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -23,8 +24,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_END_TIME,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_FORECAST_ERROR_MARGIN,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_PV_FORECAST_ENTITY,
     CONF_RUNTIME_STATE,
     CONF_START_TIME,
@@ -48,8 +49,8 @@ WINDOW_END = datetime(2026, 1, 15, 5, 59)
 INSIDE_WINDOW = datetime(2026, 1, 15, 2, 0)
 
 CONFIG = {
-    CONF_KOSTAL_MIN_SOC_ENTITY: MIN_SOC,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH: GRID,
+    CONF_MIN_SOC_ENTITY: MIN_SOC,
+    CONF_GRID_CHARGE_SWITCH: GRID,
     CONF_DEFAULT_MIN_SOC: 8.0,
 }
 WINDOW_CONFIG = {
@@ -759,3 +760,169 @@ async def test_reset_still_switches_grid_charging_off_without_a_capture(mock_has
         call("switch", "turn_off", {"entity_id": GRID})
         in mock_hass.services.async_call.await_args_list
     )
+
+
+# async_reset_inverter (the reset_inverter action) --------------------------------
+
+
+def _window_coordinator(mock_hass):
+    """A coordinator with a running window, ready to be reset from outside."""
+    mock_hass.states.async_set(MIN_SOC, "45", {"unit_of_measurement": "%"})
+    mock_hass.states.async_set(GRID, "on")
+    mock_hass.states.async_set(BATTERY, "99", {"unit_of_measurement": "%"})
+    coordinator = _make_coordinator(mock_hass, WINDOW_CONFIG)
+    coordinator.is_active = True
+    coordinator.original_min_soc = 8.0
+    coordinator.initial_calculated_soc = 45.0
+    coordinator._reset_absolute_charge_power = AsyncMock()
+    return coordinator
+
+
+@pytest.mark.asyncio
+async def test_the_reset_action_ends_the_running_window(mock_hass):
+    """A bare reset would not survive: the min SOC watchdog writes it back.
+
+    Ending the window is what makes the action mean anything - it takes down
+    the listeners and the verification task that put the floor back.
+    """
+    coordinator = _window_coordinator(mock_hass)
+
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
+        return_value=INSIDE_WINDOW,
+    ):
+        ok = await coordinator.async_reset_inverter()
+
+    assert ok is True
+    assert coordinator.is_active is False
+    awaited = mock_hass.services.async_call.await_args_list
+    assert call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0}) in awaited
+    assert call("switch", "turn_off", {"entity_id": GRID}) in awaited
+
+
+@pytest.mark.asyncio
+async def test_the_reset_action_keeps_the_window_down_until_its_end(mock_hass):
+    """Without this the next update would start the window again within minutes."""
+    coordinator = _window_coordinator(mock_hass)
+
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
+        return_value=INSIDE_WINDOW,
+    ):
+        await coordinator.async_reset_inverter()
+        assert coordinator._hands_off_until == WINDOW_END
+        # The deadline survives a restart, so a reload does not restart the window
+        assert _runtime_state(coordinator)["hands_off_until"] == WINDOW_END.isoformat()
+
+        await coordinator._check_current_window()
+        assert coordinator.is_active is False
+
+    # Past the deadline the next window runs as usual
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
+        return_value=WINDOW_END,
+    ):
+        coordinator._on_window_start = AsyncMock()
+        await coordinator._check_current_window()
+
+    assert coordinator._hands_off_until is None
+    coordinator._on_window_start.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_restored_hands_off_deadline_in_the_past_is_dropped(mock_hass):
+    """It expires by the clock, so a stale one must not block the next window."""
+    options = {
+        CONF_RUNTIME_STATE: {"hands_off_until": datetime(2026, 1, 14, 5, 59).isoformat()}
+    }
+    with patch(
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
+        return_value=INSIDE_WINDOW,
+    ):
+        coordinator = _make_coordinator(mock_hass, WINDOW_CONFIG, options=options)
+
+    assert coordinator._hands_off_until is None
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_hands_off_deadline_is_ignored(mock_hass, caplog):
+    options = {CONF_RUNTIME_STATE: {"hands_off_until": "not a timestamp"}}
+
+    coordinator = _make_coordinator(mock_hass, WINDOW_CONFIG, options=options)
+
+    assert coordinator._hands_off_until is None
+    assert "hands_off_until" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_switching_the_integration_back_on_takes_the_inverter_back(mock_hass):
+    """The action hands the inverter over; the switch is how the user takes it back."""
+    coordinator = _window_coordinator(mock_hass)
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
+        return_value=INSIDE_WINDOW,
+    ):
+        await coordinator.async_reset_inverter()
+    assert coordinator._hands_off_until == WINDOW_END
+
+    coordinator.is_enabled = False
+    switch = InverterChargeNightSwitch(coordinator, coordinator.entry)
+    switch.async_write_ha_state = MagicMock()
+    await switch.async_turn_on()
+
+    assert coordinator._hands_off_until is None
+    assert _runtime_state(coordinator)["hands_off_until"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_reset_action_without_a_window_just_resets(mock_hass):
+    """No window means nothing to end - and nothing to keep down afterwards."""
+    mock_hass.states.async_set(MIN_SOC, "45", {"unit_of_measurement": "%"})
+    mock_hass.states.async_set(GRID, "on")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.original_min_soc = 8.0
+    coordinator._reset_absolute_charge_power = AsyncMock()
+
+    ok = await coordinator.async_reset_inverter()
+
+    assert ok is True
+    assert coordinator._hands_off_until is None
+    assert (
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0})
+        in mock_hass.services.async_call.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_reset_action_refuses_during_backup_mode(mock_hass, caplog):
+    """The house runs on the battery; the inverter is not ours to write to."""
+    caplog.set_level(logging.INFO)
+    mock_hass.states.async_set(BACKUP, "on")
+    mock_hass.states.async_set(MIN_SOC, "45", {"unit_of_measurement": "%"})
+    mock_hass.states.async_set(GRID, "on")
+    coordinator = _make_coordinator(mock_hass, {**CONFIG, CONF_BACKUP_MODE_ENTITY: BACKUP})
+    coordinator.is_active = True
+    coordinator.original_min_soc = 8.0
+
+    assert await coordinator.async_reset_inverter() is False
+
+    assert coordinator.is_active is True
+    assert coordinator._hands_off_until is None
+    mock_hass.services.async_call.assert_not_awaited()
+    assert "Backup mode active" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_failed_reset_from_the_action_is_reported(mock_hass):
+    """The caller gets an error, and the retry ladder is armed all the same."""
+    coordinator = _window_coordinator(mock_hass)
+    mock_hass.services.async_call = AsyncMock(side_effect=RuntimeError("inverter says no"))
+
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
+        return_value=INSIDE_WINDOW,
+    ):
+        ok = await coordinator.async_reset_inverter()
+
+    assert ok is False
+    assert coordinator._pending_reset is True

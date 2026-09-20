@@ -10,8 +10,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_COMMAND_DELAY,
     CONF_DEFAULT_MIN_SOC,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_OPERATION_MODE,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
@@ -34,7 +34,7 @@ async def test_stop_grid_charging_when_off(mock_hass, caplog):
     mock_hass.states.async_set("switch.grid", "off")
     mock_hass.services.async_call = AsyncMock()
     coordinator = _make_coordinator(
-        mock_hass, {CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid"}
+        mock_hass, {CONF_GRID_CHARGE_SWITCH: "switch.grid"}
     )
     coordinator._reset_absolute_charge_power = AsyncMock()
     coordinator._finalize_auto_test = MagicMock()
@@ -52,7 +52,7 @@ async def test_stop_grid_charging_state_unavailable(mock_hass, caplog):
     # The strict hass returns None for the unregistered switch.grid
     mock_hass.services.async_call = AsyncMock()
     coordinator = _make_coordinator(
-        mock_hass, {CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid"}
+        mock_hass, {CONF_GRID_CHARGE_SWITCH: "switch.grid"}
     )
     coordinator._reset_absolute_charge_power = AsyncMock()
     coordinator._finalize_auto_test = MagicMock()
@@ -84,8 +84,8 @@ async def test_control_kostal_min_soc_already_set(mock_hass):
         mock_hass,
         {
             CONF_BATTERY_SOC_ENTITY: "sensor.soc",
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_DEFAULT_MIN_SOC: 8.0,
             CONF_USER_MIN_SOC: 0.0,
             CONF_USER_MAX_SOC: 100.0,
@@ -93,7 +93,7 @@ async def test_control_kostal_min_soc_already_set(mock_hass):
     )
     coordinator._is_backup_active = MagicMock(return_value=False)
 
-    await coordinator._control_kostal(50.0)
+    await coordinator._control_charge(50.0)
 
     # Inverter already at 50 % and the switch already on: nothing to send, but the
     # coordinator records the value as set and captures the original min SOC.
@@ -115,8 +115,8 @@ async def test_control_kostal_defers_when_min_soc_unavailable(mock_hass, caplog)
     coordinator = _make_coordinator(
         mock_hass,
         {
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_BATTERY_SOC_ENTITY: "sensor.soc",
             CONF_DEFAULT_MIN_SOC: 8.0,
             CONF_USER_MIN_SOC: 0.0,
@@ -125,7 +125,7 @@ async def test_control_kostal_defers_when_min_soc_unavailable(mock_hass, caplog)
     )
     coordinator._is_backup_active = MagicMock(return_value=False)
 
-    await coordinator._control_kostal(50.0)
+    await coordinator._control_charge(50.0)
 
     # Neither the min SOC nor grid charging is written; the periodic
     # verification applies the target once the entity reports a value
@@ -155,7 +155,7 @@ async def test_control_kostal_keeps_high_live_value_as_original(mock_hass):
     coordinator = _make_coordinator(
         mock_hass,
         {
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
             CONF_DEFAULT_MIN_SOC: 8.0,
             CONF_USER_MIN_SOC: 0.0,
             CONF_USER_MAX_SOC: 100.0,
@@ -164,7 +164,7 @@ async def test_control_kostal_keeps_high_live_value_as_original(mock_hass):
     )
     coordinator._is_backup_active = MagicMock(return_value=False)
 
-    await coordinator._control_kostal(30.0)
+    await coordinator._control_charge(30.0)
 
     assert coordinator.original_min_soc == 50.0
     mock_hass.services.async_call.assert_awaited_with(
@@ -187,7 +187,7 @@ async def test_control_kostal_handles_bad_min_soc_state(mock_hass):
     coordinator = _make_coordinator(
         mock_hass,
         {
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
             CONF_DEFAULT_MIN_SOC: 8.0,
             CONF_USER_MIN_SOC: 0.0,
             CONF_USER_MAX_SOC: 100.0,
@@ -196,7 +196,7 @@ async def test_control_kostal_handles_bad_min_soc_state(mock_hass):
     )
     coordinator._is_backup_active = MagicMock(return_value=False)
 
-    await coordinator._control_kostal(30.0)
+    await coordinator._control_charge(30.0)
 
     assert coordinator.original_min_soc == 8.0
 
@@ -217,8 +217,8 @@ async def test_control_kostal_sets_min_soc_even_if_last_set_matches_target(mock_
         mock_hass,
         {
             CONF_BATTERY_SOC_ENTITY: "sensor.soc",
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_DEFAULT_MIN_SOC: 8.0,
             CONF_USER_MIN_SOC: 0.0,
             CONF_USER_MAX_SOC: 100.0,
@@ -228,7 +228,7 @@ async def test_control_kostal_sets_min_soc_even_if_last_set_matches_target(mock_
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._last_soc_set = 60.0
 
-    await coordinator._control_kostal(60.0)
+    await coordinator._control_charge(60.0)
 
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": "number.min_soc", "value": 60.0}
@@ -249,8 +249,8 @@ async def test_control_discharge_sets_min_soc_even_if_last_set_matches_target(mo
         {
             CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE,
             CONF_BATTERY_SOC_ENTITY: "sensor.soc",
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_DEFAULT_MIN_SOC: 8.0,
             CONF_USER_MIN_SOC: 0.0,
             CONF_USER_MAX_SOC: 100.0,
@@ -277,8 +277,8 @@ async def test_reset_settings_always_forgets_last_soc_set(mock_hass):
     coordinator = _make_coordinator(
         mock_hass,
         {
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_DEFAULT_MIN_SOC: 8.0,
         },
     )

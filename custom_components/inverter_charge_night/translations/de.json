@@ -7,8 +7,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Betriebsart",
-          "kostal_min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
-          "kostal_grid_charge_switch": "Schalter für Netzladung",
+          "min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
+          "grid_charge_switch": "Schalter für Netzladung",
           "pv_forecast_entity": "PV-Prognose (MORGEN)",
           "pv_forecast_today_entity": "PV-Prognose (HEUTE, optional)",
           "battery_soc_entity": "Ladestandssensor des Speichers",
@@ -16,9 +16,9 @@
         },
         "data_description": {
           "name": "Name dieser Instanz der Integration",
-          "operation_mode": "Nachtladung: lädt den Speicher nachts aus dem Netz. Morgenentladung: entlädt ihn vor Sonnenaufgang, um Platz für den PV-Ertrag zu schaffen.",
-          "kostal_min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
-          "kostal_grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
+          "operation_mode": "Nachtladung füllt den Speicher im günstigen Fenster aus dem Netz, bemessen so, dass der PV-Ertrag von morgen noch hineinpasst. Morgenentladung ist das Gegenteil und experimentell: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, entlädt sie den Speicher in die Morgenspitze - etwa 5 bis 8 Uhr, wenn die Haushalte am meisten ziehen und die Sonne noch nicht liefert. Das bringt die Preisdifferenz eines dynamischen Tarifs und entlastet das Netz in seiner engsten Stunde. Sie braucht einen Zwangsentlade-Schalter und einen Tarif, der sie vergütet. Im Zweifel bei Nachtladung bleiben. Siehe docs/morning-discharge.md.",
+          "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
+          "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
           "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
           "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
@@ -35,16 +35,22 @@
           "user_max_soc": "Maximaler Ladestand",
           "default_min_soc": "Min-SOC, der am Fensterende zurückgeschrieben wird",
           "forecast_error_margin": "Sicherheitsabschlag auf die Prognose",
-          "planner_mode": "Planer"
+          "planner_mode": "Planer",
+          "high_price_start": "Hochpreiszeit, Beginn (optional)",
+          "high_price_end": "Hochpreiszeit, Ende (optional)",
+          "high_price_margin_pct": "Zuschlag auf den Abendverbrauch"
         },
         "data_description": {
           "start_time": "Uhrzeit, zu der das Fenster beginnt (HH:MM). Das Fenster darf über Mitternacht gehen, z. B. 23:00 bis 05:00.",
           "end_time": "Uhrzeit, zu der das Fenster endet und alle Einstellungen zurückgesetzt werden (HH:MM).",
           "user_min_soc": "Kleinster erlaubter Ladestand in Prozent. Der Zielladestand geht nie darunter.",
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
-          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (beim Kostal typischerweise 8 %).",
+          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
-          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“."
+          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“.",
+          "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
+          "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
+          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
         }
       },
       "power": {
@@ -61,7 +67,7 @@
           "charge_energy_sent_entity": "Energiezähler: aufgenommen (optional)",
           "charge_energy_received_entity": "Energiezähler: im Speicher angekommen (optional)",
           "auto_efficient_charge": "Effizienzsuche",
-          "force_discharge_switch": "Schalter für Zwangsentladung (optional)",
+          "force_discharge_switch": "Zwangsentlade-Schalter (für Morgen-Entladung erforderlich)",
           "discharge_limit_entity": "Entität für die Entladeleistungsgrenze (optional)",
           "grid_import_entity": "Netzbezug (optional)",
           "main_fuse_a": "Vorsicherung je Phase (optional)",
@@ -84,7 +90,7 @@
           "charge_energy_sent_entity": "Optional, aber besser: kWh-Zähler der Energie, die das Ladegerät aufnimmt. Mit beiden Zählern misst die Effizienzsuche die tatsächlich geflossene Energie, statt eine Leistungsmessung zu integrieren.",
           "charge_energy_received_entity": "Optional: der passende kWh-Zähler auf der Speicherseite. Nur zusammen mit dem Zähler darüber sinnvoll.",
           "auto_efficient_charge": "Sucht die Ladeleistung mit dem kleinsten Verlust zwischen Netz und Speicher und schaltet sich ab, sobald sie das Optimum gefunden hat. Sie misst mehrmals pro Fenster und zählt eine Messung nur, wenn der Wechselrichter wirklich mit der geprüften Leistung geladen hat. Braucht die Entität für die AC-Ladeleistung und beide Leistungssensoren; mit Energiezählern wird es genau. Der Sensor „Effizienzsuche“ zeigt den Fortschritt.",
-          "force_discharge_switch": "Optional: Schalter, der den Speicher zwingt, ins Netz zu entladen (nur für die Morgenentladung).",
+          "force_discharge_switch": "Schalter-Entität, mit der der Wechselrichter den Akku ins Netz entlädt (z. B. über Modbus). Im Modus Morgen-Entladung erforderlich - nur darüber wird wirklich entladen; im Modus Nachtladung ungenutzt.",
           "discharge_limit_entity": "Optional: Zahl-Entität für die Entladeleistung (W oder kW). Wird am Fensterbeginn auf 0 gesetzt, damit das Haus aus dem Netz läuft und gespeicherte PV liegen bleibt; am Fensterende wird der alte Wert zurückgeschrieben.",
           "grid_import_entity": "Momentaner Bezug aus dem Netz in W oder kW. Ohne diese Entität wird die Ladeleistung nicht gegen den Hausanschluss begrenzt.",
           "main_fuse_a": "Vorsicherung des Hausanschlusses je Phase. 63 A dreiphasig sind rund 43 kW Nennleistung. Nötig, wenn unten keine maximale Dauerleistung eingetragen ist.",
@@ -105,6 +111,7 @@
           "command_delay": "Befehlsverzögerung",
           "active_start_date": "Beginn des aktiven Zeitraums (optional)",
           "active_end_date": "Ende des aktiven Zeitraums (optional)",
+          "active_range_yearly": "Datumsbereich jährlich wiederholen",
           "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb (optional)",
           "backup_mode_states": "Zustände für Notstrombetrieb (optional)",
           "house_load_entity": "Energiezähler des Hausverbrauchs (optional)",
@@ -121,6 +128,7 @@
           "command_delay": "Pause zwischen dem Schreiben des Min-SOC und dem Einschalten der Netzladung (Sekunden).",
           "active_start_date": "Optional: nur zwischen diesem und dem Enddatum arbeiten (JJJJ-MM-TT). Leer lassen für das ganze Jahr — für §14a-Fenster, die nur im Winterhalbjahr gelten, hier den Zeitraum eintragen.",
           "active_end_date": "Optional: nur zwischen dem Startdatum und diesem Datum arbeiten (JJJJ-MM-TT).",
+          "active_range_yearly": "Ein (empfohlen): Es zählen nur Tag und Monat der beiden Daten oben, der Bereich kommt also jedes Jahr wieder — eine Tarifsaison steht im Preisblatt und gilt bis auf Weiteres. Aus: Die Jahreszahlen zählen mit, und die Integration hört nach dem Enddatum endgültig auf. Ein Bereich über den Jahreswechsel (Beginn nach Ende, z. B. 1. November bis 31. März) wird immer als Saison gelesen — absolut gelesen könnte er keinen einzigen Tag enthalten.",
           "backup_mode_entity": "Optional, aber wichtig: eine Entität, die anzeigt, ob das Haus gerade aus dem Speicher statt aus dem Netz läuft. Solange das so ist, ändert die Integration nichts am Wechselrichter — es gibt nichts zu laden, und ein angehobener Min-SOC würde den Speicher daran hindern, das Haus zu versorgen. Ein Schalter, ein binärer Sensor oder ein Zustandssensor (siehe unten). Bei einer manuellen Umschaltbox tut es auch ein input_boolean, den du selbst umlegst.",
           "backup_mode_states": "Nur nötig, wenn die Entität oben ein normaler Sensor ist und kein Schalter: die Zustände, die „Haus läuft aus dem Speicher“ bedeuten, durch Komma getrennt. Ein Kostal meldet im Wechselrichterzustand „ESB“ (Ersatzstrombetrieb). Bei einem Schalter oder binären Sensor leer lassen — dort bedeutet „an“ bereits Notstrom.",
           "house_load_entity": "Optional: kWh-Zähler des Hausverbrauchs. Der Überbrückungs-Planer lernt daraus aus den letzten 14 Tagen ein Tagesprofil; ohne ihn gilt der Mittelwert darunter.",
@@ -139,8 +147,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Betriebsart",
-          "kostal_min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
-          "kostal_grid_charge_switch": "Schalter für Netzladung",
+          "min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
+          "grid_charge_switch": "Schalter für Netzladung",
           "pv_forecast_entity": "PV-Prognose (MORGEN)",
           "pv_forecast_today_entity": "PV-Prognose (HEUTE, optional)",
           "battery_soc_entity": "Ladestandssensor des Speichers",
@@ -148,9 +156,9 @@
         },
         "data_description": {
           "name": "Name dieser Instanz der Integration",
-          "operation_mode": "Nachtladung: lädt den Speicher nachts aus dem Netz. Morgenentladung: entlädt ihn vor Sonnenaufgang, um Platz für den PV-Ertrag zu schaffen.",
-          "kostal_min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
-          "kostal_grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
+          "operation_mode": "Nachtladung füllt den Speicher im günstigen Fenster aus dem Netz, bemessen so, dass der PV-Ertrag von morgen noch hineinpasst. Morgenentladung ist das Gegenteil und experimentell: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, entlädt sie den Speicher in die Morgenspitze - etwa 5 bis 8 Uhr, wenn die Haushalte am meisten ziehen und die Sonne noch nicht liefert. Das bringt die Preisdifferenz eines dynamischen Tarifs und entlastet das Netz in seiner engsten Stunde. Sie braucht einen Zwangsentlade-Schalter und einen Tarif, der sie vergütet. Im Zweifel bei Nachtladung bleiben. Siehe docs/morning-discharge.md.",
+          "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
+          "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
           "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
           "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
@@ -167,16 +175,22 @@
           "user_max_soc": "Maximaler Ladestand",
           "default_min_soc": "Min-SOC, der am Fensterende zurückgeschrieben wird",
           "forecast_error_margin": "Sicherheitsabschlag auf die Prognose",
-          "planner_mode": "Planer"
+          "planner_mode": "Planer",
+          "high_price_start": "Hochpreiszeit, Beginn (optional)",
+          "high_price_end": "Hochpreiszeit, Ende (optional)",
+          "high_price_margin_pct": "Zuschlag auf den Abendverbrauch"
         },
         "data_description": {
           "start_time": "Uhrzeit, zu der das Fenster beginnt (HH:MM). Das Fenster darf über Mitternacht gehen, z. B. 23:00 bis 05:00.",
           "end_time": "Uhrzeit, zu der das Fenster endet und alle Einstellungen zurückgesetzt werden (HH:MM).",
           "user_min_soc": "Kleinster erlaubter Ladestand in Prozent. Der Zielladestand geht nie darunter.",
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
-          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (beim Kostal typischerweise 8 %).",
+          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
-          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“."
+          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“.",
+          "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
+          "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
+          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
         }
       },
       "reconfigure_power": {
@@ -193,7 +207,7 @@
           "charge_energy_sent_entity": "Energiezähler: aufgenommen (optional)",
           "charge_energy_received_entity": "Energiezähler: im Speicher angekommen (optional)",
           "auto_efficient_charge": "Effizienzsuche",
-          "force_discharge_switch": "Schalter für Zwangsentladung (optional)",
+          "force_discharge_switch": "Zwangsentlade-Schalter (für Morgen-Entladung erforderlich)",
           "discharge_limit_entity": "Entität für die Entladeleistungsgrenze (optional)",
           "grid_import_entity": "Netzbezug (optional)",
           "main_fuse_a": "Vorsicherung je Phase (optional)",
@@ -216,7 +230,7 @@
           "charge_energy_sent_entity": "Optional, aber besser: kWh-Zähler der Energie, die das Ladegerät aufnimmt. Mit beiden Zählern misst die Effizienzsuche die tatsächlich geflossene Energie, statt eine Leistungsmessung zu integrieren.",
           "charge_energy_received_entity": "Optional: der passende kWh-Zähler auf der Speicherseite. Nur zusammen mit dem Zähler darüber sinnvoll.",
           "auto_efficient_charge": "Sucht die Ladeleistung mit dem kleinsten Verlust zwischen Netz und Speicher und schaltet sich ab, sobald sie das Optimum gefunden hat. Sie misst mehrmals pro Fenster und zählt eine Messung nur, wenn der Wechselrichter wirklich mit der geprüften Leistung geladen hat. Braucht die Entität für die AC-Ladeleistung und beide Leistungssensoren; mit Energiezählern wird es genau. Der Sensor „Effizienzsuche“ zeigt den Fortschritt.",
-          "force_discharge_switch": "Optional: Schalter, der den Speicher zwingt, ins Netz zu entladen (nur für die Morgenentladung).",
+          "force_discharge_switch": "Schalter-Entität, mit der der Wechselrichter den Akku ins Netz entlädt (z. B. über Modbus). Im Modus Morgen-Entladung erforderlich - nur darüber wird wirklich entladen; im Modus Nachtladung ungenutzt.",
           "discharge_limit_entity": "Optional: Zahl-Entität für die Entladeleistung (W oder kW). Wird am Fensterbeginn auf 0 gesetzt, damit das Haus aus dem Netz läuft und gespeicherte PV liegen bleibt; am Fensterende wird der alte Wert zurückgeschrieben.",
           "grid_import_entity": "Momentaner Bezug aus dem Netz in W oder kW. Ohne diese Entität wird die Ladeleistung nicht gegen den Hausanschluss begrenzt.",
           "main_fuse_a": "Vorsicherung des Hausanschlusses je Phase. 63 A dreiphasig sind rund 43 kW Nennleistung. Nötig, wenn unten keine maximale Dauerleistung eingetragen ist.",
@@ -237,6 +251,7 @@
           "command_delay": "Befehlsverzögerung",
           "active_start_date": "Beginn des aktiven Zeitraums (optional)",
           "active_end_date": "Ende des aktiven Zeitraums (optional)",
+          "active_range_yearly": "Datumsbereich jährlich wiederholen",
           "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb (optional)",
           "backup_mode_states": "Zustände für Notstrombetrieb (optional)",
           "house_load_entity": "Energiezähler des Hausverbrauchs (optional)",
@@ -253,6 +268,7 @@
           "command_delay": "Pause zwischen dem Schreiben des Min-SOC und dem Einschalten der Netzladung (Sekunden).",
           "active_start_date": "Optional: nur zwischen diesem und dem Enddatum arbeiten (JJJJ-MM-TT). Leer lassen für das ganze Jahr — für §14a-Fenster, die nur im Winterhalbjahr gelten, hier den Zeitraum eintragen.",
           "active_end_date": "Optional: nur zwischen dem Startdatum und diesem Datum arbeiten (JJJJ-MM-TT).",
+          "active_range_yearly": "Ein (empfohlen): Es zählen nur Tag und Monat der beiden Daten oben, der Bereich kommt also jedes Jahr wieder — eine Tarifsaison steht im Preisblatt und gilt bis auf Weiteres. Aus: Die Jahreszahlen zählen mit, und die Integration hört nach dem Enddatum endgültig auf. Ein Bereich über den Jahreswechsel (Beginn nach Ende, z. B. 1. November bis 31. März) wird immer als Saison gelesen — absolut gelesen könnte er keinen einzigen Tag enthalten.",
           "backup_mode_entity": "Optional, aber wichtig: eine Entität, die anzeigt, ob das Haus gerade aus dem Speicher statt aus dem Netz läuft. Solange das so ist, ändert die Integration nichts am Wechselrichter — es gibt nichts zu laden, und ein angehobener Min-SOC würde den Speicher daran hindern, das Haus zu versorgen. Ein Schalter, ein binärer Sensor oder ein Zustandssensor (siehe unten). Bei einer manuellen Umschaltbox tut es auch ein input_boolean, den du selbst umlegst.",
           "backup_mode_states": "Nur nötig, wenn die Entität oben ein normaler Sensor ist und kein Schalter: die Zustände, die „Haus läuft aus dem Speicher“ bedeuten, durch Komma getrennt. Ein Kostal meldet im Wechselrichterzustand „ESB“ (Ersatzstrombetrieb). Bei einem Schalter oder binären Sensor leer lassen — dort bedeutet „an“ bereits Notstrom.",
           "house_load_entity": "Optional: kWh-Zähler des Hausverbrauchs. Der Überbrückungs-Planer lernt daraus aus den letzten 14 Tagen ein Tagesprofil; ohne ihn gilt der Mittelwert darunter.",
@@ -267,23 +283,25 @@
       }
     },
     "error": {
-      "invalid_entity": "Diese Entität gibt es nicht",
-      "invalid_time": "Ungültige Uhrzeit (HH:MM)",
-      "invalid_soc": "Der Ladestand muss zwischen 0 und 100 liegen",
-      "invalid_capacity": "Die Speicherkapazität muss größer als 0 sein",
-      "max_soc_must_be_greater_than_min": "Der maximale Ladestand muss über dem minimalen liegen",
-      "invalid_date": "Ungültiges Datum (JJJJ-MM-TT)",
-      "invalid_power": "Die Leistung muss größer als 0 sein",
-      "max_power_must_be_greater_than_min": "Die maximale Ladeleistung muss über der minimalen liegen",
-      "required_entity": "Dazu wird eine Entität gebraucht",
-      "required_value": "Dazu wird ein Wert gebraucht",
-      "start_end_time_must_differ": "Start- und Endzeit müssen sich unterscheiden",
-      "invalid_efficiency": "Der Ladewirkungsgrad muss zwischen 0 und 1 liegen",
       "all_prices_required": "Alle drei Preise setzen (Fenster, Tag, Einspeisung) oder keinen",
       "entity_used_by_other_entry": "Diese Min-SOC-Entität gehört bereits zu einer anderen Instanz",
-      "invalid_phases": "Die Phasenzahl muss 1 oder 3 sein",
+      "high_price_needs_both_times": "Bitte Beginn und Ende der Hochpreiszeit setzen — oder beide leer lassen.",
+      "invalid_capacity": "Die Speicherkapazität muss größer als 0 sein",
       "invalid_current": "Die Sicherungsgröße muss größer als 0 sein",
-      "invalid_voltage": "Die Spannung muss größer als 0 sein"
+      "invalid_date": "Ungültiges Datum (JJJJ-MM-TT)",
+      "invalid_efficiency": "Der Ladewirkungsgrad muss zwischen 0 und 1 liegen",
+      "invalid_entity": "Diese Entität gibt es nicht",
+      "invalid_phases": "Die Phasenzahl muss 1 oder 3 sein",
+      "invalid_power": "Die Leistung muss größer als 0 sein",
+      "invalid_soc": "Der Ladestand muss zwischen 0 und 100 liegen",
+      "invalid_time": "Ungültige Uhrzeit (HH:MM)",
+      "invalid_voltage": "Die Spannung muss größer als 0 sein",
+      "max_power_must_be_greater_than_min": "Die maximale Ladeleistung muss über der minimalen liegen",
+      "max_soc_must_be_greater_than_min": "Der maximale Ladestand muss über dem minimalen liegen",
+      "required_entity": "Dazu wird eine Entität gebraucht",
+      "required_for_discharge_mode": "Der Morgen-Entlademodus braucht den Zwangsentlade-Schalter: ohne ihn wird der Akku nie entladen.",
+      "required_value": "Dazu wird ein Wert gebraucht",
+      "start_end_time_must_differ": "Start- und Endzeit müssen sich unterscheiden"
     },
     "abort": {
       "already_configured": "Dieser Wechselrichter ist bereits eingerichtet",
@@ -299,8 +317,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Betriebsart",
-          "kostal_min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
-          "kostal_grid_charge_switch": "Schalter für Netzladung",
+          "min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
+          "grid_charge_switch": "Schalter für Netzladung",
           "pv_forecast_entity": "PV-Prognose (MORGEN)",
           "pv_forecast_today_entity": "PV-Prognose (HEUTE, optional)",
           "battery_soc_entity": "Ladestandssensor des Speichers",
@@ -308,9 +326,9 @@
         },
         "data_description": {
           "name": "Name dieser Instanz der Integration",
-          "operation_mode": "Nachtladung: lädt den Speicher nachts aus dem Netz. Morgenentladung: entlädt ihn vor Sonnenaufgang, um Platz für den PV-Ertrag zu schaffen.",
-          "kostal_min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
-          "kostal_grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
+          "operation_mode": "Nachtladung füllt den Speicher im günstigen Fenster aus dem Netz, bemessen so, dass der PV-Ertrag von morgen noch hineinpasst. Morgenentladung ist das Gegenteil und experimentell: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, entlädt sie den Speicher in die Morgenspitze - etwa 5 bis 8 Uhr, wenn die Haushalte am meisten ziehen und die Sonne noch nicht liefert. Das bringt die Preisdifferenz eines dynamischen Tarifs und entlastet das Netz in seiner engsten Stunde. Sie braucht einen Zwangsentlade-Schalter und einen Tarif, der sie vergütet. Im Zweifel bei Nachtladung bleiben. Siehe docs/morning-discharge.md.",
+          "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
+          "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
           "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
           "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
@@ -327,16 +345,22 @@
           "user_max_soc": "Maximaler Ladestand",
           "default_min_soc": "Min-SOC, der am Fensterende zurückgeschrieben wird",
           "forecast_error_margin": "Sicherheitsabschlag auf die Prognose",
-          "planner_mode": "Planer"
+          "planner_mode": "Planer",
+          "high_price_start": "Hochpreiszeit, Beginn (optional)",
+          "high_price_end": "Hochpreiszeit, Ende (optional)",
+          "high_price_margin_pct": "Zuschlag auf den Abendverbrauch"
         },
         "data_description": {
           "start_time": "Uhrzeit, zu der das Fenster beginnt (HH:MM). Das Fenster darf über Mitternacht gehen, z. B. 23:00 bis 05:00.",
           "end_time": "Uhrzeit, zu der das Fenster endet und alle Einstellungen zurückgesetzt werden (HH:MM).",
           "user_min_soc": "Kleinster erlaubter Ladestand in Prozent. Der Zielladestand geht nie darunter.",
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
-          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (beim Kostal typischerweise 8 %).",
+          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
-          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“."
+          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“.",
+          "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
+          "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
+          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
         }
       },
       "power": {
@@ -353,7 +377,7 @@
           "charge_energy_sent_entity": "Energiezähler: aufgenommen (optional)",
           "charge_energy_received_entity": "Energiezähler: im Speicher angekommen (optional)",
           "auto_efficient_charge": "Effizienzsuche",
-          "force_discharge_switch": "Schalter für Zwangsentladung (optional)",
+          "force_discharge_switch": "Zwangsentlade-Schalter (für Morgen-Entladung erforderlich)",
           "discharge_limit_entity": "Entität für die Entladeleistungsgrenze (optional)",
           "grid_import_entity": "Netzbezug (optional)",
           "main_fuse_a": "Vorsicherung je Phase (optional)",
@@ -376,7 +400,7 @@
           "charge_energy_sent_entity": "Optional, aber besser: kWh-Zähler der Energie, die das Ladegerät aufnimmt. Mit beiden Zählern misst die Effizienzsuche die tatsächlich geflossene Energie, statt eine Leistungsmessung zu integrieren.",
           "charge_energy_received_entity": "Optional: der passende kWh-Zähler auf der Speicherseite. Nur zusammen mit dem Zähler darüber sinnvoll.",
           "auto_efficient_charge": "Sucht die Ladeleistung mit dem kleinsten Verlust zwischen Netz und Speicher und schaltet sich ab, sobald sie das Optimum gefunden hat. Sie misst mehrmals pro Fenster und zählt eine Messung nur, wenn der Wechselrichter wirklich mit der geprüften Leistung geladen hat. Braucht die Entität für die AC-Ladeleistung und beide Leistungssensoren; mit Energiezählern wird es genau. Der Sensor „Effizienzsuche“ zeigt den Fortschritt.",
-          "force_discharge_switch": "Optional: Schalter, der den Speicher zwingt, ins Netz zu entladen (nur für die Morgenentladung).",
+          "force_discharge_switch": "Schalter-Entität, mit der der Wechselrichter den Akku ins Netz entlädt (z. B. über Modbus). Im Modus Morgen-Entladung erforderlich - nur darüber wird wirklich entladen; im Modus Nachtladung ungenutzt.",
           "discharge_limit_entity": "Optional: Zahl-Entität für die Entladeleistung (W oder kW). Wird am Fensterbeginn auf 0 gesetzt, damit das Haus aus dem Netz läuft und gespeicherte PV liegen bleibt; am Fensterende wird der alte Wert zurückgeschrieben.",
           "grid_import_entity": "Momentaner Bezug aus dem Netz in W oder kW. Ohne diese Entität wird die Ladeleistung nicht gegen den Hausanschluss begrenzt.",
           "main_fuse_a": "Vorsicherung des Hausanschlusses je Phase. 63 A dreiphasig sind rund 43 kW Nennleistung. Nötig, wenn unten keine maximale Dauerleistung eingetragen ist.",
@@ -397,6 +421,7 @@
           "command_delay": "Befehlsverzögerung",
           "active_start_date": "Beginn des aktiven Zeitraums (optional)",
           "active_end_date": "Ende des aktiven Zeitraums (optional)",
+          "active_range_yearly": "Datumsbereich jährlich wiederholen",
           "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb (optional)",
           "backup_mode_states": "Zustände für Notstrombetrieb (optional)",
           "house_load_entity": "Energiezähler des Hausverbrauchs (optional)",
@@ -413,6 +438,7 @@
           "command_delay": "Pause zwischen dem Schreiben des Min-SOC und dem Einschalten der Netzladung (Sekunden).",
           "active_start_date": "Optional: nur zwischen diesem und dem Enddatum arbeiten (JJJJ-MM-TT). Leer lassen für das ganze Jahr — für §14a-Fenster, die nur im Winterhalbjahr gelten, hier den Zeitraum eintragen.",
           "active_end_date": "Optional: nur zwischen dem Startdatum und diesem Datum arbeiten (JJJJ-MM-TT).",
+          "active_range_yearly": "Ein (empfohlen): Es zählen nur Tag und Monat der beiden Daten oben, der Bereich kommt also jedes Jahr wieder — eine Tarifsaison steht im Preisblatt und gilt bis auf Weiteres. Aus: Die Jahreszahlen zählen mit, und die Integration hört nach dem Enddatum endgültig auf. Ein Bereich über den Jahreswechsel (Beginn nach Ende, z. B. 1. November bis 31. März) wird immer als Saison gelesen — absolut gelesen könnte er keinen einzigen Tag enthalten.",
           "backup_mode_entity": "Optional, aber wichtig: eine Entität, die anzeigt, ob das Haus gerade aus dem Speicher statt aus dem Netz läuft. Solange das so ist, ändert die Integration nichts am Wechselrichter — es gibt nichts zu laden, und ein angehobener Min-SOC würde den Speicher daran hindern, das Haus zu versorgen. Ein Schalter, ein binärer Sensor oder ein Zustandssensor (siehe unten). Bei einer manuellen Umschaltbox tut es auch ein input_boolean, den du selbst umlegst.",
           "backup_mode_states": "Nur nötig, wenn die Entität oben ein normaler Sensor ist und kein Schalter: die Zustände, die „Haus läuft aus dem Speicher“ bedeuten, durch Komma getrennt. Ein Kostal meldet im Wechselrichterzustand „ESB“ (Ersatzstrombetrieb). Bei einem Schalter oder binären Sensor leer lassen — dort bedeutet „an“ bereits Notstrom.",
           "house_load_entity": "Optional: kWh-Zähler des Hausverbrauchs. Der Überbrückungs-Planer lernt daraus aus den letzten 14 Tagen ein Tagesprofil; ohne ihn gilt der Mittelwert darunter.",
@@ -427,30 +453,32 @@
       }
     },
     "error": {
-      "invalid_entity": "Diese Entität gibt es nicht",
-      "invalid_time": "Ungültige Uhrzeit (HH:MM)",
-      "invalid_soc": "Der Ladestand muss zwischen 0 und 100 liegen",
-      "invalid_capacity": "Die Speicherkapazität muss größer als 0 sein",
-      "max_soc_must_be_greater_than_min": "Der maximale Ladestand muss über dem minimalen liegen",
-      "invalid_date": "Ungültiges Datum (JJJJ-MM-TT)",
-      "invalid_power": "Die Leistung muss größer als 0 sein",
-      "max_power_must_be_greater_than_min": "Die maximale Ladeleistung muss über der minimalen liegen",
-      "required_entity": "Dazu wird eine Entität gebraucht",
-      "required_value": "Dazu wird ein Wert gebraucht",
-      "start_end_time_must_differ": "Start- und Endzeit müssen sich unterscheiden",
-      "invalid_efficiency": "Der Ladewirkungsgrad muss zwischen 0 und 1 liegen",
       "all_prices_required": "Alle drei Preise setzen (Fenster, Tag, Einspeisung) oder keinen",
       "entity_used_by_other_entry": "Diese Min-SOC-Entität gehört bereits zu einer anderen Instanz",
-      "invalid_phases": "Die Phasenzahl muss 1 oder 3 sein",
+      "high_price_needs_both_times": "Bitte Beginn und Ende der Hochpreiszeit setzen — oder beide leer lassen.",
+      "invalid_capacity": "Die Speicherkapazität muss größer als 0 sein",
       "invalid_current": "Die Sicherungsgröße muss größer als 0 sein",
-      "invalid_voltage": "Die Spannung muss größer als 0 sein"
+      "invalid_date": "Ungültiges Datum (JJJJ-MM-TT)",
+      "invalid_efficiency": "Der Ladewirkungsgrad muss zwischen 0 und 1 liegen",
+      "invalid_entity": "Diese Entität gibt es nicht",
+      "invalid_phases": "Die Phasenzahl muss 1 oder 3 sein",
+      "invalid_power": "Die Leistung muss größer als 0 sein",
+      "invalid_soc": "Der Ladestand muss zwischen 0 und 100 liegen",
+      "invalid_time": "Ungültige Uhrzeit (HH:MM)",
+      "invalid_voltage": "Die Spannung muss größer als 0 sein",
+      "max_power_must_be_greater_than_min": "Die maximale Ladeleistung muss über der minimalen liegen",
+      "max_soc_must_be_greater_than_min": "Der maximale Ladestand muss über dem minimalen liegen",
+      "required_entity": "Dazu wird eine Entität gebraucht",
+      "required_for_discharge_mode": "Der Morgen-Entlademodus braucht den Zwangsentlade-Schalter: ohne ihn wird der Akku nie entladen.",
+      "required_value": "Dazu wird ein Wert gebraucht",
+      "start_end_time_must_differ": "Start- und Endzeit müssen sich unterscheiden"
     }
   },
   "selector": {
     "operation_mode": {
       "options": {
         "night_charge": "Nachtladung",
-        "morning_discharge": "Morgenentladung"
+        "morning_discharge": "Morgenentladung (experimentell)"
       }
     },
     "planner_mode": {
@@ -489,6 +517,9 @@
           "measuring": "Misst",
           "finished": "Abgeschlossen"
         }
+      },
+      "next_high_price_window": {
+        "name": "Nächste Hochpreiszeit"
       }
     },
     "switch": {
@@ -507,7 +538,7 @@
         "name": "Betriebsart",
         "state": {
           "night_charge": "Nachtladung",
-          "morning_discharge": "Morgenentladung"
+          "morning_discharge": "Morgenentladung (experimentell)"
         }
       }
     },
@@ -528,6 +559,21 @@
   "exceptions": {
     "entity_not_available": {
       "message": "Die benötigte Entität {entity_id} ist noch nicht verfügbar"
+    },
+    "entry_id_required": {
+      "message": "Es sind mehrere Wechselrichter eingerichtet, die Aktion braucht also die Angabe, welcher gemeint ist. Wähle einen in den Feldern der Aktion aus."
+    },
+    "entry_not_found": {
+      "message": "Es gibt keine Inverter-Charge-Night-Konfiguration mit der Kennung {entry_id}."
+    },
+    "entry_not_loaded": {
+      "message": "Die Konfiguration „{title}“ ist nicht geladen, es gibt also nichts, worauf die Aktion wirken könnte."
+    },
+    "plan_failed": {
+      "message": "Der Planer konnte kein Ziel berechnen. Im Protokoll steht, welche Einstellung ihm im Weg stand."
+    },
+    "reset_failed": {
+      "message": "Der Wechselrichter hat den Reset nicht angenommen. Er wird automatisch wiederholt; im Protokoll steht, welche Einstellung fehlgeschlagen ist."
     }
   },
   "issues": {
@@ -538,6 +584,32 @@
     "entity_not_available": {
       "title": "Die benötigte Entität {entity_id} fehlt",
       "description": "Inverter Charge Night braucht die Entität {entity_id}, aber Home Assistant kennt sie nicht. Prüfe die Entitäts-ID in den Einstellungen der Integration (Neu konfigurieren) oder stelle die Entität in ihrer eigenen Integration wieder her."
+    },
+    "active_range_expired": {
+      "title": "{name}: Der aktive Datumsbereich endete am {end_date}",
+      "description": "Die Integration ist so eingestellt, dass sie nur bis {end_date} läuft, und dieses Datum ist vorbei — sie lädt also nicht mehr und fängt von selbst auch nicht wieder an.\n\nDrei Wege hinaus, je nachdem was passt:\n\n1. **Datumsbereich jährlich wiederholen** in den Optionen einschalten (Schritt 4). Dann zählen nur Tag und Monat, und der Bereich kommt jedes Jahr wieder — genau das ist eine Tarifsaison normalerweise.\n2. Ein neues Enddatum eintragen.\n3. Beide Daten leeren, dann läuft sie ganzjährig.\n\nDiese Meldung verschwindet, sobald eines davon erledigt ist."
+    }
+  },
+  "services": {
+    "plan_target_soc": {
+      "name": "Ziel-Ladestand berechnen",
+      "description": "Berechnet den Ziel-Ladestand für das nächste Fenster aus Prognose, Hausverbrauchsprofil und Sonnenstand und gibt ihn zurück, ohne etwas zu ändern.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wechselrichter",
+          "description": "Für welchen eingerichteten Wechselrichter geplant werden soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
+        }
+      }
+    },
+    "reset_inverter": {
+      "name": "Wechselrichter zurücksetzen",
+      "description": "Setzt Mindestladestand, Ladegrenzen und Schalter auf die vor dem Fenster gemerkten Werte zurück — derselbe Reset wie am Fensterende. Wird bei aktivem Notstrombetrieb abgelehnt.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wechselrichter",
+          "description": "Welcher eingerichtete Wechselrichter zurückgesetzt werden soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
+        }
+      }
     }
   }
 }

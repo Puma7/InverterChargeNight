@@ -19,8 +19,8 @@ from custom_components.inverter_charge_night.coordinator import (
 from custom_components.inverter_charge_night.const import (
     CONF_BACKUP_MODE_ENTITY,
     CONF_BATTERY_SOC_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
 )
 
 
@@ -37,7 +37,7 @@ def _prepare_entry(mock_config_entry, extra: dict | None = None):
 async def _setup(mock_hass, entry) -> InverterChargeNightCoordinator:
     mock_hass.config_entries.async_forward_entry_setups = AsyncMock()
     # The startup check needs the required entities to be known to hass
-    for key in (CONF_BATTERY_SOC_ENTITY, CONF_KOSTAL_MIN_SOC_ENTITY, CONF_KOSTAL_GRID_CHARGE_SWITCH):
+    for key in (CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH):
         mock_hass.states.async_set(entry.data[key], "50")
     # HA sets this context variable while an entry is being set up; the
     # coordinator picks its config entry up from it.

@@ -19,8 +19,13 @@ from custom_components.inverter_charge_night import (
     _migrate_entry_data,
 )
 from custom_components.inverter_charge_night.const import (
+    CONF_ACTIVE_END_DATE,
+    CONF_ACTIVE_RANGE_YEARLY,
+    CONF_ACTIVE_START_DATE,
     CONF_AUTO_EFFICIENCY_DATA,
+    CONF_GRID_CHARGE_SWITCH,
     CONF_HOUSE_LOAD_ENTITY,
+    CONF_MIN_SOC_ENTITY,
     CONF_RUNTIME_STATE,
     DOMAIN,
 )
@@ -107,7 +112,11 @@ def test_measurements_of_a_version_that_is_gone_are_dropped(caplog):
 def test_a_current_entry_is_not_written_at_all():
     """No pointless write, and no reload loop it could trigger."""
     entry = _entry(
-        {"battery_soc_entity": "sensor.soc", CONF_HOUSE_LOAD_ENTITY: "sensor.house"},
+        {
+            "battery_soc_entity": "sensor.soc",
+            CONF_HOUSE_LOAD_ENTITY: "sensor.house",
+            CONF_ACTIVE_RANGE_YEARLY: True,
+        },
         {CONF_AUTO_EFFICIENCY_DATA: {"history": {}}},
     )
     hass = _hass_that_stores(entry)
@@ -165,3 +174,94 @@ def test_an_entity_that_came_back_clears_its_issue():
         _clear_stale_entity_issues(hass)
 
     assert deleted == ["entity_not_available_sensor.wr_battery_soc"]
+
+
+# --- the vendor name comes out of the two inverter keys (3.0.2) --------------
+
+
+def test_the_inverter_entities_are_carried_over_to_their_new_keys(caplog):
+    """An installation configured before 3.0.2 must keep working untouched.
+
+    Both keys are read by every write path to the inverter. If the migration
+    missed them, the next window would find no min SOC entity and no grid
+    charge switch, and would quietly do nothing at all.
+    """
+    entry = _entry(
+        {
+            "kostal_min_soc_entity": "number.wr_min_soc",
+            "kostal_grid_charge_switch": "switch.wr_grid_charge",
+            "battery_soc_entity": "sensor.wr_battery_soc",
+        },
+        {},
+    )
+    hass = _hass_that_stores(entry)
+
+    with caplog.at_level(logging.INFO):
+        _migrate_entry_data(hass, entry)
+
+    assert entry.data[CONF_MIN_SOC_ENTITY] == "number.wr_min_soc"
+    assert entry.data[CONF_GRID_CHARGE_SWITCH] == "switch.wr_grid_charge"
+    assert "kostal_min_soc_entity" not in entry.data
+    assert "kostal_grid_charge_switch" not in entry.data
+    assert entry.data["battery_soc_entity"] == "sensor.wr_battery_soc"
+    assert "Carried kostal_min_soc_entity over to min_soc_entity" in caplog.text
+
+
+def test_a_value_already_under_the_new_key_wins():
+    """Reconfigured after the upgrade, then an old key turns up: keep the new one."""
+    entry = _entry(
+        {
+            "kostal_min_soc_entity": "number.old",
+            CONF_MIN_SOC_ENTITY: "number.chosen_after_the_upgrade",
+        },
+        {},
+    )
+    hass = _hass_that_stores(entry)
+
+    _migrate_entry_data(hass, entry)
+
+    assert entry.data[CONF_MIN_SOC_ENTITY] == "number.chosen_after_the_upgrade"
+    assert "kostal_min_soc_entity" not in entry.data
+
+
+def test_an_entry_without_the_old_keys_is_left_alone():
+    entry = _entry(
+        {CONF_MIN_SOC_ENTITY: "number.min_soc", CONF_ACTIVE_RANGE_YEARLY: True}, {}
+    )
+    hass = _hass_that_stores(entry)
+
+    _migrate_entry_data(hass, entry)
+
+    assert entry.data == {
+        CONF_MIN_SOC_ENTITY: "number.min_soc",
+        CONF_ACTIVE_RANGE_YEARLY: True,
+    }
+    hass.config_entries.async_update_entry.assert_not_called()
+
+
+def test_an_entry_with_dates_keeps_them_absolute():
+    """A range nobody re-enters must not come back next winter on its own."""
+    entry = _entry(
+        {
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_ACTIVE_START_DATE: "2026-11-01",
+            CONF_ACTIVE_END_DATE: "2027-03-31",
+        },
+        {},
+    )
+    hass = _hass_that_stores(entry)
+
+    _migrate_entry_data(hass, entry)
+
+    assert entry.data[CONF_ACTIVE_RANGE_YEARLY] is False
+
+
+def test_an_entry_without_dates_gets_the_new_default():
+    """Nothing is restricted, so nothing changes - but a range entered later
+    behaves the way the field describes it."""
+    entry = _entry({CONF_MIN_SOC_ENTITY: "number.min_soc"}, {})
+    hass = _hass_that_stores(entry)
+
+    _migrate_entry_data(hass, entry)
+
+    assert entry.data[CONF_ACTIVE_RANGE_YEARLY] is True

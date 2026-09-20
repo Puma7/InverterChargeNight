@@ -15,8 +15,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_DEFAULT_MIN_SOC,
     CONF_END_TIME,
     CONF_FORECAST_ERROR_MARGIN,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_OPERATION_MODE,
     CONF_PV_FORECAST_ENTITY,
     CONF_START_TIME,
@@ -45,6 +45,7 @@ def _make_coordinator(mock_hass, mock_config_entry, mode=MODE_MORNING_DISCHARGE)
         coord.skip_next = False
         coord._skip_next_unsub = None
         coord._skip_next_until = None
+        coord._hands_off_until = None
         coord.original_min_soc = None
         coord.is_active = True
         coord.is_enabled = True

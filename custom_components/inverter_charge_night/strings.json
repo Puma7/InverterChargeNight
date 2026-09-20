@@ -7,8 +7,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Operation Mode",
-          "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
-          "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
+          "min_soc_entity": "Minimum SOC number entity",
+          "grid_charge_switch": "Grid charge switch",
           "pv_forecast_entity": "PV Forecast Entity (tomorrow)",
           "pv_forecast_today_entity": "PV Forecast Today Entity (optional)",
           "battery_soc_entity": "Battery SOC Sensor",
@@ -16,9 +16,9 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
-          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
-          "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC. It also identifies this integration instance, so each inverter can only be configured once.",
-          "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
+          "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
           "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
@@ -35,16 +35,22 @@
           "user_max_soc": "Maximum SOC",
           "default_min_soc": "Default Min SOC to restore at end time",
           "forecast_error_margin": "Forecast Error Margin",
-          "planner_mode": "Planner Mode"
+          "planner_mode": "Planner Mode",
+          "high_price_start": "High-price period, start (optional)",
+          "high_price_end": "High-price period, end (optional)",
+          "high_price_margin_pct": "Allowance on the evening's consumption"
         },
         "data_description": {
           "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
           "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
-          "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
+          "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
-          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
+          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step.",
+          "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
+          "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value."
         }
       },
       "power": {
@@ -61,7 +67,7 @@
           "charge_energy_sent_entity": "Energy meter: drawn for charging (optional)",
           "charge_energy_received_entity": "Energy meter: stored in the battery (optional)",
           "auto_efficient_charge": "Efficiency search",
-          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)",
+          "force_discharge_switch": "Force discharge switch (required for Morning discharge)",
           "discharge_limit_entity": "Discharge Power Limit Entity (optional)",
           "grid_import_entity": "Grid Import Power (optional)",
           "main_fuse_a": "Main Fuse per Phase (optional)",
@@ -84,7 +90,7 @@
           "charge_energy_sent_entity": "Optional but better: a kWh meter of the energy the charger takes in. With both meters the efficiency search measures the energy that really flowed instead of integrating a power reading.",
           "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
           "auto_efficient_charge": "Searches for the charge power with the smallest loss between the grid and the battery and switches itself off when it has found the optimum. It takes several measurements per window, each only counted when the inverter really charged at the power under test. Needs the AC charge limit entity and both charge power sensors; energy meters make it exact. Follow it on the “Efficiency search” sensor.",
-          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached.",
+          "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode.",
           "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
           "main_fuse_a": "Main fuse of the house connection, per phase. 63 A on three phases is about 43 kW of nominal power. Needed unless you enter the maximum continuous power below.",
@@ -105,6 +111,7 @@
           "command_delay": "Command Delay",
           "active_start_date": "Active Start Date (optional)",
           "active_end_date": "Active End Date (optional)",
+          "active_range_yearly": "Repeat the date range every year",
           "backup_mode_entity": "Backup / island mode entity (optional)",
           "backup_mode_states": "Backup mode states (optional)",
           "house_load_entity": "House Consumption Energy Meter (optional)",
@@ -121,6 +128,7 @@
           "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
           "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
           "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_range_yearly": "On (recommended): only the day and month of the two dates above count, so the range comes back every year - a tariff season stands in a price sheet and holds until further notice. Off: the years count too, and the integration stops for good once the end date has passed. A range that crosses the new year (start after end, e.g. 1 November to 31 March) is always read as a season, because read absolutely it could not contain a single day.",
           "backup_mode_entity": "Optional but important: an entity that says whether the house is running on the battery instead of the grid. While it does, the integration changes nothing on the inverter - there is nothing to charge from, and a raised min SOC would stop the battery from supplying the house. A switch, a binary sensor, or a state sensor (see below). With a manual transfer switch, an input_boolean you flip yourself works just as well.",
           "backup_mode_states": "Only needed when the entity above is a plain sensor rather than a switch: the states that mean the house is running on the battery, comma separated. A Kostal inverter reports “ESB” (Ersatzstrombetrieb) in its inverter state. Leave empty for a switch or binary sensor - on means backup there.",
           "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
@@ -139,8 +147,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Operation Mode",
-          "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
-          "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
+          "min_soc_entity": "Minimum SOC number entity",
+          "grid_charge_switch": "Grid charge switch",
           "pv_forecast_entity": "PV Forecast Entity (tomorrow)",
           "pv_forecast_today_entity": "PV Forecast Today Entity (optional)",
           "battery_soc_entity": "Battery SOC Sensor",
@@ -148,9 +156,9 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
-          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
-          "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC. It also identifies this integration instance, so each inverter can only be configured once.",
-          "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
+          "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
           "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
@@ -167,16 +175,22 @@
           "user_max_soc": "Maximum SOC",
           "default_min_soc": "Default Min SOC to restore at end time",
           "forecast_error_margin": "Forecast Error Margin",
-          "planner_mode": "Planner Mode"
+          "planner_mode": "Planner Mode",
+          "high_price_start": "High-price period, start (optional)",
+          "high_price_end": "High-price period, end (optional)",
+          "high_price_margin_pct": "Allowance on the evening's consumption"
         },
         "data_description": {
           "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
           "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
-          "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
+          "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
-          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
+          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step.",
+          "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
+          "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value."
         }
       },
       "reconfigure_power": {
@@ -193,7 +207,7 @@
           "charge_energy_sent_entity": "Energy meter: drawn for charging (optional)",
           "charge_energy_received_entity": "Energy meter: stored in the battery (optional)",
           "auto_efficient_charge": "Efficiency search",
-          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)",
+          "force_discharge_switch": "Force discharge switch (required for Morning discharge)",
           "discharge_limit_entity": "Discharge Power Limit Entity (optional)",
           "grid_import_entity": "Grid Import Power (optional)",
           "main_fuse_a": "Main Fuse per Phase (optional)",
@@ -216,7 +230,7 @@
           "charge_energy_sent_entity": "Optional but better: a kWh meter of the energy the charger takes in. With both meters the efficiency search measures the energy that really flowed instead of integrating a power reading.",
           "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
           "auto_efficient_charge": "Searches for the charge power with the smallest loss between the grid and the battery and switches itself off when it has found the optimum. It takes several measurements per window, each only counted when the inverter really charged at the power under test. Needs the AC charge limit entity and both charge power sensors; energy meters make it exact. Follow it on the “Efficiency search” sensor.",
-          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached.",
+          "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode.",
           "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
           "main_fuse_a": "Main fuse of the house connection, per phase. 63 A on three phases is about 43 kW of nominal power. Needed unless you enter the maximum continuous power below.",
@@ -237,6 +251,7 @@
           "command_delay": "Command Delay",
           "active_start_date": "Active Start Date (optional)",
           "active_end_date": "Active End Date (optional)",
+          "active_range_yearly": "Repeat the date range every year",
           "backup_mode_entity": "Backup / island mode entity (optional)",
           "backup_mode_states": "Backup mode states (optional)",
           "house_load_entity": "House Consumption Energy Meter (optional)",
@@ -253,6 +268,7 @@
           "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
           "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
           "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_range_yearly": "On (recommended): only the day and month of the two dates above count, so the range comes back every year - a tariff season stands in a price sheet and holds until further notice. Off: the years count too, and the integration stops for good once the end date has passed. A range that crosses the new year (start after end, e.g. 1 November to 31 March) is always read as a season, because read absolutely it could not contain a single day.",
           "backup_mode_entity": "Optional but important: an entity that says whether the house is running on the battery instead of the grid. While it does, the integration changes nothing on the inverter - there is nothing to charge from, and a raised min SOC would stop the battery from supplying the house. A switch, a binary sensor, or a state sensor (see below). With a manual transfer switch, an input_boolean you flip yourself works just as well.",
           "backup_mode_states": "Only needed when the entity above is a plain sensor rather than a switch: the states that mean the house is running on the battery, comma separated. A Kostal inverter reports “ESB” (Ersatzstrombetrieb) in its inverter state. Leave empty for a switch or binary sensor - on means backup there.",
           "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
@@ -267,23 +283,25 @@
       }
     },
     "error": {
-      "invalid_entity": "Invalid entity selected",
-      "invalid_time": "Invalid time (use HH:MM)",
-      "invalid_soc": "SOC value must be between 0 and 100",
-      "invalid_capacity": "Battery capacity must be greater than 0",
-      "max_soc_must_be_greater_than_min": "Maximum SOC must be greater than minimum SOC",
-      "invalid_date": "Invalid date format (use YYYY-MM-DD)",
-      "invalid_power": "Power must be greater than 0",
-      "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
-      "required_entity": "Entity must be provided when value is set",
-      "required_value": "Value must be provided when entity is set",
-      "start_end_time_must_differ": "Start time and end time must be different",
-      "invalid_efficiency": "Charge efficiency must be between 0 and 1",
       "all_prices_required": "Set all three prices (night, day, feed-in) or none",
       "entity_used_by_other_entry": "This min SOC entity already belongs to another configured entry",
-      "invalid_phases": "Phases must be 1 or 3",
+      "high_price_needs_both_times": "Set both the start and the end of the high-price period, or neither.",
+      "invalid_capacity": "Battery capacity must be greater than 0",
       "invalid_current": "Fuse size must be greater than 0",
-      "invalid_voltage": "Voltage must be greater than 0"
+      "invalid_date": "Invalid date format (use YYYY-MM-DD)",
+      "invalid_efficiency": "Charge efficiency must be between 0 and 1",
+      "invalid_entity": "Invalid entity selected",
+      "invalid_phases": "Phases must be 1 or 3",
+      "invalid_power": "Power must be greater than 0",
+      "invalid_soc": "SOC value must be between 0 and 100",
+      "invalid_time": "Invalid time (use HH:MM)",
+      "invalid_voltage": "Voltage must be greater than 0",
+      "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
+      "max_soc_must_be_greater_than_min": "Maximum SOC must be greater than minimum SOC",
+      "required_entity": "Entity must be provided when value is set",
+      "required_for_discharge_mode": "Morning discharge needs the force discharge switch: without it the battery is never discharged.",
+      "required_value": "Value must be provided when entity is set",
+      "start_end_time_must_differ": "Start time and end time must be different"
     },
     "abort": {
       "already_configured": "Integration is already configured",
@@ -299,8 +317,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Operation Mode",
-          "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
-          "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
+          "min_soc_entity": "Minimum SOC number entity",
+          "grid_charge_switch": "Grid charge switch",
           "pv_forecast_entity": "PV Forecast Entity (tomorrow)",
           "pv_forecast_today_entity": "PV Forecast Today Entity (optional)",
           "battery_soc_entity": "Battery SOC Sensor",
@@ -308,9 +326,9 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
-          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
-          "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC. It also identifies this integration instance, so each inverter can only be configured once.",
-          "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
+          "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
           "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
@@ -327,16 +345,22 @@
           "user_max_soc": "Maximum SOC",
           "default_min_soc": "Default Min SOC to restore at end time",
           "forecast_error_margin": "Forecast Error Margin",
-          "planner_mode": "Planner Mode"
+          "planner_mode": "Planner Mode",
+          "high_price_start": "High-price period, start (optional)",
+          "high_price_end": "High-price period, end (optional)",
+          "high_price_margin_pct": "Allowance on the evening's consumption"
         },
         "data_description": {
           "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
           "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
-          "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
+          "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
-          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
+          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step.",
+          "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
+          "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value."
         }
       },
       "power": {
@@ -353,7 +377,7 @@
           "charge_energy_sent_entity": "Energy meter: drawn for charging (optional)",
           "charge_energy_received_entity": "Energy meter: stored in the battery (optional)",
           "auto_efficient_charge": "Efficiency search",
-          "force_discharge_switch": "Force Discharge Switch (optional, e.g. Modbus)",
+          "force_discharge_switch": "Force discharge switch (required for Morning discharge)",
           "discharge_limit_entity": "Discharge Power Limit Entity (optional)",
           "grid_import_entity": "Grid Import Power (optional)",
           "main_fuse_a": "Main Fuse per Phase (optional)",
@@ -376,7 +400,7 @@
           "charge_energy_sent_entity": "Optional but better: a kWh meter of the energy the charger takes in. With both meters the efficiency search measures the energy that really flowed instead of integrating a power reading.",
           "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
           "auto_efficient_charge": "Searches for the charge power with the smallest loss between the grid and the battery and switches itself off when it has found the optimum. It takes several measurements per window, each only counted when the inverter really charged at the power under test. Needs the AC charge limit entity and both charge power sensors; energy meters make it exact. Follow it on the “Efficiency search” sensor.",
-          "force_discharge_switch": "Optional: switch entity to force battery discharge to grid (e.g. via Kostal Modbus). Turned on during active discharge, turned off when target SOC reached.",
+          "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode.",
           "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
           "main_fuse_a": "Main fuse of the house connection, per phase. 63 A on three phases is about 43 kW of nominal power. Needed unless you enter the maximum continuous power below.",
@@ -397,6 +421,7 @@
           "command_delay": "Command Delay",
           "active_start_date": "Active Start Date (optional)",
           "active_end_date": "Active End Date (optional)",
+          "active_range_yearly": "Repeat the date range every year",
           "backup_mode_entity": "Backup / island mode entity (optional)",
           "backup_mode_states": "Backup mode states (optional)",
           "house_load_entity": "House Consumption Energy Meter (optional)",
@@ -413,6 +438,7 @@
           "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
           "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
           "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_range_yearly": "On (recommended): only the day and month of the two dates above count, so the range comes back every year - a tariff season stands in a price sheet and holds until further notice. Off: the years count too, and the integration stops for good once the end date has passed. A range that crosses the new year (start after end, e.g. 1 November to 31 March) is always read as a season, because read absolutely it could not contain a single day.",
           "backup_mode_entity": "Optional but important: an entity that says whether the house is running on the battery instead of the grid. While it does, the integration changes nothing on the inverter - there is nothing to charge from, and a raised min SOC would stop the battery from supplying the house. A switch, a binary sensor, or a state sensor (see below). With a manual transfer switch, an input_boolean you flip yourself works just as well.",
           "backup_mode_states": "Only needed when the entity above is a plain sensor rather than a switch: the states that mean the house is running on the battery, comma separated. A Kostal inverter reports “ESB” (Ersatzstrombetrieb) in its inverter state. Leave empty for a switch or binary sensor - on means backup there.",
           "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
@@ -427,30 +453,32 @@
       }
     },
     "error": {
-      "invalid_entity": "Invalid entity selected",
-      "invalid_time": "Invalid time (use HH:MM)",
-      "invalid_soc": "SOC value must be between 0 and 100",
-      "invalid_capacity": "Battery capacity must be greater than 0",
-      "max_soc_must_be_greater_than_min": "Maximum SOC must be greater than minimum SOC",
-      "invalid_date": "Invalid date format (use YYYY-MM-DD)",
-      "invalid_power": "Power must be greater than 0",
-      "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
-      "required_entity": "Entity must be provided when value is set",
-      "required_value": "Value must be provided when entity is set",
-      "start_end_time_must_differ": "Start time and end time must be different",
-      "invalid_efficiency": "Charge efficiency must be between 0 and 1",
       "all_prices_required": "Set all three prices (night, day, feed-in) or none",
       "entity_used_by_other_entry": "This min SOC entity already belongs to another configured entry",
-      "invalid_phases": "Phases must be 1 or 3",
+      "high_price_needs_both_times": "Set both the start and the end of the high-price period, or neither.",
+      "invalid_capacity": "Battery capacity must be greater than 0",
       "invalid_current": "Fuse size must be greater than 0",
-      "invalid_voltage": "Voltage must be greater than 0"
+      "invalid_date": "Invalid date format (use YYYY-MM-DD)",
+      "invalid_efficiency": "Charge efficiency must be between 0 and 1",
+      "invalid_entity": "Invalid entity selected",
+      "invalid_phases": "Phases must be 1 or 3",
+      "invalid_power": "Power must be greater than 0",
+      "invalid_soc": "SOC value must be between 0 and 100",
+      "invalid_time": "Invalid time (use HH:MM)",
+      "invalid_voltage": "Voltage must be greater than 0",
+      "max_power_must_be_greater_than_min": "Maximum power must be greater than minimum power",
+      "max_soc_must_be_greater_than_min": "Maximum SOC must be greater than minimum SOC",
+      "required_entity": "Entity must be provided when value is set",
+      "required_for_discharge_mode": "Morning discharge needs the force discharge switch: without it the battery is never discharged.",
+      "required_value": "Value must be provided when entity is set",
+      "start_end_time_must_differ": "Start time and end time must be different"
     }
   },
   "selector": {
     "operation_mode": {
       "options": {
         "night_charge": "Night Charge",
-        "morning_discharge": "Morning Discharge"
+        "morning_discharge": "Morning discharge (experimental)"
       }
     },
     "planner_mode": {
@@ -489,6 +517,9 @@
           "measuring": "Measuring",
           "finished": "Finished"
         }
+      },
+      "next_high_price_window": {
+        "name": "Next high-price period"
       }
     },
     "switch": {
@@ -507,7 +538,7 @@
         "name": "Operation Mode",
         "state": {
           "night_charge": "Night Charge",
-          "morning_discharge": "Morning Discharge"
+          "morning_discharge": "Morning discharge (experimental)"
         }
       }
     },
@@ -528,6 +559,21 @@
   "exceptions": {
     "entity_not_available": {
       "message": "Required entity {entity_id} is not yet available"
+    },
+    "entry_id_required": {
+      "message": "Several inverters are configured, so the action needs to be told which one. Choose an inverter in the action's fields."
+    },
+    "entry_not_found": {
+      "message": "No Inverter Charge Night configuration with the id {entry_id} exists."
+    },
+    "entry_not_loaded": {
+      "message": "The configuration “{title}” is not loaded, so there is nothing to act on."
+    },
+    "plan_failed": {
+      "message": "The planner could not produce a target. The log says which setting it stumbled over."
+    },
+    "reset_failed": {
+      "message": "The inverter did not accept the reset. It is retried automatically; the log names the setting that failed."
     }
   },
   "issues": {
@@ -538,6 +584,32 @@
     "discharge_block_without_backup": {
       "title": "{name}: the battery cannot supply the house during a power cut",
       "description": "To keep the energy it bought, this integration raises the inverter's minimum SOC while the window is open - and a battery does not discharge below its minimum SOC. If the power fails during the window and your house switches to the battery, the battery will refuse to supply it, however full it is.\n\nTwo ways out, either is enough:\n\n1. Set **Backup / island mode entity** in the integration options (step 4). Any entity that says the house is running on the battery: the inverter's state sensor (a Kostal reports `ESB` - add it under **Backup mode states**), a binary sensor, or an `input_boolean` you flip yourself when you operate a manual transfer switch. The integration then hands the inverter back within seconds.\n\n2. Set **Discharge block** to `Off` in step 3. The battery may then run the house at night, which costs the difference between the window tariff and the day tariff.\n\nThis message disappears once either is done."
+    },
+    "active_range_expired": {
+      "title": "{name}: the active date range ended on {end_date}",
+      "description": "The integration is configured to run only until {end_date}, and that date has passed - so it does not charge any more, and it will not start again on its own.\n\nThree ways out, whichever fits:\n\n1. Switch on **Repeat the date range every year** in the options (step 4). The range then means the day and month only, and comes back every year - which is what a tariff season usually is.\n2. Enter a new end date.\n3. Clear both dates to run all year round.\n\nThis message disappears as soon as one of them is done."
+    }
+  },
+  "services": {
+    "plan_target_soc": {
+      "name": "Plan target SOC",
+      "description": "Works out the target state of charge for the next window from the forecast, the house load profile and the sun, and returns it without changing anything.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Which configured inverter to plan for. Can be left empty when only one is configured."
+        }
+      }
+    },
+    "reset_inverter": {
+      "name": "Reset the inverter",
+      "description": "Puts the minimum SOC, the charge limits and the switches back to the values captured before the window. The same reset the window end performs. Refused while backup mode is active.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Which configured inverter to reset. Can be left empty when only one is configured."
+        }
+      }
     }
   }
 }
