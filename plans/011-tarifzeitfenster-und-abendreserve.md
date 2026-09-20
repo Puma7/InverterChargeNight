@@ -9,8 +9,16 @@
 > gegenüber dem Auswahlfeld ein Rückschritt. Der Schalter ist ab Werk an; bestehende Einträge mit
 > Datum behalten die absolute Bedeutung.
 >
-> **Offen**: die Periodenliste (`tariff_periods`), die Hochpreiszone und die Abendreserve, samt
-> der offenen Fragen am Ende.
+> **Ebenfalls mit 3.2.0 erledigt**: die Hochpreiszone und die Abendreserve — als ein Paar
+> Uhrzeitfelder (`high_price_start`/`high_price_end`) plus Zuschlag, nicht als Periodenliste.
+> Der Planer zieht davon ab, was die Sonne morgen laut Prognose liefert, und kauft nur den Rest
+> nachts; ohne brauchbare Prognose den ganzen Abend. Dazu der Sensor
+> `next_high_price_window`. Offene Frage 1 ist damit beantwortet (konfigurierbarer Zuschlag auf
+> das Mittel), Frage 2 stellt sich in dieser Fassung nicht: die Reserve hebt das Nachtladeziel,
+> sie greift nicht zur Abendzeit ein.
+>
+> **Offen**: die Periodenliste (`tariff_periods`) mit mehreren Perioden je Tag, Saison und
+> Wochentagen; die Reserve als Untergrenze der Morgenentladung; die Fragen 3 und 4.
 
 ## Status
 

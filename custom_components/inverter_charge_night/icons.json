@@ -15,6 +15,9 @@
       },
       "efficiency_search": {
         "default": "mdi:magnify-scan"
+      },
+      "next_high_price_window": {
+        "default": "mdi:cash-clock"
       }
     },
     "switch": {

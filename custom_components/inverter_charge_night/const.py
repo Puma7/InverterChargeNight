@@ -22,6 +22,9 @@ DEFAULT_ACTIVE_END_DATE = ""  # Optional YYYY-MM-DD
 # a range entered once is meant to come back every year. Existing entries keep
 # the old absolute meaning; the migration sets the flag for them (F-011).
 DEFAULT_ACTIVE_RANGE_YEARLY = True
+# The house load profile is an average over the last days; an evening with the
+# oven on lies above it. 0 % takes the average at face value.
+DEFAULT_HIGH_PRICE_MARGIN_PCT = 0.0
 DEFAULT_MIN_CHARGE_POWER_W = 1000  # Default min charge power (W)
 DEFAULT_MAX_CHARGE_POWER_W = 10000  # Default max charge power (W)
 
@@ -45,6 +48,11 @@ CONF_UPDATE_INTERVAL = "update_interval"
 CONF_COMMAND_DELAY = "command_delay"
 CONF_ACTIVE_START_DATE = "active_start_date"
 CONF_ACTIVE_END_DATE = "active_end_date"
+# A period in which buying from the grid costs more than usual (plan 011). Both
+# ends empty means there is none.
+CONF_HIGH_PRICE_START = "high_price_start"
+CONF_HIGH_PRICE_END = "high_price_end"
+CONF_HIGH_PRICE_MARGIN_PCT = "high_price_margin_pct"
 CONF_ACTIVE_RANGE_YEARLY = "active_range_yearly"
 CONF_BACKUP_MODE_ENTITY = "backup_mode_entity"
 CONF_MIN_CHARGE_POWER_W = "min_charge_power_w"

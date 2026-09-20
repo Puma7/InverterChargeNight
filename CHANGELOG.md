@@ -20,6 +20,20 @@ one shape a §14a season usually has — winter, crossing the new year — did n
 
 ### Added
 
+- **A high-price period, and the reserve that comes with it.** Many §14a tariffs do not only
+  have a cheap window but also a peak period — commonly 18:00–21:00, the hours a household draws
+  most and the sun delivers nothing — where a kilowatt-hour costs *more* than the normal day
+  tariff. Set **High-price period, start / end** in step 2 and the planner works out what the
+  house will draw in those hours, from the same load profile the Bridge planner uses, and makes
+  sure it is in the battery by then. It buys only what tomorrow's sun will not cover: the
+  evening's load minus the day's surplus, never below zero. A dull winter day therefore raises
+  the night target by the whole evening; a summer day changes nothing. Without a usable forecast
+  the surplus is not counted — a surplus nobody can see is one nobody may plan on.
+- **Allowance on the evening's consumption** (step 2, default 0 %): the load profile is an
+  average of the last days, and an evening with the oven on lies above it.
+- **`sensor.…_next_high_price_window`**: when the next peak period starts, how long it lasts,
+  the reserve put aside for it and how much of that the current window is buying. The target SOC
+  sensor gained `evening_reserve_kwh` and `evening_shortfall_kwh` alongside it.
 - **Repeat the date range every year** (step 4, on by default). Only day and month of the two
   dates count, so the season comes back every year; a price sheet holds until further notice.
   Switched off, the years count and the range expires as before. A range crossing the new year
@@ -29,6 +43,11 @@ one shape a §14a season usually has — winter, crossing the new year — did n
 
 ### Changed
 
+- **A missing forecast no longer undercuts the bridge.** The safe fallback (50 %) was used as
+  the target outright, even when the house load after the window needed more than that — so the
+  rest was bought by day at the day tariff. The fallback now decides how much to buy *on top of*
+  what is needed, not instead of it: the target is the higher of the two. What the house will
+  draw after the window does not depend on the forecast.
 - Entries written before 3.2.0 that have a date set **keep the absolute meaning**: a range
   nobody re-entered must not come back next winter on its own. The migration records that
   choice, and the log line says where to change it. Entries without dates get the new default.

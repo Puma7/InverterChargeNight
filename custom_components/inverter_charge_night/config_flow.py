@@ -50,6 +50,9 @@ from .const import (
     CONF_FEED_IN_PRICE_CT,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_FORECAST_ERROR_MARGIN,
+    CONF_HIGH_PRICE_END,
+    CONF_HIGH_PRICE_MARGIN_PCT,
+    CONF_HIGH_PRICE_START,
     CONF_HOUSE_LOAD_ENTITY,
     CONF_GRID_CHARGE_SWITCH,
     CONF_MIN_SOC_ENTITY,
@@ -73,6 +76,7 @@ from .const import (
     DEFAULT_DISCHARGE_BLOCK_MODE,
     DEFAULT_END_TIME,
     DEFAULT_FORECAST_ERROR_MARGIN,
+    DEFAULT_HIGH_PRICE_MARGIN_PCT,
     DEFAULT_MAX_CHARGE_POWER_W,
     DEFAULT_MAX_SOC,
     DEFAULT_MIN_CHARGE_POWER_W,
@@ -129,6 +133,9 @@ STEP_TIME_SOC_KEYS: tuple[str, ...] = (
     CONF_DEFAULT_MIN_SOC,
     CONF_FORECAST_ERROR_MARGIN,
     CONF_PLANNER_MODE,
+    CONF_HIGH_PRICE_START,
+    CONF_HIGH_PRICE_END,
+    CONF_HIGH_PRICE_MARGIN_PCT,
 )
 STEP_POWER_KEYS: tuple[str, ...] = (
     CONF_MIN_CHARGE_POWER_W,
@@ -264,6 +271,24 @@ def _validate_user_input(
     elif start_time == end_time:
         # Compare parsed values so that e.g. "2:00" and "02:00" count as equal
         errors[CONF_END_TIME] = "start_end_time_must_differ"
+
+    # The high-price period is optional, and only a pair of times is a period.
+    high_start_raw = user_input.get(CONF_HIGH_PRICE_START)
+    high_end_raw = user_input.get(CONF_HIGH_PRICE_END)
+    high_start = parse_time_str(high_start_raw) if high_start_raw else None
+    high_end = parse_time_str(high_end_raw) if high_end_raw else None
+    if high_start_raw and high_start is None:
+        errors[CONF_HIGH_PRICE_START] = "invalid_time"
+    if high_end_raw and high_end is None:
+        errors[CONF_HIGH_PRICE_END] = "invalid_time"
+    if bool(high_start_raw) != bool(high_end_raw):
+        # One end alone says when it starts but never when it is over, which
+        # would leave the reserve either endless or zero.
+        errors[CONF_HIGH_PRICE_END if high_start_raw else CONF_HIGH_PRICE_START] = (
+            "high_price_needs_both_times"
+        )
+    elif high_start is not None and high_start == high_end:
+        errors[CONF_HIGH_PRICE_END] = "start_end_time_must_differ"
 
     user_min_soc = user_input.get(CONF_USER_MIN_SOC, 0)
     user_max_soc = user_input.get(CONF_USER_MAX_SOC, 0)
@@ -575,6 +600,11 @@ def _schema_time_soc(defaults: Mapping[str, Any]) -> vol.Schema:
                 CONF_FORECAST_ERROR_MARGIN, defaults, DEFAULT_FORECAST_ERROR_MARGIN
             ): _number_selector(**_PERCENT),
             _required(CONF_PLANNER_MODE, defaults, DEFAULT_PLANNER_MODE): _planner_mode_selector(),
+            _optional(CONF_HIGH_PRICE_START, defaults.get(CONF_HIGH_PRICE_START)): _time_selector(),
+            _optional(CONF_HIGH_PRICE_END, defaults.get(CONF_HIGH_PRICE_END)): _time_selector(),
+            _required(
+                CONF_HIGH_PRICE_MARGIN_PCT, defaults, DEFAULT_HIGH_PRICE_MARGIN_PCT
+            ): _number_selector(0, 100, 1, "%"),
         }
     )
 

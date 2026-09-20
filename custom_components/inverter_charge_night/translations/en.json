@@ -35,7 +35,10 @@
           "user_max_soc": "Maximum SOC",
           "default_min_soc": "Default Min SOC to restore at end time",
           "forecast_error_margin": "Forecast Error Margin",
-          "planner_mode": "Planner Mode"
+          "planner_mode": "Planner Mode",
+          "high_price_start": "High-price period, start (optional)",
+          "high_price_end": "High-price period, end (optional)",
+          "high_price_margin_pct": "Allowance on the evening's consumption"
         },
         "data_description": {
           "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
@@ -44,7 +47,10 @@
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
-          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
+          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step.",
+          "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
+          "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value."
         }
       },
       "power": {
@@ -169,7 +175,10 @@
           "user_max_soc": "Maximum SOC",
           "default_min_soc": "Default Min SOC to restore at end time",
           "forecast_error_margin": "Forecast Error Margin",
-          "planner_mode": "Planner Mode"
+          "planner_mode": "Planner Mode",
+          "high_price_start": "High-price period, start (optional)",
+          "high_price_end": "High-price period, end (optional)",
+          "high_price_margin_pct": "Allowance on the evening's consumption"
         },
         "data_description": {
           "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
@@ -178,7 +187,10 @@
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
-          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
+          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step.",
+          "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
+          "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value."
         }
       },
       "reconfigure_power": {
@@ -273,6 +285,7 @@
     "error": {
       "all_prices_required": "Set all three prices (night, day, feed-in) or none",
       "entity_used_by_other_entry": "This min SOC entity already belongs to another configured entry",
+      "high_price_needs_both_times": "Set both the start and the end of the high-price period, or neither.",
       "invalid_capacity": "Battery capacity must be greater than 0",
       "invalid_current": "Fuse size must be greater than 0",
       "invalid_date": "Invalid date format (use YYYY-MM-DD)",
@@ -332,7 +345,10 @@
           "user_max_soc": "Maximum SOC",
           "default_min_soc": "Default Min SOC to restore at end time",
           "forecast_error_margin": "Forecast Error Margin",
-          "planner_mode": "Planner Mode"
+          "planner_mode": "Planner Mode",
+          "high_price_start": "High-price period, start (optional)",
+          "high_price_end": "High-price period, end (optional)",
+          "high_price_margin_pct": "Allowance on the evening's consumption"
         },
         "data_description": {
           "start_time": "Time when the window should start. Hour:minute, 24-hour format. The window may span midnight (e.g., 22:00 to 05:59).",
@@ -341,7 +357,10 @@
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
-          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
+          "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step.",
+          "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
+          "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value."
         }
       },
       "power": {
@@ -436,6 +455,7 @@
     "error": {
       "all_prices_required": "Set all three prices (night, day, feed-in) or none",
       "entity_used_by_other_entry": "This min SOC entity already belongs to another configured entry",
+      "high_price_needs_both_times": "Set both the start and the end of the high-price period, or neither.",
       "invalid_capacity": "Battery capacity must be greater than 0",
       "invalid_current": "Fuse size must be greater than 0",
       "invalid_date": "Invalid date format (use YYYY-MM-DD)",
@@ -497,6 +517,9 @@
           "measuring": "Measuring",
           "finished": "Finished"
         }
+      },
+      "next_high_price_window": {
+        "name": "Next high-price period"
       }
     },
     "switch": {

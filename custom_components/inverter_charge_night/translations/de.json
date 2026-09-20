@@ -35,7 +35,10 @@
           "user_max_soc": "Maximaler Ladestand",
           "default_min_soc": "Min-SOC, der am Fensterende zurückgeschrieben wird",
           "forecast_error_margin": "Sicherheitsabschlag auf die Prognose",
-          "planner_mode": "Planer"
+          "planner_mode": "Planer",
+          "high_price_start": "Hochpreiszeit, Beginn (optional)",
+          "high_price_end": "Hochpreiszeit, Ende (optional)",
+          "high_price_margin_pct": "Zuschlag auf den Abendverbrauch"
         },
         "data_description": {
           "start_time": "Uhrzeit, zu der das Fenster beginnt (HH:MM). Das Fenster darf über Mitternacht gehen, z. B. 23:00 bis 05:00.",
@@ -44,7 +47,10 @@
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
           "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
-          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“."
+          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“.",
+          "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
+          "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
+          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
         }
       },
       "power": {
@@ -169,7 +175,10 @@
           "user_max_soc": "Maximaler Ladestand",
           "default_min_soc": "Min-SOC, der am Fensterende zurückgeschrieben wird",
           "forecast_error_margin": "Sicherheitsabschlag auf die Prognose",
-          "planner_mode": "Planer"
+          "planner_mode": "Planer",
+          "high_price_start": "Hochpreiszeit, Beginn (optional)",
+          "high_price_end": "Hochpreiszeit, Ende (optional)",
+          "high_price_margin_pct": "Zuschlag auf den Abendverbrauch"
         },
         "data_description": {
           "start_time": "Uhrzeit, zu der das Fenster beginnt (HH:MM). Das Fenster darf über Mitternacht gehen, z. B. 23:00 bis 05:00.",
@@ -178,7 +187,10 @@
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
           "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
-          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“."
+          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“.",
+          "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
+          "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
+          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
         }
       },
       "reconfigure_power": {
@@ -273,6 +285,7 @@
     "error": {
       "all_prices_required": "Alle drei Preise setzen (Fenster, Tag, Einspeisung) oder keinen",
       "entity_used_by_other_entry": "Diese Min-SOC-Entität gehört bereits zu einer anderen Instanz",
+      "high_price_needs_both_times": "Bitte Beginn und Ende der Hochpreiszeit setzen — oder beide leer lassen.",
       "invalid_capacity": "Die Speicherkapazität muss größer als 0 sein",
       "invalid_current": "Die Sicherungsgröße muss größer als 0 sein",
       "invalid_date": "Ungültiges Datum (JJJJ-MM-TT)",
@@ -332,7 +345,10 @@
           "user_max_soc": "Maximaler Ladestand",
           "default_min_soc": "Min-SOC, der am Fensterende zurückgeschrieben wird",
           "forecast_error_margin": "Sicherheitsabschlag auf die Prognose",
-          "planner_mode": "Planer"
+          "planner_mode": "Planer",
+          "high_price_start": "Hochpreiszeit, Beginn (optional)",
+          "high_price_end": "Hochpreiszeit, Ende (optional)",
+          "high_price_margin_pct": "Zuschlag auf den Abendverbrauch"
         },
         "data_description": {
           "start_time": "Uhrzeit, zu der das Fenster beginnt (HH:MM). Das Fenster darf über Mitternacht gehen, z. B. 23:00 bis 05:00.",
@@ -341,7 +357,10 @@
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
           "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
-          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“."
+          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“.",
+          "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
+          "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
+          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
         }
       },
       "power": {
@@ -436,6 +455,7 @@
     "error": {
       "all_prices_required": "Alle drei Preise setzen (Fenster, Tag, Einspeisung) oder keinen",
       "entity_used_by_other_entry": "Diese Min-SOC-Entität gehört bereits zu einer anderen Instanz",
+      "high_price_needs_both_times": "Bitte Beginn und Ende der Hochpreiszeit setzen — oder beide leer lassen.",
       "invalid_capacity": "Die Speicherkapazität muss größer als 0 sein",
       "invalid_current": "Die Sicherungsgröße muss größer als 0 sein",
       "invalid_date": "Ungültiges Datum (JJJJ-MM-TT)",
@@ -497,6 +517,9 @@
           "measuring": "Misst",
           "finished": "Abgeschlossen"
         }
+      },
+      "next_high_price_window": {
+        "name": "Nächste Hochpreiszeit"
       }
     },
     "switch": {

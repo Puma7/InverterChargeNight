@@ -1,6 +1,7 @@
 """Sensor platform for Inverter Charge Night."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -39,6 +40,7 @@ async def async_setup_entry(
             PlannedChargePowerSensor(coordinator, entry),
             GridChargeHeadroomSensor(coordinator, entry),
             EfficiencySearchSensor(coordinator, entry),
+            NextHighPriceWindowSensor(coordinator, entry),
         ]
     )
 
@@ -85,6 +87,43 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
             # charge target while the window is open.
             ATTR_INVERTER_FLOOR_SOC: self.coordinator.inverter_floor_soc(),
             ATTR_DISCHARGE_BLOCK: self.coordinator.discharge_block_state(),
+        }
+
+
+class NextHighPriceWindowSensor(InverterChargeNightEntity, SensorEntity):
+    """When the next high-price period starts, and what it is expected to cost.
+
+    Without a configured period the sensor is unknown rather than absent: the
+    setting can be filled in at any time, and an entity that appears and
+    disappears breaks every dashboard that mentions it.
+    """
+
+    _attr_translation_key = "next_high_price_window"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "next_high_price_window")
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the start of the next high-price period."""
+        window = self.coordinator.next_high_price_window()
+        return window[0] if window else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the period's end and the reserve the planner derived from it."""
+        window = self.coordinator.next_high_price_window()
+        data = self.coordinator.data
+        return {
+            "end": window[1].isoformat() if window else None,
+            "duration_h": (
+                round((window[1] - window[0]).total_seconds() / 3600.0, 2) if window else None
+            ),
+            # Both come from the last plan, so they are None in headroom mode
+            "reserve_kwh": data.get("evening_reserve_kwh"),
+            "bought_at_night_kwh": data.get("evening_shortfall_kwh"),
         }
 
 

@@ -33,6 +33,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_DEFAULT_MIN_SOC,
     CONF_END_TIME,
     CONF_FEED_IN_PRICE_CT,
+    CONF_HIGH_PRICE_END,
+    CONF_HIGH_PRICE_START,
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
     CONF_NIGHT_PRICE_CT,
@@ -206,3 +208,50 @@ def test_the_handler_offers_an_options_flow(mock_config_entry):
         mock_config_entry
     )
     assert isinstance(flow, OptionsFlowHandler)
+
+
+# --- the high-price period (plan 011) ----------------------------------------
+
+
+def test_a_high_price_period_passes(mock_hass):
+    assert _errors(
+        mock_hass, **{CONF_HIGH_PRICE_START: "18:00", CONF_HIGH_PRICE_END: "21:00"}
+    ) == {}
+
+
+def test_no_high_price_period_at_all_passes(mock_hass):
+    """Both empty is the normal case - most tariffs have no peak period."""
+    assert _errors(mock_hass, **{CONF_HIGH_PRICE_START: "", CONF_HIGH_PRICE_END: ""}) == {}
+
+
+@pytest.mark.parametrize(
+    "given,complained_about",
+    [
+        ({CONF_HIGH_PRICE_START: "18:00"}, CONF_HIGH_PRICE_END),
+        ({CONF_HIGH_PRICE_END: "21:00"}, CONF_HIGH_PRICE_START),
+    ],
+)
+def test_one_end_of_the_high_price_period_alone_is_rejected(mock_hass, given, complained_about):
+    """One time says when it starts but never when it is over."""
+    errors = _errors(mock_hass, **given)
+    assert errors[complained_about] == "high_price_needs_both_times"
+
+
+def test_a_high_price_period_of_zero_length_is_rejected(mock_hass):
+    errors = _errors(
+        mock_hass, **{CONF_HIGH_PRICE_START: "18:00", CONF_HIGH_PRICE_END: "18:00"}
+    )
+    assert errors[CONF_HIGH_PRICE_END] == "start_end_time_must_differ"
+
+
+def test_an_unparsable_high_price_time_is_rejected(mock_hass):
+    errors = _errors(
+        mock_hass, **{CONF_HIGH_PRICE_START: "six pm", CONF_HIGH_PRICE_END: "21:00"}
+    )
+    assert errors[CONF_HIGH_PRICE_START] == "invalid_time"
+
+
+def test_a_high_price_period_may_cross_midnight(mock_hass):
+    assert _errors(
+        mock_hass, **{CONF_HIGH_PRICE_START: "22:00", CONF_HIGH_PRICE_END: "01:00"}
+    ) == {}

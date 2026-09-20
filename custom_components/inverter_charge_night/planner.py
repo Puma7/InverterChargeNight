@@ -13,6 +13,11 @@ The two bounds, both in kWh and then converted to SOC:
   sunset. Only the surplus needs room in the battery; the bridge energy is
   consumed again before the PV crossover, so it frees that room by itself.
 
+A high-price period (plan 011) adds to the lower bound, but only by what the
+sun will not have delivered by then: the evening's load minus the day's
+surplus. Buying the rest of it tonight at the cheap tariff is the same
+arbitrage as the bridge, one tariff step further along the day.
+
 ``lower <= upper`` means both can be satisfied and the lower bound wins (never
 buy more than needed). A conflict is decided by prices when they are known,
 otherwise the bridge wins because grid energy by day costs more than the
@@ -57,6 +62,12 @@ class PlanInput:
     reserve_kwh: float
     charge_efficiency: float
     prices_ct: tuple[float, float, float] | None = None  # (night, day, feed-in)
+    # The next high-price period after the window, e.g. 18:00-21:00 tomorrow.
+    # The house must come through it without buying at that tariff.
+    high_price_window: tuple[datetime, datetime] | None = None
+    # The load profile is an average of the last days; an evening with the oven
+    # on is above it. This is the user's allowance for that, in percent.
+    reserve_margin_pct: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -69,6 +80,10 @@ class PlanResult:
     lower_bound_soc: float
     upper_bound_soc: float
     reason: str
+    # What the high-price period is expected to draw, and how much of that the
+    # night has to buy because the day's surplus will not cover it.
+    evening_reserve_kwh: float = 0.0
+    evening_shortfall_kwh: float = 0.0
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -97,6 +112,19 @@ def integrate_load(profile: Sequence[float], start: datetime, end: datetime) -> 
     return energy_kwh
 
 
+def evening_reserve_kwh(p: PlanInput) -> float:
+    """The energy the high-price period is expected to draw, in kWh.
+
+    Zero without a configured period. The margin is the user's allowance for an
+    evening above the average the profile was learned from.
+    """
+    if p.high_price_window is None:
+        return 0.0
+    start, end = p.high_price_window
+    load_kwh = integrate_load(p.house_load_kw_profile, start, end)
+    return load_kwh * (1 + max(0.0, p.reserve_margin_pct) / 100.0)
+
+
 def plan_target_soc(p: PlanInput) -> PlanResult:
     """Derive the target SOC from the bridge and surplus bounds.
 
@@ -118,8 +146,17 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
     forecast_with_margin = max(0.0, p.forecast_kwh_next_day) * (1 + p.error_margin_pct / 100.0)
     surplus_kwh = max(0.0, forecast_with_margin - daytime_load_kwh)
 
+    evening_kwh = evening_reserve_kwh(p)
+    # The sun charges the battery before the evening does, so only the part it
+    # will not cover has to be bought tonight. Without a usable forecast the
+    # surplus is not to be relied on: then the whole evening is bought.
+    covered_by_pv = surplus_kwh if p.forecast_available else 0.0
+    evening_shortfall_kwh = max(0.0, evening_kwh - covered_by_pv)
+
     lower = _clamp(
-        (bridge_kwh + capacity * p.user_min_soc / 100.0) / capacity * 100.0,
+        (bridge_kwh + evening_shortfall_kwh + capacity * p.user_min_soc / 100.0)
+        / capacity
+        * 100.0,
         p.user_min_soc,
         p.user_max_soc,
     )
@@ -132,9 +169,18 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
     if not p.forecast_available:
         # Same protection as the headroom formula: never charge to the maximum
         # on a missing forecast, use the safe fallback instead.
-        target = _clamp(DEFAULT_SAFE_FALLBACK_SOC, p.user_min_soc, p.user_max_soc)
+        target = _clamp(
+            max(DEFAULT_SAFE_FALLBACK_SOC, lower), p.user_min_soc, p.user_max_soc
+        )
         return PlanResult(
-            round(target, 1), bridge_kwh, surplus_kwh, round(lower, 1), round(upper, 1), REASON_FALLBACK
+            round(target, 1),
+            bridge_kwh,
+            surplus_kwh,
+            round(lower, 1),
+            round(upper, 1),
+            REASON_FALLBACK,
+            evening_kwh,
+            evening_shortfall_kwh,
         )
 
     if lower <= upper:
@@ -156,7 +202,16 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
             target, reason = upper, REASON_CONFLICT_HEADROOM_WINS
 
     target = _clamp(target, p.user_min_soc, p.user_max_soc)
-    return PlanResult(round(target, 1), bridge_kwh, surplus_kwh, round(lower, 1), round(upper, 1), reason)
+    return PlanResult(
+        round(target, 1),
+        bridge_kwh,
+        surplus_kwh,
+        round(lower, 1),
+        round(upper, 1),
+        reason,
+        evening_kwh,
+        evening_shortfall_kwh,
+    )
 
 
 def required_charge_power_w(

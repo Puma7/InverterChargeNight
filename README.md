@@ -197,6 +197,11 @@ To find entities:
      (8 % on a Kostal, for example)
    - **Forecast Error Margin**: Safety buffer added to the forecast before the calculation
    - **Planner Mode**: `Headroom` (default) or `Bridge`, see [Planner Modes](#planner-modes)
+   - **High-price period, start / end** (optional): A period in which buying from the grid costs
+     *more* than usual — a §14a peak period, or the evening block of a dynamic tariff. See
+     [The evening reserve](#the-evening-reserve). Set both or neither.
+   - **Allowance on the evening's consumption** (default `0` %): Surcharge on the learned load
+     profile, which is an average — an evening with the oven on lies above it
 
    **Step 3 -- Charge Power**
    - **Min Charge Power** / **Max Charge Power**: The band the planner and the efficiency finder
@@ -337,6 +342,37 @@ Snow nights beat everything, then the manual override, then the planner:
 2. a manual override set on `number.inverter_charge_night_min_soc_override`
 3. the SOC the planner calculated at the window start (re-planned during the window, but in
    Night Charge mode the target never drops below what was already reached)
+
+### The evening reserve
+
+A §14a tariff is rarely just "cheap at night". Many grid operators also define a **peak period**
+in which a kilowatt-hour costs *more* than the normal day tariff — commonly 18:00 to 21:00, the
+hours in which a household draws most and the sun delivers nothing. Buying there is the most
+expensive energy of the day, and it is energy that could have been bought overnight for a
+fraction.
+
+With **High-price period** set, the planner works out what the house will draw between those two
+times, from the same hourly load profile the Bridge planner uses, and makes sure it is in the
+battery by the time the period starts. It does not simply buy all of it:
+
+```
+evening reserve   = house load over the period   (+ your allowance)
+covered by the PV = tomorrow's surplus           (forecast − daytime load)
+bought at night   = evening reserve − covered by the PV, never below zero
+```
+
+On a summer day whose forecast covers the house anyway, this changes nothing: the sun fills the
+battery long before the evening. On a dull winter day the whole evening is added to the night's
+target, at the cheap tariff. Without a usable forecast the surplus is not counted at all — a
+surplus nobody can see is one nobody may plan on.
+
+The period may cross midnight, and the reserve is bounded by your maximum SOC like every other
+target. `sensor.…_next_high_price_window` shows when the next one starts, how long it lasts, how
+much was reserved and how much of that this window is buying.
+
+> The reserve raises the **night charge target**. It does not, by itself, stop the battery from
+> being emptied before the evening by something else — that is what the discharge block in
+> step 3 is for.
 
 ### Backup and island operation
 
@@ -587,6 +623,7 @@ as "Inverter Charge Night <name>". The entity ids are stable; the display names 
 | Most efficient charge power | `sensor.…_best_charge_power` | The result of the efficiency search. |
 | Efficiency search | `sensor.…_efficiency_search` | What the search is doing and what it has measured. |
 | Charge power left by the house connection | `sensor.…_grid_charge_headroom` | What the connection still allows the battery. |
+| Next high-price period | `sensor.…_next_high_price_window` | When the next peak period starts, how long it lasts, and the reserve the planner put aside for it. |
 
 > **The three entities that all used to be called "Inverter Charge Night".** Before this
 > version the operation mode select and the skip switch had no translated name, so Home

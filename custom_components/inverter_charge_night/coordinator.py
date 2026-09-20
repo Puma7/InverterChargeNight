@@ -69,6 +69,9 @@ from .const import (
     CONF_FORECAST_ERROR_MARGIN,
     CONF_MIN_SOC_ENTITY,
     CONF_GRID_CHARGE_SWITCH,
+    CONF_HIGH_PRICE_END,
+    CONF_HIGH_PRICE_MARGIN_PCT,
+    CONF_HIGH_PRICE_START,
     CONF_PV_FORECAST_ENTITY,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
@@ -122,6 +125,7 @@ from .const import (
     CONF_GRID_HEADROOM_W,
     DEFAULT_GRID_PHASES,
     DEFAULT_GRID_VOLTAGE_V,
+    DEFAULT_HIGH_PRICE_MARGIN_PCT,
     DEFAULT_GRID_CONTINUOUS_PCT,
     DEFAULT_GRID_HEADROOM_W,
     DEFAULT_MIN_CHARGE_POWER_W,
@@ -591,6 +595,31 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         span = (end_minutes - start_minutes) % (24 * 60)
         return float(span * 60) if span else 24 * 3600.0
 
+    def _high_price_window(self, after: datetime) -> tuple[datetime, datetime] | None:
+        """The next high-price period that starts at or after ``after``.
+
+        ``None`` when none is configured. The period may cross midnight, the
+        same way the charge window may; its end is then on the following day.
+        Everything the battery is meant to carry through it has to be in there
+        by its start, which is why the planner is given the pair and not a
+        duration.
+        """
+        start = parse_time_str(self.config.get(CONF_HIGH_PRICE_START))
+        end = parse_time_str(self.config.get(CONF_HIGH_PRICE_END))
+        if start is None or end is None or start == end:
+            return None
+        start_dt = after.replace(hour=start[0], minute=start[1], second=0, microsecond=0)
+        if start_dt < after:
+            start_dt += timedelta(days=1)
+        end_dt = start_dt.replace(hour=end[0], minute=end[1])
+        if end_dt <= start_dt:
+            end_dt += timedelta(days=1)
+        return start_dt, end_dt
+
+    def next_high_price_window(self) -> tuple[datetime, datetime] | None:
+        """The next high-price period from now, for the sensor."""
+        return self._high_price_window(dt_util.now())
+
     def _window_end_datetime(self, now: datetime) -> datetime:
         """Return the end of the window that is running or comes next, at minute resolution.
 
@@ -922,6 +951,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
                 charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
                 prices_ct=self._prices_ct(),
+                # Measured from the window end: the evening the battery has to
+                # reach is the one on the solar day this window is planning for.
+                high_price_window=self._high_price_window(window_end),
+                reserve_margin_pct=float(
+                    self.config.get(CONF_HIGH_PRICE_MARGIN_PCT, DEFAULT_HIGH_PRICE_MARGIN_PCT)
+                ),
             ),
             pv_crossover,
         )
@@ -1007,6 +1042,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "lower_bound_soc": plan.lower_bound_soc,
             "upper_bound_soc": plan.upper_bound_soc,
             "pv_crossover": self._pv_crossover.isoformat() if self._pv_crossover else None,
+            # Plan 011: what the high-price period is expected to draw, and how
+            # much of that this window has to buy because the sun will not.
+            "evening_reserve_kwh": round(plan.evening_reserve_kwh, 2),
+            "evening_shortfall_kwh": round(plan.evening_shortfall_kwh, 2),
             "planned_charge_power_w": self.planned_charge_power_w,
         }
 
