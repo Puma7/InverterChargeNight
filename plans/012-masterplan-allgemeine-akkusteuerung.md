@@ -238,3 +238,22 @@ Pro Stufe, bevor sie ausgeliefert wird:
 2. **Preis pro Periode oder globale Klassen?** Die drei Preisfelder existieren schon.
 3. **Welche Formelvorlagen** sollen mitkommen? Mein Vorschlag: Nachtladung-Freiraum,
    Nachtladung-Überbrückung, Abendreserve, Preisschwelle.
+
+---
+
+## Nachtrag 20.09. — Strang C hat sich beim Entwerfen halbiert
+
+Der Masterplan führt Strang C als „PV-Ladung über den Tag strecken", mit einer Erkennung des
+Abregelungsfensters als Kern. Diese Annahme ist gefallen: Pascals Begrenzung ist die **dauerhafte**
+EEG-Einspeisebegrenzung, kein Ereignis, das der Netzbetreiber schaltet. Eine dauerhafte Grenze
+beißt genau dort, wo `PV-Leistung − Hauslast > Grenze`, und das ist rechenbar. **Damit entfällt der
+teuerste und unsicherste Teil des Strangs ersatzlos — es gibt nichts zu erkennen.**
+
+Zwei Rechenfehler des Entwurfs sind dabei mit aufgefallen: der nötige Platz ist nur der Teil
+*oberhalb* der Grenze, und der Wirkungsgrad wirkt hier mal statt geteilt.
+
+Mit **3.7.0** ist Stufe 1 da (Anzeige und Messung). Stufe 2 — tatsächlich drosseln — wartet
+ausdrücklich, weil Modell und Beobachtung sich widersprechen und eine falsche Drosselung
+**zweimal** kostet. Einzelheiten in `plans/014`.
+
+Offen bleibt damit allein **Strang D** (Regeln als Subentries, 4.0.0) — der einzige, der bricht.

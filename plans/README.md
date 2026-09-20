@@ -147,7 +147,7 @@ vorliegt; bis dahin bleibt der Kostal-Pfad, aber ohne Markennamen in Keys und La
 | 011 | Tarifzeitfenster (Perioden, Saison, Jahreswechsel) und Abendreserve für die Hochpreiszone | P1 | M | 006 | TODO (Entwurf) |
 | 012 | Masterplan: allgemeine Lade-/Entladesteuerung — Services, Tarifkalender, Preissignal, Regeln als Subentries | P1 | L | 006 | Stufen 1–2 DONE (3.1.0, 3.2.0), 3–4 TODO |
 | 013 | Abendrettung und das Ad-hoc-Fenster, das sie braucht | P1 | L | 009, 011 | DONE (3.4.0 + 3.5.0) |
-| 014 | Abregelung: die PV-Ladung so legen, dass die Mittagsspitze hineinpasst | P1 | L | 013, 011 | TODO (Entwurf) |
+| 014 | Abregelung: den Platz freihalten, den die Mittagsspitze braucht | P1 | M | 013, 011 | Stufe 1 DONE (3.7.0, Anzeige und Messung); Stufe 2 wartet auf eine Messsaison |
 
 Status-Werte: TODO | IN PROGRESS | DONE | BLOCKED (mit Grund) | REJECTED (mit Begründung)
 
@@ -347,9 +347,13 @@ beide Stellen prüfen jetzt explizit auf `None`.
   `docs/morning-discharge.md` beschrieben. Der Zwangsentlade-Schalter ist seit 3.0.2 Pflicht für
   den Modus.
 - ~~**017 PV-Ladung über den Tag strecken (Abregelung vermeiden)**~~ — hat jetzt einen eigenen
-  Plan: `plans/014-abregelung-pv-ladung-strecken.md`. Dort steht auch die **Korrektur der
-  Richtung**: gedrosselt gehört der *Vormittag*, nicht die Mittagszeit — während der Abregelung
-  ist der Speicher die einzige Senke, die noch bleibt. Ursprünglicher Eintrag:
+  Plan: `plans/014-abregelung-pv-ladung-strecken.md`. Dort stehen auch **drei Korrekturen am
+  ursprünglichen Gedanken**: gedrosselt gehört der *Vormittag*, nicht die Mittagszeit (während
+  der Abregelung ist der Speicher die einzige Senke, die noch bleibt); eine **dauerhafte**
+  Einspeisebegrenzung ist kein geschaltetes Ereignis, muss also weder gelernt noch eingetragen
+  werden, sondern lässt sich ausrechnen; und der nötige Platz ist **nur der Teil oberhalb der
+  Grenze**, nicht der ganze Mittagsüberschuss. Mit 3.7.0 ist die Messstufe da — geschrieben wird
+  noch nichts, weil Modell und Beobachtung sich widersprechen. Ursprünglicher Eintrag:
 
 - **017 PV-Ladung über den Tag strecken (Abregelung vermeiden)**: Pascal am 20.09. — wenn
   mittags das Netz voll ist, darf nicht mehr eingespeist werden. Ein Speicher, der um zwölf Uhr
