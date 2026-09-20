@@ -370,9 +370,14 @@ The period may cross midnight, and the reserve is bounded by your maximum SOC li
 target. `sensor.…_next_high_price_window` shows when the next one starts, how long it lasts, how
 much was reserved and how much of that this window is buying.
 
-> The reserve raises the **night charge target**. It does not, by itself, stop the battery from
-> being emptied before the evening by something else — that is what the discharge block in
-> step 3 is for.
+The same reserve bounds the other direction: in `Morning Discharge` mode the target the battery
+is emptied to is raised to the reserve, so the mode cannot sell in the morning what has to be
+bought back at the evening's peak tariff. Today's forecast is subtracted there as well, so a
+summer morning discharges as before.
+
+> The reserve raises the **night charge target** and floors the **morning discharge**. It does
+> not, by itself, stop the battery from being emptied before the evening by the house — that is
+> what the discharge block in step 3 is for.
 
 ### Backup and island operation
 

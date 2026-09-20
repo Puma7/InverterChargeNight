@@ -17,8 +17,11 @@
 > das Mittel), Frage 2 stellt sich in dieser Fassung nicht: die Reserve hebt das Nachtladeziel,
 > sie greift nicht zur Abendzeit ein.
 >
+> Die Reserve ist auch Untergrenze der Morgenentladung: Was der Abend braucht, darf morgens
+> nicht verkauft werden (abzüglich der heutigen Prognose).
+>
 > **Offen**: die Periodenliste (`tariff_periods`) mit mehreren Perioden je Tag, Saison und
-> Wochentagen; die Reserve als Untergrenze der Morgenentladung; die Fragen 3 und 4.
+> Wochentagen; die Fragen 3 und 4.
 
 ## Status
 

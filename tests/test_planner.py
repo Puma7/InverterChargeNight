@@ -18,6 +18,7 @@ from custom_components.inverter_charge_night.planner import (
     REASON_CONFLICT_HEADROOM_WINS,
     REASON_FALLBACK,
     PlanInput,
+    evening_reserve_soc,
     integrate_load,
     plan_target_soc,
     required_charge_power_w,
@@ -340,3 +341,37 @@ def test_required_charge_power_scales_with_remaining_time():
     fast = required_charge_power_w(60.0, 40.0, CAPACITY, 0.5, 1.0)
     assert fast == pytest.approx(slow * 8)
     assert (WINDOW_END + timedelta(hours=4)).hour == 9  # sanity on the fixtures used above
+
+
+# The same reserve, seen from the discharge direction ----------------------------
+
+
+def test_the_discharge_floor_is_the_user_minimum_without_a_period():
+    plan_input = _plan_input()
+    assert evening_reserve_soc(plan_input) == USER_MIN
+
+
+def test_the_discharge_floor_holds_back_what_the_evening_needs():
+    """1.5 kWh on a 10 kWh battery is 15 points above the user minimum."""
+    plan_input = _plan_input(forecast_kwh_next_day=0.0, high_price_window=EVENING)
+    assert evening_reserve_soc(plan_input) == pytest.approx(USER_MIN + 15.0)
+
+
+def test_a_sunny_day_leaves_the_discharge_alone():
+    plan_input = _plan_input(forecast_kwh_next_day=10.0, high_price_window=EVENING)
+    assert evening_reserve_soc(plan_input) == USER_MIN
+
+
+def test_the_discharge_floor_never_passes_the_user_maximum():
+    plan_input = _plan_input(
+        forecast_kwh_next_day=0.0,
+        capacity_kwh=2.0,
+        user_max_soc=40.0,
+        high_price_window=EVENING,
+    )
+    assert evening_reserve_soc(plan_input) == 40.0
+
+
+def test_the_discharge_floor_rejects_an_impossible_capacity():
+    with pytest.raises(ValueError):
+        evening_reserve_soc(_plan_input(capacity_kwh=0.0, high_price_window=EVENING))

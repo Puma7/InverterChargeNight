@@ -59,3 +59,11 @@ It runs on the same fixed daily window as night charge. It does not read a price
 cannot pick the most expensive three hours by itself, and it does not know whether today's
 forecast justifies emptying the battery — you decide that by switching the mode. Both are
 tracked in `plans/README.md` (items 010 and 013).
+
+## The evening reserve bounds it
+
+Since 3.2.0 a configured high-price period (step 2) also floors this mode: the target the
+battery is emptied to is raised by what that evening will need, minus what today's forecast says
+the sun will still deliver. Selling at 06:00 what has to be bought back at 19:00 under a peak
+tariff is the one trade this mode must not make. On a summer day, whose forecast covers the
+evening anyway, nothing changes.

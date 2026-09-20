@@ -29,6 +29,11 @@ one shape a §14a season usually has — winter, crossing the new year — did n
   evening's load minus the day's surplus, never below zero. A dull winter day therefore raises
   the night target by the whole evening; a summer day changes nothing. Without a usable forecast
   the surplus is not counted — a surplus nobody can see is one nobody may plan on.
+- **Morning discharge stops at the evening reserve.** The experimental mode empties the battery
+  into the 05:00–08:00 peak; with a high-price period configured it now keeps back what that
+  evening will need — minus what today's sun is forecast to deliver, so a summer day is
+  untouched. Selling in the morning what has to be bought back at the evening's peak tariff is
+  the one trade that mode must not make.
 - **Allowance on the evening's consumption** (step 2, default 0 %): the load profile is an
   average of the last days, and an evening with the oven on lies above it.
 - **`sensor.…_next_high_price_window`**: when the next peak period starts, how long it lasts,

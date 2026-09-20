@@ -25,11 +25,13 @@ from custom_components.inverter_charge_night.const import (
     CONF_HIGH_PRICE_MARGIN_PCT,
     CONF_HIGH_PRICE_START,
     CONF_MIN_SOC_ENTITY,
+    CONF_OPERATION_MODE,
     CONF_PLANNER_MODE,
     CONF_PV_FORECAST_ENTITY,
     CONF_START_TIME,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
+    MODE_MORNING_DISCHARGE,
     PLANNER_MODE_BRIDGE,
 )
 from custom_components.inverter_charge_night.sensor import NextHighPriceWindowSensor
@@ -205,3 +207,91 @@ async def test_an_unavailable_forecast_does_not_cut_the_bridge_back_to_the_fallb
         await coordinator._calculate_initial_soc()
 
     assert coordinator.initial_calculated_soc == 100.0
+
+
+# The morning discharge floor ---------------------------------------------------
+
+
+def _discharge_coordinator(mock_hass, extra=None):
+    coordinator = _make_coordinator(
+        mock_hass,
+        {
+            CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE,
+            CONF_START_TIME: "05:00",
+            CONF_END_TIME: "08:00",
+        }
+        | (extra or {}),
+    )
+    coordinator._house_load_profile = AsyncMock(return_value=[0.5] * 24)
+    coordinator._sun_times = MagicMock(
+        return_value=(datetime(2026, 1, 15, 7, 30), datetime(2026, 1, 15, 17, 0))
+    )
+    return coordinator
+
+
+@pytest.mark.asyncio
+async def test_a_dull_day_stops_the_morning_discharge_selling_the_evening(mock_hass):
+    """The reserve the night bought must not be sold three hours later."""
+    mock_hass.states.async_set("sensor.soc", "90", {"unit_of_measurement": "%"})
+    coordinator = _discharge_coordinator(mock_hass)
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 15, 6, 0)):
+        floor = await coordinator._evening_reserve_floor(0.0, True)
+        raised = await coordinator._floor_discharge_at_the_evening_reserve(8.0, 0.0, True)
+
+    # 1.5 kWh of evening on a 10 kWh battery, on top of the 8 % user minimum
+    assert floor == pytest.approx(23.0)
+    assert raised == pytest.approx(23.0)
+
+
+@pytest.mark.asyncio
+async def test_a_sunny_day_leaves_the_morning_discharge_alone(mock_hass):
+    mock_hass.states.async_set("sensor.soc", "90", {"unit_of_measurement": "%"})
+    coordinator = _discharge_coordinator(mock_hass)
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 15, 6, 0)):
+        assert await coordinator._floor_discharge_at_the_evening_reserve(8.0, 20.0, True) == 8.0
+
+
+@pytest.mark.asyncio
+async def test_a_target_already_above_the_reserve_is_not_lowered(mock_hass):
+    mock_hass.states.async_set("sensor.soc", "90", {"unit_of_measurement": "%"})
+    coordinator = _discharge_coordinator(mock_hass)
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 15, 6, 0)):
+        assert await coordinator._floor_discharge_at_the_evening_reserve(60.0, 0.0, True) == 60.0
+
+
+@pytest.mark.asyncio
+async def test_the_charge_mode_has_no_discharge_floor(mock_hass):
+    """It is the night target's job there, not a floor's."""
+    mock_hass.states.async_set("sensor.soc", "40", {"unit_of_measurement": "%"})
+    coordinator = _make_coordinator(mock_hass)
+    coordinator._house_load_profile = AsyncMock(return_value=[0.5] * 24)
+    coordinator._sun_times = MagicMock(
+        return_value=(datetime(2026, 1, 15, 7, 30), datetime(2026, 1, 15, 17, 0))
+    )
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 15, 2, 0)):
+        assert await coordinator._evening_reserve_floor(0.0, True) is None
+
+
+@pytest.mark.asyncio
+async def test_without_a_high_price_period_the_discharge_is_untouched(mock_hass):
+    mock_hass.states.async_set("sensor.soc", "90", {"unit_of_measurement": "%"})
+    coordinator = _discharge_coordinator(
+        mock_hass, {CONF_HIGH_PRICE_START: "", CONF_HIGH_PRICE_END: ""}
+    )
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 15, 6, 0)):
+        assert await coordinator._evening_reserve_floor(0.0, True) is None
+
+
+@pytest.mark.asyncio
+async def test_a_broken_configuration_does_not_break_the_discharge(mock_hass):
+    """A capacity of zero is a configuration error, not a reason to stop."""
+    mock_hass.states.async_set("sensor.soc", "90", {"unit_of_measurement": "%"})
+    coordinator = _discharge_coordinator(mock_hass, {CONF_BATTERY_CAPACITY: 0.0})
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 15, 6, 0)):
+        assert await coordinator._floor_discharge_at_the_evening_reserve(8.0, 0.0, True) == 8.0

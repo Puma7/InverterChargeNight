@@ -139,6 +139,7 @@ from .planner import (
     PlanInput,
     PlanResult,
     allowed_charge_power_w,
+    evening_reserve_soc,
     grid_budget_w,
     plan_target_soc,
     required_charge_power_w,
@@ -960,6 +961,41 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             pv_crossover,
         )
+
+    async def _evening_reserve_floor(
+        self, forecast_kwh: float, forecast_available: bool
+    ) -> float | None:
+        """The SOC a morning discharge must not go below, or None.
+
+        Morning discharge empties the battery into the morning peak. What the
+        evening's high-price period will need must not be sold there - the same
+        reserve the night charge buys, seen from the other direction. What
+        today's sun is forecast to deliver is subtracted first, so a summer day
+        leaves the discharge untouched.
+        """
+        if not self.is_discharge_mode or self._high_price_window(dt_util.now()) is None:
+            return None
+        try:
+            plan_input, _ = await self._build_plan_input(forecast_kwh, forecast_available)
+            return evening_reserve_soc(plan_input)
+        except (ValueError, TypeError) as err:
+            _LOGGER.error("Could not work out the evening reserve: %s", err)
+            return None
+
+    async def _floor_discharge_at_the_evening_reserve(
+        self, calculated_soc: float, forecast_kwh: float, forecast_available: bool
+    ) -> float:
+        """Raise a discharge target that would sell the evening's energy."""
+        floor = await self._evening_reserve_floor(forecast_kwh, forecast_available)
+        if floor is None or floor <= calculated_soc:
+            return calculated_soc
+        _LOGGER.info(
+            "Morning discharge target raised from %.1f%% to %.1f%% - the high-price "
+            "period this evening needs that much in the battery",
+            calculated_soc,
+            floor,
+        )
+        return floor
 
     async def preview_plan(self) -> tuple[PlanResult, PlanInput] | None:
         """Run the planner on the current inputs and change nothing.
@@ -2943,6 +2979,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     safe_fallback
                 )
 
+            calculated_soc = await self._floor_discharge_at_the_evening_reserve(
+                calculated_soc, forecast_energy, forecast_available
+            )
+
             self.initial_calculated_soc = calculated_soc
             self.minimum_calculated_soc = calculated_soc  # Initialize minimum with initial value
             self.calculated_soc = calculated_soc  # Also update current for display
@@ -3491,6 +3531,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     user_max_soc,
                     safe_fallback
                 )
+
+            calculated_soc = await self._floor_discharge_at_the_evening_reserve(
+                calculated_soc, forecast_energy, forecast_available
+            )
 
             # Store the successful fallback calculation
             self.initial_calculated_soc = calculated_soc
