@@ -5,6 +5,50 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.1] - 2026-09-20
+
+A review of code that shipped unreviewed. PR #5 was looked at once, at 13:00:14, and the earliest
+of the twelve commits that followed it into `main` is from 13:03:15 — so 1582 lines of product
+code went out with nobody having read them. Seven defects; each fix fails its own test when
+reverted on its own.
+
+### Fixed
+
+- **The evening rescue could never reach stage 2.** Extending a running ad-hoc window set the new
+  target and recalculated, but the recalculation decides between three cases in order and the
+  first is "restarted during an active window, keep the persisted target". A single poll of
+  stage 1 captures the inverter's min SOC, which makes that branch match — so stage 2's higher
+  target was discarded and the grid top-up the feature exists for never happened. The same
+  defeated a second `charge_to`, and a `charge_to` after a `block_discharge`.
+- **A restart during an ad-hoc window poisoned every window after it.** `is_active` is not
+  persisted, so the deadline came back but the window did not; the window-end path then
+  early-returned and never cleared it. A timestamp left behind in the past answers every later
+  question about when the current window ends, and the expiry check fires on entering a
+  configured window — so the next night charge was ended one poll after it started.
+- **Entering the feed-in cap aborted the config flow.** The key landed among the entity ids to
+  validate, where every entry reaches `hass.states.get`, and Home Assistant lowercases what it is
+  given — so `9000.0` reached `float.lower()`. It was also listed twice.
+- **The price gate was inert for any night window.** Today and tomorrow arrive as two separate
+  attributes on Nordpool, EPEX Spot and ENTSO-e; the parser stopped at the first, so the series
+  ended at midnight and every stretch crossing it was refused. Matching attributes are now merged,
+  and only ones that agree on the value key and the unit.
+- **And it priced the wrong night.** At 02:00 inside a 23:00–05:00 window the window began
+  *yesterday*, but the bounds came from "when does the next one start" and pointed at tonight —
+  usually unpublished, so refused, so the reserve was held whatever the prices said. The bounds
+  now come from the window's end, which is the same window the planner is given.
+- **`model_vs_measured_pct` divided kW by kWh.** It is now `model_vs_envelope_pct`, and the
+  envelope is named for what it is: each hour's highest value in 14 days, summed — an upper bound
+  no real day can beat. A model above 100 % of it is claiming an overflow the inverter has never
+  come close to.
+- **`evening_reserve_dropped` named a decision no price had made.** It was inferred from a
+  zero reserve, and a period whose load profile is zero gives exactly that. It now asks the gate.
+
+### Hardened
+
+- The persisted ad-hoc deadline is compared timezone-aware on restore. Not reachable through the
+  actions, which all add a duration to an aware now — but an unguarded comparison there raises
+  inside the constructor, and the integration then does not load at all.
+
 ## [3.7.0] - 2026-09-20
 
 ### Added

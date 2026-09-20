@@ -276,7 +276,12 @@ async def test_the_attributes_hold_the_model_next_to_the_measurement(mock_hass):
     assert attrs["measured_hours_at_the_cap"] == 5
     assert attrs["measured_peak_w_by_hour"]["12"] == 9000
     assert "3" in attrs["measured_peak_w_by_hour"], "a quiet hour is still a reading"
-    assert attrs["model_vs_measured_pct"] > 0
+    # An upper envelope, not a day: each entry is the highest that hour ever
+    # reached in 14 days, so no real day can beat it. A model above 100 % is
+    # therefore claiming an overflow the inverter has never come close to.
+    assert attrs["measured_overflow_kwh_envelope"] > 0
+    assert 0 < attrs["model_vs_envelope_pct"] <= 100.0
+    assert "model_vs_measured_pct" not in attrs, "the old name compared kW with kWh"
     assert attrs["clamped_by"] is None
 
 

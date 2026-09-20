@@ -755,6 +755,27 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._price_refusal_logged = None
         return series
 
+    def _priced_window_bounds(self, now: datetime) -> tuple[datetime, datetime]:
+        """The configured window the price question is about: (start, end).
+
+        Derived from the *end*, not from the start. ``_window_start_datetime``
+        answers "when does the next one begin", which during a running window
+        that crosses midnight is tomorrow's - so at 02:00 in a 23:00 to 05:00
+        window it priced the night that has not happened yet. With day-ahead
+        data that stretch is usually unpublished, ``mean_price_ct`` refuses it,
+        and the reserve was then held whatever the prices said.
+
+        Taking ``end - length`` gives the window that is running when one is,
+        and the next one otherwise - which is also the window whose ``end`` the
+        planner is given in the same ``PlanInput``. The ad-hoc override is
+        deliberately not used: that deadline is not a tariff window.
+        """
+        _, end = self._window_times()
+        end_dt = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
+        if (end.hour, end.minute) < (now.hour, now.minute):
+            end_dt += timedelta(days=1)
+        return end_dt - timedelta(seconds=self._window_length_s()), end_dt
+
     def _window_price_ct(self, series: PriceSeries | None, now: datetime) -> float | None:
         """The mean price over the charge window, with the window's own grid fee.
 
@@ -763,8 +784,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if series is None:
             return None
-        start = self._window_start_datetime(now)
-        end = start + timedelta(seconds=self._window_length_s())
+        start, end = self._priced_window_bounds(now)
         mean = mean_price_ct(series, start, end)
         if mean is None:
             return None
@@ -1438,8 +1458,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             }
         )
         if peaks is not None:
-            measured_overflow = sum(
-                max(0.0, peak - float(limit_w or 0.0)) for peak in peaks
+            # Each entry is the highest that hour of the day ever reached in 14
+            # days, so treating it as if it held for the whole hour, and summing
+            # across the day, gives an *upper envelope*: a day at least this bad
+            # may never actually have happened. It is deliberately not called a
+            # measurement of any one day.
+            envelope_kwh = (
+                sum(max(0.0, peak - float(limit_w or 0.0)) for peak in peaks) / 1000.0
             )
             attrs["measured_peak_w_by_hour"] = {
                 str(hour): round(peak) for hour, peak in enumerate(peaks) if peak > 0
@@ -1448,11 +1473,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             attrs["measured_hours_at_the_cap"] = sum(
                 1 for peak in peaks if limit_w and peak >= float(limit_w) * 0.98
             )
-            if outlook.overflow_kwh > 0:
-                # Both sides are powers above the cap, so the ratio is a like
-                # for like comparison of shape, not of energy.
-                attrs["model_vs_measured_pct"] = round(
-                    measured_overflow / (outlook.overflow_kwh * 1000.0) * 100.0, 1
+            attrs["measured_overflow_kwh_envelope"] = round(envelope_kwh, 2)
+            if envelope_kwh > 0:
+                # Today's model against that envelope. Comparable only in one
+                # direction, and that is the direction that matters: the
+                # envelope cannot be exceeded by any real day, so a model above
+                # 100 % is claiming an overflow the inverter has never once come
+                # close to, and is wrong. Below it says nothing on its own.
+                attrs["model_vs_envelope_pct"] = round(
+                    outlook.overflow_kwh / envelope_kwh * 100.0, 1
                 )
         return attrs
 
