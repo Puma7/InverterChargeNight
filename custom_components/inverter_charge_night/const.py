@@ -288,6 +288,9 @@ EFFICIENCY_BAND_MAX_SPAN = 2
 # evening, so it waits for a switch and for a point in the day at which the
 # forecast hardly turns any more.
 EVENING_RESCUE_CHARGE_LEAD_H = 2.0
+# The ad-hoc window's reason, in one place: the outlook has to recognise the
+# rescue's own window, or stage one would lock stage two out.
+ADHOC_REASON_EVENING_RESCUE = "evening_rescue"
 
 
 # Units this integration accepts on an energy sensor. One list, because two

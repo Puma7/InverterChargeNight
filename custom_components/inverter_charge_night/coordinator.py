@@ -127,6 +127,7 @@ from .const import (
     CONF_GRID_HEADROOM_W,
     DEFAULT_GRID_PHASES,
     DEFAULT_GRID_VOLTAGE_V,
+    ADHOC_REASON_EVENING_RESCUE,
     EFFICIENCY_BAND_MAX_SPAN,
     EFFICIENCY_BAND_MIN_SAMPLES,
     EFFICIENCY_BAND_WIDTH_PCT,
@@ -1096,8 +1097,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         zone = self._high_price_window(now)
         if zone is None:
             return None
-        if self.is_active:
-            # A window owns the inverter and plans for the evening itself.
+        if self.is_active and self._adhoc_reason != ADHOC_REASON_EVENING_RESCUE:
+            # A window owns the inverter and plans for the evening itself. The
+            # rescue's own window is the exception: it has to keep seeing the
+            # shortfall, or holding would lock out the buying that follows it.
             return None
         if self._window_start_datetime(now) < zone[0]:
             # A charge window runs before the period starts - once the period
@@ -3383,7 +3386,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if await self.async_open_adhoc_window(
             target_soc=outlook.required_soc if stage == 2 else current_soc,
             until=outlook.zone_start,
-            reason="evening_rescue",
+            reason=ADHOC_REASON_EVENING_RESCUE,
             allow_grid_charge=stage == 2,
         ):
             self._rescue_stage = stage

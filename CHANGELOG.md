@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Holding locked out the buying that should follow it.** Stage one opens a window, and an
+  active window switched the outlook off entirely — so from the next poll on there was no
+  shortfall to see and stage two could never fire. The rescue's own window is now the one
+  exception to that rule. Caught by writing the test through the real update path; the ones
+  that call the rescue directly with an outlook in hand would never have noticed.
 - **The outlook projected across the night charge.** After the day's period had begun, the next
   one is tomorrow's, while the sun times and the forecast were still today's: 23 hours of house
   load against a sliver of sun, a projected level of zero and an invented shortfall every evening

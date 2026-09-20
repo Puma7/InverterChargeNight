@@ -311,3 +311,45 @@ async def test_switching_it_off_leaves_a_running_rescue_to_finish(mock_hass):
     assert coordinator.evening_rescue_charge is False
     assert coordinator.is_active is True
     assert coordinator._adhoc_allow_grid_charge is True
+
+
+@pytest.mark.asyncio
+async def test_holding_does_not_lock_out_the_buying_that_follows_it(mock_hass):
+    """Through the real update path, not by calling the rescue directly.
+
+    Stage one opens a window, which makes the coordinator active - and an
+    active window used to switch the outlook off entirely. The outlook would
+    then be None on every later poll and stage two could never fire. The tests
+    above call _maybe_rescue_the_evening() with an outlook in hand and would
+    never have noticed.
+    """
+    mock_hass.states.async_set(
+        "sun.sun",
+        "above_horizon",
+        {
+            "next_rising": "2026-06-02T05:00:00+00:00",
+            "next_setting": "2026-06-01T21:00:00+00:00",
+        },
+    )
+    coordinator = _make_coordinator(mock_hass)
+    # After the helper, which sets its own defaults: a nearly empty battery and
+    # a day that will not fill it, so the shortfall is still there at 16:30.
+    mock_hass.states.async_set("sensor.soc", "12", {"unit_of_measurement": "%"})
+    mock_hass.states.async_set("sensor.pv", "0.5", {"unit_of_measurement": "kWh"})
+    coordinator.evening_rescue_charge = True
+
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=EARLY
+    ):
+        await coordinator._async_update_data()
+
+    assert coordinator._rescue_stage == 1, "too early to buy, so it holds"
+    assert coordinator.last_evening_outlook is not None, "the outlook has to survive its own window"
+
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=LATE
+    ):
+        await coordinator._async_update_data()
+
+    assert coordinator._rescue_stage == 2
+    assert coordinator._adhoc_allow_grid_charge is True
