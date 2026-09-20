@@ -300,6 +300,37 @@ EVENING_RESCUE_CHARGE_LEAD_H = 2.0
 # rescue's own window, or stage one would lock stage two out.
 ADHOC_REASON_EVENING_RESCUE = "evening_rescue"
 
+# Reading a price entity (plan 012, stage 3) ----------------------------------
+PRICE_UNIT_AUTO = "auto"
+PRICE_UNIT_CT_KWH = "ct_per_kwh"
+PRICE_UNIT_EUR_KWH = "eur_per_kwh"
+PRICE_UNIT_EUR_MWH = "eur_per_mwh"
+# One list per unit, for the same reason as the energy units: two that
+# disagree silently change which sensors work where.
+PRICE_UNITS_CT: frozenset[str] = frozenset(
+    {"ct/kwh", "cent/kwh", "cents/kwh", "ct", "c/kwh", "ct/kw/h"}
+)
+PRICE_UNITS_EUR_KWH: frozenset[str] = frozenset({"eur/kwh", "€/kwh", "euro/kwh"})
+PRICE_UNITS_EUR_MWH: frozenset[str] = frozenset({"eur/mwh", "€/mwh", "euro/mwh"})
+# Said to be cents but smaller than this is euros wearing the wrong label.
+MIN_PLAUSIBLE_MEDIAN_CT = 1.0
+# A total below this, with no surcharge configured, is an exchange price with
+# the grid fees and taxes still missing - which inverts the decision it feeds.
+# German day-ahead sits around 5-15 ct while a full consumer price is 25-40, so
+# the line is drawn where the two cannot be confused. Refusing costs nothing
+# but the price signal (the static prices still decide); accepting an exchange
+# price costs the wrong decision, so the bias is deliberate.
+MIN_PLAUSIBLE_TOTAL_CT = 15.0
+# Individual intervals outside this band are dropped: negative prices are real,
+# but not arbitrarily so, and neither is the top end.
+MIN_PLAUSIBLE_PRICE_CT = -100.0
+MAX_PLAUSIBLE_PRICE_CT = 300.0
+# How far either side of now a published interval is still this integration's
+# business. An entity carrying a month of history must not blow up the parse.
+PRICE_SERIES_MAX_AGE_H = 48.0
+# The evening reserve is only dropped when the evening is clearly cheaper.
+RESERVE_DROP_MARGIN_CT = 2.0
+
 
 # Units this integration accepts on an energy sensor. One list, because two
 # that disagree silently change which sensors work where.
