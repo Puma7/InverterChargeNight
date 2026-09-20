@@ -283,6 +283,12 @@ EFFICIENCY_BAND_MIN_SAMPLES = 3
 # filed battery-wide only.
 EFFICIENCY_BAND_MAX_SPAN = 2
 
+# The evening rescue (plan 013). Blocking the discharge costs nothing and runs
+# by itself; buying from the grid costs money that only comes back in the
+# evening, so it waits for a switch and for a point in the day at which the
+# forecast hardly turns any more.
+EVENING_RESCUE_CHARGE_LEAD_H = 2.0
+
 
 # Units this integration accepts on an energy sensor. One list, because two
 # that disagree silently change which sensors work where.

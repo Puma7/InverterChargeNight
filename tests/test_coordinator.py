@@ -417,6 +417,7 @@ def test_persist_state_round_trip_next_to_auto_efficiency_data(mock_hass):
         "adhoc_reason": None,
         "adhoc_target_soc": None,
         "adhoc_allow_grid_charge": False,
+        "evening_rescue_charge": False,
     }
 
     # "Restart": a new coordinator on the same entry gets everything back

@@ -378,6 +378,8 @@ async def test_the_outlook_is_worked_out_while_no_window_runs(mock_hass):
     """The whole point: it matters in the afternoon, when nothing is active."""
     coordinator = _outlook_coordinator(mock_hass, soc="12", forecast="0.5")
     coordinator.is_active = False
+    # What the rescue does with the shortfall is tested in test_evening_rescue.py
+    coordinator._maybe_rescue_the_evening = AsyncMock()
 
     with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 6, 1, 14, 0)):
         data = await coordinator._async_update_data()

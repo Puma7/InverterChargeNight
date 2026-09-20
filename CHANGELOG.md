@@ -5,6 +5,33 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] - 2026-09-20
+
+### Added
+
+- **The evening rescue acts now, not just reports.** When the outlook says the battery will not
+  carry the high-price period, the discharge is blocked automatically — the house runs from the
+  sun, and from the grid at the day tariff when the sun is not enough, rather than from a battery
+  needed in three hours at the peak tariff. With the new
+  `switch.…_evening_rescue_charge` on, the rest is bought from the grid in the last two hours
+  before the period, when the forecast hardly turns any more. At the period's start the block is
+  released and the inverter goes back to what it was. The switch is off by default: watch the
+  outlook sensor for a season before letting it spend money.
+- **The ad-hoc window.** Both stages run as a window like any other — same capture of the
+  inverter's settings, same restore, same retry ladder, same backup interlock, same house
+  connection limit, same verification — whose start comes from a call rather than from the clock.
+  A configured window always wins over it. The deadline is persisted, because a restart in the
+  middle of a rescue must still release the block when the expensive hours start.
+
+### Fixed
+
+- **The outlook projected across the night charge.** After the day's period had begun, the next
+  one is tomorrow's, while the sun times and the forecast were still today's: 23 hours of house
+  load against a sliver of sun, a projected level of zero and an invented shortfall every evening
+  and all night. And between the two sits the night charge, whose whole job is to buy for that
+  evening. The outlook is now only made while it can still be acted on. Found by Codex on the
+  pull request.
+
 ## [3.4.0] - 2026-09-20
 
 ### Added

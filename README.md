@@ -383,6 +383,34 @@ summer morning discharges as before.
 > not, by itself, stop the battery from being emptied before the evening by the house — that is
 > what the discharge block in step 3 is for.
 
+### The evening rescue
+
+The night plan buys for the high-price period in advance. The rescue is what happens when that
+plan turns out to have been too optimistic — snow on the panels, say, with the snow nights not
+set. By mid-afternoon it is already decidable, and there is still time.
+
+`sensor.…_evening_outlook` carries the shortfall in kWh, normally 0. When it is not:
+
+1. **The discharge is blocked** — automatically. The house then runs from the sun, and from the
+   grid at the day tariff when the sun is not enough, rather than from a battery that is needed
+   in three hours at the peak tariff. Nothing is spent that the same evening does not pay back.
+2. **The rest is bought** — only with `switch.…_evening_rescue_charge` on, and only in the last
+   two hours before the period, when the forecast hardly turns any more. Bought at noon is
+   bought for a sun that might still have come.
+3. **At the period's start the block is released** and the inverter goes back to the settings it
+   had before, so the battery carries the evening.
+
+The switch is off to begin with on purpose: watch the sensor for a season and see whether it
+would have been right before letting it spend money.
+
+Both stages run as an **ad-hoc window** — the same machinery as a configured window, with the
+same capture of your inverter's settings, the same restore, the same retry if a write fails, and
+the same standing down during a power cut. A configured window always wins over it: that one has
+the tariff behind it.
+
+> Partial cover still counts. It does not have to reach the level that carries the whole evening
+> — every kilowatt-hour that comes from the battery instead of the peak tariff is worth having.
+
 ### Backup and island operation
 
 A power cut is the one situation in which this integration must let go of the inverter
@@ -631,6 +659,7 @@ as "Inverter Charge Night <name>". The entity ids are stable; the display names 
 | Automation | `switch.…_enabled` | The main switch. Off means the integration controls nothing. |
 | Efficiency search | `switch.…_auto_efficient_charge_finder` | Starts the search for the most efficient charge power. Switches itself off when it is done. |
 | Skip the next window (24 h) | `switch.…_skip_next` | Skips one window, then expires by itself. |
+| Evening rescue: charge from the grid | `switch.…_evening_rescue_charge` | Lets the rescue buy for the evening, not only hold what is there. Off by default. |
 | Operation mode | `select.…_operation_mode` | Night Charge or Morning Discharge. |
 | Target SOC override | `number.…_min_soc_override` | Overrules the planner for this window. |
 | Snow nights | `number.…_snow_nights` | Charge the next N nights to the maximum. |
@@ -640,6 +669,7 @@ as "Inverter Charge Night <name>". The entity ids are stable; the display names 
 | Most efficient charge power | `sensor.…_best_charge_power` | The result of the efficiency search. |
 | Efficiency search | `sensor.…_efficiency_search` | What the search is doing and what it has measured. |
 | Charge power left by the house connection | `sensor.…_grid_charge_headroom` | What the connection still allows the battery. |
+| Evening outlook | `sensor.…_evening_outlook` | How much the battery will be short when the expensive hours start. 0 means it will make it. |
 | Next high-price period | `sensor.…_next_high_price_window` | When the next peak period starts, how long it lasts, and the reserve the planner put aside for it. |
 
 > **The three entities that all used to be called "Inverter Charge Night".** Before this

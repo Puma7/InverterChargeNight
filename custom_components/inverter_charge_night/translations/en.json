@@ -540,6 +540,9 @@
       },
       "skip_next": {
         "name": "Skip the next window (24 h)"
+      },
+      "evening_rescue_charge": {
+        "name": "Evening rescue: charge from the grid"
       }
     },
     "select": {

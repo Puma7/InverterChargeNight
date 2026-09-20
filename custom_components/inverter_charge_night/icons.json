@@ -44,6 +44,13 @@
           "on": "mdi:debug-step-over",
           "off": "mdi:play"
         }
+      },
+      "evening_rescue_charge": {
+        "default": "mdi:home-lightning-bolt",
+        "state": {
+          "on": "mdi:home-lightning-bolt",
+          "off": "mdi:home-lightning-bolt-outline"
+        }
       }
     },
     "select": {

@@ -130,6 +130,7 @@ from .const import (
     EFFICIENCY_BAND_MAX_SPAN,
     EFFICIENCY_BAND_MIN_SAMPLES,
     EFFICIENCY_BAND_WIDTH_PCT,
+    EVENING_RESCUE_CHARGE_LEAD_H,
     DEFAULT_HIGH_PRICE_MARGIN_PCT,
     DEFAULT_GRID_CONTINUOUS_PCT,
     DEFAULT_GRID_HEADROOM_W,
@@ -279,6 +280,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._adhoc_reason: str | None = None
         self._adhoc_target_soc: float | None = None
         self._adhoc_allow_grid_charge = False
+        # The evening rescue: 0 nothing, 1 holding what is there, 2 also buying.
+        # Only ever raised within a day, so a poll cannot flap between stages.
+        self._rescue_stage = 0
+        # Buying for the evening costs money now and pays it back later, so it
+        # waits for the user to switch it on. Blocking the discharge does not.
+        self.evening_rescue_charge = False
         self.calculated_soc: float | None = None
         self.initial_calculated_soc: float | None = None  # Store SOC calculated at window start
         self.minimum_calculated_soc: float | None = None  # Store minimum SOC value (always <= initial)
@@ -402,6 +409,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "adhoc_reason": self._adhoc_reason,
             "adhoc_target_soc": self._adhoc_target_soc,
             "adhoc_allow_grid_charge": self._adhoc_allow_grid_charge,
+            "evening_rescue_charge": self.evening_rescue_charge,
             "snow_nights": self.snow_nights,
         }
         self.hass.config_entries.async_update_entry(self.entry, options=options)
@@ -414,6 +422,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         state: dict[str, Any] = raw
         if isinstance(state.get("is_enabled"), bool):
             self.is_enabled = state["is_enabled"]
+        if isinstance(state.get("evening_rescue_charge"), bool):
+            self.evening_rescue_charge = state["evening_rescue_charge"]
         self.override_soc = self._restore_soc(state, "override_soc")
         self.original_min_soc = self._restore_soc(state, "original_min_soc")
         self.initial_calculated_soc = self._restore_soc(state, "initial_calculated_soc")
@@ -3322,6 +3332,62 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         finally:
             self._switching_mode = False
 
+    async def _maybe_rescue_the_evening(self) -> None:
+        """Act on a shortfall the outlook has already worked out (plan 013).
+
+        Two stages, and what separates them is what they cost:
+
+        1. **Block the discharge.** The house then runs from the sun, and from
+           the grid at the day tariff when the sun is not enough - rather than
+           from a battery that is needed in three hours at the peak tariff.
+           Nothing is spent that the same evening does not pay back, so this
+           runs by itself.
+        2. **Buy the rest.** Only with the switch on, and only once the period
+           is close enough that the forecast hardly turns any more: bought too
+           early is bought for a sun that might still have come.
+
+        The stage only ever rises within a day. A poll that sees the shortfall
+        close again does not release the block - the battery is still the
+        cheapest place for that energy to be, and the window ends when the
+        period starts anyway.
+        """
+        outlook = self.last_evening_outlook
+        if outlook is None or outlook.missing_kwh <= 0:
+            return
+        if not self.is_enabled or self._is_backup_active():
+            return
+        current_soc = self._current_battery_soc()
+        if current_soc is None:
+            return
+
+        now = dt_util.now()
+        close_enough = (outlook.zone_start - now) <= timedelta(hours=EVENING_RESCUE_CHARGE_LEAD_H)
+        stage = 2 if (self.evening_rescue_charge and close_enough) else 1
+        if stage <= self._rescue_stage:
+            return
+
+        if stage == 1:
+            _LOGGER.info(
+                "The battery is %.1f kWh short for the %s period - holding what is in it",
+                outlook.missing_kwh,
+                outlook.zone_start.strftime("%H:%M"),
+            )
+        else:
+            _LOGGER.info(
+                "The battery is %.1f kWh short for the %s period - charging to %.1f%% from the "
+                "grid at the day tariff, which is cheaper than the period itself",
+                outlook.missing_kwh,
+                outlook.zone_start.strftime("%H:%M"),
+                outlook.required_soc,
+            )
+        if await self.async_open_adhoc_window(
+            target_soc=outlook.required_soc if stage == 2 else current_soc,
+            until=outlook.zone_start,
+            reason="evening_rescue",
+            allow_grid_charge=stage == 2,
+        ):
+            self._rescue_stage = stage
+
     async def async_open_adhoc_window(
         self,
         *,
@@ -3556,6 +3622,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._adhoc_reason = None
             self._adhoc_target_soc = None
             self._adhoc_allow_grid_charge = False
+            self._rescue_stage = 0
             # A failed reset is retried until the inverter is back at its
             # original settings; original_min_soc is kept for that (F3).
             # _reset_settings marks and schedules that itself.
@@ -3792,6 +3859,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.last_evening_outlook = (
             await self.async_evening_outlook() if self.is_enabled else None
         )
+        await self._maybe_rescue_the_evening()
         if not self.is_enabled or not self.is_active:
             return inactive_data
         if self._is_backup_active():

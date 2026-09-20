@@ -540,6 +540,9 @@
       },
       "skip_next": {
         "name": "Nächstes Fenster überspringen (24 h)"
+      },
+      "evening_rescue_charge": {
+        "name": "Abendrettung: aus dem Netz nachladen"
       }
     },
     "select": {

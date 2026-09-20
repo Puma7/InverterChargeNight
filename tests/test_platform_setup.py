@@ -29,6 +29,7 @@ from custom_components.inverter_charge_night.sensor import (
 from custom_components.inverter_charge_night.switch import (
     AutoEfficientChargeSwitch,
     InverterChargeNightSwitch,
+    EveningRescueChargeSwitch,
     SkipNextSwitch,
 )
 
@@ -59,6 +60,7 @@ PLATFORM_ENTITIES = {
             (InverterChargeNightSwitch, "enabled"),
             (AutoEfficientChargeSwitch, "auto_efficient_charge"),
             (SkipNextSwitch, "skip_next"),
+            (EveningRescueChargeSwitch, "evening_rescue_charge"),
         ],
     ),
     "select": (select, [(OperationModeSelect, "operation_mode")]),

@@ -32,6 +32,7 @@ async def async_setup_entry(
             InverterChargeNightSwitch(coordinator, entry),
             AutoEfficientChargeSwitch(coordinator, entry),
             SkipNextSwitch(coordinator, entry),
+            EveningRescueChargeSwitch(coordinator, entry),
         ]
     )
 
@@ -71,6 +72,53 @@ class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):
             return
 
         await self.coordinator.async_disable()
+        self.async_write_ha_state()
+
+
+class EveningRescueChargeSwitch(InverterChargeNightEntity, SwitchEntity):
+    """Let the evening rescue buy from the grid, not only hold what is there.
+
+    Off by default on purpose. Holding the battery back costs nothing that the
+    same evening does not pay back, so the integration does it by itself.
+    Buying spends money in the afternoon against a forecast that might still
+    turn, so it waits to be asked - watch ``sensor.…_evening_outlook`` for a
+    season first and see whether it would have been right.
+    """
+
+    _attr_translation_key = "evening_rescue_charge"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the switch."""
+        super().__init__(coordinator, entry, "evening_rescue_charge")
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether the rescue may charge from the grid."""
+        return bool(self.coordinator.evening_rescue_charge)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Allow the rescue to buy for the evening."""
+        if self.coordinator.evening_rescue_charge:
+            return
+        _LOGGER.info("The evening rescue may now charge from the grid")
+        self.coordinator.evening_rescue_charge = True
+        self.coordinator._persist_state()
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Hold only, do not buy.
+
+        A rescue that is already charging is left to finish: it bought that
+        energy for an evening that has not happened yet, and ending the window
+        here would hand the inverter back without the level it was aiming for.
+        """
+        if not self.coordinator.evening_rescue_charge:
+            return
+        _LOGGER.info("The evening rescue may no longer charge from the grid")
+        self.coordinator.evening_rescue_charge = False
+        self.coordinator._persist_state()
         self.async_write_ha_state()
 
 

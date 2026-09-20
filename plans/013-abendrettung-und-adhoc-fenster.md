@@ -1,7 +1,12 @@
 # Plan 013: Abendrettung — und das Ad-hoc-Fenster, das sie braucht
 
-> Entwurf. Teil 1 (Vorhersage und Sensor) ist umgesetzt und schreibt nichts. Dieser Plan beschreibt
-> Teil 2, die Eingriffe — und den Umbau, ohne den sie nicht sicher sind.
+> **Umgesetzt mit 3.4.0 (Teil 1) und 3.5.0 (Teil 2).** Abweichung vom Entwurf: keine — das
+> Ad-hoc-Fenster kam wie beschrieben, samt persistierter Frist. Dazu kam ein Befund von Codex auf
+> PR #5: die Vorschau rechnete über die Nachtladung hinweg, sobald die Zone des Tages begonnen
+> hatte. Sie wird jetzt nur noch gestellt, solange man noch handeln kann.
+>
+> Offen aus diesem Plan: die drei Fragen am Ende, und die restlichen Aufrufer des Ad-hoc-Fensters
+> (`charge_to`, `force_discharge_to`, `block_discharge` mit `until`).
 
 ## Status
 
