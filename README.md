@@ -672,8 +672,10 @@ Two settings turn it on, both in the advanced step:
   `9000` for 15 kWp at 60 %.
 - **Feed-in power entity** — optional, and worth configuring. The cap applies to what actually
   goes out to the grid, so this is the one measurement that can check the figure above. The sensor
-  reads its hourly maxima over 14 days and shows `model_vs_measured_pct`: the modelled spill next
-  to the real one.
+  reads its hourly maxima over 14 days and shows `model_vs_envelope_pct`: today's modelled spill
+  against `measured_overflow_kwh_envelope`, which is the highest each hour ever reached in those 14
+  days, summed. That envelope is an upper bound no single day can beat, so a model above 100 % of it
+  is claiming an overflow your inverter has never come close to. Below it says nothing on its own.
 
 It also needs a PV forecast entity for **today**. Without one the integration would fall back to
 tomorrow's forecast, which for a decision made in the morning is the wrong day — so the feature

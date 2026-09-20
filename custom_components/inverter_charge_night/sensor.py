@@ -183,8 +183,10 @@ class CurtailmentOutlookSensor(InverterChargeNightEntity, SensorEntity):
 
     Nothing is written from this. The model and the measurement have to be held
     against each other for a season before anything throttles on them, and the
-    attributes are what does the holding: ``model_vs_measured_pct`` puts the
-    modelled spill next to what the feed-in sensor actually recorded.
+    attributes are what does the holding: ``model_vs_envelope_pct`` puts
+    today's modelled spill against ``measured_overflow_kwh_envelope`` - the
+    highest each hour ever reached in 14 days, summed, which no single day can
+    beat. A model above 100 % of that is wrong; below it proves nothing.
 
     Diagnostic and disabled by default for the same reason as the efficiency
     search: the hourly peak series is state the recorder would keep for every

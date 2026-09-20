@@ -1374,7 +1374,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Display only. Nothing is written from this in 3.7.0: the model and the
         observation have to be held against each other for a season first, and
-        the sensor's ``model_vs_measured_pct`` is what does the holding.
+        the sensor's ``model_vs_envelope_pct`` is what does the holding.
 
         ``None`` without a cap configured, and - deliberately - ``None`` without
         an explicit *today* forecast entity. ``_get_active_forecast_entity``
