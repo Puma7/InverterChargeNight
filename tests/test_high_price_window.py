@@ -25,10 +25,12 @@ from custom_components.inverter_charge_night.const import (
     CONF_HIGH_PRICE_MARGIN_PCT,
     CONF_HIGH_PRICE_START,
     CONF_MIN_SOC_ENTITY,
+    CONF_PLANNER_MODE,
     CONF_PV_FORECAST_ENTITY,
     CONF_START_TIME,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
+    PLANNER_MODE_BRIDGE,
 )
 from custom_components.inverter_charge_night.sensor import NextHighPriceWindowSensor
 
@@ -168,3 +170,38 @@ def test_the_sensor_is_unknown_without_a_configured_period(mock_hass):
     assert sensor.native_value is None
     assert sensor.extra_state_attributes["end"] is None
     assert sensor.extra_state_attributes["duration_h"] is None
+
+
+# The interaction with the safe fallback ---------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_unavailable_forecast_does_not_cut_the_bridge_back_to_the_fallback(mock_hass):
+    """The 50 % fallback belongs to the headroom formula, not to the planner.
+
+    Headroom charges to the maximum exactly because it read no forecast, which
+    is what the fallback is there to stop. The planner derives its target from
+    the house load and handles a missing forecast itself - cutting that back to
+    50 % would drop a need it had just worked out, and on the coldest night.
+    """
+    mock_hass.states.async_set("sensor.soc", "20", {"unit_of_measurement": "%"})
+    mock_hass.states.async_set("sensor.pv", "unavailable")
+    coordinator = _make_coordinator(
+        mock_hass,
+        {
+            CONF_PLANNER_MODE: PLANNER_MODE_BRIDGE,
+            # A big evening on a small battery: the bridge alone wants the maximum
+            CONF_BATTERY_CAPACITY: 4.0,
+            CONF_HIGH_PRICE_START: "18:00",
+            CONF_HIGH_PRICE_END: "21:00",
+        },
+    )
+    coordinator._house_load_profile = AsyncMock(return_value=[0.5] * 24)
+    coordinator._sun_times = MagicMock(
+        return_value=(datetime(2026, 1, 15, 7, 30), datetime(2026, 1, 15, 17, 0))
+    )
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 15, 2, 0)):
+        await coordinator._calculate_initial_soc()
+
+    assert coordinator.initial_calculated_soc == 100.0

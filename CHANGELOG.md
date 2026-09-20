@@ -43,6 +43,12 @@ one shape a §14a season usually has — winter, crossing the new year — did n
 
 ### Changed
 
+- **A missing forecast no longer cuts the planner's target back to 50 %.** The guard that stops
+  the headroom formula charging to the maximum when it read no forecast was applied to the
+  bridge plan as well. Headroom charges to the maximum *because* it read no forecast — that is
+  what the guard is for — while the planner derives its target from the house load and has its
+  own fallback. On a cold night with a long bridge, a forecast entity that happened to be
+  unavailable therefore dropped a target that had just been worked out properly.
 - **A missing forecast no longer undercuts the bridge.** The safe fallback (50 %) was used as
   the target outright, even when the house load after the window needed more than that — so the
   rest was bought by day at the day tariff. The fallback now decides how much to buy *on top of*

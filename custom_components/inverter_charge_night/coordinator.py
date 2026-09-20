@@ -2924,8 +2924,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "SOC calculation failed, using safe fallback: %.1f%% (prevents charging to 100%%)",
                     safe_fallback
                 )
-            elif not forecast_available and calculated_soc >= user_max_soc - 1.0:
-                # Forecast entity UNAVAILABLE (not just 0 kWh) and would charge to max - use safe fallback
+            elif (
+                plan is None
+                and not forecast_available
+                and calculated_soc >= user_max_soc - 1.0
+            ):
+                # Forecast entity UNAVAILABLE (not just 0 kWh) and would charge to max - use safe fallback.
+                # Only for the headroom formula: it charges to the maximum precisely
+                # because it read no forecast. The bridge planner has its own
+                # fallback and derives its target from the house load, so cutting
+                # it back to 50 % here would drop a need it just worked out.
                 safe_fallback = max(user_min_soc, min(DEFAULT_SAFE_FALLBACK_SOC, user_max_soc))
                 calculated_soc = safe_fallback
                 _LOGGER.warning(
@@ -3465,8 +3473,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "SOC calculation failed, using safe fallback: %.1f%% (prevents charging to 100%%)",
                     safe_fallback
                 )
-            elif not forecast_available and calculated_soc >= user_max_soc - 1.0:
-                # Forecast entity UNAVAILABLE (not just 0 kWh) and would charge to max - use safe fallback
+            elif (
+                plan is None
+                and not forecast_available
+                and calculated_soc >= user_max_soc - 1.0
+            ):
+                # Forecast entity UNAVAILABLE (not just 0 kWh) and would charge to max - use safe fallback.
+                # Only for the headroom formula: it charges to the maximum precisely
+                # because it read no forecast. The bridge planner has its own
+                # fallback and derives its target from the house load, so cutting
+                # it back to 50 % here would drop a need it just worked out.
                 safe_fallback = max(user_min_soc, min(DEFAULT_SAFE_FALLBACK_SOC, user_max_soc))
                 calculated_soc = safe_fallback
                 _LOGGER.warning(
