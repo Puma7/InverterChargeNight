@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the day's yield; that is the one error that matters here, because it would let the battery walk
   into the evening short while the projection says it is fine.
 
+The outlook is only made while it can still be acted on: not while a charge window runs (that
+window plans for the evening itself) and not once the day's period has begun, because the next
+one lies on the far side of a night charge the projection knows nothing about. Without that
+bound it integrated 23 hours of house load against a sliver of today's sun and invented a
+shortfall every evening — found by Codex on the pull request.
+
 This release is the read-only half and is useful on its own: it tells you, in the afternoon,
 that tonight will be short. It changes nothing about what the integration writes. The
 interventions — blocking the discharge during the day, topping up from the grid before the period

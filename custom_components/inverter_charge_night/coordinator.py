@@ -674,6 +674,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """The next high-price period from now, for the sensor."""
         return self._high_price_window(dt_util.now())
 
+    def _window_start_datetime(self, now: datetime) -> datetime:
+        """The start of the configured window that is running or comes next.
+
+        The counterpart of :meth:`_window_end_datetime`, and deliberately
+        without its ad-hoc override: this is about the window the clock owns.
+        """
+        start, _ = self._window_times()
+        start_dt = now.replace(hour=start.hour, minute=start.minute, second=0, microsecond=0)
+        if (start.hour, start.minute) < (now.hour, now.minute):
+            start_dt += timedelta(days=1)
+        return start_dt
+
     def _window_end_datetime(self, now: datetime) -> datetime:
         """Return the end of the window that is running or comes next, at minute resolution.
 
@@ -1070,13 +1082,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         battery cannot be read, or when the configuration makes the arithmetic
         impossible. None of those are reasons to act.
         """
-        zone = self._high_price_window(dt_util.now())
+        now = dt_util.now()
+        zone = self._high_price_window(now)
         if zone is None:
+            return None
+        if self.is_active:
+            # A window owns the inverter and plans for the evening itself.
+            return None
+        if self._window_start_datetime(now) < zone[0]:
+            # A charge window runs before the period starts - once the period
+            # of the day has begun, the next one is on the other side of a
+            # night this projection knows nothing about. Carrying the house
+            # across it would invent a shortfall every evening.
+            _LOGGER.debug(
+                "The next high-price period at %s is behind a charge window - no outlook",
+                zone[0].isoformat(timespec="minutes"),
+            )
             return None
         current_soc = self._current_battery_soc()
         if current_soc is None:
             return None
-        now = dt_util.now()
         sunrise, sunset = self._sun_times(now, now)
         forecast_kwh, forecast_available = self._parse_forecast_energy(
             self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)

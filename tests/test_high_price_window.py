@@ -431,3 +431,40 @@ def test_the_sensor_is_empty_without_an_outlook(mock_hass):
 
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
+
+
+@pytest.mark.asyncio
+async def test_no_outlook_once_the_period_of_the_day_has_begun(mock_hass):
+    """Found by Codex on #5.
+
+    At 19:00 the 18:00-21:00 period has started, so the next one is tomorrow's
+    - on the far side of a night charge this projection knows nothing about.
+    Carried across it, the projection integrated 23 hours of house load against
+    a sliver of today's sun and invented a shortfall every single evening.
+    """
+    coordinator = _outlook_coordinator(mock_hass, soc="60")
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 6, 1, 19, 0)):
+        assert await coordinator.async_evening_outlook() is None
+
+
+@pytest.mark.asyncio
+async def test_no_outlook_while_a_charge_window_runs(mock_hass):
+    """That window plans for the evening itself; two plans would disagree."""
+    coordinator = _outlook_coordinator(mock_hass)
+    coordinator.is_active = True
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 6, 1, 2, 0)):
+        assert await coordinator.async_evening_outlook() is None
+
+
+@pytest.mark.asyncio
+async def test_the_outlook_returns_after_the_charge_window_ended(mock_hass):
+    """From the morning on there is no window between now and the evening."""
+    coordinator = _outlook_coordinator(mock_hass, soc="12", forecast="0.5")
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 6, 1, 6, 0)):
+        outlook = await coordinator.async_evening_outlook()
+
+    assert outlook is not None
+    assert outlook.zone_start == datetime(2026, 6, 1, 18, 0)
