@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import voluptuous as vol
 import yaml
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import SupportsResponse
@@ -234,14 +235,14 @@ async def test_reset_inverter_reports_a_refused_reset():
 # Registration and declarations ----------------------------------------------
 
 
-def test_both_actions_are_registered():
+def test_every_action_is_registered():
     hass = MagicMock()
     services.async_setup_services(hass)
     registered = {call.args[1]: call for call in hass.services.async_register.call_args_list}
-    assert set(registered) == {SERVICE_PLAN_TARGET_SOC, SERVICE_RESET_INVERTER}
+    assert set(registered) == set(_declared_services())
     for service, call in registered.items():
         assert call.args[0] == DOMAIN
-        assert call.kwargs["schema"] is services._ENTRY_SCHEMA
+        assert call.kwargs["schema"] is not None
     assert (
         registered[SERVICE_PLAN_TARGET_SOC].kwargs["supports_response"] is SupportsResponse.ONLY
     ), "a service that only answers must declare it, or the caller gets nothing back"
@@ -298,9 +299,11 @@ def test_every_exception_key_the_actions_raise_is_translated():
         if f'translation_key="{key}"' in source
     }
     assert raised == {
+        "adhoc_refused",
         "entry_id_required",
         "entry_not_found",
         "entry_not_loaded",
+        "nothing_to_release",
         "plan_failed",
         "reset_failed",
     }
@@ -318,7 +321,7 @@ async def test_async_setup_registers_the_actions_without_an_entry():
     hass = MagicMock()
     assert await async_setup(hass, {}) is True
     registered = {call.args[1] for call in hass.services.async_register.call_args_list}
-    assert registered == {SERVICE_PLAN_TARGET_SOC, SERVICE_RESET_INVERTER}
+    assert registered == set(_declared_services())
 
 
 def test_every_exception_carries_a_message_object():
@@ -333,3 +336,97 @@ def test_every_exception_carries_a_message_object():
             assert isinstance(value, dict), (name, key)
             assert set(value) == {"message"}, (name, key)
             assert value["message"], (name, key)
+
+
+# The ad-hoc actions (plan 013) --------------------------------------------------
+
+
+def _adhoc_entry():
+    entry = _entry(None)
+    entry.runtime_data.async_charge_to = AsyncMock(return_value=True)
+    entry.runtime_data.async_block_discharge = AsyncMock(return_value=True)
+    entry.runtime_data.async_allow_discharge = AsyncMock(return_value=True)
+    return entry
+
+
+@pytest.mark.asyncio
+async def test_charge_to_passes_the_target_and_the_duration():
+    entry = _adhoc_entry()
+    hass = _hass_with([entry])
+    data = services._CHARGE_TO_SCHEMA({"target_soc": 62})
+
+    await services._async_charge_to(_call(hass, data))
+
+    entry.runtime_data.async_charge_to.assert_awaited_once_with(62.0, timedelta(hours=2))
+
+
+@pytest.mark.asyncio
+async def test_charge_to_takes_a_duration_it_is_given():
+    entry = _adhoc_entry()
+    hass = _hass_with([entry])
+    data = services._CHARGE_TO_SCHEMA({"target_soc": 50, "duration": {"minutes": 45}})
+
+    await services._async_charge_to(_call(hass, data))
+
+    entry.runtime_data.async_charge_to.assert_awaited_once_with(50.0, timedelta(minutes=45))
+
+
+@pytest.mark.parametrize("target", [-1, 101])
+def test_charge_to_refuses_an_impossible_level(target):
+    with pytest.raises(vol.Invalid):
+        services._CHARGE_TO_SCHEMA({"target_soc": target})
+
+
+def test_charge_to_needs_a_level():
+    with pytest.raises(vol.Invalid):
+        services._CHARGE_TO_SCHEMA({})
+
+
+def test_a_negative_duration_is_refused():
+    with pytest.raises(vol.Invalid):
+        services._DURATION_SCHEMA({"duration": {"minutes": -5}})
+
+
+@pytest.mark.asyncio
+async def test_a_refused_window_is_reported_as_an_error():
+    """The configured window is running, or backup mode, or no readable battery."""
+    entry = _adhoc_entry()
+    entry.runtime_data.async_charge_to.return_value = False
+    hass = _hass_with([entry])
+
+    with pytest.raises(HomeAssistantError) as err:
+        await services._async_charge_to(
+            _call(hass, services._CHARGE_TO_SCHEMA({"target_soc": 62}))
+        )
+    assert err.value.translation_key == "adhoc_refused"
+
+
+@pytest.mark.asyncio
+async def test_block_discharge_holds_for_the_default_two_hours():
+    entry = _adhoc_entry()
+    hass = _hass_with([entry])
+
+    await services._async_block_discharge(_call(hass, services._DURATION_SCHEMA({})))
+
+    entry.runtime_data.async_block_discharge.assert_awaited_once_with(timedelta(hours=2))
+
+
+@pytest.mark.asyncio
+async def test_allow_discharge_releases():
+    entry = _adhoc_entry()
+    hass = _hass_with([entry])
+
+    await services._async_allow_discharge(_call(hass))
+
+    entry.runtime_data.async_allow_discharge.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_releasing_nothing_says_so():
+    entry = _adhoc_entry()
+    entry.runtime_data.async_allow_discharge.return_value = False
+    hass = _hass_with([entry])
+
+    with pytest.raises(HomeAssistantError) as err:
+        await services._async_allow_discharge(_call(hass))
+    assert err.value.translation_key == "nothing_to_release"

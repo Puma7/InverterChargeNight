@@ -83,6 +83,11 @@ Jede Stufe ist für sich nützlich und auslieferbar.
 
 ### Stufe 1 — Services (3.1) · Aufwand S · kein neuer HA-Boden — **UMGESETZT in 3.1.0**
 
+**Nachtrag 20.09.:** mit 3.5.0 vollständig — `charge_to`, `block_discharge` und
+`allow_discharge` sind dazugekommen, sobald das Ad-hoc-Fenster aus `plans/013` sie tragen konnte.
+Offen bleiben nur `force_discharge_to` (bräuchte ein Ad-hoc-Fenster in Entladerichtung) und
+`set_charge_power_limit` (schriebe ohne Fenster und damit ohne Restore).
+
 Umgesetzt wurden zunächst die beiden Aktionen ohne eigenen Fenster-Lebenszyklus:
 `plan_target_soc` (Response-Service, schreibt nichts) und `reset_inverter`. Die übrigen aus der
 Tabelle (`charge_to`, `block_discharge`/`allow_discharge`, `force_discharge_to`,
@@ -134,7 +139,18 @@ vier zusätzliche Felder für eine zweite Periode im bestehenden Assistenten. Da
 den Bruch erst dort, wo er wirklich nötig ist — in Stufe 4. Das Datenmodell wird aber schon hier
 als Liste angelegt, damit Stufe 4 nur die Oberfläche tauscht und keine Migration braucht.
 
-### Stufe 3 — Preissignal (3.3) · Aufwand M · kein neuer HA-Boden
+### Stufe 3 — Preissignal · **UMGESETZT in 3.6.0**
+
+Abweichung vom Entwurf: **keine Tabelle mit Attributnamen je Integration**. Die ließ sich von hier
+aus nicht gegen die echten Quellen prüfen, und ein geratener Name ergibt einen Parser, der still
+auf nichts passt. Die Reihe wird stattdessen an ihrer **Form** erkannt, und was getroffen wurde,
+steht am Sensor. Der Fensterzuschlag wird beim Abfragen verrechnet statt beim Parsen — damit
+bleibt die tägliche Wiederholung des Fensters aus `prices.py` heraus.
+
+Offen aus dieser Stufe: `prices_ct` dynamisch (der Konfliktzweig nutzt weiter die drei festen
+Felder) und die Morgenentladung mit eigenem Preiskriterium.
+
+### Stufe 3 (Entwurf) — Preissignal (3.3) · Aufwand M · kein neuer HA-Boden
 
 Backlog 013. Eine Preisentität (Tibber/aWATTar/EPEX) als Eingang, plus optional deren
 `forecast`-Attribut für die nächsten 24 h. Wirkt an drei Stellen:
@@ -222,3 +238,22 @@ Pro Stufe, bevor sie ausgeliefert wird:
 2. **Preis pro Periode oder globale Klassen?** Die drei Preisfelder existieren schon.
 3. **Welche Formelvorlagen** sollen mitkommen? Mein Vorschlag: Nachtladung-Freiraum,
    Nachtladung-Überbrückung, Abendreserve, Preisschwelle.
+
+---
+
+## Nachtrag 20.09. — Strang C hat sich beim Entwerfen halbiert
+
+Der Masterplan führt Strang C als „PV-Ladung über den Tag strecken", mit einer Erkennung des
+Abregelungsfensters als Kern. Diese Annahme ist gefallen: Pascals Begrenzung ist die **dauerhafte**
+EEG-Einspeisebegrenzung, kein Ereignis, das der Netzbetreiber schaltet. Eine dauerhafte Grenze
+beißt genau dort, wo `PV-Leistung − Hauslast > Grenze`, und das ist rechenbar. **Damit entfällt der
+teuerste und unsicherste Teil des Strangs ersatzlos — es gibt nichts zu erkennen.**
+
+Zwei Rechenfehler des Entwurfs sind dabei mit aufgefallen: der nötige Platz ist nur der Teil
+*oberhalb* der Grenze, und der Wirkungsgrad wirkt hier mal statt geteilt.
+
+Mit **3.7.0** ist Stufe 1 da (Anzeige und Messung). Stufe 2 — tatsächlich drosseln — wartet
+ausdrücklich, weil Modell und Beobachtung sich widersprechen und eine falsche Drosselung
+**zweimal** kostet. Einzelheiten in `plans/014`.
+
+Offen bleibt damit allein **Strang D** (Regeln als Subentries, 4.0.0) — der einzige, der bricht.

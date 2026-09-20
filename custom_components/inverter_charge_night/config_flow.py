@@ -45,6 +45,7 @@ from .const import (
     CONF_DEFAULT_MIN_SOC,
     CONF_DISCHARGE_BLOCK_MODE,
     CONF_DISCHARGE_BLOCK_SWITCH,
+    CONF_DISCHARGE_EFFICIENCY,
     CONF_DISCHARGE_LIMIT_ENTITY,
     CONF_END_TIME,
     CONF_FEED_IN_PRICE_CT,
@@ -59,6 +60,12 @@ from .const import (
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
     CONF_NIGHT_PRICE_CT,
+    CONF_CURTAILMENT_FEED_IN_ENTITY,
+    CONF_CURTAILMENT_LIMIT_W,
+    CONF_PRICE_ENTITY,
+    CONF_PRICE_SURCHARGE_CT,
+    CONF_PRICE_SURCHARGE_WINDOW_CT,
+    CONF_PRICE_UNIT,
     CONF_OPERATION_MODE,
     CONF_PLANNER_MODE,
     CONF_PV_CROSSOVER_DELAY_MIN,
@@ -72,6 +79,7 @@ from .const import (
     DEFAULT_AVG_HOUSE_LOAD_KW,
     DEFAULT_BRIDGE_RESERVE_KWH,
     DEFAULT_CHARGE_EFFICIENCY,
+    DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_COMMAND_DELAY,
     DEFAULT_DISCHARGE_BLOCK_MODE,
     DEFAULT_END_TIME,
@@ -83,6 +91,8 @@ from .const import (
     DEFAULT_MIN_SOC,
     DEFAULT_OPERATION_MODE,
     DEFAULT_PLANNER_MODE,
+    DEFAULT_PRICE_SURCHARGE_CT,
+    DEFAULT_PRICE_UNIT,
     DEFAULT_PV_CROSSOVER_DELAY_MIN,
     DEFAULT_START_TIME,
     DEFAULT_UPDATE_INTERVAL,
@@ -92,6 +102,10 @@ from .const import (
     MODE_MORNING_DISCHARGE,
     MODE_NIGHT_CHARGE,
     PLANNER_MODE_BRIDGE,
+    PRICE_UNIT_AUTO,
+    PRICE_UNIT_CT_KWH,
+    PRICE_UNIT_EUR_KWH,
+    PRICE_UNIT_EUR_MWH,
     PLANNER_MODE_HEADROOM,
     # House connection limit (plan 008)
     CONF_GRID_IMPORT_ENTITY,
@@ -174,9 +188,16 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_PV_CROSSOVER_DELAY_MIN,
     CONF_BRIDGE_RESERVE_KWH,
     CONF_CHARGE_EFFICIENCY,
+    CONF_DISCHARGE_EFFICIENCY,
     CONF_NIGHT_PRICE_CT,
+    CONF_PRICE_ENTITY,
+    CONF_PRICE_UNIT,
+    CONF_PRICE_SURCHARGE_CT,
+    CONF_PRICE_SURCHARGE_WINDOW_CT,
     CONF_DAY_PRICE_CT,
     CONF_FEED_IN_PRICE_CT,
+    CONF_CURTAILMENT_LIMIT_W,
+    CONF_CURTAILMENT_FEED_IN_ENTITY,
 )
 # Every key the wizard owns; anything else in entry.data is written at runtime.
 _ALL_STEP_KEYS: frozenset[str] = frozenset(
@@ -236,6 +257,9 @@ def _normalize_date_value(value: str | date | None) -> str | None:
 
 
 _ENTITY_KEYS_TO_VALIDATE = [
+    CONF_CURTAILMENT_FEED_IN_ENTITY,
+    CONF_CURTAILMENT_LIMIT_W,
+    CONF_PRICE_ENTITY,
     CONF_MIN_SOC_ENTITY,
     CONF_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
@@ -253,6 +277,7 @@ _ENTITY_KEYS_TO_VALIDATE = [
     CONF_HOUSE_LOAD_ENTITY,
     CONF_GRID_IMPORT_ENTITY,
     CONF_DISCHARGE_BLOCK_SWITCH,
+    CONF_CURTAILMENT_FEED_IN_ENTITY,
 ]
 
 
@@ -485,6 +510,25 @@ def _number_selector(
 
 def _time_selector() -> Any:
     return cast(Any, selector.TimeSelector())
+
+
+def _price_unit_selector() -> Any:
+    """What the price entity's numbers mean, when nothing else says."""
+    return cast(
+        Any,
+        selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[
+                    PRICE_UNIT_AUTO,
+                    PRICE_UNIT_CT_KWH,
+                    PRICE_UNIT_EUR_KWH,
+                    PRICE_UNIT_EUR_MWH,
+                ],
+                translation_key="price_unit",
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+    )
 
 
 def _date_selector() -> Any:
@@ -721,6 +765,9 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
             _required(
                 CONF_CHARGE_EFFICIENCY, defaults, DEFAULT_CHARGE_EFFICIENCY
             ): _number_selector(0.5, 1.0, 0.01),
+            _required(
+                CONF_DISCHARGE_EFFICIENCY, defaults, DEFAULT_DISCHARGE_EFFICIENCY
+            ): _number_selector(0.5, 1.0, 0.01),
             _optional(CONF_NIGHT_PRICE_CT, defaults.get(CONF_NIGHT_PRICE_CT)): _number_selector(
                 0, 200, 0.1, "ct/kWh"
             ),
@@ -730,6 +777,22 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
             _optional(
                 CONF_FEED_IN_PRICE_CT, defaults.get(CONF_FEED_IN_PRICE_CT)
             ): _number_selector(0, 200, 0.1, "ct/kWh"),
+            _optional(CONF_PRICE_ENTITY, defaults.get(CONF_PRICE_ENTITY)): _entity_selector(
+                "sensor"
+            ),
+            _required(CONF_PRICE_UNIT, defaults, DEFAULT_PRICE_UNIT): _price_unit_selector(),
+            _required(
+                CONF_PRICE_SURCHARGE_CT, defaults, DEFAULT_PRICE_SURCHARGE_CT
+            ): _number_selector(0, 100, 0.1, "ct/kWh"),
+            _optional(
+                CONF_PRICE_SURCHARGE_WINDOW_CT, defaults.get(CONF_PRICE_SURCHARGE_WINDOW_CT)
+            ): _number_selector(0, 100, 0.1, "ct/kWh"),
+            _optional(
+                CONF_CURTAILMENT_LIMIT_W, defaults.get(CONF_CURTAILMENT_LIMIT_W)
+            ): _number_selector(100, 100000, 100, "W"),
+            _optional(
+                CONF_CURTAILMENT_FEED_IN_ENTITY, defaults.get(CONF_CURTAILMENT_FEED_IN_ENTITY)
+            ): _entity_selector("sensor", "power"),
         }
     )
 

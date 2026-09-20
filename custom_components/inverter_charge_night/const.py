@@ -80,6 +80,10 @@ CONF_AVG_HOUSE_LOAD_KW = "avg_house_load_kw"  # fallback without a meter: averag
 CONF_PV_CROSSOVER_DELAY_MIN = "pv_crossover_delay_min"  # minutes after sunrise until PV > load
 CONF_BRIDGE_RESERVE_KWH = "bridge_reserve_kwh"  # safety reserve added to the bridge energy
 CONF_CHARGE_EFFICIENCY = "charge_efficiency"  # 0.80-1.0, default 0.90
+# The other direction. Energy leaving the battery passes through the inverter
+# too, so the battery has to hold more than the house will draw - which is what
+# decides how much has to be bought for a bridge or an evening.
+CONF_DISCHARGE_EFFICIENCY = "discharge_efficiency"  # 0.50-1.0, default 0.95
 CONF_DISCHARGE_LIMIT_ENTITY = "discharge_limit_entity"  # number: discharge power limit (W), optional
 CONF_FEED_IN_PRICE_CT = "feed_in_price_ct"  # optional
 CONF_NIGHT_PRICE_CT = "night_price_ct"  # optional
@@ -89,8 +93,18 @@ DEFAULT_AVG_HOUSE_LOAD_KW = 0.5
 DEFAULT_PV_CROSSOVER_DELAY_MIN = 90
 DEFAULT_BRIDGE_RESERVE_KWH = 0.5
 DEFAULT_CHARGE_EFFICIENCY = 0.90
+DEFAULT_DISCHARGE_EFFICIENCY = 0.95
 HOUSE_LOAD_PROFILE_DAYS = 14  # history used to learn the hourly load profile
 HOUSE_LOAD_PROFILE_CACHE_S = 900  # 15 minutes
+
+# Curtailment (plan 014). A permanent feed-in cap bites wherever PV minus house
+# load exceeds it; the overflow is integrated in steps small enough that the
+# bell's curvature is not lost between two samples.
+CURTAILMENT_INTEGRATION_STEP_MIN = 5
+CONF_CURTAILMENT_LIMIT_W = "curtailment_limit_w"
+CONF_CURTAILMENT_FEED_IN_ENTITY = "curtailment_feed_in_entity"
+CURTAILMENT_PEAK_DAYS = 14  # history used to check the model against reality
+CURTAILMENT_PEAK_CACHE_S = 900  # 15 minutes, like the load profile
 PLANNED_POWER_WRITE_THRESHOLD_W = 100  # write the charge setpoint only when it moves more than this
 
 # Attributes
@@ -230,6 +244,14 @@ BACKUP_INACTIVE_STATES: frozenset[str] = frozenset(
 # checks the entry's state itself and says so rather than failing silently.
 SERVICE_PLAN_TARGET_SOC = "plan_target_soc"
 SERVICE_RESET_INVERTER = "reset_inverter"
+SERVICE_CHARGE_TO = "charge_to"
+SERVICE_BLOCK_DISCHARGE = "block_discharge"
+SERVICE_ALLOW_DISCHARGE = "allow_discharge"
+ATTR_TARGET_SOC = "target_soc"
+ATTR_DURATION = "duration"
+# How long an ad-hoc window from an action runs when the caller does not say.
+DEFAULT_ADHOC_DURATION_MIN = 120
+ADHOC_REASON_SERVICE = "service"
 ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 
 # Settings and stored data of earlier versions. Installations that have been
@@ -277,6 +299,52 @@ EFFICIENCY_BAND_MIN_SAMPLES = 3
 # A measurement that runs across more than this many bands is a blend and is
 # filed battery-wide only.
 EFFICIENCY_BAND_MAX_SPAN = 2
+
+# The evening rescue (plan 013). Blocking the discharge costs nothing and runs
+# by itself; buying from the grid costs money that only comes back in the
+# evening, so it waits for a switch and for a point in the day at which the
+# forecast hardly turns any more.
+EVENING_RESCUE_CHARGE_LEAD_H = 2.0
+# The ad-hoc window's reason, in one place: the outlook has to recognise the
+# rescue's own window, or stage one would lock stage two out.
+ADHOC_REASON_EVENING_RESCUE = "evening_rescue"
+
+# Reading a price entity (plan 012, stage 3) ----------------------------------
+CONF_PRICE_ENTITY = "price_entity"
+CONF_PRICE_UNIT = "price_unit"
+CONF_PRICE_SURCHARGE_CT = "price_surcharge_ct"
+CONF_PRICE_SURCHARGE_WINDOW_CT = "price_surcharge_window_ct"
+DEFAULT_PRICE_SURCHARGE_CT = 0.0
+PRICE_UNIT_AUTO = "auto"
+PRICE_UNIT_CT_KWH = "ct_per_kwh"
+PRICE_UNIT_EUR_KWH = "eur_per_kwh"
+PRICE_UNIT_EUR_MWH = "eur_per_mwh"
+DEFAULT_PRICE_UNIT = PRICE_UNIT_AUTO
+# One list per unit, for the same reason as the energy units: two that
+# disagree silently change which sensors work where.
+PRICE_UNITS_CT: frozenset[str] = frozenset(
+    {"ct/kwh", "cent/kwh", "cents/kwh", "ct", "c/kwh", "ct/kw/h"}
+)
+PRICE_UNITS_EUR_KWH: frozenset[str] = frozenset({"eur/kwh", "€/kwh", "euro/kwh"})
+PRICE_UNITS_EUR_MWH: frozenset[str] = frozenset({"eur/mwh", "€/mwh", "euro/mwh"})
+# Said to be cents but smaller than this is euros wearing the wrong label.
+MIN_PLAUSIBLE_MEDIAN_CT = 1.0
+# A total below this, with no surcharge configured, is an exchange price with
+# the grid fees and taxes still missing - which inverts the decision it feeds.
+# German day-ahead sits around 5-15 ct while a full consumer price is 25-40, so
+# the line is drawn where the two cannot be confused. Refusing costs nothing
+# but the price signal (the static prices still decide); accepting an exchange
+# price costs the wrong decision, so the bias is deliberate.
+MIN_PLAUSIBLE_TOTAL_CT = 15.0
+# Individual intervals outside this band are dropped: negative prices are real,
+# but not arbitrarily so, and neither is the top end.
+MIN_PLAUSIBLE_PRICE_CT = -100.0
+MAX_PLAUSIBLE_PRICE_CT = 300.0
+# How far either side of now a published interval is still this integration's
+# business. An entity carrying a month of history must not blow up the parse.
+PRICE_SERIES_MAX_AGE_H = 48.0
+# The evening reserve is only dropped when the evening is clearly cheaper.
+RESERVE_DROP_MARGIN_CT = 2.0
 
 
 # Units this integration accepts on an energy sensor. One list, because two

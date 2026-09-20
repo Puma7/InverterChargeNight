@@ -12,3 +12,48 @@ reset_inverter:
       selector:
         config_entry:
           integration: inverter_charge_night
+charge_to:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: inverter_charge_night
+    target_soc:
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+    duration:
+      required: false
+      default:
+        hours: 2
+        minutes: 0
+        seconds: 0
+      selector:
+        duration:
+block_discharge:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: inverter_charge_night
+    duration:
+      required: false
+      default:
+        hours: 2
+        minutes: 0
+        seconds: 0
+      selector:
+        duration:
+allow_discharge:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: inverter_charge_night

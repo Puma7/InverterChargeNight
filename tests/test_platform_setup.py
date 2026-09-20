@@ -18,16 +18,20 @@ from custom_components.inverter_charge_night.number import (
 )
 from custom_components.inverter_charge_night.select import OperationModeSelect
 from custom_components.inverter_charge_night.sensor import (
+    CurtailmentOutlookSensor,
     BestChargePowerSensor,
     CalculatedSOCSensor,
     PlannedChargePowerSensor,
     EfficiencySearchSensor,
+    EveningOutlookSensor,
     NextHighPriceWindowSensor,
+    PriceSignalSensor,
     GridChargeHeadroomSensor,
 )
 from custom_components.inverter_charge_night.switch import (
     AutoEfficientChargeSwitch,
     InverterChargeNightSwitch,
+    EveningRescueChargeSwitch,
     SkipNextSwitch,
 )
 
@@ -45,6 +49,9 @@ PLATFORM_ENTITIES = {
             (GridChargeHeadroomSensor, "grid_charge_headroom"),
             (EfficiencySearchSensor, "efficiency_search"),
             (NextHighPriceWindowSensor, "next_high_price_window"),
+            (EveningOutlookSensor, "evening_outlook"),
+            (PriceSignalSensor, "price_signal"),
+            (CurtailmentOutlookSensor, "curtailment_outlook"),
         ],
     ),
     "number": (
@@ -57,6 +64,7 @@ PLATFORM_ENTITIES = {
             (InverterChargeNightSwitch, "enabled"),
             (AutoEfficientChargeSwitch, "auto_efficient_charge"),
             (SkipNextSwitch, "skip_next"),
+            (EveningRescueChargeSwitch, "evening_rescue_charge"),
         ],
     ),
     "select": (select, [(OperationModeSelect, "operation_mode")]),

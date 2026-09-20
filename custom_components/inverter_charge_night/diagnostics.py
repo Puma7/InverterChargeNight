@@ -14,6 +14,7 @@ from .coordinator import InverterChargeNightConfigEntry, InverterChargeNightCoor
 # ``const.py``, so a newly added ``*_entity`` / ``*_switch`` key cannot be
 # forgotten here.
 REDACT_KEYS = {
+    "price_entity",
     "pv_forecast_entity",
     "battery_soc_entity",
     "min_soc_entity",
@@ -35,6 +36,7 @@ REDACT_KEYS = {
     "house_load_entity",
     "grid_import_entity",
     "discharge_block_switch",
+    "curtailment_feed_in_entity",
 }
 
 
@@ -66,6 +68,32 @@ async def async_get_config_entry_diagnostics(
                 if coordinator._hands_off_until
                 else None
             ),
+            # The ad-hoc window and the evening rescue (plans 013): between
+            # them they answer "why is the inverter doing something outside
+            # any configured window", which is otherwise hard to see at all.
+            "adhoc_until": (
+                coordinator._adhoc_until.isoformat() if coordinator._adhoc_until else None
+            ),
+            "adhoc_reason": coordinator._adhoc_reason,
+            "adhoc_target_soc": coordinator._adhoc_target_soc,
+            "adhoc_allow_grid_charge": coordinator._adhoc_allow_grid_charge,
+            "rescue_stage": coordinator._rescue_stage,
+            "evening_rescue_charge": coordinator.evening_rescue_charge,
+            # Display only in 3.7.0: the model has to be held against the
+            # measurement for a season before anything throttles on it.
+            "curtailment": coordinator.last_curtailment_attributes or None,
+            "evening_outlook": (
+                {
+                    "zone_start": coordinator.last_evening_outlook.zone_start.isoformat(),
+                    "required_soc": coordinator.last_evening_outlook.required_soc,
+                    "projected_soc": coordinator.last_evening_outlook.projected_soc,
+                    "missing_kwh": round(coordinator.last_evening_outlook.missing_kwh, 2),
+                    "forecast_available": coordinator.last_evening_outlook.forecast_available,
+                }
+                if coordinator.last_evening_outlook
+                else None
+            ),
+            "auto_efficiency_bands": auto_data.get("bands"),
             "target_reached": coordinator.target_reached,
             "calculated_soc": coordinator.calculated_soc,
             "initial_calculated_soc": coordinator.initial_calculated_soc,

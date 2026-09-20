@@ -41,6 +41,9 @@ async def async_setup_entry(
             GridChargeHeadroomSensor(coordinator, entry),
             EfficiencySearchSensor(coordinator, entry),
             NextHighPriceWindowSensor(coordinator, entry),
+            EveningOutlookSensor(coordinator, entry),
+            PriceSignalSensor(coordinator, entry),
+            CurtailmentOutlookSensor(coordinator, entry),
         ]
     )
 
@@ -125,6 +128,128 @@ class NextHighPriceWindowSensor(InverterChargeNightEntity, SensorEntity):
             "reserve_kwh": data.get("evening_reserve_kwh"),
             "bought_at_night_kwh": data.get("evening_shortfall_kwh"),
         }
+
+
+class EveningOutlookSensor(InverterChargeNightEntity, SensorEntity):
+    """How much the battery will be short when the expensive hours start.
+
+    Zero means it will make it. The state is deliberately the *deficit* rather
+    than a projected level: a number that is normally zero and only moves when
+    something is wrong is one you can put a notification on.
+    """
+
+    _attr_translation_key = "evening_outlook"
+    _attr_native_unit_of_measurement = "kWh"
+    # No ENERGY device class: this is a shortfall the planner is predicting,
+    # not energy that flowed, and an energy dashboard would treat it as one.
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "evening_outlook")
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the shortfall in kWh, or None without a high-price period."""
+        outlook = self.coordinator.last_evening_outlook
+        return round(outlook.missing_kwh, 2) if outlook else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the projection the shortfall was derived from."""
+        outlook = self.coordinator.last_evening_outlook
+        if outlook is None:
+            return {}
+        return {
+            "zone_start": outlook.zone_start.isoformat(),
+            "zone_end": outlook.zone_end.isoformat(),
+            "required_soc": outlook.required_soc,
+            "projected_soc": outlook.projected_soc,
+            "pv_to_come_kwh": round(outlook.pv_to_come_kwh, 2),
+            "load_to_come_kwh": round(outlook.load_to_come_kwh, 2),
+            # Without a forecast the sun counts for nothing, so the projection
+            # is the pessimistic one and says so.
+            "forecast_available": outlook.forecast_available,
+        }
+
+
+class CurtailmentOutlookSensor(InverterChargeNightEntity, SensorEntity):
+    """How much of today's PV a permanent feed-in cap throws away.
+
+    The state is what is lost today if the battery has no room for it, and it
+    is normally 0 - the same shape as the evening outlook, so a notification
+    fits on it. ``None`` rather than 0 when the question cannot be asked at
+    all: no cap configured, or no forecast entity for *today*.
+
+    Nothing is written from this. The model and the measurement have to be held
+    against each other for a season before anything throttles on them, and the
+    attributes are what does the holding: ``model_vs_measured_pct`` puts the
+    modelled spill next to what the feed-in sensor actually recorded.
+
+    Diagnostic and disabled by default for the same reason as the efficiency
+    search: the hourly peak series is state the recorder would keep for every
+    user, including those with no cap at all.
+    """
+
+    _attr_translation_key = "curtailment_outlook"
+    _attr_native_unit_of_measurement = "kWh"
+    # No ENERGY device class: this is energy the planner predicts will be
+    # thrown away, not energy that flowed.
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "curtailment_outlook")
+
+    @property
+    def native_value(self) -> float | None:
+        """Return today's overflow in kWh, or None without a cap configured."""
+        outlook = self.coordinator.last_curtailment_outlook
+        return round(outlook.overflow_kwh, 2) if outlook else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the model, and the measurement it has to be checked against."""
+        return self.coordinator.last_curtailment_attributes
+
+
+class PriceSignalSensor(InverterChargeNightEntity, SensorEntity):
+    """What the price entity was read as, and what it says.
+
+    This exists to be looked at before anything decides on the numbers. A
+    price that is out by a factor of a hundred, or that is the exchange price
+    with the grid fees missing, does not look wrong - so the sensor publishes
+    what was matched, which unit was resolved and which surcharge was applied,
+    and a human can see 32 ct and nod, or see 6 ct and not.
+    """
+
+    _attr_translation_key = "price_signal"
+    _attr_native_unit_of_measurement = "ct/kWh"
+    # No MONETARY device class: that would drag it into the energy dashboard
+    # as a cost, and this is a tariff, not a sum of money spent.
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "price_signal")
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the price of the interval covering now."""
+        value = self.coordinator.price_snapshot()["current_ct"]
+        return float(value) if value is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return everything needed to judge whether it was read right."""
+        snapshot = dict(self.coordinator.price_snapshot())
+        snapshot.pop("current_ct", None)
+        for key in ("window_ct", "evening_ct"):
+            if snapshot.get(key) is not None:
+                snapshot[key] = round(float(snapshot[key]), 2)
+        return snapshot
 
 
 class BestChargePowerSensor(InverterChargeNightEntity, SensorEntity):

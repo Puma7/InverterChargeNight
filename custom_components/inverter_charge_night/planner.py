@@ -32,10 +32,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from .const import (
+    CURTAILMENT_INTEGRATION_STEP_MIN,
     DEFAULT_GRID_CONTINUOUS_PCT,
     DEFAULT_GRID_VOLTAGE_V,
     DEFAULT_SAFE_FALLBACK_SOC,
+    RESERVE_DROP_MARGIN_CT,
 )
+from .prices import evening_reserve_pays
 
 REASON_BRIDGE = "bridge"
 REASON_HEADROOM = "headroom"
@@ -61,6 +64,10 @@ class PlanInput:
     house_load_kw_profile: Sequence[float]  # 24 values, one per hour of the day
     reserve_kwh: float
     charge_efficiency: float
+    # Energy on its way out of the battery passes through the inverter as well,
+    # so the battery has to hold more than the house will draw. 1.0 means "do
+    # not account for it" and is what a caller that predates this field gets.
+    discharge_efficiency: float = 1.0
     prices_ct: tuple[float, float, float] | None = None  # (night, day, feed-in)
     # The next high-price period after the window, e.g. 18:00-21:00 tomorrow.
     # The house must come through it without buying at that tariff.
@@ -68,11 +75,23 @@ class PlanInput:
     # The load profile is an average of the last days; an evening with the oven
     # on is above it. This is the user's allowance for that, in percent.
     reserve_margin_pct: float = 0.0
+    # The mean price over this entry's own window and over the high-price
+    # period, when a price entity supplies them. Separate from prices_ct, which
+    # is the conflict triple and needs all three of its values to mean
+    # anything. None on either side keeps the reserve, which is what the period
+    # was configured for.
+    window_price_ct: float | None = None
+    evening_price_ct: float | None = None
 
 
 @dataclass(frozen=True)
 class PlanResult:
-    """The planner's answer plus the numbers it was derived from."""
+    """The planner's answer plus the numbers it was derived from.
+
+    Energies here are what the **battery** has to hold, not what the house will
+    draw: the two differ by the discharge loss, and the planner's job is to buy
+    the first so the house gets the second.
+    """
 
     target_soc: float
     bridge_kwh: float
@@ -80,10 +99,15 @@ class PlanResult:
     lower_bound_soc: float
     upper_bound_soc: float
     reason: str
-    # What the high-price period is expected to draw, and how much of that the
-    # night has to buy because the day's surplus will not cover it.
+    # What the high-price period is expected to draw (house side), and how much
+    # the battery therefore has to gain tonight because the day's surplus will
+    # not cover it - that second figure is battery side, so it carries the
+    # discharge loss, the same way ``bridge_kwh`` does.
     evening_reserve_kwh: float = 0.0
     evening_shortfall_kwh: float = 0.0
+    # True when prices said the evening is cheap enough that holding energy
+    # back for it costs more than buying it then.
+    evening_reserve_dropped: bool = False
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -115,10 +139,20 @@ def integrate_load(profile: Sequence[float], start: datetime, end: datetime) -> 
 def evening_reserve_kwh(p: PlanInput) -> float:
     """The energy the high-price period is expected to draw, in kWh.
 
-    Zero without a configured period. The margin is the user's allowance for an
-    evening above the average the profile was learned from.
+    Zero without a configured period, and zero when prices say the period is
+    not worth carrying: a kilowatt-hour put aside in the window has to pass
+    through the inverter twice, and an evening that is cheaper than that round
+    trip is an evening to buy rather than to save for. Unknown prices hold the
+    reserve, which is what the period was configured for.
+
+    The margin is the user's allowance for an evening above the average the
+    profile was learned from.
     """
     if p.high_price_window is None:
+        return 0.0
+    if not evening_reserve_pays(
+        p.window_price_ct, p.evening_price_ct, p.charge_efficiency, RESERVE_DROP_MARGIN_CT
+    ):
         return 0.0
     start, end = p.high_price_window
     load_kwh = integrate_load(p.house_load_kw_profile, start, end)
@@ -146,6 +180,19 @@ def evening_shortfall_kwh(p: PlanInput) -> float:
     return max(0.0, evening_reserve_kwh(p) - covered_by_pv)
 
 
+def _from_battery_kwh(house_kwh: float, discharge_efficiency: float) -> float:
+    """What the battery must hold to deliver ``house_kwh`` to the house.
+
+    The house load profile and the forecast are both measured on the house
+    side of the inverter. Energy coming out of the battery is not: it loses a
+    few percent on the way, and a plan that ignores that buys a few percent too
+    little - every time, in the same direction, which is the kind of error that
+    only shows up as "the battery did not quite make it through the evening".
+    """
+    efficiency = min(1.0, max(0.01, discharge_efficiency))
+    return house_kwh / efficiency
+
+
 def evening_reserve_soc(p: PlanInput) -> float:
     """The SOC the battery must not fall below if the evening is to be covered.
 
@@ -156,7 +203,7 @@ def evening_reserve_soc(p: PlanInput) -> float:
     """
     if p.capacity_kwh <= 0:
         raise ValueError("Battery capacity must be positive")
-    shortfall = evening_shortfall_kwh(p)
+    shortfall = _from_battery_kwh(evening_shortfall_kwh(p), p.discharge_efficiency)
     return _clamp(
         p.user_min_soc + shortfall / p.capacity_kwh * 100.0,
         p.user_min_soc,
@@ -178,15 +225,20 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
         )
 
     capacity = float(p.capacity_kwh)
-    bridge_kwh = integrate_load(p.house_load_kw_profile, p.window_end, p.pv_crossover) + max(
-        0.0, float(p.reserve_kwh)
-    )
+    # Both figures are what the battery has to hold, not what the house draws:
+    # the difference is the inverter's discharge loss, and ignoring it under-buys
+    # a little every single night.
+    bridge_kwh = _from_battery_kwh(
+        integrate_load(p.house_load_kw_profile, p.window_end, p.pv_crossover),
+        p.discharge_efficiency,
+    ) + max(0.0, float(p.reserve_kwh))
     surplus = surplus_kwh(p)
 
     evening_kwh = evening_reserve_kwh(p)
+    evening_dropped = p.high_price_window is not None and evening_kwh == 0.0
     # The sun charges the battery before the evening does, so only the part it
     # will not cover has to be bought tonight.
-    evening_shortfall = evening_shortfall_kwh(p)
+    evening_shortfall = _from_battery_kwh(evening_shortfall_kwh(p), p.discharge_efficiency)
 
     lower = _clamp(
         (bridge_kwh + evening_shortfall + capacity * p.user_min_soc / 100.0)
@@ -216,6 +268,7 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
             REASON_FALLBACK,
             evening_kwh,
             evening_shortfall,
+            evening_dropped,
         )
 
     if lower <= upper:
@@ -246,6 +299,7 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
         reason,
         evening_kwh,
         evening_shortfall,
+        evening_dropped,
     )
 
 
@@ -350,3 +404,263 @@ def allowed_charge_power_w(
     # Feeding in (a negative import) does not earn the battery extra budget.
     other_load_w = max(0.0, max(0.0, grid_import_w) - max(0.0, own_charge_w))
     return max(0.0, budget_w - max(0.0, headroom_w) - other_load_w)
+
+
+# The evening outlook (plan 013) ------------------------------------------------
+#
+# The night plan asks "how much must the battery hold by morning". This asks the
+# question the day after a forecast that was too optimistic: "will there still be
+# enough in it when the expensive hours start this evening, and if not, by how
+# much is it short". Pure arithmetic again - the coordinator reads the states.
+
+
+@dataclass(frozen=True)
+class EveningOutlook:
+    """What the battery is heading for at the start of the high-price period."""
+
+    zone_start: datetime
+    zone_end: datetime
+    required_soc: float        # what it has to be at zone_start
+    projected_soc: float       # what it will be if nothing is done
+    missing_kwh: float         # battery side, 0.0 when it will make it
+    pv_to_come_kwh: float      # what the sun is still expected to deliver
+    load_to_come_kwh: float    # what the house will draw before then
+    forecast_available: bool
+
+
+def pv_fraction_between(
+    sunrise: datetime, sunset: datetime, start: datetime, end: datetime
+) -> float:
+    """The share of a day's PV energy produced between two instants.
+
+    A clear-sky bell: output follows ``sin(pi * x)`` across the solar day, so
+    the energy between two points is ``(cos(pi*x1) - cos(pi*x2)) / 2``.
+
+    It is an approximation and is used as one. Clouds, orientation, shading and
+    snow all move it, and it is deliberately not linear: at four in the
+    afternoon a linear model still promises half the day's yield, which is the
+    one error that matters here - it would let the battery run into the evening
+    short while the plan says it is fine.
+    """
+    day_s = (sunset - sunrise).total_seconds()
+    if day_s <= 0:
+        return 0.0
+    first = _clamp((start - sunrise).total_seconds() / day_s, 0.0, 1.0)
+    last = _clamp((end - sunrise).total_seconds() / day_s, 0.0, 1.0)
+    if last <= first:
+        return 0.0
+    return (math.cos(math.pi * first) - math.cos(math.pi * last)) / 2.0
+
+
+def evening_outlook(
+    *,
+    now: datetime,
+    capacity_kwh: float,
+    current_soc: float,
+    user_min_soc: float,
+    user_max_soc: float,
+    house_load_kw_profile: Sequence[float],
+    zone_start: datetime,
+    zone_end: datetime,
+    margin_pct: float,
+    charge_efficiency: float,
+    discharge_efficiency: float,
+    sunrise: datetime,
+    sunset: datetime,
+    forecast_kwh_today: float,
+    forecast_available: bool,
+) -> EveningOutlook:
+    """Project the battery forward to the start of the high-price period.
+
+    What it needs there is the period's own load, grossed up for the way out of
+    the battery, on top of the user minimum - the day's surplus is *not*
+    subtracted here the way it is in the night plan, because the sun between now
+    and then is already in the projection.
+
+    Raises ValueError for a non-positive capacity, like the other entry points.
+    """
+    if capacity_kwh <= 0:
+        raise ValueError("Battery capacity must be positive")
+
+    zone_load_kwh = integrate_load(house_load_kw_profile, zone_start, zone_end) * (
+        1 + max(0.0, margin_pct) / 100.0
+    )
+    required_soc = _clamp(
+        user_min_soc + _from_battery_kwh(zone_load_kwh, discharge_efficiency) / capacity_kwh * 100.0,
+        user_min_soc,
+        user_max_soc,
+    )
+
+    load_to_come = integrate_load(house_load_kw_profile, now, zone_start)
+    pv_to_come = (
+        max(0.0, forecast_kwh_today) * pv_fraction_between(sunrise, sunset, now, zone_start)
+        if forecast_available
+        else 0.0
+    )
+    # The sun serves the house first; only what is left over reaches the
+    # battery, and only a shortfall has to come out of it.
+    net_house_kwh = pv_to_come - load_to_come
+    if net_house_kwh >= 0:
+        delta_battery_kwh = net_house_kwh * min(1.0, max(0.01, charge_efficiency))
+    else:
+        delta_battery_kwh = _from_battery_kwh(net_house_kwh, discharge_efficiency)
+
+    projected_soc = _clamp(
+        current_soc + delta_battery_kwh / capacity_kwh * 100.0, 0.0, user_max_soc
+    )
+    missing_kwh = max(0.0, (required_soc - projected_soc) / 100.0 * capacity_kwh)
+
+    return EveningOutlook(
+        zone_start=zone_start,
+        zone_end=zone_end,
+        required_soc=round(required_soc, 1),
+        projected_soc=round(projected_soc, 1),
+        missing_kwh=missing_kwh,
+        pv_to_come_kwh=pv_to_come,
+        load_to_come_kwh=load_to_come,
+        forecast_available=forecast_available,
+    )
+
+
+def pv_power_kw_at(
+    sunrise: datetime, sunset: datetime, when: datetime, daily_kwh: float
+) -> float:
+    """Clear-sky output at one instant, in kW.
+
+    This is the derivative of :func:`pv_fraction_between` and has to stay that
+    way: the energy between two points is ``(cos(pi*x1) - cos(pi*x2)) / 2``, so
+    the density is ``(pi/2) * sin(pi*x)`` per unit of ``x``, and ``x`` runs
+    across the solar day. Integrating this curve over any stretch reproduces
+    the fraction exactly, which is what keeps a display built on one from
+    contradicting a decision built on the other.
+
+    Zero outside the solar day, and zero for a day that has no length.
+    """
+    day_s = (sunset - sunrise).total_seconds()
+    if day_s <= 0 or daily_kwh <= 0:
+        return 0.0
+    x = (when - sunrise).total_seconds() / day_s
+    if x <= 0.0 or x >= 1.0:
+        return 0.0
+    day_h = day_s / 3600.0
+    return daily_kwh * (math.pi / 2.0) * math.sin(math.pi * x) / day_h
+
+
+@dataclass(frozen=True)
+class CurtailmentOutlook:
+    """What a permanent feed-in cap will throw away today, and what would hold it."""
+
+    limit_w: float
+    # The envelope of the hours the cap actually bites in. None on a day it
+    # never bites - which is the honest answer on a dull day, not zero.
+    binding_start: datetime | None
+    binding_end: datetime | None
+    overflow_kwh: float          # thrown away today if the battery has no room
+    room_needed_kwh: float       # what the battery has to have free by then
+    morning_target_soc: float    # the cap's target, already clamped
+    clamped_by: str | None       # "evening_reserve" | "user_min" | None
+    forecast_available: bool
+
+
+CLAMPED_BY_EVENING_RESERVE = "evening_reserve"
+CLAMPED_BY_USER_MIN = "user_min"
+
+
+def curtailment_outlook(
+    *,
+    capacity_kwh: float,
+    user_min_soc: float,
+    user_max_soc: float,
+    house_load_kw_profile: Sequence[float],
+    sunrise: datetime,
+    sunset: datetime,
+    forecast_kwh_today: float,
+    forecast_available: bool,
+    error_margin_pct: float,
+    limit_w: float,
+    charge_efficiency: float,
+    evening_reserve_soc_pct: float,
+    step_minutes: int = CURTAILMENT_INTEGRATION_STEP_MIN,
+) -> CurtailmentOutlook | None:
+    """How much PV a permanent feed-in cap will throw away today.
+
+    A cap at the grid connection point is not an event somebody switches on:
+    it bites in exactly the hours where ``PV - house load`` exceeds it, and
+    those follow from the forecast, the sun times and the load profile. On a
+    dull day the answer is correctly "it never bites".
+
+    Returns ``None`` when the question cannot be asked - no cap configured, no
+    forecast, a day with no length. None means "no opinion" and every caller
+    has to treat it as such; it is never 0.0, because 0.0 is a real answer.
+
+    The forecast is *damped* by the error margin here, the opposite direction
+    from :func:`surplus_kwh`, which inflates it. Both lean the same way in the
+    end: away from a battery that is empty in the evening. Overestimating the
+    overflow throttles the morning on a day that did not need it, and that day
+    costs twice - short in the evening, and then bought back from the grid.
+    """
+    if capacity_kwh <= 0:
+        raise ValueError("Battery capacity must be positive")
+    if limit_w <= 0 or not forecast_available or sunset <= sunrise:
+        return None
+    if step_minutes <= 0:
+        raise ValueError("Integration step must be positive")
+    if len(house_load_kw_profile) != 24:
+        raise ValueError(
+            f"Load profile needs 24 hourly values, got {len(house_load_kw_profile)}"
+        )
+
+    damped_kwh = max(0.0, forecast_kwh_today) * max(
+        0.0, 1.0 - max(0.0, error_margin_pct) / 100.0
+    )
+    limit_kw = limit_w / 1000.0
+    step = timedelta(minutes=step_minutes)
+
+    overflow_kwh = 0.0
+    first: datetime | None = None
+    last: datetime | None = None
+    cursor = sunrise
+    while cursor < sunset:
+        segment_end = min(cursor + step, sunset)
+        hours = (segment_end - cursor).total_seconds() / 3600.0
+        # Sample at the midpoint: the bell is curved, and its endpoints are the
+        # two places a rectangle rule is worst.
+        midpoint = cursor + (segment_end - cursor) / 2
+        pv_kw = pv_power_kw_at(sunrise, sunset, midpoint, damped_kwh)
+        load_kw = float(house_load_kw_profile[midpoint.hour])
+        excess_kw = pv_kw - load_kw - limit_kw
+        if excess_kw > 0:
+            overflow_kwh += excess_kw * hours
+            if first is None:
+                first = cursor
+            last = segment_end
+        cursor = segment_end
+
+    # What the overflow will occupy in the battery is the AC amount times the
+    # charge efficiency, not divided by it - the loss happens on the way in, so
+    # less arrives than was diverted. This is the opposite direction from the
+    # night plan, where the question is how much to buy to store a given amount.
+    room_needed_kwh = overflow_kwh * min(1.0, max(0.01, charge_efficiency))
+    unclamped_soc = user_max_soc - room_needed_kwh / capacity_kwh * 100.0
+
+    clamped_by: str | None = None
+    floor = user_min_soc
+    if evening_reserve_soc_pct > floor:
+        floor = evening_reserve_soc_pct
+    if unclamped_soc < floor:
+        clamped_by = (
+            CLAMPED_BY_EVENING_RESERVE
+            if floor == evening_reserve_soc_pct and evening_reserve_soc_pct > user_min_soc
+            else CLAMPED_BY_USER_MIN
+        )
+
+    return CurtailmentOutlook(
+        limit_w=limit_w,
+        binding_start=first,
+        binding_end=last,
+        overflow_kwh=overflow_kwh,
+        room_needed_kwh=room_needed_kwh,
+        morning_target_soc=round(_clamp(unclamped_soc, floor, user_max_soc), 1),
+        clamped_by=clamped_by,
+        forecast_available=forecast_available,
+    )

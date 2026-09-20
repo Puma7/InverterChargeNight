@@ -73,6 +73,12 @@ from .const import (
     CONF_HIGH_PRICE_MARGIN_PCT,
     CONF_HIGH_PRICE_START,
     CONF_PV_FORECAST_ENTITY,
+    CONF_PRICE_ENTITY,
+    CONF_PRICE_SURCHARGE_CT,
+    CONF_PRICE_SURCHARGE_WINDOW_CT,
+    CONF_PRICE_UNIT,
+    CONF_CURTAILMENT_FEED_IN_ENTITY,
+    CONF_CURTAILMENT_LIMIT_W,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_PLANNER_MODE,
@@ -81,6 +87,7 @@ from .const import (
     CONF_PV_CROSSOVER_DELAY_MIN,
     CONF_BRIDGE_RESERVE_KWH,
     CONF_CHARGE_EFFICIENCY,
+    CONF_DISCHARGE_EFFICIENCY,
     CONF_DISCHARGE_LIMIT_ENTITY,
     CONF_DISCHARGE_BLOCK_SWITCH,
     CONF_DISCHARGE_BLOCK_MODE,
@@ -93,9 +100,12 @@ from .const import (
     DEFAULT_BRIDGE_RESERVE_KWH,
     DEFAULT_CHARGE_EFFICIENCY,
     HOUSE_LOAD_PROFILE_DAYS,
+    CURTAILMENT_PEAK_CACHE_S,
+    CURTAILMENT_PEAK_DAYS,
     HOUSE_LOAD_PROFILE_CACHE_S,
     PLANNED_POWER_WRITE_THRESHOLD_W,
     PLANNER_MODE_BRIDGE,
+    PRICE_UNIT_AUTO,
     DEFAULT_END_TIME,
     DEFAULT_MAX_SOC,
     DEFAULT_OPERATION_MODE,
@@ -106,6 +116,7 @@ from .const import (
     DEFAULT_ACTIVE_END_DATE,
     DEFAULT_ACTIVE_RANGE_YEARLY,
     DEFAULT_DISCHARGE_BLOCK_MODE,
+    DEFAULT_DISCHARGE_EFFICIENCY,
     DISCHARGE_BLOCK_OFF,
     DISCHARGE_BLOCK_VIA_SWITCH,
     DISCHARGE_BLOCK_VIA_LIMIT,
@@ -125,10 +136,15 @@ from .const import (
     CONF_GRID_HEADROOM_W,
     DEFAULT_GRID_PHASES,
     DEFAULT_GRID_VOLTAGE_V,
+    ADHOC_REASON_EVENING_RESCUE,
+    ADHOC_REASON_SERVICE,
     EFFICIENCY_BAND_MAX_SPAN,
     EFFICIENCY_BAND_MIN_SAMPLES,
     EFFICIENCY_BAND_WIDTH_PCT,
+    EVENING_RESCUE_CHARGE_LEAD_H,
     DEFAULT_HIGH_PRICE_MARGIN_PCT,
+    DEFAULT_PRICE_SURCHARGE_CT,
+    DEFAULT_PRICE_UNIT,
     DEFAULT_GRID_CONTINUOUS_PCT,
     DEFAULT_GRID_HEADROOM_W,
     DEFAULT_MIN_CHARGE_POWER_W,
@@ -137,11 +153,16 @@ from .const import (
     GRID_LIMIT_MIN_WRITE_INTERVAL_S,
 )
 from .calculation import calculate_required_soc
+from .prices import PriceSeries, mean_price_ct, parse_price_series
 from .planner import (
     REASON_FALLBACK,
+    CurtailmentOutlook,
+    EveningOutlook,
     PlanInput,
     PlanResult,
     allowed_charge_power_w,
+    curtailment_outlook,
+    evening_outlook,
     evening_reserve_soc,
     grid_budget_w,
     plan_target_soc,
@@ -268,6 +289,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The end date of the expired range the repair issue currently names,
         # so the registry is only written when that changes.
         self._expired_range_issue: date | None = None
+        # The last reason a price entity was refused, so the warning is written
+        # once rather than every fifteen minutes.
+        self._price_refusal_logged: str | None = None
+        # An ad-hoc window (plan 013): a window like any other - same capture,
+        # restore, retry ladder and interlocks - whose start came from a call
+        # rather than from the clock. None means no ad-hoc window is running.
+        self._adhoc_until: datetime | None = None
+        self._adhoc_reason: str | None = None
+        self._adhoc_target_soc: float | None = None
+        self._adhoc_allow_grid_charge = False
+        # The evening rescue: 0 nothing, 1 holding what is there, 2 also buying.
+        # Only ever raised within a day, so a poll cannot flap between stages.
+        self._rescue_stage = 0
+        # Buying for the evening costs money now and pays it back later, so it
+        # waits for the user to switch it on. Blocking the discharge does not.
+        self.evening_rescue_charge = False
         self.calculated_soc: float | None = None
         self.initial_calculated_soc: float | None = None  # Store SOC calculated at window start
         self.minimum_calculated_soc: float | None = None  # Store minimum SOC value (always <= initial)
@@ -280,6 +317,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # ignoring the forecast. Counts down at every window end.
         self.snow_nights: int = 0
         self._original_absolute_charge_power: float | None = None
+        # What we last wrote there ourselves. Without it a fresh capture
+        # cannot tell the user's value from our own - see the guard in
+        # _apply_absolute_charge_power_limit.
+        self._absolute_charge_power_written_w: float | None = None
         self._original_ac_charge_power: float | None = None  # W, captured before the finder's first write
         self._pending_reset = False  # window ended but the inverter is not back at its original settings
         self._reset_retry_unsub: CALLBACK_TYPE | None = None
@@ -310,6 +351,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_missing_entities_logged = False
         # Planner v2 (plan 006)
         self.last_plan: PlanResult | None = None  # result of the last bridge plan this window
+        # The evening outlook belongs to the day, not to a window, so it is
+        # kept here rather than in the coordinator data, which is empty while
+        # no window runs - which is exactly when this matters (plan 013).
+        self.last_evening_outlook: EveningOutlook | None = None
+        self.last_curtailment_outlook: CurtailmentOutlook | None = None
+        # Built once per poll: the attributes need the recorder, and an
+        # entity's attribute property cannot await anything.
+        self.last_curtailment_attributes: dict[str, Any] = {}
         self.planned_charge_power_w: float | None = None  # setpoint for the remaining window
         # Whether that setpoint is also ordered from the inverter. The plan is
         # worth showing in every mode, but a number that looks like a command
@@ -319,6 +368,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._original_discharge_limit: float | None = None  # raw value in the entity's unit
         self._planned_setpoint_written_w: float | None = None
         self._house_load_cache: tuple[datetime, list[float]] | None = None
+        self._feed_in_peak_cache: tuple[datetime, list[float]] | None = None
         self._sun_fallback_logged = False
         # House connection limit (plan 008)
         self._grid_limit_listener: CALLBACK_TYPE | None = None
@@ -379,6 +429,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "hands_off_until": (
                 self._hands_off_until.isoformat() if self._hands_off_until else None
             ),
+            # A restart in the middle of an ad-hoc window must still end it at
+            # the right moment - for the evening rescue that end is the release
+            # of the discharge block, and a battery whose release a restart
+            # swallowed stays blocked until the next regular window end.
+            "adhoc_until": self._adhoc_until.isoformat() if self._adhoc_until else None,
+            "adhoc_reason": self._adhoc_reason,
+            "adhoc_target_soc": self._adhoc_target_soc,
+            "adhoc_allow_grid_charge": self._adhoc_allow_grid_charge,
+            "evening_rescue_charge": self.evening_rescue_charge,
             "snow_nights": self.snow_nights,
         }
         self.hass.config_entries.async_update_entry(self.entry, options=options)
@@ -391,6 +450,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         state: dict[str, Any] = raw
         if isinstance(state.get("is_enabled"), bool):
             self.is_enabled = state["is_enabled"]
+        if isinstance(state.get("evening_rescue_charge"), bool):
+            self.evening_rescue_charge = state["evening_rescue_charge"]
         self.override_soc = self._restore_soc(state, "override_soc")
         self.original_min_soc = self._restore_soc(state, "original_min_soc")
         self.initial_calculated_soc = self._restore_soc(state, "initial_calculated_soc")
@@ -423,6 +484,30 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
             self.snow_nights = snow_raw
+
+        adhoc_raw = state.get("adhoc_until")
+        if isinstance(adhoc_raw, str):
+            try:
+                adhoc_until = datetime.fromisoformat(adhoc_raw)
+            except (ValueError, TypeError):
+                _LOGGER.warning("Ignoring invalid persisted adhoc_until %r", adhoc_raw)
+            else:
+                if adhoc_until > dt_util.now():
+                    self._adhoc_until = adhoc_until
+                    self._adhoc_reason = (
+                        state["adhoc_reason"] if isinstance(state.get("adhoc_reason"), str) else None
+                    )
+                    self._adhoc_target_soc = self._restore_soc(state, "adhoc_target_soc")
+                    self._adhoc_allow_grid_charge = state.get("adhoc_allow_grid_charge") is True
+                    _LOGGER.info(
+                        "Restored the ad-hoc window (%s) running until %s",
+                        self._adhoc_reason,
+                        adhoc_until.isoformat(timespec="minutes"),
+                    )
+                else:
+                    # It is over; the window end below resets the inverter, and
+                    # a pending reset was persisted with it.
+                    _LOGGER.info("The persisted ad-hoc window ended during downtime")
 
         hands_off_raw = state.get("hands_off_until")
         if isinstance(hands_off_raw, str):
@@ -623,9 +708,112 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             end_dt += timedelta(days=1)
         return start_dt, end_dt
 
+    def _price_series(self) -> PriceSeries | None:
+        """Read the configured price entity, or None with a reason logged once.
+
+        Every refusal falls back to the static price fields, which is to say
+        to the behaviour of an installation with no price entity at all. That
+        is the whole contract: a price that cannot be trusted must never
+        produce a worse decision than having no price.
+        """
+        entity_id = self.config.get(CONF_PRICE_ENTITY)
+        if not entity_id:
+            return None
+        state = self.hass.states.get(str(entity_id))
+        if not state or state.state in ("unknown", "unavailable", None):
+            return None
+        unit_override = str(self.config.get(CONF_PRICE_UNIT, DEFAULT_PRICE_UNIT))
+        series, reason = parse_price_series(
+            state.attributes,
+            entity_unit=_unit_of(state),
+            unit_override=None if unit_override == PRICE_UNIT_AUTO else unit_override,
+            surcharge_ct=float(
+                self.config.get(CONF_PRICE_SURCHARGE_CT, DEFAULT_PRICE_SURCHARGE_CT)
+            ),
+            tz=dt_util.DEFAULT_TIME_ZONE,
+            now=dt_util.now(),
+        )
+        if series is None:
+            if self._price_refusal_logged != reason:
+                _LOGGER.warning(
+                    "Cannot use the price entity %s (%s) - the configured prices are used "
+                    "instead. Attributes seen: %s",
+                    entity_id,
+                    reason,
+                    ", ".join(sorted(state.attributes)) or "(none)",
+                )
+                self._price_refusal_logged = reason
+            return None
+        if self._price_refusal_logged is not None:
+            _LOGGER.info("The price entity %s is usable again", entity_id)
+            self._price_refusal_logged = None
+        return series
+
+    def _window_price_ct(self, series: PriceSeries | None, now: datetime) -> float | None:
+        """The mean price over the charge window, with the window's own grid fee.
+
+        A reduced tariff applies to those hours only, so the day surcharge that
+        every interval carries is swapped for the window one here.
+        """
+        if series is None:
+            return None
+        start = self._window_start_datetime(now)
+        end = start + timedelta(seconds=self._window_length_s())
+        mean = mean_price_ct(series, start, end)
+        if mean is None:
+            return None
+        window_surcharge = self.config.get(CONF_PRICE_SURCHARGE_WINDOW_CT)
+        if window_surcharge is None:
+            return mean
+        day = float(self.config.get(CONF_PRICE_SURCHARGE_CT, DEFAULT_PRICE_SURCHARGE_CT))
+        return mean - day + float(window_surcharge)
+
+    def price_snapshot(self) -> dict[str, Any]:
+        """What was parsed and what it says, for the sensor and diagnostics."""
+        series = self._price_series()
+        now = dt_util.now()
+        zone = self._high_price_window(now)
+        # The series is always aware; the clock here need not be (the test
+        # suite runs on a naive one deliberately), and comparing the two
+        # raises rather than answering.
+        reading_now = self._align_tz(now, series.intervals[0].start) if series else now
+        current = (
+            next(
+                (i.ct_per_kwh for i in series.intervals if i.start <= reading_now < i.end),
+                None,
+            )
+            if series
+            else None
+        )
+        horizon = series.horizon_end() if series else None
+        return {
+            "current_ct": round(current, 2) if current is not None else None,
+            "source_attribute": series.source_attribute if series else None,
+            "value_key": series.value_key if series else None,
+            "unit_resolved": series.unit if series else None,
+            "surcharge_ct": series.surcharge_ct if series else None,
+            "intervals": len(series.intervals) if series else 0,
+            "horizon_end": horizon.isoformat() if horizon else None,
+            "window_ct": self._window_price_ct(series, now),
+            "evening_ct": mean_price_ct(series, zone[0], zone[1]) if (series and zone) else None,
+            "reason": self._price_refusal_logged,
+        }
+
     def next_high_price_window(self) -> tuple[datetime, datetime] | None:
         """The next high-price period from now, for the sensor."""
         return self._high_price_window(dt_util.now())
+
+    def _window_start_datetime(self, now: datetime) -> datetime:
+        """The start of the configured window that is running or comes next.
+
+        The counterpart of :meth:`_window_end_datetime`, and deliberately
+        without its ad-hoc override: this is about the window the clock owns.
+        """
+        start, _ = self._window_times()
+        start_dt = now.replace(hour=start.hour, minute=start.minute, second=0, microsecond=0)
+        if (start.hour, start.minute) < (now.hour, now.minute):
+            start_dt += timedelta(days=1)
+        return start_dt
 
     def _window_end_datetime(self, now: datetime) -> datetime:
         """Return the end of the window that is running or comes next, at minute resolution.
@@ -640,6 +828,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         fall-back, where the end minute occurs twice; ``_plan_charge_power``
         guards the resulting near-zero remainder.
         """
+        if self._adhoc_until is not None:
+            # An ad-hoc window ends when it was told to, not when the configured
+            # one would. Everything that asks "how long has this window left" -
+            # the charge power plan above all - has to get that answer.
+            return self._adhoc_until
         _, end = self._window_times()
         end_dt = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
         if (end.hour, end.minute) < (now.hour, now.minute):
@@ -906,6 +1099,68 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         return [sums[hour] / counts[hour] if counts[hour] else avg_kw for hour in range(24)]
 
+    async def _feed_in_peaks_by_hour(self) -> list[float] | None:
+        """The highest feed-in power seen in each hour of the day, in W, or None.
+
+        The reality check for the curtailment model. A feed-in curve that sits
+        flat on the same number for hours is a curve against a cap, and where it
+        sits is where the cap is - which is the one thing the model cannot tell
+        you, because it is the number the model was given.
+
+        Not the same call as the house load profile: that one asks for
+        ``change``, which only exists for a total/total_increasing meter. A
+        power sensor is a ``measurement``, so it has ``max`` and no ``change``
+        at all, and asking for both in one call gets neither.
+        """
+        entity_id = self.config.get(CONF_CURTAILMENT_FEED_IN_ENTITY)
+        if not entity_id:
+            return None
+        now = dt_util.utcnow()
+        if self._feed_in_peak_cache is not None:
+            cached_at, cached = self._feed_in_peak_cache
+            if (now - cached_at).total_seconds() < CURTAILMENT_PEAK_CACHE_S:
+                return cached
+        peaks = await self._learn_feed_in_peaks(str(entity_id))
+        if peaks is not None:
+            self._feed_in_peak_cache = (now, peaks)
+        return peaks
+
+    async def _learn_feed_in_peaks(self, entity_id: str) -> list[float] | None:
+        """Read the hourly maxima of a feed-in power sensor over 14 days."""
+        if DATA_INSTANCE not in self.hass.data:
+            _LOGGER.debug("Recorder is not loaded; cannot read the feed-in peaks")
+            return None
+        # Imported here so the integration never depends on the recorder being present
+        from homeassistant.components.recorder.statistics import statistics_during_period
+
+        start = (dt_util.utcnow() - timedelta(days=CURTAILMENT_PEAK_DAYS)).replace(
+            minute=0, second=0, microsecond=0
+        )
+        try:
+            rows = await get_instance(self.hass).async_add_executor_job(
+                lambda: statistics_during_period(
+                    self.hass, start, None, {entity_id}, "hour", None, {"max"}
+                )
+            )
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Reading feed-in statistics for %s failed: %s", entity_id, err)
+            return None
+        unit = _unit_of(self.hass.states.get(entity_id))
+        factor = 1000.0 if unit in ("kw", "kilowatt", "kilowatts") else 1.0
+        peaks = [0.0] * 24
+        seen = False
+        for row in rows.get(entity_id, []):
+            start_ts = row.get("start")
+            value = row.get("max")
+            if not isinstance(start_ts, (int, float)) or not isinstance(value, (int, float)):
+                continue
+            hour = dt_util.as_local(dt_util.utc_from_timestamp(start_ts)).hour
+            # A negative reading is this meter pointing the other way; the peak
+            # of an export sensor is never below zero.
+            peaks[hour] = max(peaks[hour], float(value) * factor)
+            seen = True
+        return peaks if seen else None
+
     async def _build_plan_input(
         self, forecast_kwh: float, forecast_available: bool
     ) -> tuple[PlanInput, datetime]:
@@ -942,6 +1197,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 SUN_ENTITY_ID,
             )
         current_soc = self._current_battery_soc()
+        # Plan 012 stage 3: what the window and the period actually cost, when
+        # a price entity says. Both None without one, and the reserve is then
+        # held exactly as before.
+        series = self._price_series()
+        high_price_window = self._high_price_window(window_end)
         return (
             PlanInput(
                 capacity_kwh=capacity,
@@ -957,12 +1217,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 house_load_kw_profile=await self._house_load_profile(),
                 reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
                 charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
+                discharge_efficiency=float(
+                    self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)
+                ),
                 prices_ct=self._prices_ct(),
                 # Measured from the window end: the evening the battery has to
                 # reach is the one on the solar day this window is planning for.
-                high_price_window=self._high_price_window(window_end),
+                high_price_window=high_price_window,
                 reserve_margin_pct=float(
                     self.config.get(CONF_HIGH_PRICE_MARGIN_PCT, DEFAULT_HIGH_PRICE_MARGIN_PCT)
+                ),
+                window_price_ct=self._window_price_ct(series, now),
+                evening_price_ct=(
+                    mean_price_ct(series, high_price_window[0], high_price_window[1])
+                    if high_price_window
+                    else None
                 ),
             ),
             pv_crossover,
@@ -1002,6 +1271,180 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             floor,
         )
         return floor
+
+    async def async_evening_outlook(self) -> EveningOutlook | None:
+        """Will the battery still carry the high-price period this evening?
+
+        The night plan buys for the evening in advance; this is the question
+        the day *after* a forecast that was too good - snow on the panels, say,
+        with nobody having set the snow nights. By mid-afternoon it is already
+        decidable, and there is still time to do something about it.
+
+        ``None`` when there is no high-price period configured, when the
+        battery cannot be read, or when the configuration makes the arithmetic
+        impossible. None of those are reasons to act.
+        """
+        now = dt_util.now()
+        zone = self._high_price_window(now)
+        if zone is None:
+            return None
+        if self.is_active and self._adhoc_reason != ADHOC_REASON_EVENING_RESCUE:
+            # A window owns the inverter and plans for the evening itself. The
+            # rescue's own window is the exception: it has to keep seeing the
+            # shortfall, or holding would lock out the buying that follows it.
+            return None
+        if self._window_start_datetime(now) < zone[0]:
+            # A charge window runs before the period starts - once the period
+            # of the day has begun, the next one is on the other side of a
+            # night this projection knows nothing about. Carrying the house
+            # across it would invent a shortfall every evening.
+            _LOGGER.debug(
+                "The next high-price period at %s is behind a charge window - no outlook",
+                zone[0].isoformat(timespec="minutes"),
+            )
+            return None
+        current_soc = self._current_battery_soc()
+        if current_soc is None:
+            return None
+        sunrise, sunset = self._sun_times(now, now)
+        forecast_kwh, forecast_available = self._parse_forecast_energy(
+            self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)
+            or self.config.get(CONF_PV_FORECAST_ENTITY)
+        )
+        try:
+            return evening_outlook(
+                now=now,
+                capacity_kwh=float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)),
+                current_soc=current_soc,
+                user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
+                user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
+                house_load_kw_profile=await self._house_load_profile(),
+                zone_start=zone[0],
+                zone_end=zone[1],
+                margin_pct=float(
+                    self.config.get(CONF_HIGH_PRICE_MARGIN_PCT, DEFAULT_HIGH_PRICE_MARGIN_PCT)
+                ),
+                charge_efficiency=float(
+                    self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)
+                ),
+                discharge_efficiency=float(
+                    self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)
+                ),
+                sunrise=sunrise,
+                sunset=sunset,
+                forecast_kwh_today=forecast_kwh,
+                forecast_available=forecast_available,
+            )
+        except (ValueError, TypeError) as err:
+            _LOGGER.error("Could not work out the evening outlook: %s", err)
+            return None
+
+    async def async_curtailment_outlook(self) -> CurtailmentOutlook | None:
+        """How much of today's PV a permanent feed-in cap will throw away.
+
+        Display only. Nothing is written from this in 3.7.0: the model and the
+        observation have to be held against each other for a season first, and
+        the sensor's ``model_vs_measured_pct`` is what does the holding.
+
+        ``None`` without a cap configured, and - deliberately - ``None`` without
+        an explicit *today* forecast entity. ``_get_active_forecast_entity``
+        falls back to tomorrow's entity when today's is unset, which for a
+        morning decision is quietly the wrong day. Better no answer than an
+        answer about the wrong day.
+        """
+        limit_w = self.config.get(CONF_CURTAILMENT_LIMIT_W)
+        today_entity = self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)
+        if not limit_w or not today_entity:
+            return None
+        now = dt_util.now()
+        sunrise, sunset = self._sun_times(now, now)
+        forecast_kwh, forecast_available = self._parse_forecast_energy(today_entity)
+        if not forecast_available:
+            return None
+        reserve_floor = 0.0
+        try:
+            plan_input, _ = await self._build_plan_input(forecast_kwh, forecast_available)
+            reserve_floor = evening_reserve_soc(plan_input)
+        except (ValueError, TypeError) as err:
+            # No reserve is a weaker floor, not a wrong one: the user minimum
+            # still holds, and the sensor writes nothing either way.
+            _LOGGER.debug("No evening reserve for the curtailment outlook: %s", err)
+        try:
+            return curtailment_outlook(
+                capacity_kwh=float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)),
+                user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
+                user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
+                house_load_kw_profile=await self._house_load_profile(),
+                sunrise=sunrise,
+                sunset=sunset,
+                forecast_kwh_today=forecast_kwh,
+                forecast_available=forecast_available,
+                error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
+                limit_w=float(limit_w),
+                charge_efficiency=float(
+                    self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)
+                ),
+                evening_reserve_soc_pct=reserve_floor,
+            )
+        except (ValueError, TypeError) as err:
+            _LOGGER.error("Could not work out the curtailment outlook: %s", err)
+            return None
+
+    async def curtailment_attributes(self) -> dict[str, Any]:
+        """What the curtailment sensor shows beside its state.
+
+        The measured half is the point of the whole release: the model says how
+        much should be spilling, the recorder says how much actually was, and
+        the ratio between them is the number that decides whether throttling is
+        worth building at all.
+        """
+        outlook = self.last_curtailment_outlook
+        peaks = await self._feed_in_peaks_by_hour()
+        limit_w = self.config.get(CONF_CURTAILMENT_LIMIT_W)
+        attrs: dict[str, Any] = {
+            "limit_w": float(limit_w) if limit_w else None,
+            # Plan 014 stage 2 writes the cap on this entity and nothing else
+            # can cap DC-side charging. Saying so is better than a feature that
+            # silently does nothing.
+            "control_entity_configured": bool(
+                self.config.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY)
+            ),
+            "forecast_today_configured": bool(self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)),
+        }
+        if outlook is None:
+            return attrs
+        attrs.update(
+            {
+                "binding_start": (
+                    outlook.binding_start.isoformat() if outlook.binding_start else None
+                ),
+                "binding_end": (
+                    outlook.binding_end.isoformat() if outlook.binding_end else None
+                ),
+                "room_needed_kwh": round(outlook.room_needed_kwh, 2),
+                "morning_target_soc": outlook.morning_target_soc,
+                "clamped_by": outlook.clamped_by,
+                "forecast_available": outlook.forecast_available,
+            }
+        )
+        if peaks is not None:
+            measured_overflow = sum(
+                max(0.0, peak - float(limit_w or 0.0)) for peak in peaks
+            )
+            attrs["measured_peak_w_by_hour"] = {
+                str(hour): round(peak) for hour, peak in enumerate(peaks) if peak > 0
+            }
+            attrs["measured_peak_w"] = round(max(peaks))
+            attrs["measured_hours_at_the_cap"] = sum(
+                1 for peak in peaks if limit_w and peak >= float(limit_w) * 0.98
+            )
+            if outlook.overflow_kwh > 0:
+                # Both sides are powers above the cap, so the ratio is a like
+                # for like comparison of shape, not of energy.
+                attrs["model_vs_measured_pct"] = round(
+                    measured_overflow / (outlook.overflow_kwh * 1000.0) * 100.0, 1
+                )
+        return attrs
 
     async def preview_plan(self) -> tuple[PlanResult, PlanInput] | None:
         """Run the planner on the current inputs and change nothing.
@@ -1088,6 +1531,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # much of that this window has to buy because the sun will not.
             "evening_reserve_kwh": round(plan.evening_reserve_kwh, 2),
             "evening_shortfall_kwh": round(plan.evening_shortfall_kwh, 2),
+            "evening_reserve_dropped": plan.evening_reserve_dropped,
             "planned_charge_power_w": self.planned_charge_power_w,
         }
 
@@ -1926,8 +2370,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if domain not in ("number", "input_number"):
             _LOGGER.warning("Absolute charge power entity %s has unsupported domain %s", entity_id, domain)
             return
+        state = self.hass.states.get(entity_id)
+        unit = _unit_of(state)
+        scale = 1000.0 if unit in ("kw", "kilowatt", "kilowatts") else 1.0
+
         if self._original_absolute_charge_power is None:
-            state = self.hass.states.get(entity_id)
             current = (
                 _as_float(state.state)
                 if state and state.state not in ("unknown", "unavailable")
@@ -1940,29 +2387,51 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     entity_id,
                 )
                 return
+            written = self._absolute_charge_power_written_w
+            if (
+                written is not None
+                and abs(current * scale - written) <= PLANNED_POWER_WRITE_THRESHOLD_W
+            ):
+                # This reading is our own limit, not the user's setting. Adopting
+                # it would make the window-end restore put our value back as if
+                # it were theirs, and the real one would be gone for good. Better
+                # to leave the limit off than to lose what it was.
+                _LOGGER.warning(
+                    "%s still reads back our own limit (%.3f) - not capturing it as the "
+                    "original value",
+                    entity_id,
+                    current,
+                )
+                return
             self._original_absolute_charge_power = current
             _LOGGER.info("Stored original absolute charge power: %.3f", current)
             self._persist_state()
-        value = max_power
-        state = self.hass.states.get(entity_id)
-        unit = _unit_of(state)
-        if unit in ("kw", "kilowatt", "kilowatts"):
-            value = value / 1000.0
+        value = max_power / scale
         try:
             await self.hass.services.async_call(
                 domain,
                 service,
                 {"entity_id": entity_id, "value": value},
             )
+            self._absolute_charge_power_written_w = max_power
             _LOGGER.info("Set absolute charge power to %.3f (%s)", value, unit or "unitless")
         except Exception as e:
             _LOGGER.error("Error setting absolute charge power: %s", e, exc_info=True)
 
-    async def _reset_absolute_charge_power(self) -> bool:
+    async def _reset_absolute_charge_power(self, *, forget: bool = True) -> bool:
         """Restore the absolute charge power captured before the first write.
 
         Returns True when nothing is left to restore; on failure the original
         value is kept so a retry can still put it back.
+
+        ``forget=False`` restores the value but keeps remembering it. That is
+        for the restore that happens *while the window is still open* - the one
+        on reaching the charge target. The service call is not blocking, and on
+        an inverter whose limit register falls back to factory on its own the
+        entity can still be reading our value moments later. A later charge pass
+        would then capture that as "the user's setting" and the real one would be
+        lost at the window end. Keeping it costs one redundant write; dropping it
+        costs the setting.
         """
         if self._original_absolute_charge_power is None:
             return True
@@ -1971,6 +2440,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not entity_id or domain not in ("number", "input_number"):
             # Entity no longer configured or unusable: nothing we can restore
             self._original_absolute_charge_power = None
+            self._absolute_charge_power_written_w = None
             return True
         value = self._original_absolute_charge_power
         state = self.hass.states.get(entity_id)
@@ -1985,7 +2455,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Error resetting absolute charge power: %s", e, exc_info=True)
             return False
         _LOGGER.info("Reset absolute charge power to original value: %.3f (%s)", value, unit or "unitless")
-        self._original_absolute_charge_power = None
+        self._absolute_charge_power_written_w = None
+        if forget:
+            self._original_absolute_charge_power = None
+            self._persist_state()
         return True
 
     def get_auto_efficiency_data(self) -> dict[str, Any]:
@@ -2906,12 +3379,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             start_time_obj, end_time_obj = self._window_times()
             in_window = self._is_time_between(now_dt.time(), start_time_obj, end_time_obj)
 
+            if self._adhoc_until is not None and (in_window or now_dt >= self._adhoc_until):
+                # The configured window wins over an ad-hoc one: it has the
+                # tariff contract behind it. Otherwise the ad-hoc window has
+                # simply reached the end it was given.
+                _LOGGER.info(
+                    "Ending the ad-hoc window (%s): %s",
+                    self._adhoc_reason,
+                    "the configured window is starting" if in_window else "it is over",
+                )
+                await self._on_window_end(now_dt)
+
             # Handle state transitions
             if in_window and not self.is_active:
                 # We're in the window but not active - start it
                 _LOGGER.info("Currently in active window but not active - starting")
                 await self._on_window_start(now_dt)
-            elif not in_window and self.is_active:
+            elif not in_window and self.is_active and self._adhoc_until is None:
                 # We're active but no longer in the window - reset
                 _LOGGER.info("No longer in active window but still active - resetting")
                 await self._on_window_end(now_dt)
@@ -2926,8 +3410,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "was not running at the window end) - resetting them now"
                 )
                 await self._reset_settings()
-            elif in_window and self.is_active:
-                # We're already active and in window - ensure listeners are set up (e.g., after restart)
+            elif self.is_active:
+                # In the configured window, or in an ad-hoc one that is still
+                # running - ensure listeners are set up (e.g., after restart)
                 if not self._battery_soc_listener:
                     self._setup_battery_soc_listener()
                 if not self._inverter_min_soc_listener:
@@ -3043,6 +3528,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     preserved_soc,
                     f"{self.original_min_soc:.1f}%" if self.original_min_soc is not None else "not captured",
                 )
+                return
+
+            if self._adhoc_target_soc is not None:
+                # An ad-hoc window was opened with a target rather than with a
+                # forecast to derive one from.
+                adhoc_soc = max(user_min_soc, min(self._adhoc_target_soc, user_max_soc))
+                self.initial_calculated_soc = adhoc_soc
+                self.minimum_calculated_soc = adhoc_soc
+                self.calculated_soc = adhoc_soc
+                _LOGGER.info(
+                    "Ad-hoc window (%s): target %.1f%% until %s",
+                    self._adhoc_reason,
+                    adhoc_soc,
+                    self._adhoc_until.isoformat(timespec="minutes") if self._adhoc_until else "?",
+                )
+                self._persist_state()
                 return
 
             # Otherwise, calculate normally from forecast
@@ -3161,6 +3662,179 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.operation_mode = mode
         finally:
             self._switching_mode = False
+
+    async def _maybe_rescue_the_evening(self) -> None:
+        """Act on a shortfall the outlook has already worked out (plan 013).
+
+        Two stages, and what separates them is what they cost:
+
+        1. **Block the discharge.** The house then runs from the sun, and from
+           the grid at the day tariff when the sun is not enough - rather than
+           from a battery that is needed in three hours at the peak tariff.
+           Nothing is spent that the same evening does not pay back, so this
+           runs by itself.
+        2. **Buy the rest.** Only with the switch on, and only once the period
+           is close enough that the forecast hardly turns any more: bought too
+           early is bought for a sun that might still have come.
+
+        The stage only ever rises within a day. A poll that sees the shortfall
+        close again does not release the block - the battery is still the
+        cheapest place for that energy to be, and the window ends when the
+        period starts anyway.
+        """
+        outlook = self.last_evening_outlook
+        if outlook is None or outlook.missing_kwh <= 0:
+            return
+        if not self.is_enabled or self._is_backup_active():
+            return
+        current_soc = self._current_battery_soc()
+        if current_soc is None:
+            return
+
+        now = dt_util.now()
+        close_enough = (outlook.zone_start - now) <= timedelta(hours=EVENING_RESCUE_CHARGE_LEAD_H)
+        stage = 2 if (self.evening_rescue_charge and close_enough) else 1
+        if stage <= self._rescue_stage:
+            return
+
+        if stage == 1:
+            _LOGGER.info(
+                "The battery is %.1f kWh short for the %s period - holding what is in it",
+                outlook.missing_kwh,
+                outlook.zone_start.strftime("%H:%M"),
+            )
+        else:
+            _LOGGER.info(
+                "The battery is %.1f kWh short for the %s period - charging to %.1f%% from the "
+                "grid at the day tariff, which is cheaper than the period itself",
+                outlook.missing_kwh,
+                outlook.zone_start.strftime("%H:%M"),
+                outlook.required_soc,
+            )
+        if await self.async_open_adhoc_window(
+            target_soc=outlook.required_soc if stage == 2 else current_soc,
+            until=outlook.zone_start,
+            reason=ADHOC_REASON_EVENING_RESCUE,
+            allow_grid_charge=stage == 2,
+        ):
+            self._rescue_stage = stage
+
+    async def async_charge_to(self, target_soc: float, duration: timedelta) -> bool:
+        """Charge to a level from the grid, for the ``charge_to`` action.
+
+        An ad-hoc window with grid charging allowed, so the house connection
+        limit, the capture of the inverter's own settings and the restore when
+        it ends all apply exactly as they do at night.
+        """
+        return await self.async_open_adhoc_window(
+            target_soc=target_soc,
+            until=dt_util.now() + duration,
+            reason=ADHOC_REASON_SERVICE,
+            allow_grid_charge=True,
+        )
+
+    async def async_block_discharge(self, duration: timedelta) -> bool:
+        """Hold what is in the battery, for the ``block_discharge`` action.
+
+        The same thing the evening rescue does by itself, on request: an ad-hoc
+        window at the level the battery is at now, with no buying. The house
+        runs from the sun or the grid until it ends.
+        """
+        current_soc = self._current_battery_soc()
+        if current_soc is None:
+            _LOGGER.warning("Cannot block the discharge - the battery level cannot be read")
+            return False
+        return await self.async_open_adhoc_window(
+            target_soc=current_soc,
+            until=dt_util.now() + duration,
+            reason=ADHOC_REASON_SERVICE,
+            allow_grid_charge=False,
+        )
+
+    async def async_allow_discharge(self) -> bool:
+        """End an ad-hoc window early, for the ``allow_discharge`` action.
+
+        Only an ad-hoc one: a configured window is the schedule doing its job,
+        and ending that is what ``reset_inverter`` is for.
+        """
+        if self._adhoc_until is None:
+            _LOGGER.info("No ad-hoc window is running - nothing to release")
+            return False
+        _LOGGER.info("Releasing the ad-hoc window (%s) on request", self._adhoc_reason)
+        await self._on_window_end(dt_util.now())
+        return not self._pending_reset
+
+    async def async_open_adhoc_window(
+        self,
+        *,
+        target_soc: float,
+        until: datetime,
+        reason: str,
+        allow_grid_charge: bool,
+    ) -> bool:
+        """Open a window that the clock did not ask for (plan 013).
+
+        It is a window like any other - same capture of the inverter's own
+        settings, same restore at the end, same retry ladder, same backup
+        interlock, same house connection limit, same verification. Only its
+        start comes from here and its end from ``until`` rather than from the
+        configured times.
+
+        Refused while a configured window runs (that one has the tariff behind
+        it), while the integration is off, during backup mode, and for an end
+        that is already past. ``allow_grid_charge=False`` holds what is in the
+        battery without buying more.
+        """
+        now = dt_util.now()
+        if until <= now:
+            _LOGGER.warning("Ad-hoc window (%s) refused: %s is not in the future", reason, until)
+            return False
+        if not self.is_enabled:
+            _LOGGER.info("Ad-hoc window (%s) refused: the integration is switched off", reason)
+            return False
+        if self._is_backup_active():
+            _LOGGER.info("Ad-hoc window (%s) refused: backup mode is active", reason)
+            return False
+        if self.is_active and self._adhoc_until is None:
+            _LOGGER.info(
+                "Ad-hoc window (%s) refused: the configured window is running", reason
+            )
+            return False
+        if self._adhoc_until is not None:
+            _LOGGER.info(
+                "Ad-hoc window (%s) already running until %s - extending it to %s",
+                self._adhoc_reason,
+                self._adhoc_until.isoformat(timespec="minutes"),
+                until.isoformat(timespec="minutes"),
+            )
+            self._adhoc_until = until
+            self._adhoc_target_soc = target_soc
+            self._adhoc_allow_grid_charge = allow_grid_charge
+            self._adhoc_reason = reason
+            self._persist_state()
+            await self._calculate_initial_soc()
+            return True
+
+        self._adhoc_until = until
+        self._adhoc_reason = reason
+        self._adhoc_target_soc = target_soc
+        self._adhoc_allow_grid_charge = allow_grid_charge
+        _LOGGER.info(
+            "Opening an ad-hoc window (%s) to %.1f%% until %s, grid charging %s",
+            reason,
+            target_soc,
+            until.isoformat(timespec="minutes"),
+            "allowed" if allow_grid_charge else "not allowed",
+        )
+        await self._on_window_start(now)
+        if not self.is_active:
+            # _on_window_start has its own refusals (skip next, date range).
+            self._adhoc_until = None
+            self._adhoc_reason = None
+            self._adhoc_target_soc = None
+            self._adhoc_allow_grid_charge = False
+            return False
+        return True
 
     async def async_reset_inverter(self) -> bool:
         """Put the inverter back to the settings captured before the window.
@@ -3319,6 +3993,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._window_floor_soc = None
             self._window_started_at = None
             self._discharge_block_logged = None
+            # Whatever this window was, the next one is decided from scratch
+            self._adhoc_until = None
+            self._adhoc_reason = None
+            self._adhoc_target_soc = None
+            self._adhoc_allow_grid_charge = False
+            self._rescue_stage = 0
             # A failed reset is retried until the inverter is back at its
             # original settings; original_min_soc is kept for that (F3).
             # _reset_settings marks and schedules that itself.
@@ -3549,6 +4229,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "operation_mode": self.operation_mode,
             "skip_next": self.skip_next,
         }
+        # Worked out before every early return below: the question "will the
+        # battery carry this evening" is a daytime one, and by then no window
+        # is running (plan 013).
+        self.last_evening_outlook = (
+            await self.async_evening_outlook() if self.is_enabled else None
+        )
+        self.last_curtailment_outlook = (
+            await self.async_curtailment_outlook() if self.is_enabled else None
+        )
+        self.last_curtailment_attributes = (
+            await self.curtailment_attributes() if self.is_enabled else {}
+        )
+        await self._maybe_rescue_the_evening()
         if not self.is_enabled or not self.is_active:
             return inactive_data
         if self._is_backup_active():
@@ -3567,7 +4260,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # _is_time_between is inclusive at both ends, so a poll in the end minute
         # leaves the window to the trigger.
         start, end = self._window_times()
-        if not self._is_time_between(dt_util.now().time(), start, end):
+        if self._adhoc_until is not None:
+            # An ad-hoc window runs outside the configured times by definition,
+            # so the clock check below would end it at once. It ends by its own.
+            if dt_util.now() >= self._adhoc_until:
+                _LOGGER.info(
+                    "The ad-hoc window (%s) is over; ending it from the polling update",
+                    self._adhoc_reason,
+                )
+                await self._on_window_end(dt_util.now())
+                return inactive_data
+        elif not self._is_time_between(dt_util.now().time(), start, end):
             _LOGGER.warning(
                 "Window end was missed (now outside %s-%s); ending window from polling update",
                 start,
@@ -3821,6 +4524,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
         current_soc = None
         should_skip_charging = False
+
+        if self._adhoc_until is not None and not self._adhoc_allow_grid_charge:
+            # An ad-hoc window that may only hold what is there, not buy more.
+            # The floor still goes on the inverter; the grid switch does not.
+            _LOGGER.debug(
+                "Ad-hoc window (%s) does not allow grid charging", self._adhoc_reason
+            )
+            should_skip_charging = True
 
         if battery_soc_entity:
             state = self.hass.states.get(battery_soc_entity)
@@ -4133,7 +4844,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.warning("Cannot stop grid charge - entity state unavailable")
             except Exception as e:
                 _LOGGER.error("Error stopping grid charge: %s", e, exc_info=True)
-        await self._reset_absolute_charge_power()
+        # The window is still open here - reaching the target does not end it -
+        # so the captured original has to survive this restore.
+        await self._reset_absolute_charge_power(forget=False)
         self._finalize_auto_test()
         if self.is_active and self._grid_budget() is not None:
             # The house connection limit stays on the inverter until the window

@@ -5,6 +5,171 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] - 2026-09-20
+
+### Added
+
+- **A permanent feed-in cap is now visible, and what it costs is a number.** A 60 % or 70 % EEG
+  limit at the grid connection point is not something the grid operator switches on: it is always
+  in force and only *bites* around midday, when production exceeds it. So there is no window to
+  learn or configure — the hours it bites in follow from the forecast, the sun times and the load
+  profile, and on a dull day the answer is correctly "it never bites".
+  `sensor.…_curtailment_outlook` reports what today's cap throws away because the battery was
+  already full.
+- **The PV power curve, as the exact derivative of the energy curve.** 3.4.0 added the clear-sky
+  bell as an *energy* fraction; a cap is about *power*, so the same model had to be readable the
+  other way round. A property test integrates one and compares it to the other on every run: if
+  they ever drift apart, a display built on one would contradict a decision built on the other,
+  and nothing else in the suite would notice.
+- **A reality check, not just a model.** With a feed-in power sensor configured, the hourly maxima
+  of the last 14 days are read from the recorder and shown beside the modelled overflow as
+  `model_vs_measured_pct`. This is the number the whole release exists to produce.
+
+### Fixed
+
+- **The absolute charge power limit could overwrite the user's own setting, permanently.** Nothing
+  to do with curtailment — it was already reachable through the night window. Reaching the charge
+  target restores the limit *while the window is still open*; the service call is not blocking,
+  and an inverter whose limit register falls back on its own can still be reading our value
+  moments later. The next charge pass then captured that as "the user's setting", and the window
+  end put our own number back as if it were theirs. The mid-window restore now keeps remembering
+  the captured value, and a capture that reads back exactly what we last wrote refuses to take it.
+
+### Notes
+
+**Nothing is throttled from any of this.** Stage two of plan 014 — capping the morning charge so
+the battery still has room at midday — is deliberately not in this release. The model and the
+observation currently disagree: at 100 kWh across a summer day the modelled peak is about 9.8 kW,
+so a 60 % cap on anything above ~16 kWp would never bite, and yet it demonstrably does. Until that
+is settled, throttling would fire on an unknown share of days that did not need it, and such a day
+costs twice — the battery is short in the evening, and the evening rescue buys it back from the
+grid.
+
+Both new settings are optional and the feature is off without them. It also stays off unless a
+PV forecast entity for **today** is configured: the forecast selection otherwise falls back to
+tomorrow's entity, which for a morning decision is quietly the wrong day.
+
+## [3.6.0] - 2026-09-20
+
+### Added
+
+- **A price entity can be read, and the integration does not need to know which one it is.**
+  Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them all publish
+  tomorrow's hourly prices under their own attribute name with their own keys. Rather than a
+  table of those names — which could not be checked against the real integrations and would
+  quietly match nothing where it was wrong — the series is recognised by its **shape**: a list of
+  items carrying a timestamp and a number, in order, evenly spaced, with values that could be a
+  price. `sensor.…_price_signal` reports what was matched, which unit was resolved and which
+  surcharge was applied, so a wrong pick is visible rather than silent.
+- **Surcharge fields**, and they are load-bearing. An exchange price is not a consumer price:
+  Tibber publishes the full price, the others usually publish the market alone. 6 ct and 32 ct
+  are both plausible numbers, and the evening reserve decision comes out the *other way round* on
+  the wrong one. A second field covers the reduced §14a grid fee inside the cheap window.
+- **Nothing is ever guessed.** No unit from the entity, the attribute name or the setting means
+  the price entity is refused and the fixed prices decide — a guess there is a factor of a
+  hundred, or a thousand for EUR/MWh. Cents the size of euros, an exchange price with no
+  surcharge configured, a stale series, a gap in the middle: all refused, all falling back to
+  exactly the behaviour of an installation with no price entity. A test asserts that contract
+  once per way it can go wrong.
+
+- **The evening reserve became a decision instead of an assumption.** It used to hold energy back
+  whenever two times were configured, whatever the evening actually cost. A kilowatt-hour put
+  aside in the window passes through the inverter twice, so holding it costs `window price ÷
+  efficiency`; an evening clearly cheaper than that (by more than 2 ct/kWh, so marginal
+  differences move nothing) is an evening to buy rather than to save for. One gate, and because
+  the morning-discharge floor reads the same reserve, it frees that too. Unknown prices hold the
+  reserve exactly as before.
+
+Without a price entity configured, none of this changes anything: the reserve is held as it was
+in 3.2.0.
+
+## [3.5.0] - 2026-09-20
+
+### Added
+
+- **The evening rescue acts now, not just reports.** When the outlook says the battery will not
+  carry the high-price period, the discharge is blocked automatically — the house runs from the
+  sun, and from the grid at the day tariff when the sun is not enough, rather than from a battery
+  needed in three hours at the peak tariff. With the new
+  `switch.…_evening_rescue_charge` on, the rest is bought from the grid in the last two hours
+  before the period, when the forecast hardly turns any more. At the period's start the block is
+  released and the inverter goes back to what it was. The switch is off by default: watch the
+  outlook sensor for a season before letting it spend money.
+- **Three more actions, now that the ad-hoc window exists to carry them.** `charge_to` charges
+  to a level from the grid for a while; `block_discharge` holds what is in the battery without
+  buying; `allow_discharge` ends either early. All three run as ad-hoc windows, so the house
+  connection limit, the capture of your inverter's settings and the restore afterwards apply
+  exactly as they do at night. This completes stage 1 of the masterplan, whose remaining actions
+  had been waiting for precisely this lifecycle.
+- **The ad-hoc window.** Both stages run as a window like any other — same capture of the
+  inverter's settings, same restore, same retry ladder, same backup interlock, same house
+  connection limit, same verification — whose start comes from a call rather than from the clock.
+  A configured window always wins over it. The deadline is persisted, because a restart in the
+  middle of a rescue must still release the block when the expensive hours start.
+
+### Fixed
+
+- **Holding locked out the buying that should follow it.** Stage one opens a window, and an
+  active window switched the outlook off entirely — so from the next poll on there was no
+  shortfall to see and stage two could never fire. The rescue's own window is now the one
+  exception to that rule. Caught by writing the test through the real update path; the ones
+  that call the rescue directly with an outlook in hand would never have noticed.
+- **The outlook projected across the night charge.** After the day's period had begun, the next
+  one is tomorrow's, while the sun times and the forecast were still today's: 23 hours of house
+  load against a sliver of sun, a projected level of zero and an invented shortfall every evening
+  and all night. And between the two sits the night charge, whose whole job is to buy for that
+  evening. The outlook is now only made while it can still be acted on. Found by Codex on the
+  pull request.
+
+## [3.4.0] - 2026-09-20
+
+### Added
+
+- **`sensor.…_evening_outlook` — will the battery still carry the expensive hours tonight?**
+  The night plan buys for the evening in advance. This answers the question the day *after* a
+  forecast that was too good — snow on the panels with nobody having set the snow nights — while
+  there is still time to do something about it. The state is the shortfall in kWh, normally 0, so
+  a notification can hang off it. Attributes carry the whole projection: what the period needs,
+  what the battery is heading for, what the sun is still expected to deliver and what the house
+  will draw before then.
+- The sun's remaining share of the day is modelled as a clear-sky bell (`sin(pi*x)` across the
+  solar day) rather than linearly. At four in the afternoon a linear model still promises half
+  the day's yield; that is the one error that matters here, because it would let the battery walk
+  into the evening short while the projection says it is fine.
+
+The outlook is only made while it can still be acted on: not while a charge window runs (that
+window plans for the evening itself) and not once the day's period has begun, because the next
+one lies on the far side of a night charge the projection knows nothing about. Without that
+bound it integrated 23 hours of house load against a sliver of today's sun and invented a
+shortfall every evening — found by Codex on the pull request.
+
+This release is the read-only half and is useful on its own: it tells you, in the afternoon,
+that tonight will be short. It changes nothing about what the integration writes. The
+interventions — blocking the discharge during the day, topping up from the grid before the period
+starts, with the top-up behind its own switch — follow in 3.5.0, designed in
+[`plans/013`](plans/013-abendrettung-und-adhoc-fenster.md).
+
+## [3.3.1] - 2026-09-20
+
+### Fixed
+
+- **The planner bought too little, every night, in the same direction.** The house load profile
+  and the forecast are measured on the house side of the inverter; energy coming *out* of the
+  battery is not. The bridge energy and the evening reserve were converted one to one all the
+  same, as if discharging were free. To deliver 4 kWh to the house on a winter evening the
+  battery has to hold roughly 4.2. New setting **Discharge efficiency** (step 4, default 0.95)
+  with the arithmetic behind it; targets rise by about a point on a typical bridge. Raised by
+  Pascal, who named exactly this ("bei den Entladeverlusten könnte man zu knapp agieren")
+  — the code confirmed it: `charge_efficiency` was carried into the planner and then never used
+  by it at all.
+
+### Changed
+
+- The energies in the plan (`bridge_kwh`, `evening_shortfall_kwh`, and the matching sensor
+  attributes) are now stated as what the **battery** has to hold rather than what the house will
+  draw. `evening_reserve_kwh` stays the house draw, so the pair reads as "the evening will take
+  1.5 kWh; the battery has to gain 1.58 tonight to deliver it".
+
 ## [3.3.0] - 2026-09-20
 
 ### Added

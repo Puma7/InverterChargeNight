@@ -119,9 +119,16 @@
           "pv_crossover_delay_min": "Verzögerung bis PV den Verbrauch deckt",
           "bridge_reserve_kwh": "Reserve für die Überbrückung",
           "charge_efficiency": "Ladewirkungsgrad",
+          "discharge_efficiency": "Entladewirkungsgrad",
           "night_price_ct": "Preis im Fenster (optional)",
           "day_price_ct": "Preis außerhalb des Fensters (optional)",
-          "feed_in_price_ct": "Einspeisevergütung (optional)"
+          "feed_in_price_ct": "Einspeisevergütung (optional)",
+          "price_entity": "Strompreis-Entität (optional)",
+          "price_unit": "Worin die Preise angegeben sind",
+          "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
+          "price_surcharge_window_ct": "Zuschlag im Fenster (optional)",
+          "curtailment_limit_w": "Einspeisegrenze (optional)",
+          "curtailment_feed_in_entity": "Einspeiseleistung (optional)"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -136,9 +143,16 @@
           "pv_crossover_delay_min": "Minuten nach Sonnenaufgang, bis der PV-Ertrag den Hausverbrauch übersteigt (Standard 90). Bis dahin überbrückt der Planer mit dem Speicher.",
           "bridge_reserve_kwh": "Sicherheitsreserve in kWh, die zur Überbrückungsenergie addiert wird (Standard 0,5).",
           "charge_efficiency": "Wirkungsgrad vom Netz bis in den Speicher (0,5–1,0, Standard 0,9). Daraus wird die nötige Ladeleistung für die Restzeit des Fensters berechnet.",
+          "discharge_efficiency": "Wie viel von dem, was den Akku verlässt, im Haus ankommt (0,5–1,0, Vorgabe 0,95). Verbrauchsprofil und Prognose werden auf der Hausseite gemessen; Energie aus dem Akku verliert auf dem Weg durch den Wechselrichter ein paar Prozent. Ohne diesen Wert kauft der Planer für Überbrückung und Abendreserve etwas zu wenig — jede Nacht, immer in dieselbe Richtung.",
           "night_price_ct": "Optional: Arbeitspreis im Fenster in ct/kWh. Alle drei Preise setzen oder keinen; der Überbrückungs-Planer entscheidet damit den Konflikt zwischen Überbrücken und PV-Freiraum.",
           "day_price_ct": "Optional: Arbeitspreis außerhalb des Fensters in ct/kWh.",
-          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh."
+          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh.",
+          "price_entity": "Optional: ein Sensor, dessen Attribute die Stundenpreise für heute und morgen tragen — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e und alles, was so geformt ist. Die Integration muss nicht wissen, welche davon es ist; sie erkennt die Reihe an ihrer Form und zeigt am Preissensor, worauf sie getroffen hat. Leer lassen, dann gelten weiter die drei festen Preise oben.",
+          "price_unit": "Auf „automatisch erkennen“ lassen, außer die Entität trägt keine Einheit oder eine falsche. Geraten wird hier nie: Sagt weder die Entität noch der Attributname noch dieses Feld, was die Zahlen bedeuten, wird die Preisentität abgelehnt und es gelten die festen Preise — ein falscher Tipp wäre Faktor hundert.",
+          "price_surcharge_ct": "Was deine Rechnung auf das drauflegt, was die Entität zeigt — Netzentgelt, Umlagen, Steuern, MwSt. Tibber zeigt bereits den Vollpreis, dort bleibt das auf 0. aWATTar, EPEX Spot, Nordpool und ENTSO-e zeigen meist nur die Börse; in Deutschland sind das typisch 20–25 ct/kWh Unterschied. Ein Fehler hier sieht nicht nach einem Fehler aus — 6 ct und 32 ct sind beide plausible Zahlen, und die Abendreserve fällt auf der falschen genau andersherum aus.",
+          "price_surcharge_window_ct": "Dasselbe für die Stunden deines günstigen Fensters — hier sitzt das reduzierte §14a-Netzentgelt. Leer lassen, wenn der Zuschlag rund um die Uhr derselbe ist.",
+          "curtailment_limit_w": "Optional: was deine Anlage höchstens ins Netz geben darf, in Watt — die 60-%- oder 70-%-Begrenzung am Netzverknüpfungspunkt. Trag die Grenze selbst ein, nicht den Prozentsatz: 0,60 × Anlagenleistung in Watt, bei 15 kWp und 60 % also 9000. Leer lassen, wenn du nicht begrenzt bist. Gedrosselt wird davon nichts; es zeigt nur, wie viel Mittagssonne die Grenze wegwirft, weil der Speicher schon voll war.",
+          "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch."
         }
       },
       "reconfigure": {
@@ -259,9 +273,16 @@
           "pv_crossover_delay_min": "Verzögerung bis PV den Verbrauch deckt",
           "bridge_reserve_kwh": "Reserve für die Überbrückung",
           "charge_efficiency": "Ladewirkungsgrad",
+          "discharge_efficiency": "Entladewirkungsgrad",
           "night_price_ct": "Preis im Fenster (optional)",
           "day_price_ct": "Preis außerhalb des Fensters (optional)",
-          "feed_in_price_ct": "Einspeisevergütung (optional)"
+          "feed_in_price_ct": "Einspeisevergütung (optional)",
+          "price_entity": "Strompreis-Entität (optional)",
+          "price_unit": "Worin die Preise angegeben sind",
+          "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
+          "price_surcharge_window_ct": "Zuschlag im Fenster (optional)",
+          "curtailment_limit_w": "Einspeisegrenze (optional)",
+          "curtailment_feed_in_entity": "Einspeiseleistung (optional)"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -276,9 +297,16 @@
           "pv_crossover_delay_min": "Minuten nach Sonnenaufgang, bis der PV-Ertrag den Hausverbrauch übersteigt (Standard 90). Bis dahin überbrückt der Planer mit dem Speicher.",
           "bridge_reserve_kwh": "Sicherheitsreserve in kWh, die zur Überbrückungsenergie addiert wird (Standard 0,5).",
           "charge_efficiency": "Wirkungsgrad vom Netz bis in den Speicher (0,5–1,0, Standard 0,9). Daraus wird die nötige Ladeleistung für die Restzeit des Fensters berechnet.",
+          "discharge_efficiency": "Wie viel von dem, was den Akku verlässt, im Haus ankommt (0,5–1,0, Vorgabe 0,95). Verbrauchsprofil und Prognose werden auf der Hausseite gemessen; Energie aus dem Akku verliert auf dem Weg durch den Wechselrichter ein paar Prozent. Ohne diesen Wert kauft der Planer für Überbrückung und Abendreserve etwas zu wenig — jede Nacht, immer in dieselbe Richtung.",
           "night_price_ct": "Optional: Arbeitspreis im Fenster in ct/kWh. Alle drei Preise setzen oder keinen; der Überbrückungs-Planer entscheidet damit den Konflikt zwischen Überbrücken und PV-Freiraum.",
           "day_price_ct": "Optional: Arbeitspreis außerhalb des Fensters in ct/kWh.",
-          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh."
+          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh.",
+          "price_entity": "Optional: ein Sensor, dessen Attribute die Stundenpreise für heute und morgen tragen — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e und alles, was so geformt ist. Die Integration muss nicht wissen, welche davon es ist; sie erkennt die Reihe an ihrer Form und zeigt am Preissensor, worauf sie getroffen hat. Leer lassen, dann gelten weiter die drei festen Preise oben.",
+          "price_unit": "Auf „automatisch erkennen“ lassen, außer die Entität trägt keine Einheit oder eine falsche. Geraten wird hier nie: Sagt weder die Entität noch der Attributname noch dieses Feld, was die Zahlen bedeuten, wird die Preisentität abgelehnt und es gelten die festen Preise — ein falscher Tipp wäre Faktor hundert.",
+          "price_surcharge_ct": "Was deine Rechnung auf das drauflegt, was die Entität zeigt — Netzentgelt, Umlagen, Steuern, MwSt. Tibber zeigt bereits den Vollpreis, dort bleibt das auf 0. aWATTar, EPEX Spot, Nordpool und ENTSO-e zeigen meist nur die Börse; in Deutschland sind das typisch 20–25 ct/kWh Unterschied. Ein Fehler hier sieht nicht nach einem Fehler aus — 6 ct und 32 ct sind beide plausible Zahlen, und die Abendreserve fällt auf der falschen genau andersherum aus.",
+          "price_surcharge_window_ct": "Dasselbe für die Stunden deines günstigen Fensters — hier sitzt das reduzierte §14a-Netzentgelt. Leer lassen, wenn der Zuschlag rund um die Uhr derselbe ist.",
+          "curtailment_limit_w": "Optional: was deine Anlage höchstens ins Netz geben darf, in Watt — die 60-%- oder 70-%-Begrenzung am Netzverknüpfungspunkt. Trag die Grenze selbst ein, nicht den Prozentsatz: 0,60 × Anlagenleistung in Watt, bei 15 kWp und 60 % also 9000. Leer lassen, wenn du nicht begrenzt bist. Gedrosselt wird davon nichts; es zeigt nur, wie viel Mittagssonne die Grenze wegwirft, weil der Speicher schon voll war.",
+          "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch."
         }
       }
     },
@@ -429,9 +457,16 @@
           "pv_crossover_delay_min": "Verzögerung bis PV den Verbrauch deckt",
           "bridge_reserve_kwh": "Reserve für die Überbrückung",
           "charge_efficiency": "Ladewirkungsgrad",
+          "discharge_efficiency": "Entladewirkungsgrad",
           "night_price_ct": "Preis im Fenster (optional)",
           "day_price_ct": "Preis außerhalb des Fensters (optional)",
-          "feed_in_price_ct": "Einspeisevergütung (optional)"
+          "feed_in_price_ct": "Einspeisevergütung (optional)",
+          "price_entity": "Strompreis-Entität (optional)",
+          "price_unit": "Worin die Preise angegeben sind",
+          "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
+          "price_surcharge_window_ct": "Zuschlag im Fenster (optional)",
+          "curtailment_limit_w": "Einspeisegrenze (optional)",
+          "curtailment_feed_in_entity": "Einspeiseleistung (optional)"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -446,9 +481,16 @@
           "pv_crossover_delay_min": "Minuten nach Sonnenaufgang, bis der PV-Ertrag den Hausverbrauch übersteigt (Standard 90). Bis dahin überbrückt der Planer mit dem Speicher.",
           "bridge_reserve_kwh": "Sicherheitsreserve in kWh, die zur Überbrückungsenergie addiert wird (Standard 0,5).",
           "charge_efficiency": "Wirkungsgrad vom Netz bis in den Speicher (0,5–1,0, Standard 0,9). Daraus wird die nötige Ladeleistung für die Restzeit des Fensters berechnet.",
+          "discharge_efficiency": "Wie viel von dem, was den Akku verlässt, im Haus ankommt (0,5–1,0, Vorgabe 0,95). Verbrauchsprofil und Prognose werden auf der Hausseite gemessen; Energie aus dem Akku verliert auf dem Weg durch den Wechselrichter ein paar Prozent. Ohne diesen Wert kauft der Planer für Überbrückung und Abendreserve etwas zu wenig — jede Nacht, immer in dieselbe Richtung.",
           "night_price_ct": "Optional: Arbeitspreis im Fenster in ct/kWh. Alle drei Preise setzen oder keinen; der Überbrückungs-Planer entscheidet damit den Konflikt zwischen Überbrücken und PV-Freiraum.",
           "day_price_ct": "Optional: Arbeitspreis außerhalb des Fensters in ct/kWh.",
-          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh."
+          "feed_in_price_ct": "Optional: Einspeisevergütung in ct/kWh.",
+          "price_entity": "Optional: ein Sensor, dessen Attribute die Stundenpreise für heute und morgen tragen — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e und alles, was so geformt ist. Die Integration muss nicht wissen, welche davon es ist; sie erkennt die Reihe an ihrer Form und zeigt am Preissensor, worauf sie getroffen hat. Leer lassen, dann gelten weiter die drei festen Preise oben.",
+          "price_unit": "Auf „automatisch erkennen“ lassen, außer die Entität trägt keine Einheit oder eine falsche. Geraten wird hier nie: Sagt weder die Entität noch der Attributname noch dieses Feld, was die Zahlen bedeuten, wird die Preisentität abgelehnt und es gelten die festen Preise — ein falscher Tipp wäre Faktor hundert.",
+          "price_surcharge_ct": "Was deine Rechnung auf das drauflegt, was die Entität zeigt — Netzentgelt, Umlagen, Steuern, MwSt. Tibber zeigt bereits den Vollpreis, dort bleibt das auf 0. aWATTar, EPEX Spot, Nordpool und ENTSO-e zeigen meist nur die Börse; in Deutschland sind das typisch 20–25 ct/kWh Unterschied. Ein Fehler hier sieht nicht nach einem Fehler aus — 6 ct und 32 ct sind beide plausible Zahlen, und die Abendreserve fällt auf der falschen genau andersherum aus.",
+          "price_surcharge_window_ct": "Dasselbe für die Stunden deines günstigen Fensters — hier sitzt das reduzierte §14a-Netzentgelt. Leer lassen, wenn der Zuschlag rund um die Uhr derselbe ist.",
+          "curtailment_limit_w": "Optional: was deine Anlage höchstens ins Netz geben darf, in Watt — die 60-%- oder 70-%-Begrenzung am Netzverknüpfungspunkt. Trag die Grenze selbst ein, nicht den Prozentsatz: 0,60 × Anlagenleistung in Watt, bei 15 kWp und 60 % also 9000. Leer lassen, wenn du nicht begrenzt bist. Gedrosselt wird davon nichts; es zeigt nur, wie viel Mittagssonne die Grenze wegwirft, weil der Speicher schon voll war.",
+          "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch."
         }
       }
     },
@@ -492,6 +534,14 @@
         "auto": "Automatisch (Schalter, sonst Leistungsgrenze, sonst Min-SOC)",
         "off": "Aus (der Speicher darf entladen)"
       }
+    },
+    "price_unit": {
+      "options": {
+        "auto": "Automatisch erkennen",
+        "ct_per_kwh": "Cent pro kWh",
+        "eur_per_kwh": "Euro pro kWh",
+        "eur_per_mwh": "Euro pro MWh"
+      }
     }
   },
   "entity": {
@@ -520,6 +570,15 @@
       },
       "next_high_price_window": {
         "name": "Nächste Hochpreiszeit"
+      },
+      "evening_outlook": {
+        "name": "Abendvorschau"
+      },
+      "price_signal": {
+        "name": "Preissignal"
+      },
+      "curtailment_outlook": {
+        "name": "Abregelungsvorschau"
       }
     },
     "switch": {
@@ -531,6 +590,9 @@
       },
       "skip_next": {
         "name": "Nächstes Fenster überspringen (24 h)"
+      },
+      "evening_rescue_charge": {
+        "name": "Abendrettung: aus dem Netz nachladen"
       }
     },
     "select": {
@@ -557,6 +619,9 @@
     }
   },
   "exceptions": {
+    "adhoc_refused": {
+      "message": "Der Wechselrichter konnte gerade nicht angesteuert werden. Vielleicht läuft das eingerichtete Fenster, vielleicht ist Notstrombetrieb aktiv, vielleicht ist der Ladestand nicht lesbar — im Protokoll steht, was davon."
+    },
     "entity_not_available": {
       "message": "Die benötigte Entität {entity_id} ist noch nicht verfügbar"
     },
@@ -568,6 +633,9 @@
     },
     "entry_not_loaded": {
       "message": "Die Konfiguration „{title}“ ist nicht geladen, es gibt also nichts, worauf die Aktion wirken könnte."
+    },
+    "nothing_to_release": {
+      "message": "Es wird gerade nichts durch eine Aktion gehalten oder geladen, also gibt es nichts freizugeben."
     },
     "plan_failed": {
       "message": "Der Planer konnte kein Ziel berechnen. Im Protokoll steht, welche Einstellung ihm im Weg stand."
@@ -591,6 +659,48 @@
     }
   },
   "services": {
+    "allow_discharge": {
+      "name": "Akku freigeben",
+      "description": "Beendet ein Halten oder Laden vor der Zeit und gibt den Wechselrichter zurück. Wirkt nur auf eines, das eine Aktion oder die Abendrettung begonnen hat — ein eingerichtetes Fenster ist der Zeitplan bei der Arbeit, und dafür gibt es „Wechselrichter zurücksetzen“.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wechselrichter",
+          "description": "Auf welchen eingerichteten Wechselrichter die Aktion wirken soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
+        }
+      }
+    },
+    "block_discharge": {
+      "name": "Akku halten",
+      "description": "Hindert den Akku für eine Weile daran, das Haus zu versorgen, ohne etwas zu kaufen: das Haus zieht aus der Sonne und, wo die nicht reicht, aus dem Netz. Dasselbe, was die Abendrettung von selbst tut.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wechselrichter",
+          "description": "Auf welchen eingerichteten Wechselrichter die Aktion wirken soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
+        },
+        "duration": {
+          "name": "Wie lange",
+          "description": "Wie lange der Akku gehalten oder geladen wird. Danach endet es von selbst und der Wechselrichter steht wieder so wie vorher. Leer bedeutet zwei Stunden."
+        }
+      }
+    },
+    "charge_to": {
+      "name": "Laden bis",
+      "description": "Lädt den Akku für eine Weile aus dem Netz auf einen Stand. Es gilt alles, was auch nachts gilt: die Hausanschlussgrenze, die vorher gemerkten und nachher zurückgesetzten Einstellungen. Wird abgelehnt, solange das eingerichtete Fenster läuft.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wechselrichter",
+          "description": "Auf welchen eingerichteten Wechselrichter die Aktion wirken soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
+        },
+        "target_soc": {
+          "name": "Zielstand",
+          "description": "Der Ladestand, der erreicht werden soll, in Prozent. Wird auf dein eingestelltes Minimum und Maximum begrenzt."
+        },
+        "duration": {
+          "name": "Wie lange",
+          "description": "Wie lange der Akku gehalten oder geladen wird. Danach endet es von selbst und der Wechselrichter steht wieder so wie vorher. Leer bedeutet zwei Stunden."
+        }
+      }
+    },
     "plan_target_soc": {
       "name": "Ziel-Ladestand berechnen",
       "description": "Berechnet den Ziel-Ladestand für das nächste Fenster aus Prognose, Hausverbrauchsprofil und Sonnenstand und gibt ihn zurück, ohne etwas zu ändern.",
