@@ -374,6 +374,13 @@ The period may cross midnight, and the reserve is bounded by your maximum SOC li
 target. `sensor.…_next_high_price_window` shows when the next one starts, how long it lasts, how
 much was reserved and how much of that this window is buying.
 
+**With a price entity configured, the reserve becomes a decision rather than an assumption.**
+A kilowatt-hour put aside in the window passes through the inverter twice, so holding it really
+costs `window price ÷ efficiency`. If the evening is *clearly* cheaper than that — more than
+2 ct/kWh cheaper, so a marginal difference does not move anything — there is nothing to save for
+and the reserve is dropped for that night. Unknown prices hold it, which is what configuring the
+period asked for. `sensor.…_calculated_soc` carries `evening_reserve_dropped` when it happens.
+
 The same reserve bounds the other direction: in `Morning Discharge` mode the target the battery
 is emptied to is raised to the reserve, so the mode cannot sell in the morning what has to be
 bought back at the evening's peak tariff. Today's forecast is subtracted there as well, so a

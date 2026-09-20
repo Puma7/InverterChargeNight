@@ -35,7 +35,9 @@ from .const import (
     DEFAULT_GRID_CONTINUOUS_PCT,
     DEFAULT_GRID_VOLTAGE_V,
     DEFAULT_SAFE_FALLBACK_SOC,
+    RESERVE_DROP_MARGIN_CT,
 )
+from .prices import evening_reserve_pays
 
 REASON_BRIDGE = "bridge"
 REASON_HEADROOM = "headroom"
@@ -72,6 +74,13 @@ class PlanInput:
     # The load profile is an average of the last days; an evening with the oven
     # on is above it. This is the user's allowance for that, in percent.
     reserve_margin_pct: float = 0.0
+    # The mean price over this entry's own window and over the high-price
+    # period, when a price entity supplies them. Separate from prices_ct, which
+    # is the conflict triple and needs all three of its values to mean
+    # anything. None on either side keeps the reserve, which is what the period
+    # was configured for.
+    window_price_ct: float | None = None
+    evening_price_ct: float | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +104,9 @@ class PlanResult:
     # discharge loss, the same way ``bridge_kwh`` does.
     evening_reserve_kwh: float = 0.0
     evening_shortfall_kwh: float = 0.0
+    # True when prices said the evening is cheap enough that holding energy
+    # back for it costs more than buying it then.
+    evening_reserve_dropped: bool = False
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -126,10 +138,20 @@ def integrate_load(profile: Sequence[float], start: datetime, end: datetime) -> 
 def evening_reserve_kwh(p: PlanInput) -> float:
     """The energy the high-price period is expected to draw, in kWh.
 
-    Zero without a configured period. The margin is the user's allowance for an
-    evening above the average the profile was learned from.
+    Zero without a configured period, and zero when prices say the period is
+    not worth carrying: a kilowatt-hour put aside in the window has to pass
+    through the inverter twice, and an evening that is cheaper than that round
+    trip is an evening to buy rather than to save for. Unknown prices hold the
+    reserve, which is what the period was configured for.
+
+    The margin is the user's allowance for an evening above the average the
+    profile was learned from.
     """
     if p.high_price_window is None:
+        return 0.0
+    if not evening_reserve_pays(
+        p.window_price_ct, p.evening_price_ct, p.charge_efficiency, RESERVE_DROP_MARGIN_CT
+    ):
         return 0.0
     start, end = p.high_price_window
     load_kwh = integrate_load(p.house_load_kw_profile, start, end)
@@ -212,6 +234,7 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
     surplus = surplus_kwh(p)
 
     evening_kwh = evening_reserve_kwh(p)
+    evening_dropped = p.high_price_window is not None and evening_kwh == 0.0
     # The sun charges the battery before the evening does, so only the part it
     # will not cover has to be bought tonight.
     evening_shortfall = _from_battery_kwh(evening_shortfall_kwh(p), p.discharge_efficiency)
@@ -244,6 +267,7 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
             REASON_FALLBACK,
             evening_kwh,
             evening_shortfall,
+            evening_dropped,
         )
 
     if lower <= upper:
@@ -274,6 +298,7 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
         reason,
         evening_kwh,
         evening_shortfall,
+        evening_dropped,
     )
 
 

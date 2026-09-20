@@ -211,3 +211,45 @@ def test_the_sensor_is_empty_without_a_price_entity(mock_hass):
     with patch(f"{COORDINATOR}.dt_util.now", return_value=NOW):
         assert sensor.native_value is None
         assert sensor.extra_state_attributes["intervals"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_cheap_evening_reaches_the_plan(mock_hass):
+    """End to end: the price entity decides whether the reserve is held.
+
+    The gate is a pure function with its own tests; this is the wire between
+    it and the entity, which is the part that can be connected wrongly.
+    """
+    midnight = NOW.replace(hour=0, minute=0)
+    dear_evening = [
+        {
+            "start": (midnight + timedelta(hours=h)).isoformat(),
+            "total": 0.45 if 18 <= (h % 24) < 21 else 0.22,
+        }
+        for h in range(36)
+    ]
+    cheap_evening = [
+        {
+            "start": (midnight + timedelta(hours=h)).isoformat(),
+            "total": 0.18 if 18 <= (h % 24) < 21 else 0.40,
+        }
+        for h in range(36)
+    ]
+
+    async def _plan(items):
+        coordinator = _make_coordinator(mock_hass, attributes={"raw_today": items})
+        coordinator._house_load_profile = AsyncMock(return_value=[0.5] * 24)
+        coordinator._sun_times = MagicMock(
+            return_value=(NOW.replace(hour=7), NOW.replace(hour=19))
+        )
+        with patch(f"{COORDINATOR}.dt_util.now", return_value=NOW.replace(hour=2)):
+            plan_input, _ = await coordinator._build_plan_input(0.0, True)
+        return plan_input
+
+    dear = await _plan(dear_evening)
+    assert dear.evening_price_ct == pytest.approx(45.0)
+    assert dear.window_price_ct == pytest.approx(22.0)
+
+    cheap = await _plan(cheap_evening)
+    assert cheap.evening_price_ct == pytest.approx(18.0)
+    assert cheap.window_price_ct == pytest.approx(40.0)

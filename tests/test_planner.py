@@ -539,3 +539,68 @@ def test_the_projection_cannot_exceed_the_user_maximum():
 def test_an_impossible_capacity_is_rejected():
     with pytest.raises(ValueError):
         _outlook(capacity_kwh=0.0)
+
+
+# The price gate on the reserve (plan 012, stage 3) -------------------------------
+
+
+def test_without_prices_the_reserve_is_held_as_before():
+    """The shipped behaviour, and what an installation with no price entity gets."""
+    plan = plan_target_soc(_plan_input(forecast_kwh_next_day=0.0, high_price_window=EVENING))
+    assert plan.evening_reserve_kwh == pytest.approx(EVENING_KWH)
+    assert plan.evening_reserve_dropped is False
+
+
+def test_a_dear_evening_holds_the_reserve():
+    plan = plan_target_soc(
+        _plan_input(
+            forecast_kwh_next_day=0.0,
+            high_price_window=EVENING,
+            window_price_ct=22.0,
+            evening_price_ct=38.0,
+        )
+    )
+    assert plan.evening_reserve_kwh == pytest.approx(EVENING_KWH)
+    assert plan.evening_reserve_dropped is False
+
+
+def test_a_cheap_evening_is_bought_rather_than_saved_for():
+    """Holding costs the window price plus the round trip; buying costs the evening."""
+    plan = plan_target_soc(
+        _plan_input(
+            forecast_kwh_next_day=0.0,
+            high_price_window=EVENING,
+            window_price_ct=38.0,
+            evening_price_ct=22.0,
+        )
+    )
+    assert plan.evening_reserve_kwh == 0.0
+    assert plan.evening_shortfall_kwh == 0.0
+    assert plan.evening_reserve_dropped is True
+    assert plan.target_soc == _lower_bound(BRIDGE_KWH)
+
+
+def test_dropping_the_reserve_frees_the_morning_discharge_too():
+    """One gate, both directions - the floor follows the same reserve."""
+    plan_input = _plan_input(
+        forecast_kwh_next_day=0.0,
+        high_price_window=EVENING,
+        window_price_ct=38.0,
+        evening_price_ct=22.0,
+    )
+    assert evening_reserve_soc(plan_input) == USER_MIN
+
+
+def test_only_one_known_price_keeps_the_reserve():
+    """Half an answer is not an answer, and holding is what was configured."""
+    for prices in (({"window_price_ct": 38.0}), ({"evening_price_ct": 22.0})):
+        plan = plan_target_soc(
+            _plan_input(forecast_kwh_next_day=0.0, high_price_window=EVENING, **prices)
+        )
+        assert plan.evening_reserve_kwh == pytest.approx(EVENING_KWH), prices
+
+
+def test_prices_without_a_period_change_nothing():
+    plan = plan_target_soc(_plan_input(window_price_ct=38.0, evening_price_ct=22.0))
+    assert plan.evening_reserve_kwh == 0.0
+    assert plan.evening_reserve_dropped is False, "there was no reserve to drop"

@@ -1120,6 +1120,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 SUN_ENTITY_ID,
             )
         current_soc = self._current_battery_soc()
+        # Plan 012 stage 3: what the window and the period actually cost, when
+        # a price entity says. Both None without one, and the reserve is then
+        # held exactly as before.
+        series = self._price_series()
+        high_price_window = self._high_price_window(window_end)
         return (
             PlanInput(
                 capacity_kwh=capacity,
@@ -1141,9 +1146,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 prices_ct=self._prices_ct(),
                 # Measured from the window end: the evening the battery has to
                 # reach is the one on the solar day this window is planning for.
-                high_price_window=self._high_price_window(window_end),
+                high_price_window=high_price_window,
                 reserve_margin_pct=float(
                     self.config.get(CONF_HIGH_PRICE_MARGIN_PCT, DEFAULT_HIGH_PRICE_MARGIN_PCT)
+                ),
+                window_price_ct=self._window_price_ct(series, now),
+                evening_price_ct=(
+                    mean_price_ct(series, high_price_window[0], high_price_window[1])
+                    if high_price_window
+                    else None
                 ),
             ),
             pv_crossover,
@@ -1336,6 +1347,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # much of that this window has to buy because the sun will not.
             "evening_reserve_kwh": round(plan.evening_reserve_kwh, 2),
             "evening_shortfall_kwh": round(plan.evening_shortfall_kwh, 2),
+            "evening_reserve_dropped": plan.evening_reserve_dropped,
             "planned_charge_power_w": self.planned_charge_power_w,
         }
 

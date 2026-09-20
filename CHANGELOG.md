@@ -28,8 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly the behaviour of an installation with no price entity. A test asserts that contract
   once per way it can go wrong.
 
-**This release reads and shows; it does not yet decide.** The price gate on the evening reserve
-follows, so the sensor can be watched first — which is the point of shipping it on its own.
+- **The evening reserve became a decision instead of an assumption.** It used to hold energy back
+  whenever two times were configured, whatever the evening actually cost. A kilowatt-hour put
+  aside in the window passes through the inverter twice, so holding it costs `window price ÷
+  efficiency`; an evening clearly cheaper than that (by more than 2 ct/kWh, so marginal
+  differences move nothing) is an evening to buy rather than to save for. One gate, and because
+  the morning-discharge floor reads the same reserve, it frees that too. Unknown prices hold the
+  reserve exactly as before.
+
+Without a price entity configured, none of this changes anything: the reserve is held as it was
+in 3.2.0.
 
 ## [3.5.0] - 2026-09-20
 
