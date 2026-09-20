@@ -198,7 +198,10 @@ def validate_soc(value: float) -> bool:
 
 def validate_date_optional(value: str | date | None) -> bool:
     """Validate optional date format YYYY-MM-DD (allow empty)."""
-    if value in (None, ""):
+    # Spelled out rather than ``value in (None, "")``: only mypy 2.x narrows the
+    # membership form, so the older versions requirements-dev.txt still allows
+    # see a ``str | None`` reach date.fromisoformat below.
+    if value is None or value == "":
         return True
     if isinstance(value, date):
         return True
@@ -211,7 +214,7 @@ def validate_date_optional(value: str | date | None) -> bool:
 
 def _normalize_date_value(value: str | date | None) -> str | None:
     """Normalize date selector values to ISO strings for storage."""
-    if value in (None, ""):
+    if value is None or value == "":
         return None
     if isinstance(value, date):
         return value.isoformat()

@@ -10,7 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.getcwd())
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,

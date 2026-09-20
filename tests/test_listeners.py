@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_KOSTAL_MIN_SOC_ENTITY,
@@ -38,7 +40,7 @@ async def test_battery_soc_listener_stops_on_target(mock_hass):
         return MagicMock()
 
     with patch(
-        "custom_components.inverter_charge_night.async_track_state_change_event",
+        "custom_components.inverter_charge_night.coordinator.async_track_state_change_event",
         side_effect=_capture,
     ):
         coordinator._setup_battery_soc_listener()
@@ -70,7 +72,7 @@ async def test_battery_soc_listener_handles_stop_error(mock_hass):
         return MagicMock()
 
     with patch(
-        "custom_components.inverter_charge_night.async_track_state_change_event",
+        "custom_components.inverter_charge_night.coordinator.async_track_state_change_event",
         side_effect=_capture,
     ):
         coordinator._setup_battery_soc_listener()
@@ -109,7 +111,7 @@ async def test_inverter_min_soc_listener_triggers_restore(mock_hass):
         return MagicMock()
 
     with patch(
-        "custom_components.inverter_charge_night.async_track_state_change_event",
+        "custom_components.inverter_charge_night.coordinator.async_track_state_change_event",
         side_effect=_capture,
     ):
         coordinator._setup_inverter_min_soc_listener()
@@ -143,7 +145,7 @@ async def test_battery_soc_listener_uses_current_target_soc(mock_hass):
         return MagicMock()
 
     with patch(
-        "custom_components.inverter_charge_night.async_track_state_change_event",
+        "custom_components.inverter_charge_night.coordinator.async_track_state_change_event",
         side_effect=_capture,
     ):
         coordinator._setup_battery_soc_listener()
@@ -178,7 +180,7 @@ async def test_battery_soc_listener_without_target_does_nothing(mock_hass):
         return MagicMock()
 
     with patch(
-        "custom_components.inverter_charge_night.async_track_state_change_event",
+        "custom_components.inverter_charge_night.coordinator.async_track_state_change_event",
         side_effect=_capture,
     ):
         coordinator._setup_battery_soc_listener()

@@ -22,7 +22,9 @@ import pytest_asyncio
 
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night import config_flow
 from custom_components.inverter_charge_night.const import (
     CONF_AUTO_EFFICIENCY_DATA,
@@ -200,8 +202,8 @@ LATER = FOUR_HOURS_LEFT + timedelta(minutes=1)
 MUCH_LATER = FOUR_HOURS_LEFT + timedelta(minutes=2)
 # 40 -> 100 % of a 10 kWh battery in 4 h at 0.9 efficiency
 PLANNED_W = 1667.0
-NOW = "custom_components.inverter_charge_night.dt_util.now"
-TRACK = "custom_components.inverter_charge_night.async_track_state_change_event"
+NOW = "custom_components.inverter_charge_night.coordinator.dt_util.now"
+TRACK = "custom_components.inverter_charge_night.coordinator.async_track_state_change_event"
 
 BASE_CONFIG = {
     CONF_KOSTAL_MIN_SOC_ENTITY: MIN_SOC,

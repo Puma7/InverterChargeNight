@@ -126,8 +126,14 @@ async def test_async_setup_entry_missing_entity_creates_issue_and_raises(mock_ha
     ), patch(
         "custom_components.inverter_charge_night.ir.async_get"
     ) as delete_issue:
-        with pytest.raises(ConfigEntryNotReady, match=missing):
+        with pytest.raises(ConfigEntryNotReady) as raised:
             await async_setup_entry(mock_hass, mock_config_entry)
+
+    # The message is translated, so it is carried as key + placeholders rather
+    # than as text: str() on it would need a running hass to resolve.
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == "entity_not_available"
+    assert raised.value.translation_placeholders == {"entity_id": missing}
 
     create_issue.assert_called_once()
     args, kwargs = create_issue.call_args

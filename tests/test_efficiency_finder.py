@@ -16,7 +16,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 import pytest_asyncio
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.const import (
     AUTO_TEST_MAX_ATTEMPTS,
     AUTO_TEST_SETTLE_S,
@@ -42,7 +44,7 @@ METER_RECEIVED = "sensor.charge_energy_into_battery"
 AC_LIMIT = "number.ac_limit"
 
 START = datetime(2026, 1, 15, 0, 0)
-NOW = "custom_components.inverter_charge_night.dt_util.now"
+NOW = "custom_components.inverter_charge_night.coordinator.dt_util.now"
 
 CONFIG = {
     CONF_CHARGE_POWER_ENTITY: AC_LIMIT,
@@ -488,7 +490,7 @@ def test_changing_the_power_range_starts_the_search_over(mock_hass, finder):
 
 @pytest.mark.asyncio
 async def test_the_sampling_listener_is_registered_and_removed(mock_hass, finder):
-    with patch("custom_components.inverter_charge_night.async_track_state_change_event") as track:
+    with patch("custom_components.inverter_charge_night.coordinator.async_track_state_change_event") as track:
         await finder._start_auto_test(9000)
 
     assert track.call_args.args[1] == [SENT, RECEIVED]

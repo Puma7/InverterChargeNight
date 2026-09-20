@@ -9,7 +9,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
+from .coordinator import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 from .entity import InverterChargeNightEntity
 from .const import (
     CONF_OPERATION_MODE,

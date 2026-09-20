@@ -26,7 +26,9 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import pytest
 import pytest_asyncio
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.calculation import calculate_required_soc
 from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_CAPACITY,
@@ -96,7 +98,7 @@ ABOVE_TARGET = 70.0  # the case the block exists for: more in the battery than p
 def _inside_window():
     """The polling update ends a window it finds itself outside of."""
     with patch(
-        "custom_components.inverter_charge_night.dt_util.now", return_value=INSIDE_WINDOW
+        "custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=INSIDE_WINDOW
     ):
         yield
 
@@ -541,7 +543,7 @@ async def test_min_soc_listener_measures_against_the_floor(mock_hass, coordinato
         return MagicMock()
 
     with patch(
-        "custom_components.inverter_charge_night.async_track_state_change_event",
+        "custom_components.inverter_charge_night.coordinator.async_track_state_change_event",
         side_effect=_capture,
     ):
         coordinator._setup_inverter_min_soc_listener()
@@ -866,7 +868,9 @@ async def test_an_unreadable_battery_soc_leaves_the_floor_alone(mock_hass, coord
 @pytest.mark.asyncio
 async def test_unload_during_the_window_drops_the_raised_floor(mock_hass, coordinator):
     """A successful reset takes the floor with it - it must not reach another window."""
-    from custom_components.inverter_charge_night import async_unload_entry
+    from custom_components.inverter_charge_night import (
+    async_unload_entry,
+)
 
     await coordinator._on_window_start(WINDOW_START)
     assert coordinator._window_floor_soc == ABOVE_TARGET

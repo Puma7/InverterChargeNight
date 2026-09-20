@@ -5,6 +5,40 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.1] - 2026-09-19
+
+A maintenance release: no new settings, no changed behaviour on the inverter.
+
+### Changed
+
+- The coordinator moved from `__init__.py` into `coordinator.py`. `__init__.py` is now the
+  setup, update and unload shim it is supposed to be. The moved code is unchanged line for
+  line; only the import paths differ, which matters for anyone importing from this package
+  (templates and custom code should use `custom_components.inverter_charge_night.coordinator`).
+- "Required entity … is not yet available" is now a translated message rather than English
+  text, so it reads the same as the repair issue shown next to it.
+- As a consequence of the move, the control loop logs under
+  `custom_components.inverter_charge_night.coordinator`. A `logger:` setting for
+  `custom_components.inverter_charge_night` still covers it; a filter matching the logger name
+  exactly does not.
+
+### Fixed
+
+- **CI never ran the tests.** `actions/setup-python` was told to cache pip but this repository
+  has no `requirements.txt` or `pyproject.toml`, so the job failed at the cache step before
+  installing anything. It now caches against `requirements-dev.txt`.
+- **hassfest**: the integration reads the recorder (for the house load profile) without
+  declaring it. `recorder` is now listed in `after_dependencies`, where an optional
+  integration belongs.
+
+### Internal
+
+- Brand assets (`brand/icon.png`, `brand/logo.png` and their @2x variants) so HACS does not
+  have to fall back to the Home Assistant brands repository.
+- All 54 rules of Home Assistant's integration quality scale are met or documented as not
+  applicable; `quality_scale.yaml` carries the reason for each one.
+- 627 tests, 95 % coverage over the whole package (100 % on the config flow), enforced in CI.
+
 ## [3.0.0] - 2026-09-19
 
 The release that makes this integration inverter-agnostic, safe around a house connection,

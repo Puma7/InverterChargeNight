@@ -3,7 +3,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.inverter_charge_night import async_unload_entry
+from custom_components.inverter_charge_night import (
+    async_unload_entry,
+)
 
 
 @pytest.mark.asyncio

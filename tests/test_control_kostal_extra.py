@@ -5,7 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_COMMAND_DELAY,
@@ -160,7 +162,7 @@ async def test_update_data_survives_min_soc_service_error(mock_hass):
     coordinator._handle_auto_charge = AsyncMock()
 
     with patch(
-        "custom_components.inverter_charge_night.dt_util.now",
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
         return_value=datetime(2026, 1, 15, 2, 0),
     ):
         data = await coordinator._async_update_data()

@@ -147,7 +147,7 @@ async def setup_integration(hass: HomeAssistant, mock_config_entry: ConfigEntry)
         coordinator.async_config_entry_first_refresh = AsyncMock()
         coordinator.setup_time_triggers = MagicMock()
         hass.data[DOMAIN][mock_config_entry.entry_id] = coordinator
-        
+
         yield coordinator
 
 

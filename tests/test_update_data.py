@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.inverter_charge_night import InverterChargeNightCoordinator
+from custom_components.inverter_charge_night.coordinator import (
+    InverterChargeNightCoordinator,
+)
 from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
@@ -33,7 +35,7 @@ def _inside_window():
     exercise the update body must not depend on the wall clock.
     """
     with patch(
-        "custom_components.inverter_charge_night.dt_util.now",
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
         return_value=INSIDE_DEFAULT_WINDOW,
     ):
         yield
@@ -98,7 +100,7 @@ async def test_async_update_data_ends_window_when_end_trigger_was_missed(mock_ha
     coordinator._on_window_end = AsyncMock()
 
     with patch(
-        "custom_components.inverter_charge_night.dt_util.now",
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
         return_value=datetime(2026, 1, 15, 7, 0),
     ):
         data = await coordinator._async_update_data()
@@ -123,7 +125,7 @@ async def test_async_update_data_keeps_overnight_window_when_inside(mock_hass):
     coordinator._handle_auto_charge = AsyncMock()
 
     with patch(
-        "custom_components.inverter_charge_night.dt_util.now",
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
         return_value=datetime(2026, 1, 15, 1, 0),
     ):
         data = await coordinator._async_update_data()

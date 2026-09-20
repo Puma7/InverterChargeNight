@@ -7,7 +7,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
+from .coordinator import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 
 # Every config key that names an entity of the user's system. The test
 # ``test_every_entity_config_key_is_redacted`` derives the expected set from

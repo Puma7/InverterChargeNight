@@ -11,7 +11,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.const import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
+from .coordinator import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
 from .entity import InverterChargeNightEntity
 from .const import CONF_AUTO_EFFICIENT_CHARGE
 

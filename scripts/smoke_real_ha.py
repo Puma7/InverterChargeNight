@@ -207,6 +207,26 @@ async def main() -> int:
     await hass.async_block_till_done()
     check("config entry unloads", ok_unload, f"state={entry.state}")
 
+    # A required entity that Home Assistant does not know keeps the entry in
+    # SETUP_RETRY. The message is a translation key, so this also proves that a
+    # real HA resolves it instead of showing the key to the user.
+    retry_data = dict(data) | {"battery_soc_entity": "sensor.does_not_exist"}
+    retry_kwargs = dict(kwargs) | {"data": retry_data, "entry_id": "smoke2",
+                                   "title": "Smoke retry", "unique_id": "number.inv_min_soc_2"}
+    retry_entry = config_entries.ConfigEntry(
+        **{k: v for k, v in retry_kwargs.items() if k in accepted}
+    )
+    hass.config_entries._entries[retry_entry.entry_id] = retry_entry  # noqa: SLF001
+    await hass.config_entries.async_setup(retry_entry.entry_id)
+    await hass.async_block_till_done()
+    check("a missing entity keeps the entry retrying",
+          retry_entry.state is config_entries.ConfigEntryState.SETUP_RETRY,
+          f"state={retry_entry.state}")
+    check("the not-ready message is translated, not a raw key",
+          "sensor.does_not_exist" in (retry_entry.reason or "")
+          and "entity_not_available" not in (retry_entry.reason or ""),
+          f"reason={retry_entry.reason!r}")
+
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
     await hass.async_block_till_done()
     await hass.async_stop()

@@ -14,7 +14,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.inverter_charge_night import _clear_stale_entity_issues, _migrate_entry_data
+from custom_components.inverter_charge_night import (
+    _clear_stale_entity_issues,
+    _migrate_entry_data,
+)
 from custom_components.inverter_charge_night.const import (
     CONF_AUTO_EFFICIENCY_DATA,
     CONF_HOUSE_LOAD_ENTITY,
