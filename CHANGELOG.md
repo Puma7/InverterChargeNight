@@ -5,7 +5,7 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 3.4.0, evening rescue (part 1 of 2)
+## [3.4.0] - 2026-09-20
 
 ### Added
 
@@ -21,9 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the day's yield; that is the one error that matters here, because it would let the battery walk
   into the evening short while the projection says it is fine.
 
-This is the read-only half. It changes nothing about what the integration writes — the
-interventions (blocking the discharge during the day, topping up from the grid before the period
-starts) follow in the second half, with the top-up behind its own switch.
+This release is the read-only half and is useful on its own: it tells you, in the afternoon,
+that tonight will be short. It changes nothing about what the integration writes. The
+interventions — blocking the discharge during the day, topping up from the grid before the period
+starts, with the top-up behind its own switch — follow in 3.5.0, designed in
+[`plans/013`](plans/013-abendrettung-und-adhoc-fenster.md).
 
 ## [3.3.1] - 2026-09-20
 
