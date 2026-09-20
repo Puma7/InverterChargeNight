@@ -332,7 +332,9 @@ beide Stellen prüfen jetzt explizit auf `None`.
   gefordert.
 - **015 Effizienz je Ladestandsband**: Verluste hängen auch vom SOC ab; die Suche bucht heute nur
   auf die Leistung. Wer das verfeinern will, misst pro SOC-Band (Plan 010, Wartungshinweise).
-- **014 Doku-Bereinigung**: README auf 2.0 und 28 Felder bringen (Forecast-Entität für MORGEN, nicht heute), Platzhalter-URLs, elf Audit-Dateien im Wurzelverzeichnis nach `docs/history/`, `de.json` anlegen.
+- ~~**014 Doku-Bereinigung**~~ — erledigt: die README beschreibt die Prognose-Entität für den
+  nächsten Tag und alle Felder, die Platzhalter-URLs sind durch die echten ersetzt, die
+  Audit-Dateien liegen unter `docs/history/`, und `translations/de.json` existiert.
 
 ### Abhängigkeiten
 
