@@ -147,8 +147,20 @@ auf nichts passt. Die Reihe wird stattdessen an ihrer **Form** erkannt, und was 
 steht am Sensor. Der Fensterzuschlag wird beim Abfragen verrechnet statt beim Parsen — damit
 bleibt die tägliche Wiederholung des Fensters aus `prices.py` heraus.
 
-Offen aus dieser Stufe: `prices_ct` dynamisch (der Konfliktzweig nutzt weiter die drei festen
-Felder) und die Morgenentladung mit eigenem Preiskriterium.
+Offen aus dieser Stufe: `prices_ct` dynamisch — der Konfliktzweig nutzt weiter die drei festen
+Felder.
+
+**Die Morgenentladung ist dagegen erledigt, entgegen dem Eintrag unten.** Am Code nachgesehen
+(20.09.): ihr Boden liest durch `_floor_discharge_at_the_evening_reserve` →
+`_evening_reserve_floor` → `evening_reserve_soc` → `evening_shortfall_kwh` →
+`evening_reserve_kwh`, und dort sitzt seit 3.6.0 das Tor `evening_reserve_pays`. Im Entlademodus
+liefert `_window_price_ct` das Morgenfenster, also genau die Opportunitätskosten von „jetzt
+verkaufen gegen für den Abend behalten". Sagen die Preise, der Abend sei billig, fällt die Reserve
+und die Entladung läuft ungehindert.
+
+Preisblind ist nur noch, **ob** überhaupt entladen wird und **wie tief** — der Betriebsmodus ist
+Eintragskonfiguration und wird von Hand gesetzt. Das ist ein eigenes Feature, kein Rest, und es
+gehört nicht unter demselben Stichwort verbucht.
 
 ### Stufe 3 (Entwurf) — Preissignal (3.3) · Aufwand M · kein neuer HA-Boden
 
@@ -158,7 +170,9 @@ Backlog 013. Eine Preisentität (Tibber/aWATTar/EPEX) als Eingang, plus optional
 - Die `prices_ct` im Planer werden dynamisch statt fest konfiguriert.
 - Der Tarifkalender bekommt eine dritte Periodenart: `cheap`/`high` nicht nach Uhrzeit, sondern
   nach Schwellwert.
-- Die Morgenentladung bekommt endlich ein Kriterium statt „Modus von Hand umschalten".
+- ~~Die Morgenentladung bekommt endlich ein Kriterium statt „Modus von Hand umschalten".~~ Der
+  *Boden* hat es seit 3.6.0 (siehe oben). Das Umschalten des Modus selbst hat weiterhin keines —
+  aber das ist eine eigene Funktion, nicht der Rest dieser Stufe.
 
 ### Stufe 4 — Regeln als Subentries (4.0) · Aufwand L · **hebt den HA-Boden auf 2026.2**
 
