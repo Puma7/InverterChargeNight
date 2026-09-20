@@ -5,10 +5,9 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.1] - 2026-09-20
+## [3.0.2] - 2026-09-20
 
-Mostly a maintenance release. One setting changes: Morning discharge now insists on the switch
-that performs the discharge. Nothing about what the integration writes to the inverter changes.
+Follow-ups from a review of 3.0.1. One of them is a safety fix, and one setting changes.
 
 ### Added
 
@@ -19,16 +18,54 @@ that performs the discharge. Nothing about what the integration writes to the in
 
 ### Changed
 
-- **`best_charge_power` and `efficiency_search` are disabled by default.** Both report on the
-  efficiency search, which is off unless it is switched on, and the second carries the whole
-  measurement series in its attributes. Existing installations are unaffected — the entities
-  are already registered there; new ones enable them from the device page if they run a search.
 - **Morning discharge now requires the force discharge switch.** It is the only thing that
   actually discharges the battery; without it the mode raised the min SOC floor, turned grid
   charging off and then waited for a discharge that could never start. The field said
   "optional" while the grid charge switch, which that mode only ever turns off, was demanded.
   Existing entries keep working until the settings are saved again, which is where the
   requirement is now enforced.
+- **`best_charge_power` and `efficiency_search` are disabled by default.** Both report on the
+  efficiency search, which is off unless it is switched on, and the second carries the whole
+  measurement series in its attributes. Existing installations are unaffected — the entities
+  are already registered there; new ones enable them from the device page if they run a search.
+
+### Fixed
+
+- **Morning discharge could start against an unknown floor.** If reading and capturing the
+  inverter's min SOC failed, the error was logged and the forced discharge was switched on
+  anyway — with no idea where the battery's floor was, which is how a discharge runs past the
+  user minimum. The failed *write* of the floor already blocked the discharge for exactly that
+  reason; the failed *read* now does too.
+- **hassfest** rejected the manifest a second time once the recorder dependency was declared:
+  its keys have to be `domain`, `name`, then alphabetical. A test now checks the order.
+- **mypy and pyright were pinned to Python 3.13** in their config files. Both parse Home
+  Assistant's own sources, and 2026.9 uses an unparenthesised `except` expression — 3.14-only
+  syntax — so mypy stopped on `homeassistant/core.py` before reaching this package. CI passes
+  the matrix version to both now.
+- `validate_date_optional` and `_normalize_date_value` spell the empty check out instead of
+  using `value in (None, "")`, which only mypy 2.x narrows. On the older mypy that
+  `requirements-dev.txt` still allows, both reported `str | None` reaching
+  `date.fromisoformat`.
+
+### Internal
+
+- The brand icons are rebuilt to the image specification in the home-assistant/brands README:
+  square, trimmed to the subject, 256 and 512 pixels. The duplicate `logo.png` files are gone,
+  because that README says to add only the icon when the same image serves as both. No pull
+  request against that repository: it marks `custom_integrations/` a legacy folder and states
+  that since Home Assistant 2026.3.0 custom components carry their brand icons themselves.
+- All 54 quality-scale rules are now done (39) or exempt (15), with nothing open.
+- Coverage 95 % → 96 % (ratchet raised), with the new tests on the paths where a failure costs
+  something: a reset that cannot report its own failure, a house connection limit that assumes
+  a write landed, every service call in the discharge path, and a verification that could leave
+  its own lock held.
+
+## [3.0.1] - 2026-09-19
+
+A maintenance release: no new settings, no changed behaviour on the inverter.
+
+### Changed
+
 - The coordinator moved from `__init__.py` into `coordinator.py`. `__init__.py` is now the
   setup, update and unload shim it is supposed to be. The moved code is unchanged line for
   line; only the import paths differ, which matters for anyone importing from this package
@@ -42,11 +79,6 @@ that performs the discharge. Nothing about what the integration writes to the in
 
 ### Fixed
 
-- **Morning discharge could start against an unknown floor.** If reading and capturing the
-  inverter's min SOC failed, the error was logged and the forced discharge was switched on
-  anyway — with no idea where the battery's floor was, which is how a discharge runs past the
-  user minimum. The failed *write* of the floor already blocked the discharge for exactly that
-  reason; the failed *read* now does too.
 - **CI never ran the tests.** `actions/setup-python` was told to cache pip but this repository
   has no `requirements.txt` or `pyproject.toml`, so the job failed at the cache step before
   installing anything. It now caches against `requirements-dev.txt`.
@@ -60,8 +92,7 @@ that performs the discharge. Nothing about what the integration writes to the in
   have to fall back to the Home Assistant brands repository.
 - All 54 rules of Home Assistant's integration quality scale are met or documented as not
   applicable; `quality_scale.yaml` carries the reason for each one.
-- 95 % coverage over the whole package (100 % on the config flow), enforced in CI by the
-  `.coveragerc` ratchet.
+- 627 tests, 95 % coverage over the whole package (100 % on the config flow), enforced in CI.
 
 ## [3.0.0] - 2026-09-19
 
