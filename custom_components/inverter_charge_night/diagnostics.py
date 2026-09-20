@@ -16,6 +16,10 @@ from .coordinator import InverterChargeNightConfigEntry, InverterChargeNightCoor
 REDACT_KEYS = {
     "pv_forecast_entity",
     "battery_soc_entity",
+    "min_soc_entity",
+    "grid_charge_switch",
+    # The names these two carried before 3.0.2. A diagnostics dump of an entry
+    # that has not been migrated yet must redact them just the same.
     "kostal_min_soc_entity",
     "kostal_grid_charge_switch",
     "charge_power_entity",

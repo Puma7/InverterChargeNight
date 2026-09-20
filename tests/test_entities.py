@@ -102,7 +102,7 @@ async def test_min_soc_override_number_set_value():
     coordinator.is_active = True
     coordinator.is_enabled = True
     coordinator.minimum_calculated_soc = None
-    coordinator._control_kostal = AsyncMock()
+    coordinator._control_charge = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
     entry = _make_entry()
     number = MinSOCOverrideNumber(coordinator, entry)
@@ -114,7 +114,7 @@ async def test_min_soc_override_number_set_value():
     assert coordinator.target_reached is False
     # The override is applied by the refresh through the mode-correct control
     # path; the entity never calls the charge path directly
-    coordinator._control_kostal.assert_not_awaited()
+    coordinator._control_charge.assert_not_awaited()
     coordinator.async_request_refresh.assert_awaited()
 
 
@@ -127,7 +127,7 @@ async def test_min_soc_override_number_set_value_in_discharge_mode():
     coordinator.is_enabled = True
     coordinator.is_discharge_mode = True
     coordinator.minimum_calculated_soc = None
-    coordinator._control_kostal = AsyncMock()
+    coordinator._control_charge = AsyncMock()
     coordinator._control_discharge = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
     entry = _make_entry()
@@ -138,7 +138,7 @@ async def test_min_soc_override_number_set_value_in_discharge_mode():
 
     assert coordinator.override_soc == 30.0
     assert coordinator.target_reached is False
-    coordinator._control_kostal.assert_not_awaited()
+    coordinator._control_charge.assert_not_awaited()
     coordinator._control_discharge.assert_not_awaited()
     coordinator.async_request_refresh.assert_awaited_once()
 
@@ -279,7 +279,7 @@ async def test_inverter_charge_night_switch_reset_error_handled(mock_hass):
 
     mock_hass.states.async_set("number.min_soc", "8")
     entry = _make_entry()
-    entry.data = {"kostal_min_soc_entity": "number.min_soc"}
+    entry.data = {"min_soc_entity": "number.min_soc"}
     entry.options = {}
     coordinator = InverterChargeNightCoordinator(mock_hass, entry)
     coordinator.original_min_soc = 8.0

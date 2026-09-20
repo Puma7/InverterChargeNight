@@ -13,8 +13,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_DEFAULT_MIN_SOC,
     CONF_END_TIME,
     CONF_FORECAST_ERROR_MARGIN,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_PV_FORECAST_ENTITY,
     CONF_START_TIME,
     CONF_USER_MAX_SOC,
@@ -157,7 +157,7 @@ async def test_async_update_data_fallback_when_forecast_unavailable(mock_hass):
     coordinator.is_active = True
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=True)
-    coordinator._control_kostal = AsyncMock()
+    coordinator._control_charge = AsyncMock()
     coordinator._handle_auto_charge = AsyncMock()
     mock_hass.states.get.side_effect = lambda entity_id: {
         "sensor.pv": pv_state,
@@ -193,7 +193,7 @@ async def test_async_update_data_uses_initial_soc(mock_hass):
     coordinator.initial_calculated_soc = 40.0
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=True)
-    coordinator._control_kostal = AsyncMock()
+    coordinator._control_charge = AsyncMock()
     coordinator._handle_auto_charge = AsyncMock()
     coordinator._parse_forecast_energy = MagicMock()
 
@@ -236,7 +236,7 @@ async def test_async_update_data_forecast_wh_conversion(mock_hass):
     coordinator.is_active = True
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=True)
-    coordinator._control_kostal = AsyncMock()
+    coordinator._control_charge = AsyncMock()
     coordinator._handle_auto_charge = AsyncMock()
 
     data = await coordinator._async_update_data()
@@ -272,7 +272,7 @@ async def test_async_update_data_forecast_attributes_list(mock_hass):
     coordinator.is_active = True
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=True)
-    coordinator._control_kostal = AsyncMock()
+    coordinator._control_charge = AsyncMock()
     coordinator._handle_auto_charge = AsyncMock()
 
     data = await coordinator._async_update_data()
@@ -308,7 +308,7 @@ async def test_async_update_data_forecast_today_attribute(mock_hass):
     coordinator.is_active = True
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=True)
-    coordinator._control_kostal = AsyncMock()
+    coordinator._control_charge = AsyncMock()
     coordinator._handle_auto_charge = AsyncMock()
 
     data = await coordinator._async_update_data()
@@ -416,8 +416,8 @@ async def test_backup_abort_from_the_update_keeps_the_snow_night(mock_hass):
     coordinator = _make_coordinator(
         mock_hass,
         {
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_DEFAULT_MIN_SOC: 8.0,
         },
     )
@@ -441,8 +441,8 @@ async def test_update_outside_a_window_never_resets_the_inverter(mock_hass):
     coordinator = _make_coordinator(
         mock_hass,
         {
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_DEFAULT_MIN_SOC: 8.0,
         },
     )

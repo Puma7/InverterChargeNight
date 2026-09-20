@@ -66,8 +66,8 @@ from .const import (
     CONF_USER_MIN_SOC,
     CONF_USER_MAX_SOC,
     CONF_FORECAST_ERROR_MARGIN,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_FORCE_DISCHARGE_SWITCH,
@@ -495,7 +495,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         user_min_soc = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
         user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC))
         if not user_min_soc <= target_soc <= user_max_soc:
-            # The target itself is out of bounds; _control_kostal refuses it and
+            # The target itself is out of bounds; _control_charge refuses it and
             # logs why. Raising it here would paper over that.
             return target_soc
         return max(user_min_soc, min(user_max_soc, floor))
@@ -1114,7 +1114,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _grid_charging_is_on(self) -> bool:
         """True while the inverter is charging the battery from the grid on our order."""
-        switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
         if not switch:
             # Without the switch the integration cannot tell; the charge target
             # is the honest assumption while the target is not reached yet.
@@ -1238,14 +1238,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Write the floor to the min SOC entity when it sits above the target.
 
         Only then: with floor == charge target nothing about the existing
-        control flow changes, and _control_kostal writes it on the next update
+        control flow changes, and _control_charge writes it on the next update
         as it always did.
         """
         target_soc = self.current_target_soc()
         floor_soc = self.inverter_floor_soc(target_soc)
         if target_soc is None or floor_soc is None or floor_soc <= target_soc:
             return
-        entity_id = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
+        entity_id = self.config.get(CONF_MIN_SOC_ENTITY)
         if not entity_id:
             return
         state = self.hass.states.get(entity_id)
@@ -1311,7 +1311,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._apply_discharge_block_switch()
             return
         if method == DISCHARGE_BLOCK_VIA_MIN_SOC:
-            # The floor is written by _control_kostal and _verify_and_restore_min_soc,
+            # The floor is written by _control_charge and _verify_and_restore_min_soc,
             # which both read it back through inverter_floor_soc().
             self._update_window_floor()
             return
@@ -2331,7 +2331,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._auto_missing_entities_logged = True
             return
 
-        grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
         grid_on = False
         if grid_charge_switch:
             state = self.hass.states.get(grid_charge_switch)
@@ -2614,7 +2614,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Arm the listeners and the verification first. The target calculation
         # no longer waits for the inverter; if the min SOC entity is not
-        # available yet, _control_kostal skips the write and the verification
+        # available yet, _control_charge skips the write and the verification
         # applies the target as soon as the entity reports a value.
         self._setup_battery_soc_listener()
         self._setup_inverter_min_soc_listener()
@@ -2629,7 +2629,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._apply_discharge_block(announce=True)
             # A floor above the charge target has to reach the inverter now:
             # with the battery already above the target the update below returns
-            # early ("target reached") and _control_kostal never runs - which is
+            # early ("target reached") and _control_charge never runs - which is
             # exactly the case this block exists for.
             await self._write_raised_min_soc_floor()
 
@@ -3013,8 +3013,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         # CRITICAL: Use stored original value if available, otherwise use configured default
         reset_min_soc = self.original_min_soc if self.original_min_soc is not None else float(self.config.get(CONF_DEFAULT_MIN_SOC, 8.0))
-        kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-        if kostal_min_soc_entity and self.original_min_soc is None:
+        min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+        if min_soc_entity and self.original_min_soc is None:
             # No floor was captured, so this integration never changed it:
             # writing the configured default would clobber a min SOC the user
             # set by hand (reachable by disabling the integration outside a
@@ -3023,25 +3023,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # as do the limit restores, which carry their own captures.
             _LOGGER.debug(
                 "Min SOC restore skipped for %s - no original value was captured",
-                kostal_min_soc_entity,
+                min_soc_entity,
             )
-            kostal_min_soc_entity = None
-        kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+            min_soc_entity = None
+        grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
 
         ok = True
 
         # Reset min SOC
-        if kostal_min_soc_entity:
+        if min_soc_entity:
             try:
-                state = self.hass.states.get(kostal_min_soc_entity)
+                state = self.hass.states.get(min_soc_entity)
                 if state and state.state not in ("unknown", "unavailable"):
                     await self.hass.services.async_call(
                         "number",
                         "set_value",
-                        {"entity_id": kostal_min_soc_entity, "value": reset_min_soc},
+                        {"entity_id": min_soc_entity, "value": reset_min_soc},
                     )
                     _LOGGER.info(
-                        "Reset Kostal min SOC to %.1f%% (original: %s)",
+                        "Reset the inverter min SOC to %.1f%% (original: %s)",
                         reset_min_soc,
                         "stored" if self.original_min_soc is not None else "configured default",
                     )
@@ -3051,23 +3051,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as e:
                 _LOGGER.error("Error resetting min SOC: %s", e, exc_info=True)
                 ok = False
-        elif not self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY):
+        elif not self.config.get(CONF_MIN_SOC_ENTITY):
             # Reaching here with one configured means the guard above skipped the
             # restore, which already logged why.
             _LOGGER.warning("No min SOC entity configured - cannot reset")
 
         # Turn off grid charge
-        if kostal_grid_charge_switch:
+        if grid_charge_switch:
             try:
-                state = self.hass.states.get(kostal_grid_charge_switch)
+                state = self.hass.states.get(grid_charge_switch)
                 if state and state.state not in ("unknown", "unavailable"):
                     if state.state == "on":
                         await self.hass.services.async_call(
                             "switch",
                             "turn_off",
-                            {"entity_id": kostal_grid_charge_switch},
+                            {"entity_id": grid_charge_switch},
                         )
-                        _LOGGER.info("Turned off Kostal grid charge switch")
+                        _LOGGER.info("Turned off the grid charge switch")
                     else:
                         _LOGGER.debug("Grid charge switch already off")
                 else:
@@ -3245,7 +3245,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "override" if self.override_soc is not None else "calculated",
             )
 
-        # SAFETY: Before controlling Kostal, verify we can check battery SOC
+        # SAFETY: Before touching the inverter, verify we can check battery SOC
         # This prevents turning on grid charge switch if battery SOC is unavailable
         # (e.g., after restart when battery entity hasn't loaded yet)
         battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
@@ -3288,13 +3288,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 except (ValueError, TypeError):
                     pass
 
-        # Control Kostal entities based on operation mode
+        # Control the inverter entities based on operation mode
         if not self.target_reached:
             if can_check_soc:
                 if self.is_discharge_mode:
                     await self._control_discharge(target_soc)
                 else:
-                    await self._control_kostal(target_soc)
+                    await self._control_charge(target_soc)
             else:
                 _LOGGER.warning(
                     "Battery SOC entity %s is unavailable - skipping control to prevent "
@@ -3365,10 +3365,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         self._persist_state()
 
-    async def _control_kostal(self, target_soc: float) -> None:
-        """Control Kostal entities based on calculated SOC."""
+    async def _control_charge(self, target_soc: float) -> None:
+        """Control the inverter entities for night charging, from the calculated SOC."""
         if self._is_backup_active():
-            _LOGGER.info("Backup mode active - skipping Kostal control")
+            _LOGGER.info("Backup mode active - skipping inverter control")
             return
         # CRITICAL: Validate target_soc before applying
         user_min_soc = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
@@ -3383,8 +3383,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             return
 
-        kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-        kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+        grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
 
         # Check current SOC before starting charging (doesn't delay commands)
         # CRITICAL: If battery SOC is unavailable, we should NOT turn on grid charge
@@ -3427,9 +3427,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         min_soc_current_value = None
 
         # Prepare min SOC setting (check if needed, store original value)
-        if kostal_min_soc_entity:
+        if min_soc_entity:
             try:
-                state = self.hass.states.get(kostal_min_soc_entity)
+                state = self.hass.states.get(min_soc_entity)
                 if not state or state.state in ("unknown", "unavailable"):
                     # Without the entity the floor cannot be set, so charging must
                     # not start either. Nothing has been written yet, so no original
@@ -3438,7 +3438,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.warning(
                         "Min SOC entity %s is unavailable - deferring min SOC and grid "
                         "charge until it reports a value",
-                        kostal_min_soc_entity,
+                        min_soc_entity,
                     )
                     should_skip_charging = True
                 else:
@@ -3459,19 +3459,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # CRITICAL: Send commands together to avoid double DC checks
         # If both min SOC and grid charge need to be set, send them with minimal delay (0.1s)
         # so the inverter processes them together and only does DC checks once
-        if need_to_set_min_soc and kostal_min_soc_entity:
+        if need_to_set_min_soc and min_soc_entity:
             # Set min SOC first
             min_soc_set = False
             try:
                 await self.hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": kostal_min_soc_entity, "value": floor_soc},
+                    {"entity_id": min_soc_entity, "value": floor_soc},
                 )
                 self._last_soc_set = floor_soc
                 min_soc_set = True
                 _LOGGER.info(
-                    "Set Kostal min SOC to %.1f%% (was %s)",
+                    "Set the inverter min SOC to %.1f%% (was %s)",
                     floor_soc,
                     f"{min_soc_current_value:.1f}%" if min_soc_current_value is not None else "unknown",
                 )
@@ -3481,7 +3481,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.error("Error setting min SOC: %s", e, exc_info=True)
 
             # Immediately send grid charge command (configurable delay) so inverter processes both together
-            if min_soc_set and kostal_grid_charge_switch and not should_skip_charging:
+            if min_soc_set and grid_charge_switch and not should_skip_charging:
                 delay = _as_float(self.config.get(CONF_COMMAND_DELAY))
                 # A configured 0 is a valid answer ("no delay"), so it must not
                 # fall through to the default the way a falsy check would.
@@ -3489,40 +3489,40 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await asyncio.sleep(command_delay)  # Configurable delay
 
                 try:
-                    state = self.hass.states.get(kostal_grid_charge_switch)
+                    state = self.hass.states.get(grid_charge_switch)
                     if state and state.state == "off":
                         await self.hass.services.async_call(
                             "switch",
                             "turn_on",
-                            {"entity_id": kostal_grid_charge_switch},
+                            {"entity_id": grid_charge_switch},
                         )
-                        _LOGGER.info("Turned on Kostal grid charge switch (immediately after min SOC)")
+                        _LOGGER.info("Turned on the grid charge switch (immediately after min SOC)")
                     elif state and state.state == "on":
                         _LOGGER.debug("Grid charge switch already on")
                 except Exception as e:
                     _LOGGER.error("Error turning on grid charge: %s", e, exc_info=True)
-        elif kostal_grid_charge_switch and not should_skip_charging:
+        elif grid_charge_switch and not should_skip_charging:
             # Only grid charge needs to be turned on (min SOC already set or not needed)
             try:
-                state = self.hass.states.get(kostal_grid_charge_switch)
+                state = self.hass.states.get(grid_charge_switch)
                 if state and state.state == "off":
                     await self.hass.services.async_call(
                         "switch",
                         "turn_on",
-                        {"entity_id": kostal_grid_charge_switch},
+                        {"entity_id": grid_charge_switch},
                     )
-                    _LOGGER.info("Turned on Kostal grid charge switch")
+                    _LOGGER.info("Turned on the grid charge switch")
                 elif state and state.state == "on":
                     _LOGGER.debug("Grid charge switch already on")
             except Exception as e:
                 _LOGGER.error("Error turning on grid charge: %s", e, exc_info=True)
 
         # Apply absolute AC+DC charge limit during AC charging
-        if kostal_grid_charge_switch and not should_skip_charging:
+        if grid_charge_switch and not should_skip_charging:
             await self._apply_absolute_charge_power_limit()
 
     async def _control_discharge(self, target_soc: float) -> None:
-        """Control Kostal entities for morning discharge mode.
+        """Control the inverter entities for morning discharge mode.
 
         Sets min SOC to the discharge target (floor), ensures grid charging is off,
         and activates the force-discharge switch (if configured) to push battery
@@ -3544,8 +3544,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             return
 
-        kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-        kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+        grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
         force_discharge_switch = self.config.get(CONF_FORCE_DISCHARGE_SWITCH)
 
         battery_soc_entity = self.config.get(CONF_BATTERY_SOC_ENTITY)
@@ -3592,14 +3592,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # for the periodic verification to apply the target (finding F6).
         min_soc_available = True
 
-        if kostal_min_soc_entity:
+        if min_soc_entity:
             try:
-                state = self.hass.states.get(kostal_min_soc_entity)
+                state = self.hass.states.get(min_soc_entity)
                 if not state or state.state in ("unknown", "unavailable"):
                     _LOGGER.warning(
                         "Min SOC entity %s is unavailable - deferring discharge floor and "
                         "force discharge until it reports a value",
-                        kostal_min_soc_entity,
+                        min_soc_entity,
                     )
                     min_soc_available = False
                 else:
@@ -3620,12 +3620,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.error("Error preparing min SOC for discharge: %s", e, exc_info=True)
                 min_soc_available = False
 
-        if need_to_set_min_soc and kostal_min_soc_entity:
+        if need_to_set_min_soc and min_soc_entity:
             try:
                 await self.hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": kostal_min_soc_entity, "value": target_soc},
+                    {"entity_id": min_soc_entity, "value": target_soc},
                 )
             except Exception as e:
                 # Every other call in this method is wrapped; this one was not,
@@ -3640,14 +3640,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.info("Set min SOC to %.1f%% for discharge (floor)", target_soc)
 
         # Ensure grid charging is OFF during discharge
-        if kostal_grid_charge_switch:
+        if grid_charge_switch:
             try:
-                state = self.hass.states.get(kostal_grid_charge_switch)
+                state = self.hass.states.get(grid_charge_switch)
                 if state and state.state == "on":
                     await self.hass.services.async_call(
                         "switch",
                         "turn_off",
-                        {"entity_id": kostal_grid_charge_switch},
+                        {"entity_id": grid_charge_switch},
                     )
                     _LOGGER.info("Turned off grid charge for discharge mode")
             except Exception as e:
@@ -3687,15 +3687,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _stop_grid_charging(self) -> None:
         """Stop grid charging when target is reached."""
-        kostal_grid_charge_switch = self.config.get(CONF_KOSTAL_GRID_CHARGE_SWITCH)
-        if kostal_grid_charge_switch:
+        grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        if grid_charge_switch:
             try:
-                state = self.hass.states.get(kostal_grid_charge_switch)
+                state = self.hass.states.get(grid_charge_switch)
                 if state and state.state == "on":
                     await self.hass.services.async_call(
                         "switch",
                         "turn_off",
-                        {"entity_id": kostal_grid_charge_switch},
+                        {"entity_id": grid_charge_switch},
                     )
                     _LOGGER.info("Stopped grid charging - target SOC reached")
                 elif state and state.state == "off":
@@ -3788,8 +3788,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Set up a listener for inverter min SOC changes to detect external modifications."""
         self._remove_inverter_min_soc_listener()  # Remove any existing listener
 
-        kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-        if not kostal_min_soc_entity:
+        min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+        if not min_soc_entity:
             return
 
         async def _on_inverter_min_soc_change(
@@ -3827,10 +3827,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._inverter_min_soc_listener = async_track_state_change_event(
             self.hass,
-            kostal_min_soc_entity,
+            min_soc_entity,
             _on_inverter_min_soc_change,
         )
-        _LOGGER.debug("Set up inverter min SOC listener for %s", kostal_min_soc_entity)
+        _LOGGER.debug("Set up inverter min SOC listener for %s", min_soc_entity)
 
     def _remove_inverter_min_soc_listener(self) -> None:
         """Remove the inverter min SOC listener."""
@@ -3955,18 +3955,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if floor_soc is None:
                 return
 
-            kostal_min_soc_entity = self.config.get(CONF_KOSTAL_MIN_SOC_ENTITY)
-            if not kostal_min_soc_entity:
+            min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+            if not min_soc_entity:
                 return
 
-            state = self.hass.states.get(kostal_min_soc_entity)
+            state = self.hass.states.get(min_soc_entity)
             if not state or state.state in ("unknown", "unavailable"):
                 _LOGGER.debug("Cannot verify min SOC - entity unavailable")
                 return
 
             current_inverter_soc = _as_float(state.state)
             if current_inverter_soc is None:
-                _LOGGER.debug("Cannot verify min SOC - %s is not a usable number", kostal_min_soc_entity)
+                _LOGGER.debug("Cannot verify min SOC - %s is not a usable number", min_soc_entity)
                 return
 
             # Check if inverter min SOC doesn't match the floor (with tolerance)
@@ -3986,7 +3986,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self.hass.services.async_call(
                     "number",
                     "set_value",
-                    {"entity_id": kostal_min_soc_entity, "value": floor_soc},
+                    {"entity_id": min_soc_entity, "value": floor_soc},
                 )
                 self._last_soc_set = floor_soc
                 _LOGGER.info("Restored inverter min SOC to %.1f%%", floor_soc)

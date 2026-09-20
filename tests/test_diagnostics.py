@@ -54,7 +54,7 @@ async def test_diagnostics_without_coordinator_omits_state(mock_hass, mock_confi
     diagnostics = await async_get_config_entry_diagnostics(mock_hass, mock_config_entry)
 
     assert set(diagnostics) == {"entry", "options"}
-    assert diagnostics["entry"]["kostal_min_soc_entity"] == "**REDACTED**"
+    assert diagnostics["entry"]["min_soc_entity"] == "**REDACTED**"
 
 def test_every_entity_config_key_is_redacted():
     """A config key that names an entity of the user's system must be redacted.
@@ -72,4 +72,6 @@ def test_every_entity_config_key_is_redacted():
     }
 
     assert entity_keys, "no entity config keys found - the derivation is broken"
-    assert REDACT_KEYS == entity_keys
+    # Plus the names the two inverter keys carried before 3.0.2: a diagnostics
+    # dump taken from an entry that has not been migrated yet still holds them.
+    assert REDACT_KEYS == entity_keys | set(const.LEGACY_INVERTER_KEYS)

@@ -322,16 +322,48 @@ beide Stellen prüfen jetzt explizit auf `None`.
 
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 
-- **010 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des Config-Entrys, tägliche Neubestimmung.
+- **010 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des
+  Config-Entrys, tägliche Neubestimmung. Pascal am 20.09.: die Reduzierung ist regional
+  verschieden — es kann auch mittags zwischen 12 und 14 Uhr sein, und nur an bestimmten Monaten
+  oder Wochentagen. Ein einzelnes Start/Ende-Paar reicht dafür nicht.
+
+  Home Assistant bietet dafür mehr als Textfelder, beides in der installierten Version geprüft:
+  - **`schedule`-Helfer**: ein Wochenraster, das der Nutzer grafisch zeichnet (Einstellungen →
+    Geräte & Dienste → Helfer → Zeitplan), mehrere Blöcke je Wochentag, mit `next_event`-Attribut.
+    Die Integration würde dann keine Zeiten mehr selbst halten, sondern auf eine `schedule.*`-
+    Entität zeigen. Billigste Lösung mit der besten Oberfläche; Monats- und Datumsbereiche kann
+    das Raster allerdings nicht, die blieben als eigene Felder.
+  - **`ObjectSelector`** mit `fields`, `multiple` und `label_field`: eine wiederholbare Liste
+    strukturierter Zeilen (Datum von/bis, Zeit von/bis, Wochentage) als echtes Formular im
+    Assistenten, nicht als Textbox. Deckt den diffusen Fall vollständig ab, ist aber mehr Arbeit
+    und mehr Zustand im Config-Entry.
+
+  Empfehlung: `schedule`-Entität als Eingang anbieten (opt-in, das bestehende Zeitpaar bleibt der
+  einfache Weg), und die Datums-/Monatsdimension erst dann als `ObjectSelector`-Liste nachziehen,
+  wenn jemand sie wirklich braucht.
 - **011 Wechselrichter-Profile** (L8): erst Spike gegen die realen Entitäten der Fronius- und SMA-Integrationen, dann Fähigkeitsschnittstelle; Umbenennung `kostal_*` → `min_soc_entity` / `grid_charge_switch` mit `async_migrate_entry`.
-- **012 Morning-Discharge entscheiden** (L9): entweder als "dynamischer Tarif"-Funktion dokumentieren oder zum Überbrückungsmodus umbauen. Bis dahin mindestens Override-Pfad korrigieren (in 004 enthalten).
-- **013 Preissignal** (L5): Tibber/aWATTar/EPEX-Sensor als Eingang, ersetzt den festen Zeitplan durch Kostenoptimierung.
+- ~~**012 Morning-Discharge entscheiden** (L9)~~ — entschieden von Pascal am 20.09.: der Modus
+  bleibt, als **Netzentlastungs- und Arbitragefunktion**, nicht als "Platz für die Sonne
+  schaffen". Zweck: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, den Speicher in
+  die Morgenspitze (etwa 5–8 Uhr) entladen — dort zieht der Haushalt am meisten, die Sonne
+  liefert noch nicht, der dynamische Tarif ist am teuersten und das Netz am engsten. Hochoptional
+  und ausdrücklich **experimentell**; so ist er jetzt auch in der Oberfläche benannt und in
+  `docs/morning-discharge.md` beschrieben. Der Zwangsentlade-Schalter ist seit 3.0.2 Pflicht für
+  den Modus.
+- **013 Preissignal** (L5): Tibber/aWATTar/EPEX-Sensor als Eingang, ersetzt den festen Zeitplan
+  durch Kostenoptimierung. Von Pascal bestätigt: wer einen dynamischen Tarif hat, würde darüber
+  laden *und* entladen — das ist derselbe Eingang für Nachtladung und Morgenentladung, und es ist
+  das, was 012 von "Modus von Hand umschalten" zu "rechnet selbst" machen würde.
 - ~~**016 Coordinator aufteilen** (`common-modules`)~~ — erledigt: der Coordinator liegt in
   `coordinator.py`, `__init__.py` ist nur noch Setup, Update und Unload. Eine feinere Aufteilung
   (Limits, Effizienzsuche, Zeitplan, Persistenz) bleibt möglich, ist aber von keiner Regel
   gefordert.
 - **015 Effizienz je Ladestandsband**: Verluste hängen auch vom SOC ab; die Suche bucht heute nur
   auf die Leistung. Wer das verfeinern will, misst pro SOC-Band (Plan 010, Wartungshinweise).
+  Von Pascal als sinnvoll und direkt umsetzbar eingestuft. Umfang: die Messung trägt den SOC
+  ohnehin schon (Start- und End-SOC stehen im Sample), es fehlt die Ablage je Band und ein
+  Optimum je Band statt eines globalen. Der Rahmen dafür — golden-section über die Leistung,
+  Verwerfen unbrauchbarer Messungen — bleibt wie er ist.
 - ~~**014 Doku-Bereinigung**~~ — erledigt: die README beschreibt die Prognose-Entität für den
   nächsten Tag und alle Felder, die Platzhalter-URLs sind durch die echten ersetzt, die
   Audit-Dateien liegen unter `docs/history/`, und `translations/de.json` existiert.

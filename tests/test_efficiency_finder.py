@@ -514,7 +514,7 @@ async def test_a_finished_measurement_frees_the_window_for_the_next(mock_hass, f
     mock_hass.states.async_set("switch.grid", "on")
     finder.entry.data = {
         **CONFIG,
-        "kostal_grid_charge_switch": "switch.grid",
+        "grid_charge_switch": "switch.grid",
     }
     finder.config = finder.entry.data
     finder.auto_efficient_charge = True
@@ -537,7 +537,7 @@ async def test_a_finished_measurement_frees_the_window_for_the_next(mock_hass, f
 @pytest.mark.asyncio
 async def test_an_unfinished_measurement_keeps_running(mock_hass, finder):
     mock_hass.states.async_set("switch.grid", "on")
-    finder.entry.data = {**CONFIG, "kostal_grid_charge_switch": "switch.grid"}
+    finder.entry.data = {**CONFIG, "grid_charge_switch": "switch.grid"}
     finder.config = finder.entry.data
     finder.auto_efficient_charge = True
     finder.target_reached = False

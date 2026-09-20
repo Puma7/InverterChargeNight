@@ -66,9 +66,11 @@ day will do.
 - **Two planner modes** — `Headroom` keeps room in the battery for tomorrow's PV forecast;
   `Bridge` additionally covers the house load from the window end until solar output exceeds it.
   See [Planner Modes](#planner-modes).
-- **Two operation modes** — `Night Charge` fills the battery from the grid during the window;
-  `Morning Discharge` empties it towards the grid before sunrise (for dynamic tariffs). Switchable
-  at runtime.
+- **Two operation modes** — `Night Charge` fills the battery from the grid during the window.
+  `Morning discharge` does the opposite and is **experimental**: on a summer day it empties the
+  battery into the 05:00–08:00 household peak, for the spread on a dynamic tariff and to take
+  that load off the grid. See [Morning discharge](docs/morning-discharge.md). Switchable at
+  runtime.
 - **Any time window**, including one that spans midnight, and an optional date range for tariffs
   that only apply in certain months.
 - **Charge power planning** — the constant power that reaches the target exactly at the end of the
@@ -175,8 +177,9 @@ To find entities:
 
    **Step 1 -- Entities**
    - **Name**: Name for this integration instance
-   - **Operation Mode**: `Night Charge` (charge from the grid overnight) or `Morning Discharge`
-     (discharge before sunrise to make room for solar)
+   - **Operation Mode**: `Night Charge` (charge from the grid overnight) or
+     `Morning discharge (experimental)` (empty the battery into the morning peak on a summer day;
+     needs a force discharge switch — see [Morning discharge](docs/morning-discharge.md))
    - **Minimum SOC entity**: The number entity that controls min SOC. It also identifies
      this instance, so each inverter can only be configured once.
    - **Grid charge switch**: The switch that enables or disables charging from the grid
@@ -531,9 +534,11 @@ Morning Discharge windows are never blocked -- there the point is to empty the b
    it, measured against the inverter floor, not the charge target
 8. Nothing is written while backup/island mode is active
 
-**In Morning Discharge mode** the same window drives the battery *down* to the target instead:
-the min SOC acts as a floor, grid charging is kept off, and the optional force discharge switch
-is turned on until the target is reached.
+**In Morning discharge mode** the same window drives the battery *down* to the target instead:
+the min SOC acts as a floor, grid charging is kept off, and the force discharge switch is turned
+on until the target is reached. That switch is required in this mode — it is the only thing that
+discharges. The mode is experimental; [docs/morning-discharge.md](docs/morning-discharge.md)
+explains what it is for and when it pays.
 
 **At Window End (e.g., 05:59):**
 
@@ -952,13 +957,14 @@ efficiency history (`auto_efficiency_data`) and the persisted runtime state (`ru
 The full list with labels and help texts lives in `strings.json`.
 
 Step 1 -- entities:
-- `operation_mode` - `night_charge` or `morning_discharge`
-- `kostal_min_soc_entity` - the minimum SOC number entity (also the entry's unique id)
-- `kostal_grid_charge_switch` - the grid charge switch entity
+- `operation_mode` - `night_charge` or `morning_discharge` (experimental, see
+  [docs/morning-discharge.md](docs/morning-discharge.md))
+- `min_soc_entity` - the minimum SOC number entity (also the entry's unique id)
+- `grid_charge_switch` - the grid charge switch entity
 
-  Both keys carry `kostal_` for historical reasons: the first version of this integration only
-  spoke to a Kostal. They accept any inverter's entities and will be renamed in a future release
-  with a migration.
+  Both carried a `kostal_` prefix until 3.0.2, from the first version of this integration.
+  Nothing in the code was ever Kostal-specific; entries configured earlier are migrated on
+  startup and keep working.
 - `pv_forecast_entity` - PV forecast entity ID for the next day (Solcast)
 - `pv_forecast_today_entity` - optional forecast entity ID for today
 - `battery_soc_entity` - Battery SOC sensor entity ID

@@ -40,8 +40,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_DISCHARGE_LIMIT_ENTITY,
     CONF_END_TIME,
     CONF_FORECAST_ERROR_MARGIN,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_OPERATION_MODE,
     CONF_PV_FORECAST_ENTITY,
     CONF_RUNTIME_STATE,
@@ -71,8 +71,8 @@ DEFAULT_MIN = 8.0
 FORECAST_KWH = 5.0
 
 CONFIG = {
-    CONF_KOSTAL_MIN_SOC_ENTITY: MIN_SOC,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH: GRID,
+    CONF_MIN_SOC_ENTITY: MIN_SOC,
+    CONF_GRID_CHARGE_SWITCH: GRID,
     CONF_BATTERY_SOC_ENTITY: BATTERY,
     CONF_PV_FORECAST_ENTITY: PV,
     CONF_BATTERY_CAPACITY: CAPACITY_KWH,
@@ -355,7 +355,7 @@ async def test_floor_is_raised_to_the_charge_level_above_the_target(mock_hass, c
     assert coordinator._window_floor_soc == ABOVE_TARGET
     # The raised floor reaches the inverter at the window start, not only at the
     # first periodic verification: with the battery above the target the polling
-    # update returns early and never calls _control_kostal.
+    # update returns early and never calls _control_charge.
     assert _min_soc_writes(mock_hass) == [ABOVE_TARGET]
     # ... and the value found there is what the window end restores
     assert coordinator.original_min_soc == DEFAULT_MIN
@@ -473,7 +473,7 @@ async def test_the_floor_follows_a_rise_we_did_not_order(mock_hass, coordinator)
 async def test_without_a_grid_switch_the_charge_target_decides(mock_hass):
     """No switch to read: while the target is not reached the rise is ours."""
     _register(mock_hass, battery=str(ABOVE_TARGET))
-    made = _make(mock_hass, {k: v for k, v in CONFIG.items() if k != CONF_KOSTAL_GRID_CHARGE_SWITCH})
+    made = _make(mock_hass, {k: v for k, v in CONFIG.items() if k != CONF_GRID_CHARGE_SWITCH})
     try:
         await made._on_window_start(WINDOW_START)
         assert made._window_floor_soc == ABOVE_TARGET
@@ -572,7 +572,7 @@ async def test_control_kostal_writes_the_floor_but_charges_to_the_target(mock_ha
         made._window_floor_soc = 60.0
         mock_hass.services.async_call.reset_mock()
 
-        await made._control_kostal(TARGET)
+        await made._control_charge(TARGET)
 
         assert mock_hass.services.async_call.await_args_list == [
             call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}),
@@ -726,7 +726,7 @@ async def test_mode_off_keeps_the_floor_at_the_target_while_charging(mock_hass):
         await made._on_window_start(WINDOW_START)
         made._window_floor_soc = 90.0  # even a leftover value is ignored
 
-        await made._control_kostal(TARGET)
+        await made._control_charge(TARGET)
 
         assert mock_hass.services.async_call.await_args_list == [
             call("number", "set_value", {"entity_id": MIN_SOC, "value": TARGET}),
@@ -801,7 +801,7 @@ async def test_raised_floor_is_deferred_while_the_min_soc_entity_is_unavailable(
 
 @pytest.mark.asyncio
 async def test_raised_floor_without_a_min_soc_entity_is_a_no_op(mock_hass):
-    config = {key: value for key, value in CONFIG.items() if key != CONF_KOSTAL_MIN_SOC_ENTITY}
+    config = {key: value for key, value in CONFIG.items() if key != CONF_MIN_SOC_ENTITY}
     _register(mock_hass, battery=str(ABOVE_TARGET))
     made = _make(mock_hass, config)
     try:

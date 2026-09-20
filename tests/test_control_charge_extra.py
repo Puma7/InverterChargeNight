@@ -12,8 +12,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_COMMAND_DELAY,
     CONF_DEFAULT_MIN_SOC,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
 )
@@ -35,9 +35,9 @@ async def test_control_kostal_skips_on_backup(mock_hass, caplog):
     coordinator._is_backup_active = MagicMock(return_value=True)
     mock_hass.services.async_call = AsyncMock()
 
-    await coordinator._control_kostal(50.0)
+    await coordinator._control_charge(50.0)
 
-    assert "Backup mode active - skipping Kostal control" in caplog.text
+    assert "Backup mode active - skipping inverter control" in caplog.text
     mock_hass.services.async_call.assert_not_awaited()
 
 
@@ -49,7 +49,7 @@ async def test_control_kostal_invalid_target(mock_hass, caplog):
     coordinator._is_backup_active = MagicMock(return_value=False)
     mock_hass.services.async_call = AsyncMock()
 
-    await coordinator._control_kostal(5.0)
+    await coordinator._control_charge(5.0)
 
     assert "Target SOC 5.0% is outside allowed range [10.0%, 90.0%]" in caplog.text
     mock_hass.services.async_call.assert_not_awaited()
@@ -75,8 +75,8 @@ async def test_control_kostal_sets_min_and_grid(mock_hass):
         mock_hass,
         {
             CONF_BATTERY_SOC_ENTITY: "sensor.soc",
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_DEFAULT_MIN_SOC: 8.0,
             CONF_USER_MIN_SOC: 8.0,
             CONF_USER_MAX_SOC: 100.0,
@@ -87,7 +87,7 @@ async def test_control_kostal_sets_min_and_grid(mock_hass):
     coordinator._apply_absolute_charge_power_limit = AsyncMock()
 
     with patch("asyncio.sleep", new=AsyncMock()):
-        await coordinator._control_kostal(50.0)
+        await coordinator._control_charge(50.0)
 
     calls = [call.args for call in mock_hass.services.async_call.call_args_list]
     assert ("number", "set_value") in [(c[0], c[1]) for c in calls]
@@ -101,7 +101,7 @@ async def test_stop_grid_charging_turns_off_and_resets(mock_hass):
     mock_hass.services.async_call = AsyncMock()
 
     coordinator = _make_coordinator(
-        mock_hass, {CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid"}
+        mock_hass, {CONF_GRID_CHARGE_SWITCH: "switch.grid"}
     )
     coordinator._reset_absolute_charge_power = AsyncMock()
     coordinator._finalize_auto_test = MagicMock()
@@ -117,8 +117,8 @@ async def test_stop_grid_charging_turns_off_and_resets(mock_hass):
 
 _CONTROL_CONFIG = {
     CONF_BATTERY_SOC_ENTITY: "sensor.soc",
-    CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-    CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+    CONF_MIN_SOC_ENTITY: "number.min_soc",
+    CONF_GRID_CHARGE_SWITCH: "switch.grid",
     CONF_DEFAULT_MIN_SOC: 8.0,
     CONF_USER_MIN_SOC: 8.0,
     CONF_USER_MAX_SOC: 100.0,
@@ -137,7 +137,7 @@ async def test_control_kostal_min_soc_service_error_keeps_grid_charge_off(mock_h
     coordinator = _make_coordinator(mock_hass, _CONTROL_CONFIG)
     coordinator._is_backup_active = MagicMock(return_value=False)
 
-    await coordinator._control_kostal(50.0)
+    await coordinator._control_charge(50.0)
 
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": "number.min_soc", "value": 50.0}

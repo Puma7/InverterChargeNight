@@ -7,8 +7,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Operation Mode",
-          "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
-          "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
+          "min_soc_entity": "Minimum SOC number entity",
+          "grid_charge_switch": "Grid charge switch",
           "pv_forecast_entity": "PV Forecast Entity (tomorrow)",
           "pv_forecast_today_entity": "PV Forecast Today Entity (optional)",
           "battery_soc_entity": "Battery SOC Sensor",
@@ -16,9 +16,9 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
-          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
-          "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC. It also identifies this integration instance, so each inverter can only be configured once.",
-          "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
+          "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
           "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
@@ -42,7 +42,7 @@
           "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
-          "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
+          "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
           "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
         }
@@ -139,8 +139,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Operation Mode",
-          "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
-          "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
+          "min_soc_entity": "Minimum SOC number entity",
+          "grid_charge_switch": "Grid charge switch",
           "pv_forecast_entity": "PV Forecast Entity (tomorrow)",
           "pv_forecast_today_entity": "PV Forecast Today Entity (optional)",
           "battery_soc_entity": "Battery SOC Sensor",
@@ -148,9 +148,9 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
-          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
-          "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC. It also identifies this integration instance, so each inverter can only be configured once.",
-          "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
+          "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
           "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
@@ -174,7 +174,7 @@
           "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
-          "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
+          "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
           "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
         }
@@ -300,8 +300,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Operation Mode",
-          "kostal_min_soc_entity": "Kostal Min SOC Number Entity",
-          "kostal_grid_charge_switch": "Kostal Grid Charge Switch",
+          "min_soc_entity": "Minimum SOC number entity",
+          "grid_charge_switch": "Grid charge switch",
           "pv_forecast_entity": "PV Forecast Entity (tomorrow)",
           "pv_forecast_today_entity": "PV Forecast Today Entity (optional)",
           "battery_soc_entity": "Battery SOC Sensor",
@@ -309,9 +309,9 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
-          "operation_mode": "Night Charge: charges battery from grid overnight. Morning Discharge: discharges battery before sunrise to make room for solar.",
-          "kostal_min_soc_entity": "Select the Kostal number entity that controls minimum SOC. It also identifies this integration instance, so each inverter can only be configured once.",
-          "kostal_grid_charge_switch": "Select the Kostal switch entity that enables/disables grid charging",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
+          "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
           "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
@@ -335,7 +335,7 @@
           "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
-          "default_min_soc": "Min SOC value to restore at end time (typically 8% for Kostal)",
+          "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
           "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
           "planner_mode": "Headroom (default): the target only keeps room for tomorrow's PV forecast. Bridge: the target also covers the house load from the window end until PV output exceeds it (sunrise + delay) and compares the tariffs on conflict. Bridge uses the fields in the Advanced step."
         }
@@ -452,7 +452,7 @@
     "operation_mode": {
       "options": {
         "night_charge": "Night Charge",
-        "morning_discharge": "Morning Discharge"
+        "morning_discharge": "Morning discharge (experimental)"
       }
     },
     "planner_mode": {
@@ -509,7 +509,7 @@
         "name": "Operation Mode",
         "state": {
           "night_charge": "Night Charge",
-          "morning_discharge": "Morning Discharge"
+          "morning_discharge": "Morning discharge (experimental)"
         }
       }
     },

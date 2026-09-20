@@ -34,9 +34,9 @@ from custom_components.inverter_charge_night.const import (
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_FORECAST_ERROR_MARGIN,
     CONF_GRID_IMPORT_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_GRID_CHARGE_SWITCH,
     CONF_CHARGE_POWER_ENTITY,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_MIN_SOC_ENTITY,
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
     CONF_OPERATION_MODE,
@@ -58,8 +58,8 @@ BACKUP = "binary_sensor.backup"
 METER = "sensor.grid_import_energy"
 
 CONFIG = {
-    CONF_KOSTAL_MIN_SOC_ENTITY: MIN_SOC,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH: GRID,
+    CONF_MIN_SOC_ENTITY: MIN_SOC,
+    CONF_GRID_CHARGE_SWITCH: GRID,
     CONF_BATTERY_SOC_ENTITY: BATTERY,
     CONF_PV_FORECAST_ENTITY: PV,
     CONF_BATTERY_CAPACITY: 10.0,
@@ -294,7 +294,7 @@ async def test_a_target_crossed_during_the_update_stops_charging(mock_hass, coor
     async def _charge_past_the_target(_target_soc):
         mock_hass.states.async_set(BATTERY, str(target + 0.5))
 
-    coordinator._control_kostal = AsyncMock(side_effect=_charge_past_the_target)
+    coordinator._control_charge = AsyncMock(side_effect=_charge_past_the_target)
 
     data = await coordinator._async_update_data()
 
@@ -363,7 +363,7 @@ async def test_verification_without_a_target_writes_nothing(mock_hass):
 
 @pytest.mark.asyncio
 async def test_verification_without_a_min_soc_entity_writes_nothing(mock_hass):
-    config = {k: v for k, v in CONFIG.items() if k != CONF_KOSTAL_MIN_SOC_ENTITY}
+    config = {k: v for k, v in CONFIG.items() if k != CONF_MIN_SOC_ENTITY}
     coordinator = _armed_for_verification(mock_hass, config)
 
     await coordinator._verify_and_restore_min_soc()

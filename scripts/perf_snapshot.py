@@ -20,8 +20,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_DEFAULT_MIN_SOC,
     CONF_END_TIME,
     CONF_FORECAST_ERROR_MARGIN,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
     CONF_PV_FORECAST_ENTITY,
@@ -57,8 +57,8 @@ async def _run_once() -> None:
     entry.entry_id = "perf_entry"
     entry.title = "Perf"
     entry.data = {
-        CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
-        CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+        CONF_MIN_SOC_ENTITY: "number.min_soc",
+        CONF_GRID_CHARGE_SWITCH: "switch.grid",
         CONF_PV_FORECAST_ENTITY: "sensor.pv",
         CONF_BATTERY_SOC_ENTITY: "sensor.soc",
         CONF_BATTERY_CAPACITY: 10.0,

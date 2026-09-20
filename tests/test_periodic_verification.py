@@ -19,8 +19,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_DEFAULT_MIN_SOC,
     CONF_END_TIME,
     CONF_FORECAST_ERROR_MARGIN,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_PV_FORECAST_ENTITY,
     CONF_START_TIME,
     CONF_USER_MAX_SOC,
@@ -33,8 +33,8 @@ BATTERY = "sensor.soc"
 PV = "sensor.pv"
 
 CONFIG = {
-    CONF_KOSTAL_MIN_SOC_ENTITY: MIN_SOC,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH: GRID,
+    CONF_MIN_SOC_ENTITY: MIN_SOC,
+    CONF_GRID_CHARGE_SWITCH: GRID,
     CONF_BATTERY_SOC_ENTITY: BATTERY,
     CONF_PV_FORECAST_ENTITY: PV,
     CONF_BATTERY_CAPACITY: 10.0,
@@ -226,7 +226,7 @@ async def test_verification_applies_target_once_min_soc_entity_appears(mock_hass
 async def test_verify_does_not_write_when_window_ends_during_run(mock_hass):
     """Finding F11: the window end between the read and the write cancels the write."""
     coordinator = _make_coordinator(
-        mock_hass, {CONF_KOSTAL_MIN_SOC_ENTITY: MIN_SOC, CONF_BATTERY_SOC_ENTITY: BATTERY}
+        mock_hass, {CONF_MIN_SOC_ENTITY: MIN_SOC, CONF_BATTERY_SOC_ENTITY: BATTERY}
     )
     coordinator.is_active = True
     coordinator.is_enabled = True

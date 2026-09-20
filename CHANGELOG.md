@@ -18,6 +18,17 @@ Follow-ups from a review of 3.0.1. One of them is a safety fix, and one setting 
 
 ### Changed
 
+- **The two inverter entities lost their `kostal_` prefix.** `kostal_min_soc_entity` and
+  `kostal_grid_charge_switch` are now `min_soc_entity` and `grid_charge_switch`; the labels, help
+  texts and log messages say "inverter" instead of "Kostal". Nothing in this integration was ever
+  Kostal-specific. **Existing entries are migrated on startup** and keep working untouched —
+  verified against a real Home Assistant. Anything of your own that reads the config keys (a
+  template, a script) has to follow.
+- **Morning discharge is declared experimental** and its purpose is stated properly. It is not
+  "make room for the sun": on a summer day whose forecast covers the house anyway, it empties the
+  battery into the 05:00–08:00 household peak, for the spread on a dynamic tariff and to take
+  that load off the grid at its tightest hour. New page:
+  [docs/morning-discharge.md](docs/morning-discharge.md).
 - **Morning discharge now requires the force discharge switch.** It is the only thing that
   actually discharges the battery; without it the mode raised the min SOC floor, turned grid
   charging off and then waited for a discharge that could never start. The field said

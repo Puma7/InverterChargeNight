@@ -15,8 +15,8 @@ from .const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_END_TIME,
     CONF_HOUSE_LOAD_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_OPERATION_MODE,
     CONF_START_TIME,
     CONF_UPDATE_INTERVAL,
@@ -26,6 +26,7 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     LEGACY_HOUSE_LOAD_ENERGY_ENTITY,
+    LEGACY_INVERTER_KEYS,
     LEGACY_UNUSED_DATA_KEYS,
     LEGACY_UNUSED_OPTION_KEYS,
 )
@@ -94,6 +95,17 @@ def _migrate_entry_data(hass: HomeAssistant, entry: InverterChargeNightConfigEnt
     options = dict(entry.options)
     changed = False
 
+    for legacy_key, new_key in LEGACY_INVERTER_KEYS.items():
+        legacy_entity = data.pop(legacy_key, None)
+        if legacy_entity is None:
+            continue
+        changed = True
+        if not data.get(new_key):
+            # Same entity under a name that does not carry a vendor: the wizard
+            # writes the new key from 3.0.2 on, and everything reads only that.
+            data[new_key] = legacy_entity
+            _LOGGER.info("Carried %s over to %s", legacy_key, new_key)
+
     legacy_load_meter = data.pop(LEGACY_HOUSE_LOAD_ENERGY_ENTITY, None)
     if legacy_load_meter and not data.get(CONF_HOUSE_LOAD_ENTITY):
         # Same quantity under a new name: a cumulative kWh meter of the house.
@@ -144,7 +156,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
     # Test-before-setup: verify critical entities are available
     required_entities = [
         entry.data.get(key)
-        for key in (CONF_BATTERY_SOC_ENTITY, CONF_KOSTAL_MIN_SOC_ENTITY, CONF_KOSTAL_GRID_CHARGE_SWITCH)
+        for key in (CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH)
     ]
     for entity_id in required_entities:
         if entity_id and hass.states.get(entity_id) is None:

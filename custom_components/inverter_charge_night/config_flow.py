@@ -50,8 +50,8 @@ from .const import (
     CONF_FORCE_DISCHARGE_SWITCH,
     CONF_FORECAST_ERROR_MARGIN,
     CONF_HOUSE_LOAD_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
     CONF_NIGHT_PRICE_CT,
@@ -112,8 +112,8 @@ DEFAULT_BATTERY_CAPACITY = 10.0
 STEP_USER_KEYS: tuple[str, ...] = (
     CONF_NAME,
     CONF_OPERATION_MODE,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
     CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_BATTERY_SOC_ENTITY,
@@ -226,8 +226,8 @@ def _normalize_date_value(value: str | date | None) -> str | None:
 
 
 _ENTITY_KEYS_TO_VALIDATE = [
-    CONF_KOSTAL_MIN_SOC_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
     CONF_PV_FORECAST_ENTITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_BACKUP_MODE_ENTITY,
@@ -545,8 +545,8 @@ def _schema_entities(defaults: Mapping[str, Any]) -> vol.Schema:
         {
             _required(CONF_NAME, defaults, DEFAULT_NAME): _text_selector(),
             _required(CONF_OPERATION_MODE, defaults, DEFAULT_OPERATION_MODE): _mode_selector(),
-            _required(CONF_KOSTAL_MIN_SOC_ENTITY, defaults): _entity_selector("number"),
-            _required(CONF_KOSTAL_GRID_CHARGE_SWITCH, defaults): _entity_selector("switch"),
+            _required(CONF_MIN_SOC_ENTITY, defaults): _entity_selector("number"),
+            _required(CONF_GRID_CHARGE_SWITCH, defaults): _entity_selector("switch"),
             _required(CONF_PV_FORECAST_ENTITY, defaults): _entity_selector("sensor"),
             _optional(
                 CONF_PV_FORECAST_TODAY_ENTITY, defaults.get(CONF_PV_FORECAST_TODAY_ENTITY)
@@ -710,7 +710,7 @@ def _entry_using_min_soc_entity(
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.entry_id == except_entry_id:
             continue
-        if entity_id in (entry.unique_id, entry.data.get(CONF_KOSTAL_MIN_SOC_ENTITY)):
+        if entity_id in (entry.unique_id, entry.data.get(CONF_MIN_SOC_ENTITY)):
             return entry
     return None
 
@@ -780,7 +780,7 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _async_create(self) -> ConfigFlowResult:
         data = _finalize_data(self._data)
-        await self.async_set_unique_id(data[CONF_KOSTAL_MIN_SOC_ENTITY])
+        await self.async_set_unique_id(data[CONF_MIN_SOC_ENTITY])
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title=data[CONF_NAME], data=data)
 
@@ -845,12 +845,12 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # (a replaced device, a renamed entity) must stay possible, which is
         # why this is not _abort_if_unique_id_mismatch: that one compares
         # against this entry's own id and would refuse every change.
-        min_soc_entity = data[CONF_KOSTAL_MIN_SOC_ENTITY]
+        min_soc_entity = data[CONF_MIN_SOC_ENTITY]
         if _entry_using_min_soc_entity(self.hass, min_soc_entity, entry.entry_id):
             return self.async_show_form(
                 step_id="reconfigure",
                 data_schema=_schema_entities(self._data),
-                errors={CONF_KOSTAL_MIN_SOC_ENTITY: "entity_used_by_other_entry"},
+                errors={CONF_MIN_SOC_ENTITY: "entity_used_by_other_entry"},
             )
         # The unique id follows the inverter, so a later entry for the old
         # entity is not blocked and a later one for the new entity is. It has
@@ -958,21 +958,21 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         return data
 
     async def _async_save(self) -> ConfigFlowResult:
-        min_soc_entity = self._data.get(CONF_KOSTAL_MIN_SOC_ENTITY)
+        min_soc_entity = self._data.get(CONF_MIN_SOC_ENTITY)
         if min_soc_entity and _entry_using_min_soc_entity(
             self.hass, min_soc_entity, self._config_entry.entry_id
         ):
             return self.async_show_form(
                 step_id="init",
                 data_schema=_schema_entities(self._data),
-                errors={CONF_KOSTAL_MIN_SOC_ENTITY: "entity_used_by_other_entry"},
+                errors={CONF_MIN_SOC_ENTITY: "entity_used_by_other_entry"},
             )
         # The settings live in entry.data (unchanged for existing installations);
         # entry.options only holds the auto-efficiency history, which is preserved.
         data = self._merged_data()
         # Keep the unique id on the inverter this entry now drives; otherwise a
         # second entry could be created for the new entity without being caught.
-        unique_id = data.get(CONF_KOSTAL_MIN_SOC_ENTITY, self._config_entry.unique_id)
+        unique_id = data.get(CONF_MIN_SOC_ENTITY, self._config_entry.unique_id)
         self.hass.config_entries.async_update_entry(
             self._config_entry, data=data, unique_id=unique_id
         )

@@ -19,7 +19,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEFAULT_MIN_SOC,
     CONF_FORECAST_ERROR_MARGIN,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_MIN_SOC_ENTITY,
     CONF_RUNTIME_STATE,
     CONF_PV_FORECAST_ENTITY,
     CONF_ACTIVE_END_DATE,
@@ -28,7 +28,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
+    CONF_GRID_CHARGE_SWITCH,
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
     CONF_USER_MAX_SOC,
@@ -159,7 +159,7 @@ async def test_handle_auto_charge_uses_best_power_and_disables(mock_hass):
     coordinator = _make_coordinator(
         mock_hass,
         {
-            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_CHARGE_POWER_ENTITY: "number.setpoint",
             CONF_CHARGE_POWER_SENT_ENTITY: "sensor.sent",
             CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.received",
@@ -223,7 +223,7 @@ async def test_handle_auto_charge_grid_off_finalizes_test(mock_hass):
         {
             CONF_MIN_CHARGE_POWER_W: 5000,
             CONF_MAX_CHARGE_POWER_W: 15000,
-            CONF_KOSTAL_GRID_CHARGE_SWITCH: "switch.grid",
+            CONF_GRID_CHARGE_SWITCH: "switch.grid",
             CONF_CHARGE_POWER_ENTITY: "number.setpoint",
             CONF_CHARGE_POWER_SENT_ENTITY: "sensor.sent",
             CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.received",
@@ -245,7 +245,7 @@ async def test_calculate_initial_soc_uses_persisted_target_after_restart(mock_ha
     coordinator = _make_coordinator(
         mock_hass,
         {
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
             CONF_PV_FORECAST_ENTITY: "sensor.pv",
             CONF_USER_MIN_SOC: 8.0,
             CONF_USER_MAX_SOC: 100.0,
@@ -275,7 +275,7 @@ async def test_calculate_initial_soc_ignores_live_value_without_persisted_state(
     coordinator = _make_coordinator(
         mock_hass,
         {
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
             CONF_PV_FORECAST_ENTITY: "sensor.pv",
             CONF_USER_MIN_SOC: 8.0,
             CONF_USER_MAX_SOC: 100.0,
@@ -323,7 +323,7 @@ async def test_verify_and_restore_min_soc_sets_value(mock_hass):
     coordinator = _make_coordinator(
         mock_hass,
         {
-            CONF_KOSTAL_MIN_SOC_ENTITY: "number.min_soc",
+            CONF_MIN_SOC_ENTITY: "number.min_soc",
             CONF_BATTERY_SOC_ENTITY: "sensor.soc",
         },
     )

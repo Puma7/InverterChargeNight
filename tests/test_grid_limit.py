@@ -48,8 +48,8 @@ from custom_components.inverter_charge_night.const import (
     CONF_GRID_MAX_CONTINUOUS_W,
     CONF_GRID_PHASES,
     CONF_GRID_VOLTAGE_V,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH,
-    CONF_KOSTAL_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_MIN_SOC_ENTITY,
     CONF_MAIN_FUSE_A,
     CONF_MAX_CHARGE_POWER_W,
     CONF_MIN_CHARGE_POWER_W,
@@ -206,8 +206,8 @@ NOW = "custom_components.inverter_charge_night.coordinator.dt_util.now"
 TRACK = "custom_components.inverter_charge_night.coordinator.async_track_state_change_event"
 
 BASE_CONFIG = {
-    CONF_KOSTAL_MIN_SOC_ENTITY: MIN_SOC,
-    CONF_KOSTAL_GRID_CHARGE_SWITCH: GRID,
+    CONF_MIN_SOC_ENTITY: MIN_SOC,
+    CONF_GRID_CHARGE_SWITCH: GRID,
     CONF_BATTERY_SOC_ENTITY: BATTERY,
     CONF_PV_FORECAST_ENTITY: PV,
     CONF_BATTERY_CAPACITY: 10.0,

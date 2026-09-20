@@ -115,8 +115,8 @@ async def main() -> int:
     data = {
         "name": "Smoke",
         "operation_mode": "night_charge",
-        "kostal_min_soc_entity": "number.inv_min_soc",
-        "kostal_grid_charge_switch": "switch.inv_grid_charge",
+        "min_soc_entity": "number.inv_min_soc",
+        "grid_charge_switch": "switch.inv_grid_charge",
         "pv_forecast_entity": "sensor.pv_forecast_tomorrow",
         "battery_soc_entity": "sensor.battery_soc",
         "battery_capacity": 10.0,
@@ -206,6 +206,31 @@ async def main() -> int:
     ok_unload = await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     check("config entry unloads", ok_unload, f"state={entry.state}")
+
+    # An entry written before 3.0.2 carries the two inverter entities under
+    # their kostal_ names. It has to come up as if it had always used the new
+    # ones - the migration runs inside async_setup_entry, so this is the only
+    # place it can be seen end to end.
+    legacy_data = {k: v for k, v in data.items()
+                   if k not in ("min_soc_entity", "grid_charge_switch")}
+    legacy_data["kostal_min_soc_entity"] = "number.inv_min_soc"
+    legacy_data["kostal_grid_charge_switch"] = "switch.inv_grid_charge"
+    legacy_kwargs = dict(kwargs) | {"data": legacy_data, "entry_id": "smoke3",
+                                    "title": "Smoke legacy", "unique_id": "number.inv_min_soc_3"}
+    legacy_entry = config_entries.ConfigEntry(
+        **{k: v for k, v in legacy_kwargs.items() if k in accepted}
+    )
+    hass.config_entries._entries[legacy_entry.entry_id] = legacy_entry  # noqa: SLF001
+    ok_legacy = await hass.config_entries.async_setup(legacy_entry.entry_id)
+    await hass.async_block_till_done()
+    check("an entry from before the rename still sets up", ok_legacy, f"state={legacy_entry.state}")
+    check("its inverter entities moved to the new keys",
+          legacy_entry.data.get("min_soc_entity") == "number.inv_min_soc"
+          and legacy_entry.data.get("grid_charge_switch") == "switch.inv_grid_charge"
+          and "kostal_min_soc_entity" not in legacy_entry.data,
+          f"keys={sorted(k for k in legacy_entry.data if 'min_soc' in k or 'grid_charge' in k)}")
+    await hass.config_entries.async_unload(legacy_entry.entry_id)
+    await hass.async_block_till_done()
 
     # A required entity that Home Assistant does not know keeps the entry in
     # SETUP_RETRY. The message is a translation key, so this also proves that a

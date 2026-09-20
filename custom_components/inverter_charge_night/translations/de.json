@@ -7,8 +7,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Betriebsart",
-          "kostal_min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
-          "kostal_grid_charge_switch": "Schalter für Netzladung",
+          "min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
+          "grid_charge_switch": "Schalter für Netzladung",
           "pv_forecast_entity": "PV-Prognose (MORGEN)",
           "pv_forecast_today_entity": "PV-Prognose (HEUTE, optional)",
           "battery_soc_entity": "Ladestandssensor des Speichers",
@@ -16,9 +16,9 @@
         },
         "data_description": {
           "name": "Name dieser Instanz der Integration",
-          "operation_mode": "Nachtladung: lädt den Speicher nachts aus dem Netz. Morgenentladung: entlädt ihn vor Sonnenaufgang, um Platz für den PV-Ertrag zu schaffen.",
-          "kostal_min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
-          "kostal_grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
+          "operation_mode": "Nachtladung füllt den Speicher im günstigen Fenster aus dem Netz, bemessen so, dass der PV-Ertrag von morgen noch hineinpasst. Morgenentladung ist das Gegenteil und experimentell: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, entlädt sie den Speicher in die Morgenspitze - etwa 5 bis 8 Uhr, wenn die Haushalte am meisten ziehen und die Sonne noch nicht liefert. Das bringt die Preisdifferenz eines dynamischen Tarifs und entlastet das Netz in seiner engsten Stunde. Sie braucht einen Zwangsentlade-Schalter und einen Tarif, der sie vergütet. Im Zweifel bei Nachtladung bleiben. Siehe docs/morning-discharge.md.",
+          "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
+          "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
           "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
           "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
@@ -42,7 +42,7 @@
           "end_time": "Uhrzeit, zu der das Fenster endet und alle Einstellungen zurückgesetzt werden (HH:MM).",
           "user_min_soc": "Kleinster erlaubter Ladestand in Prozent. Der Zielladestand geht nie darunter.",
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
-          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (beim Kostal typischerweise 8 %).",
+          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
           "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“."
         }
@@ -139,8 +139,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Betriebsart",
-          "kostal_min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
-          "kostal_grid_charge_switch": "Schalter für Netzladung",
+          "min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
+          "grid_charge_switch": "Schalter für Netzladung",
           "pv_forecast_entity": "PV-Prognose (MORGEN)",
           "pv_forecast_today_entity": "PV-Prognose (HEUTE, optional)",
           "battery_soc_entity": "Ladestandssensor des Speichers",
@@ -148,9 +148,9 @@
         },
         "data_description": {
           "name": "Name dieser Instanz der Integration",
-          "operation_mode": "Nachtladung: lädt den Speicher nachts aus dem Netz. Morgenentladung: entlädt ihn vor Sonnenaufgang, um Platz für den PV-Ertrag zu schaffen.",
-          "kostal_min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
-          "kostal_grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
+          "operation_mode": "Nachtladung füllt den Speicher im günstigen Fenster aus dem Netz, bemessen so, dass der PV-Ertrag von morgen noch hineinpasst. Morgenentladung ist das Gegenteil und experimentell: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, entlädt sie den Speicher in die Morgenspitze - etwa 5 bis 8 Uhr, wenn die Haushalte am meisten ziehen und die Sonne noch nicht liefert. Das bringt die Preisdifferenz eines dynamischen Tarifs und entlastet das Netz in seiner engsten Stunde. Sie braucht einen Zwangsentlade-Schalter und einen Tarif, der sie vergütet. Im Zweifel bei Nachtladung bleiben. Siehe docs/morning-discharge.md.",
+          "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
+          "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
           "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
           "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
@@ -174,7 +174,7 @@
           "end_time": "Uhrzeit, zu der das Fenster endet und alle Einstellungen zurückgesetzt werden (HH:MM).",
           "user_min_soc": "Kleinster erlaubter Ladestand in Prozent. Der Zielladestand geht nie darunter.",
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
-          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (beim Kostal typischerweise 8 %).",
+          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
           "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“."
         }
@@ -300,8 +300,8 @@
         "data": {
           "name": "Name",
           "operation_mode": "Betriebsart",
-          "kostal_min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
-          "kostal_grid_charge_switch": "Schalter für Netzladung",
+          "min_soc_entity": "Entität für den Mindestladestand (Min-SOC)",
+          "grid_charge_switch": "Schalter für Netzladung",
           "pv_forecast_entity": "PV-Prognose (MORGEN)",
           "pv_forecast_today_entity": "PV-Prognose (HEUTE, optional)",
           "battery_soc_entity": "Ladestandssensor des Speichers",
@@ -309,9 +309,9 @@
         },
         "data_description": {
           "name": "Name dieser Instanz der Integration",
-          "operation_mode": "Nachtladung: lädt den Speicher nachts aus dem Netz. Morgenentladung: entlädt ihn vor Sonnenaufgang, um Platz für den PV-Ertrag zu schaffen.",
-          "kostal_min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
-          "kostal_grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
+          "operation_mode": "Nachtladung füllt den Speicher im günstigen Fenster aus dem Netz, bemessen so, dass der PV-Ertrag von morgen noch hineinpasst. Morgenentladung ist das Gegenteil und experimentell: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, entlädt sie den Speicher in die Morgenspitze - etwa 5 bis 8 Uhr, wenn die Haushalte am meisten ziehen und die Sonne noch nicht liefert. Das bringt die Preisdifferenz eines dynamischen Tarifs und entlastet das Netz in seiner engsten Stunde. Sie braucht einen Zwangsentlade-Schalter und einen Tarif, der sie vergütet. Im Zweifel bei Nachtladung bleiben. Siehe docs/morning-discharge.md.",
+          "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
+          "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
           "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
           "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
@@ -335,7 +335,7 @@
           "end_time": "Uhrzeit, zu der das Fenster endet und alle Einstellungen zurückgesetzt werden (HH:MM).",
           "user_min_soc": "Kleinster erlaubter Ladestand in Prozent. Der Zielladestand geht nie darunter.",
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
-          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (beim Kostal typischerweise 8 %).",
+          "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
           "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“."
         }
@@ -452,7 +452,7 @@
     "operation_mode": {
       "options": {
         "night_charge": "Nachtladung",
-        "morning_discharge": "Morgenentladung"
+        "morning_discharge": "Morgenentladung (experimentell)"
       }
     },
     "planner_mode": {
@@ -509,7 +509,7 @@
         "name": "Betriebsart",
         "state": {
           "night_charge": "Nachtladung",
-          "morning_discharge": "Morgenentladung"
+          "morning_discharge": "Morgenentladung (experimentell)"
         }
       }
     },

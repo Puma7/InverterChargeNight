@@ -23,8 +23,11 @@ DEFAULT_MAX_CHARGE_POWER_W = 10000  # Default max charge power (W)
 
 # Configuration keys
 CONF_OPERATION_MODE = "operation_mode"
-CONF_KOSTAL_MIN_SOC_ENTITY = "kostal_min_soc_entity"
-CONF_KOSTAL_GRID_CHARGE_SWITCH = "kostal_grid_charge_switch"
+# The two entities that identify the inverter. They carried a kostal_ prefix
+# until 3.0.2, from the first version of this integration; nothing in the code
+# has ever been Kostal-specific. LEGACY_INVERTER_KEYS below migrates them.
+CONF_MIN_SOC_ENTITY = "min_soc_entity"
+CONF_GRID_CHARGE_SWITCH = "grid_charge_switch"
 CONF_PV_FORECAST_ENTITY = "pv_forecast_entity"
 CONF_BATTERY_SOC_ENTITY = "battery_soc_entity"
 CONF_BATTERY_CAPACITY = "battery_capacity"
@@ -214,6 +217,12 @@ BACKUP_INACTIVE_STATES: frozenset[str] = frozenset(
 # held 500 dead measurement records, about a hundred kilobytes that Home
 # Assistant loads and rewrites on every change.
 LEGACY_HOUSE_LOAD_ENERGY_ENTITY = "home_consumption_energy_entity"  # -> house_load_entity
+# Renamed in 3.0.2: {old key: new key}. The integration drives whatever entities
+# another integration provides, so the vendor name did not belong in them.
+LEGACY_INVERTER_KEYS: dict[str, str] = {
+    "kostal_min_soc_entity": CONF_MIN_SOC_ENTITY,
+    "kostal_grid_charge_switch": CONF_GRID_CHARGE_SWITCH,
+}
 LEGACY_UNUSED_DATA_KEYS: tuple[str, ...] = (
     "battery_charge_energy_entity",  # kWh counter of grid energy into the battery
     "grid_import_energy_entity",  # kWh counter of the grid import
