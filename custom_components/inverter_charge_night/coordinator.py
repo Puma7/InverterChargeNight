@@ -125,6 +125,9 @@ from .const import (
     CONF_GRID_HEADROOM_W,
     DEFAULT_GRID_PHASES,
     DEFAULT_GRID_VOLTAGE_V,
+    EFFICIENCY_BAND_MAX_SPAN,
+    EFFICIENCY_BAND_MIN_SAMPLES,
+    EFFICIENCY_BAND_WIDTH_PCT,
     DEFAULT_HIGH_PRICE_MARGIN_PCT,
     DEFAULT_GRID_CONTINUOUS_PCT,
     DEFAULT_GRID_HEADROOM_W,
@@ -301,6 +304,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_last_sample_time: datetime | None = None
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
+        # The state of charge the running measurement started at, so its loss
+        # can be filed under the part of the battery it was measured in.
+        self._auto_start_soc: float | None = None
         self._auto_missing_entities_logged = False
         # Planner v2 (plan 006)
         self.last_plan: PlanResult | None = None  # result of the last bridge plan this window
@@ -1132,8 +1138,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         min_w = float(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000))
         max_w = float(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000))
         ceiling = max_w
-        best = self.get_auto_efficiency_data().get("best_power_w")
-        if isinstance(best, int) and required <= best:
+        # Per band where one has been searched, battery-wide otherwise (plan 015)
+        best = self.best_charge_power_w(current_soc)
+        if best is not None and required <= best:
             ceiling = max(min_w, min(max_w, float(best)))
         setpoint = float(round(max(min_w, min(required, ceiling))))
         # What the battery would draw without the house connection limit. Kept
@@ -2119,6 +2126,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_meter_start = None
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
+        self._auto_start_soc = None
 
     async def _limit_the_efficiency_finder(self) -> None:
         """Hold the finder's setpoint inside what the connection carries.
@@ -2231,6 +2239,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "measured_energy_kwh": round(self._auto_energy_sent_wh / 1000.0, 3),
             "last_result": self._auto_last_result,
             "measurement_source": "energy meters" if self._energy_meter_entities() else "power sensors",
+            # Plan 015: what has been measured where on the battery, and which
+            # of those bands is far enough along to overrule the overall best.
+            "loss_by_band_pct": {
+                key: {
+                    "best_power_w": band.get("best_power_w"),
+                    "best_loss_pct": (
+                        round(float(band["best_loss"]) * 100.0, 2)
+                        if band.get("best_loss") is not None
+                        else None
+                    ),
+                    "measured_powers": len(band.get("history") or {}),
+                    "in_use": len(band.get("history") or {}) >= EFFICIENCY_BAND_MIN_SAMPLES,
+                }
+                for key, band in sorted(
+                    (dict(data.get("bands") or {})).items(), key=lambda item: int(item[0])
+                )
+                if isinstance(band, dict)
+            },
+            "band_width_pct": EFFICIENCY_BAND_WIDTH_PCT,
         }
         if self._auto_measure_start is not None:
             attributes["measuring_for_min"] = round(
@@ -2275,6 +2302,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _begin_auto_measurement(self, now: datetime) -> None:
         """Start counting: the inverter has had its settling time."""
         self._auto_measure_start = now
+        # Where on the battery this measurement is taken. A loss measured from
+        # a third full is not the loss measured near the top, and until now
+        # every sample was filed as if it were (plan 015).
+        self._auto_start_soc = self._current_battery_soc()
         self._auto_last_sample_time = now
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
@@ -2439,6 +2470,91 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
         self._save_auto_efficiency_data(data)
 
+    @staticmethod
+    def _efficiency_band(soc: float) -> str:
+        """The band key a state of charge falls into, e.g. 60.0 -> "60".
+
+        100 % belongs to the top band rather than one of its own: a battery is
+        only briefly full, and a band that can only ever hold the last moments
+        of a charge would never gather enough samples to be used.
+        """
+        clamped = max(0.0, min(100.0, soc))
+        index = min(
+            int(clamped // EFFICIENCY_BAND_WIDTH_PCT),
+            100 // EFFICIENCY_BAND_WIDTH_PCT - 1,
+        )
+        return str(index * EFFICIENCY_BAND_WIDTH_PCT)
+
+    def _band_for_measurement(self, start_soc: float | None, end_soc: float | None) -> str | None:
+        """The band a finished measurement belongs to, or None.
+
+        None when either end is unknown, or when the charge ran across more
+        bands than EFFICIENCY_BAND_MAX_SPAN: such a sample is a blend of
+        several bands and says nothing reliable about any one of them. It is
+        still kept battery-wide, which is exactly what it is evidence for.
+        """
+        if start_soc is None or end_soc is None:
+            return None
+        span_pct = abs(end_soc - start_soc)
+        if span_pct > EFFICIENCY_BAND_MAX_SPAN * EFFICIENCY_BAND_WIDTH_PCT:
+            _LOGGER.debug(
+                "Measurement ran from %.0f%% to %.0f%% - too wide for a band, keeping it "
+                "battery-wide only",
+                start_soc,
+                end_soc,
+            )
+            return None
+        return self._efficiency_band((start_soc + end_soc) / 2.0)
+
+    def best_charge_power_w(self, soc: float | None = None) -> int | None:
+        """The most efficient charge power, for this part of the battery if known.
+
+        A band only overrules the battery-wide optimum once it has been
+        searched rather than merely sampled - EFFICIENCY_BAND_MIN_SAMPLES
+        distinct powers. Everything else falls back to the battery-wide value,
+        so an installation that measured before this existed keeps its result.
+        """
+        data = self.get_auto_efficiency_data()
+        overall = data.get("best_power_w")
+        overall_w = overall if isinstance(overall, int) else None
+        if soc is None:
+            return overall_w
+        bands = data.get("bands")
+        if not isinstance(bands, dict):
+            return overall_w
+        band = bands.get(self._efficiency_band(soc))
+        if not isinstance(band, dict):
+            return overall_w
+        history = band.get("history")
+        best = band.get("best_power_w")
+        if not isinstance(history, dict) or len(history) < EFFICIENCY_BAND_MIN_SAMPLES:
+            return overall_w
+        return best if isinstance(best, int) else overall_w
+
+    def _record_band_sample(self, data: dict[str, Any], power_w: int, loss: float) -> None:
+        """File a finished measurement under the band it was taken in."""
+        band_key = self._band_for_measurement(self._auto_start_soc, self._current_battery_soc())
+        if band_key is None:
+            return
+        bands = dict(data.get("bands") or {})
+        band = dict(bands.get(band_key) or {})
+        history = dict(band.get("history") or {})
+        history[str(power_w)] = loss
+        band["history"] = history
+        best_loss = band.get("best_loss")
+        if not isinstance(best_loss, (int, float)) or loss < best_loss:
+            band["best_loss"] = loss
+            band["best_power_w"] = power_w
+            _LOGGER.info(
+                "New best charge power for the %s-%d %% band: %.2f %% loss at %d W",
+                band_key,
+                int(band_key) + EFFICIENCY_BAND_WIDTH_PCT,
+                loss * 100.0,
+                power_w,
+            )
+        bands[band_key] = band
+        data["bands"] = bands
+
     def _finalize_auto_test(self) -> None:
         """Turn the running measurement into a sample, or discard it.
 
@@ -2502,6 +2618,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         history = dict(data.get("history", {}))
         history[str(power_w)] = loss
         data["history"] = history
+        self._record_band_sample(data, power_w, loss)
         data["bounds_w"] = [
             int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000)),
             int(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000)),

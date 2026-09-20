@@ -251,8 +251,32 @@ LEGACY_UNUSED_OPTION_KEYS: tuple[str, ...] = ("charge_session_data",)
 # What the efficiency search itself stores; everything else in that option is
 # from a version that no longer exists and is dropped on setup.
 AUTO_EFFICIENCY_KEYS: frozenset[str] = frozenset(
-    {"history", "best_power_w", "best_loss", "range_min_w", "range_max_w", "failed", "bounds_w"}
+    {
+        "history",
+        "best_power_w",
+        "best_loss",
+        "range_min_w",
+        "range_max_w",
+        "failed",
+        "bounds_w",
+        # Per state-of-charge band (plan 015). Missing from this set the whole
+        # band store would be dropped on every setup by _migrate_entry_data.
+        "bands",
+    }
 )
+
+# Charging losses depend on the state of charge, not only on the power: a cell
+# near the top takes current differently from one at a third full. The search
+# files every measurement under the band it was measured in, and falls back to
+# the battery-wide optimum until a band has seen enough of them.
+EFFICIENCY_BAND_WIDTH_PCT = 20
+# Distinct powers a band needs before its own optimum is preferred. Below this
+# the band has not been searched, only sampled, and the battery-wide optimum is
+# the better guess.
+EFFICIENCY_BAND_MIN_SAMPLES = 3
+# A measurement that runs across more than this many bands is a blend and is
+# filed battery-wide only.
+EFFICIENCY_BAND_MAX_SPAN = 2
 
 
 # Units this integration accepts on an energy sensor. One list, because two

@@ -446,6 +446,14 @@ battery side.
 > optional, but they make the result exact: a difference of two meter readings is the energy
 > that really flowed, with no assumption about what the power did in between.
 
+> **Per state of charge.** Losses depend on how full the battery already is, not only on the
+> power, so each measurement is filed under the 20-point band it was taken in (0–20, 20–40, …).
+> A band takes over from the battery-wide optimum once it has been *searched* rather than merely
+> sampled — three distinct powers — so an installation that measured before this existed keeps
+> working on its old result until the bands fill in. A measurement that runs across more than two
+> bands is a blend and is kept battery-wide only. `sensor.…_efficiency_search` shows what has been
+> measured where, and which bands are in use.
+
 ### House connection
 
 The cheap-tariff window is exactly when every big load runs at once. Two wallboxes with 22 kW

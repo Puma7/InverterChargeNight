@@ -5,6 +5,26 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.0] - 2026-09-20
+
+### Added
+
+- **The efficiency search measures per state of charge.** Losses depend on how full the battery
+  is, not only on the charge power, but every measurement was filed as if it did not. Each one now
+  goes under the 20-point band it was taken in, and the charge power plan asks for the band the
+  battery is actually in. A band only overrules the battery-wide optimum once it has been searched
+  rather than sampled (three distinct powers), so an installation that measured before this keeps
+  its result until the bands fill in. A measurement running across more than two bands is a blend
+  and is kept battery-wide only.
+- `sensor.…_efficiency_search` gained `loss_by_band_pct` — what was measured where, how many
+  powers each band has seen, and which bands are in use — plus `band_width_pct`.
+
+### Fixed
+
+- **The measurement never recorded the state of charge it ran at.** The backlog entry for this
+  work assumed it did. It does not: the state of charge is now captured when the measurement
+  starts and when it finishes, which is what makes the bands possible at all.
+
 ## [3.2.0] - 2026-09-20
 
 A tariff season now behaves like a season. The optional date range was absolute-only, and the

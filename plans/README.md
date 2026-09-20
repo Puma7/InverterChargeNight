@@ -380,6 +380,12 @@ beide Stellen prüfen jetzt explizit auf `None`.
   `coordinator.py`, `__init__.py` ist nur noch Setup, Update und Unload. Eine feinere Aufteilung
   (Limits, Effizienzsuche, Zeitplan, Persistenz) bleibt möglich, ist aber von keiner Regel
   gefordert.
+- ~~**015 Effizienz je Ladestandsband**~~ — erledigt mit 3.3.0. Nachtrag zum Eintrag unten: die
+  Annahme, die Messung trage Start- und End-SOC schon mit, war **falsch** — im gesamten Messpfad
+  kam `_current_battery_soc()` nicht vor. Die Aufnahme des SOC war der eigentliche Teil der Arbeit.
+  Bänder à 20 Punkte, Mittelwert der Messung entscheidet, ab drei gemessenen Leistungen sticht das
+  Band das globale Optimum, breitere Messungen bleiben global.
+
 - **015 Effizienz je Ladestandsband**: Verluste hängen auch vom SOC ab; die Suche bucht heute nur
   auf die Leistung. Wer das verfeinern will, misst pro SOC-Band (Plan 010, Wartungshinweise).
   Von Pascal als sinnvoll und direkt umsetzbar eingestuft. Umfang: die Messung trägt den SOC
