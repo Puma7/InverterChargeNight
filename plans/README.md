@@ -322,26 +322,18 @@ beide Stellen prüfen jetzt explizit auf `None`.
 
 ### Backlog ohne eigenen Plan (nach 006 entscheiden)
 
-- **010 Zeitplanmodell für §14a-Fenster** (L5): Liste von Datumsbereich → Fenster, Migration des
-  Config-Entrys, tägliche Neubestimmung. Pascal am 20.09.: die Reduzierung ist regional
-  verschieden — es kann auch mittags zwischen 12 und 14 Uhr sein, und nur an bestimmten Monaten
-  oder Wochentagen. Ein einzelnes Start/Ende-Paar reicht dafür nicht.
+- ~~**010 Zeitplanmodell für §14a-Fenster** (L5)~~ — hat jetzt einen eigenen Plan:
+  `plans/011-tarifzeitfenster-und-abendreserve.md`. Dort stehen der Defekt im heutigen
+  Datumsbereich (absolute Daten laufen ab, eine Winter-Saison wird still ignoriert), das
+  Datenmodell als Periodenliste, die Antwort auf die Wiederholungsfrage (`MM-DD` wiederholt sich
+  jährlich, `YYYY-MM-DD` einmalig, Jahreswechsel wie Mitternacht behandelt), der `ObjectSelector`
+  als Oberfläche — und die **Abendreserve** für Pascals Hochpreiszone 18–21 Uhr.
 
-  Home Assistant bietet dafür mehr als Textfelder, beides in der installierten Version geprüft:
-  - **`schedule`-Helfer**: ein Wochenraster, das der Nutzer grafisch zeichnet (Einstellungen →
-    Geräte & Dienste → Helfer → Zeitplan), mehrere Blöcke je Wochentag, mit `next_event`-Attribut.
-    Die Integration würde dann keine Zeiten mehr selbst halten, sondern auf eine `schedule.*`-
-    Entität zeigen. Billigste Lösung mit der besten Oberfläche; Monats- und Datumsbereiche kann
-    das Raster allerdings nicht, die blieben als eigene Felder.
-  - **`ObjectSelector`** mit `fields`, `multiple` und `label_field`: eine wiederholbare Liste
-    strukturierter Zeilen (Datum von/bis, Zeit von/bis, Wochentage) als echtes Formular im
-    Assistenten, nicht als Textbox. Deckt den diffusen Fall vollständig ab, ist aber mehr Arbeit
-    und mehr Zustand im Config-Entry.
-
-  Empfehlung: `schedule`-Entität als Eingang anbieten (opt-in, das bestehende Zeitpaar bleibt der
-  einfache Weg), und die Datums-/Monatsdimension erst dann als `ObjectSelector`-Liste nachziehen,
-  wenn jemand sie wirklich braucht.
-- **011 Wechselrichter-Profile** (L8): erst Spike gegen die realen Entitäten der Fronius- und SMA-Integrationen, dann Fähigkeitsschnittstelle; Umbenennung `kostal_*` → `min_soc_entity` / `grid_charge_switch` mit `async_migrate_entry`.
+- **011 Wechselrichter-Profile** (L8): erst Spike gegen die realen Entitäten der Fronius- und
+  SMA-Integrationen, dann Fähigkeitsschnittstelle. Die Umbenennung `kostal_*` →
+  `min_soc_entity` / `grid_charge_switch` samt Migration ist mit 3.0.2 erledigt; offen bleibt die
+  Fähigkeitsschnittstelle, also die Frage, welche Steuergrößen ein Wechselrichter überhaupt
+  anbietet und was die Integration tut, wenn eine davon fehlt.
 - ~~**012 Morning-Discharge entscheiden** (L9)~~ — entschieden von Pascal am 20.09.: der Modus
   bleibt, als **Netzentlastungs- und Arbitragefunktion**, nicht als "Platz für die Sonne
   schaffen". Zweck: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, den Speicher in
@@ -350,6 +342,34 @@ beide Stellen prüfen jetzt explizit auf `None`.
   und ausdrücklich **experimentell**; so ist er jetzt auch in der Oberfläche benannt und in
   `docs/morning-discharge.md` beschrieben. Der Zwangsentlade-Schalter ist seit 3.0.2 Pflicht für
   den Modus.
+- **017 PV-Ladung über den Tag strecken (Abregelung vermeiden)**: Pascal am 20.09. — wenn
+  mittags das Netz voll ist, darf nicht mehr eingespeist werden. Ein Speicher, der um zwölf Uhr
+  schon voll ist, kann dann nichts mehr aufnehmen und die Anlage wird abgeregelt. Beispiel:
+  100 kWh Prognose für den Tag, 35 kWh Speicher — der ist bis mittags voll, und der Rest der
+  Mittagsspitze geht verloren. Die Ladung müsste so gestreckt werden, dass der Speicher erst am
+  Nachmittag voll ist und die Spitze noch aufnehmen kann.
+
+  Was dafür spricht, dass es geht: die Steuergröße gibt es schon. Ein Limit, das auch die
+  **DC-seitige PV-Ladung** begrenzt, ist bei einem Kostal G3 Register 1280
+  (`Battery Max Charge Power (G3)`, AC+DC) — genau die Entität, die diese Integration bereits als
+  „absolutes Maximum" kennt. Das AC-Ladelimit allein würde nicht reichen, das begrenzt nur den
+  Netzbezug.
+
+  Was noch offen ist:
+  - **Die Integration ist heute ein Nachtfenster-Programm.** Eine Ladekurve über den Tag hieße,
+    dass sie auch tagsüber rechnet und schreibt — das ist eine echte Erweiterung, kein Parameter.
+  - **1280 fällt zurück.** Ohne regelmäßiges Nachschreiben springt das Register nach
+    `Battery Time Until Fallback (G3)` auf die Werkseinstellung (siehe `docs/kostal-kore.md`).
+    Eine Kurve muss also in jedem Poll erneuert werden.
+  - **Die Prognose für *heute*** ist heute ein optionales Feld (`pv_forecast_today_entity`). Für
+    diese Funktion wäre sie Pflicht.
+  - Zusammenspiel mit 011: die Abendreserve sagt, wie voll der Speicher am Abend sein muss — zu
+    scharf gestreckt wird er das nicht mehr.
+
+  Einfachste tragfähige Fassung: kein SOC-Fahrplan, sondern eine Leistungsobergrenze aus
+  „verbleibende Prognose / verbleibende Kapazität / Stunden bis PV-Ende", bei jedem Poll neu
+  geschrieben.
+
 - **013 Preissignal** (L5): Tibber/aWATTar/EPEX-Sensor als Eingang, ersetzt den festen Zeitplan
   durch Kostenoptimierung. Von Pascal bestätigt: wer einen dynamischen Tarif hat, würde darüber
   laden *und* entladen — das ist derselbe Eingang für Nachtladung und Morgenentladung, und es ist

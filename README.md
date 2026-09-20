@@ -817,8 +817,11 @@ The integration updates every **15 minutes** (900 seconds) by default. This is d
   `binary_sensor.…_active` is `off` and nothing is written to the inverter — that is the normal
   state for most of the day.
 - **Active start/end date** (step 4) is empty by default, which means the window runs all year.
-  If your reduced grid fee only applies in certain months (§14a windows often do), enter the
-  date range there; outside it the integration stays out of the way.
+  It takes one fixed stretch of calendar, not a season that repeats: the dates are absolute, so a
+  range ending in March 2027 stops the integration for good after that, and a range crossing the
+  new year is rejected and then ignored altogether. If your reduced grid fee only applies in
+  certain months, that is the limitation to know about — the replacement is designed in
+  `plans/011-tarifzeitfenster-und-abendreserve.md`.
 - `sensor.…_calculated_soc` shows the target of the *running* window and its `is_active`
   attribute says whether one is running at all.
 
@@ -1002,6 +1005,13 @@ Step 4 -- advanced:
 - `update_interval` - Coordinator refresh interval in seconds (default 900)
 - `command_delay` - Delay between min SOC and grid charge commands in seconds
 - `active_start_date` / `active_end_date` - Optional seasonal restriction (YYYY-MM-DD)
+
+  > **Known limitation.** These are absolute dates, so they do not repeat: a range that ends on
+  > `2027-03-31` stops the integration for good after that day. And a range that crosses the new
+  > year (`2026-11-01` to `2026-03-31`) is rejected as invalid and the restriction is then
+  > *ignored entirely*, so the window runs all year. A tariff-period list that repeats yearly and
+  > handles both is designed in `plans/011-tarifzeitfenster-und-abendreserve.md`. Until then,
+  > leave these empty unless you really mean one fixed stretch of calendar.
 - `backup_mode_entity` - Optional backup/island mode entity
 - `house_load_entity` - Optional cumulative house consumption meter (kWh)
 - `avg_house_load_kw` - Fallback average house load in kW
