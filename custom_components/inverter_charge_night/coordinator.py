@@ -2826,7 +2826,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if await self._set_ac_charge_limit_w(int(allowed)):
                     self._planned_setpoint_written_w = allowed
                 return
-        await self._set_ac_charge_limit_w(power_w)
+        if not await self._set_ac_charge_limit_w(power_w):
+            # The battery would charge at whatever stands on the inverter -
+            # usually the previous test's higher value, which the follow check
+            # does not catch - and the sample would be filed under this power.
+            # The next poll offers the candidate again.
+            _LOGGER.debug("Efficiency test at %d W not started: the setpoint did not arrive", power_w)
+            return
         self._auto_test_active = True
         self._auto_test_power_w = power_w
         self._auto_test_start = dt_util.now()

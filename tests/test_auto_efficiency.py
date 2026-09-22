@@ -106,12 +106,38 @@ async def test_start_auto_test_sets_fields(mock_hass: HomeAssistant):
             CONF_MAX_CHARGE_POWER_W: 15000,
         },
     )
-    coordinator._set_ac_charge_limit_w = AsyncMock()
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
     await coordinator._start_auto_test(5000)
 
     assert coordinator._auto_test_active is True
     assert coordinator._auto_test_power_w == 5000
-    coordinator._set_ac_charge_limit_w.assert_awaited()
+    coordinator._set_ac_charge_limit_w.assert_awaited_once_with(5000)
+
+
+@pytest.mark.asyncio
+async def test_a_test_whose_setpoint_did_not_arrive_is_not_started(mock_hass: HomeAssistant):
+    """Whole-repo review, finding 8.
+
+    The write result was ignored. With the setpoint not on the inverter, the
+    battery charges at whatever stands there - usually the previous test's
+    higher value, which the follow check (it only catches drawing *less*)
+    lets through - and the sample is filed under a power it was never taken
+    at. That entry then steers every later night.
+    """
+    coordinator = _make_coordinator(
+        mock_hass,
+        {
+            CONF_MIN_CHARGE_POWER_W: 5000,
+            CONF_MAX_CHARGE_POWER_W: 15000,
+        },
+    )
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=False)
+    await coordinator._start_auto_test(5000)
+
+    coordinator._set_ac_charge_limit_w.assert_awaited_once_with(5000)
+    assert coordinator._auto_test_active is False
+    assert coordinator._auto_test_power_w is None
+    assert coordinator._auto_test_start is None
 
 
 def test_reset_auto_test_state_clears_values(mock_hass: HomeAssistant):
