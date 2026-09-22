@@ -88,6 +88,26 @@ Jede Stufe ist für sich nützlich und auslieferbar.
 Offen bleiben nur `force_discharge_to` (bräuchte ein Ad-hoc-Fenster in Entladerichtung) und
 `set_charge_power_limit` (schriebe ohne Fenster und damit ohne Restore).
 
+**Nachtrag 22.09. zu `set_charge_power_limit`:** der Plan für 3.8.0 hielt den Einwand für
+überholt, weil ein Ad-hoc-Fenster am Ende alles zurücksetzt. Das stimmt, war aber nur die halbe
+Prüfung. Am Code nachgesehen scheitern **beide** denkbaren Wege, aus zwei unabhängigen Gründen:
+
+1. **Als Ad-hoc-Fenster** schreibt die Aktion mehr, als sie verspricht. `_control_charge` setzt
+   für *jedes* aktive Fenster den Min-SOC-Boden, Ad-hoc-Fenster eingeschlossen. Eine
+   Leistungsgrenze würde also nebenbei die Entladung sperren — eine Nebenwirkung, um die niemand
+   gebeten hat.
+2. **Als Deckel innerhalb eines laufenden Fensters** schreibt sie in der Standardkonfiguration
+   gar nichts. `_plan_charge_power` schreibt nur im Planermodus `bridge` oder mit konfigurierter
+   Hausanschlussgrenze, nie im Standardmodus `headroom` ohne Grenze. Und
+   `CONF_MIN_CHARGE_POWER_W` übersteuert jeden niedrigeren Deckel. Eine Aktion, die still nichts
+   tut, ist die schlechteste Sorte.
+
+Was wirklich trägt, ist ein Ad-hoc-Fenster **ohne** Boden, das nur den Deckel setzt: ein neuer
+Grund neben `evening_rescue` und `service`, mit eigenen Ausnahmen in `_control_charge` und bei
+der Entladesperre. Das ist genau der Codebereich, in dem das Review vom 20.09. zweimal den Fehler
+„Stufe 1 sperrt Stufe 2 aus" fand — und derselbe Baustein, den Stufe 2 der Abregelung
+(`plans/014`) braucht. **Eigener Plan, gemeinsam mit Abregelung Stufe 2, nicht als Rest.**
+
 Umgesetzt wurden zunächst die beiden Aktionen ohne eigenen Fenster-Lebenszyklus:
 `plan_target_soc` (Response-Service, schreibt nichts) und `reset_inverter`. Die übrigen aus der
 Tabelle (`charge_to`, `block_discharge`/`allow_discharge`, `force_discharge_to`,

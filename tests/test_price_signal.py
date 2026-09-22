@@ -422,3 +422,22 @@ async def test_the_price_sensor_says_where_the_conflict_prices_came_from(mock_ha
         snapshot = coordinator.price_snapshot()
 
     assert snapshot["conflict_prices_source"] == "entity"
+
+
+@pytest.mark.asyncio
+async def test_an_uncovered_entity_with_no_fixed_prices_leaves_the_bridge_winning(mock_hass):
+    """The likeliest setup of all: a price entity, a feed-in price, no fixed night or day.
+
+    Somebody with a price entity has little reason to type prices in as well. When
+    the entity cannot cover both stretches there is then nothing to fall back to,
+    and the answer has to be the one from before this release - no triple, so the
+    bridge wins - rather than a pair made up of whatever half was available.
+    """
+    coordinator = _make_coordinator(
+        mock_hass,
+        extra={CONF_FEED_IN_PRICE_CT: 8.0, CONF_PV_CROSSOVER_DELAY_MIN: 60},
+        attributes={"raw_today": _priced(30)},  # stops one hour into the bridge
+    )
+
+    assert await _plan_prices(coordinator) is None
+    assert coordinator._conflict_prices_source is None
