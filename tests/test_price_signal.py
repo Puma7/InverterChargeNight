@@ -296,3 +296,129 @@ async def test_the_running_window_is_priced_not_the_next_one(mock_hass):
 
     assert price is not None, "the running window is covered by the series"
     assert price < 20.0, "the cheap night we are in, not the dear one to come"
+
+
+# --- Dynamic conflict prices (3.8.0) ---------------------------------------
+
+from custom_components.inverter_charge_night.const import (  # noqa: E402
+    CONF_DAY_PRICE_CT,
+    CONF_FEED_IN_PRICE_CT,
+    CONF_NIGHT_PRICE_CT,
+    CONF_PV_CROSSOVER_DELAY_MIN,
+)
+
+STATIC_PRICES = {
+    CONF_NIGHT_PRICE_CT: 14.0,
+    CONF_DAY_PRICE_CT: 30.0,
+    CONF_FEED_IN_PRICE_CT: 8.0,
+    CONF_PV_CROSSOVER_DELAY_MIN: 60,
+}
+TONIGHT = NOW.replace(hour=23, minute=0)          # the window: 23:00 ...
+TOMORROW_0500 = TONIGHT + timedelta(hours=6)      # ... to 05:00
+SUNRISE_0700 = TONIGHT + timedelta(hours=8)       # crossover 08:00 with the delay
+
+
+def _priced(hours, night=0.20, bridge=0.38, other=0.30):
+    """Hourly prices from today's midnight: cheap window, dear bridge."""
+    midnight = NOW.replace(hour=0, minute=0)
+    items = []
+    for h in range(hours):
+        start = midnight + timedelta(hours=h)
+        if TONIGHT <= start < TOMORROW_0500:
+            value = night
+        elif TOMORROW_0500 <= start < TOMORROW_0500 + timedelta(hours=3):
+            value = bridge
+        else:
+            value = other
+        items.append({"start": start.isoformat(), "total": value})
+    return items
+
+
+async def _plan_prices(coordinator, sunrise=SUNRISE_0700):
+    coordinator._house_load_profile = AsyncMock(return_value=[0.5] * 24)
+    coordinator._sun_times = MagicMock(return_value=(sunrise, sunrise + timedelta(hours=12)))
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=NOW):
+        plan_input, _ = await coordinator._build_plan_input(10.0, True)
+    return plan_input.prices_ct
+
+
+@pytest.mark.asyncio
+async def test_the_conflict_prices_come_from_the_entity_when_it_covers_both(mock_hass):
+    """Night is the window the battery buys in; day is the bridge it would cover.
+
+    The fixed fields say 14 / 30 ct. The entity says the window is 20 ct and
+    the bridge 38 ct - and it is the entity the decision has to follow, because
+    it is the one that knows what tonight and tomorrow morning cost.
+    """
+    coordinator = _make_coordinator(
+        mock_hass, extra=STATIC_PRICES, attributes={"raw_today": _priced(36)}
+    )
+
+    prices = await _plan_prices(coordinator)
+
+    assert prices == pytest.approx((20.0, 38.0, 8.0))
+    assert coordinator._conflict_prices_source == "entity"
+
+
+@pytest.mark.asyncio
+async def test_night_and_day_come_from_one_source_or_neither(mock_hass):
+    """An entity that covers the night but not the bridge gives no pair at all.
+
+    Mixing its 20 ct night with the fixed 30 ct day would tip the branch on the
+    difference between two ways of writing a price down. So both fall back.
+    """
+    # 30 hours from midnight: ends at 06:00 tomorrow, one hour into the bridge.
+    coordinator = _make_coordinator(
+        mock_hass, extra=STATIC_PRICES, attributes={"raw_today": _priced(30)}
+    )
+
+    prices = await _plan_prices(coordinator)
+
+    assert prices == (14.0, 30.0, 8.0), "both fixed, not the entity's night and a fixed day"
+    assert coordinator._conflict_prices_source == "static"
+
+
+@pytest.mark.asyncio
+async def test_an_empty_bridge_falls_back_to_the_fixed_prices(mock_hass):
+    """Morning discharge: the sun is up before the window ends.
+
+    The crossover is clamped to the window end, the bridge is empty, and an
+    empty stretch has no mean price. Not an edge case - it is every day in that
+    mode - so it has to land somewhere sensible, and that is the fixed fields.
+    """
+    coordinator = _make_coordinator(
+        mock_hass, extra=STATIC_PRICES, attributes={"raw_today": _priced(36)}
+    )
+
+    # Sunrise 03:00, crossover 04:00 - before the 05:00 window end.
+    prices = await _plan_prices(coordinator, sunrise=TONIGHT + timedelta(hours=4))
+
+    assert prices == (14.0, 30.0, 8.0)
+    assert coordinator._conflict_prices_source == "static"
+
+
+@pytest.mark.asyncio
+async def test_without_a_feed_in_price_there_is_no_triple_whatever_the_entity_says(mock_hass):
+    """No price source publishes a feed-in tariff, so it stays a fixed field.
+
+    Without it the conflict has no cost for the bridge side, and the bridge
+    wins by default - exactly as before this release.
+    """
+    extra = {k: v for k, v in STATIC_PRICES.items() if k != CONF_FEED_IN_PRICE_CT}
+    coordinator = _make_coordinator(mock_hass, extra=extra, attributes={"raw_today": _priced(36)})
+
+    assert await _plan_prices(coordinator) is None
+    assert coordinator._conflict_prices_source is None
+
+
+@pytest.mark.asyncio
+async def test_the_price_sensor_says_where_the_conflict_prices_came_from(mock_hass):
+    coordinator = _make_coordinator(
+        mock_hass, extra=STATIC_PRICES, attributes={"raw_today": _priced(36)}
+    )
+    await _plan_prices(coordinator)
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=NOW):
+        snapshot = coordinator.price_snapshot()
+
+    assert snapshot["conflict_prices_source"] == "entity"

@@ -334,6 +334,15 @@ Load** is used for every hour.
   Without tariffs the bridge wins, because grid energy by day costs more than the feed-in
   tariff that is lost when PV finds no room.
 
+  With a price entity configured, the night and day prices come from it instead: the window's
+  own mean price, and the mean over the bridge from the window end to the PV crossover. They are
+  taken **as a pair or not at all** -- the decision turns on their difference, and a difference
+  between an entity's night and a hand-entered day would partly be a difference between two ways
+  of writing a price down. When the entity does not cover both stretches, both come from the
+  fixed fields. The feed-in price is always the fixed field, because no price source publishes
+  one. `sensor.…_price_signal` shows which source the last plan used in
+  `conflict_prices_source`.
+
 The chosen bound and its inputs are exposed as attributes of
 `sensor.inverter_charge_night_calculated_soc` (`plan_reason`, `bridge_kwh`, `surplus_kwh`,
 `lower_bound_soc`, `upper_bound_soc`, `pv_crossover`).

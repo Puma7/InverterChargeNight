@@ -292,6 +292,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The last reason a price entity was refused, so the warning is written
         # once rather than every fifteen minutes.
         self._price_refusal_logged: str | None = None
+        # Where the last plan's conflict prices came from: "entity", "static",
+        # or None when there were none. Shown on the price sensor so that a
+        # conflict decision can be traced back to the numbers behind it.
+        self._conflict_prices_source: str | None = None
         # An ad-hoc window (plan 013): a window like any other - same capture,
         # restore, retry ladder and interlocks - whose start came from a call
         # rather than from the clock. None means no ad-hoc window is running.
@@ -822,6 +826,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "horizon_end": horizon.isoformat() if horizon else None,
             "window_ct": self._window_price_ct(series, now),
             "evening_ct": mean_price_ct(series, zone[0], zone[1]) if (series and zone) else None,
+            "conflict_prices_source": self._conflict_prices_source,
             "reason": self._price_refusal_logged,
         }
 
@@ -1048,13 +1053,61 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._sun_fallback_logged = True
         return sunrise, sunset
 
-    def _prices_ct(self) -> tuple[float, float, float] | None:
-        """Return (night, day, feed-in) prices when all three are configured."""
+    def _prices_ct(
+        self,
+        series: PriceSeries | None = None,
+        now: datetime | None = None,
+        window_end: datetime | None = None,
+        pv_crossover: datetime | None = None,
+    ) -> tuple[float, float, float] | None:
+        """(night, day, feed-in) for the planner's conflict branch, or None.
+
+        The branch weighs ``day - night`` against ``night - feed_in``, so what
+        it needs is the night the window buys in and the day the bridge would
+        otherwise be bought at: the window's mean price, and the mean over
+        ``[window_end, pv_crossover)``.
+
+        Night and day come from the price entity **as a pair or not at all**.
+        The decision turns on their difference, and a difference between two
+        numbers taken from two different sources is partly a difference between
+        the sources - a hand-entered day price against an entity's night price
+        can tip the branch on nothing but how the two were set up. So when the
+        entity cannot cover both stretches, both fall back to the fixed fields.
+
+        Feed-in stays a fixed field: no exchange or retail price source
+        publishes a feed-in tariff. Without it the triple is None, exactly as
+        before, and the bridge wins the conflict.
+
+        The bridge is routinely empty in the morning-discharge mode, where the
+        crossover is clamped to the window end because the sun is already up.
+        An empty stretch has no mean, so that mode falls back to the fixed
+        fields every time - which is the right answer, because with nothing to
+        bridge the day price has nothing to price.
+        """
+        feed_in = _as_float(self.config.get(CONF_FEED_IN_PRICE_CT))
+        if feed_in is None:
+            self._conflict_prices_source = None
+            return None
+
+        if (
+            series is not None
+            and now is not None
+            and window_end is not None
+            and pv_crossover is not None
+            and pv_crossover > window_end
+        ):
+            night_ct = self._window_price_ct(series, now)
+            day_ct = mean_price_ct(series, window_end, pv_crossover)
+            if night_ct is not None and day_ct is not None:
+                self._conflict_prices_source = "entity"
+                return night_ct, day_ct, feed_in
+
         night = _as_float(self.config.get(CONF_NIGHT_PRICE_CT))
         day = _as_float(self.config.get(CONF_DAY_PRICE_CT))
-        feed_in = _as_float(self.config.get(CONF_FEED_IN_PRICE_CT))
-        if night is None or day is None or feed_in is None:
+        if night is None or day is None:
+            self._conflict_prices_source = None
             return None
+        self._conflict_prices_source = "static"
         return night, day, feed_in
 
     async def _house_load_profile(self) -> list[float]:
@@ -1250,7 +1303,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 discharge_efficiency=float(
                     self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)
                 ),
-                prices_ct=self._prices_ct(),
+                prices_ct=self._prices_ct(series, now, window_end, pv_crossover),
                 # Measured from the window end: the evening the battery has to
                 # reach is the one on the solar day this window is planning for.
                 high_price_window=high_price_window,
