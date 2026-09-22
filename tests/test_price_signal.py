@@ -220,20 +220,24 @@ async def test_a_cheap_evening_reaches_the_plan(mock_hass):
     The gate is a pure function with its own tests; this is the wire between
     it and the entity, which is the part that can be connected wrongly.
     """
-    midnight = NOW.replace(hour=0, minute=0)
+    # The series has to start before the window does: at 02:00 the running
+    # 23:00 to 05:00 window began *yesterday*, and pricing it is the whole
+    # point. Starting at today's midnight only ever worked because the
+    # coordinator was asking about the wrong night.
+    midnight = NOW.replace(hour=0, minute=0) - timedelta(days=1)
     dear_evening = [
         {
             "start": (midnight + timedelta(hours=h)).isoformat(),
             "total": 0.45 if 18 <= (h % 24) < 21 else 0.22,
         }
-        for h in range(36)
+        for h in range(60)
     ]
     cheap_evening = [
         {
             "start": (midnight + timedelta(hours=h)).isoformat(),
             "total": 0.18 if 18 <= (h % 24) < 21 else 0.40,
         }
-        for h in range(36)
+        for h in range(60)
     ]
 
     async def _plan(items):
@@ -253,3 +257,42 @@ async def test_a_cheap_evening_reaches_the_plan(mock_hass):
     cheap = await _plan(cheap_evening)
     assert cheap.evening_price_ct == pytest.approx(18.0)
     assert cheap.window_price_ct == pytest.approx(40.0)
+
+
+@pytest.mark.asyncio
+async def test_the_running_window_is_priced_not_the_next_one(mock_hass):
+    """At 02:00 inside a 23:00 to 05:00 window, the window began yesterday.
+
+    ``_window_start_datetime`` answers "when does the next one begin", so it
+    returned *tonight's* 23:00 and priced a night that has not happened yet.
+    With real day-ahead data that stretch is usually unpublished, so
+    ``mean_price_ct`` refused it and the reserve was held whatever the prices
+    said - the gate looked implemented and decided nothing.
+
+    The bounds now come from the window's end, which is also the ``window_end``
+    the planner is handed in the same ``PlanInput``.
+    """
+    midnight = NOW.replace(hour=0, minute=0)
+    yesterday = midnight - timedelta(days=1)
+    # Yesterday's night hours are cheap, tonight's are dear. Only one of them
+    # is the window we are standing in.
+    items = [
+        {
+            "start": (yesterday + timedelta(hours=h)).isoformat(),
+            "total": 0.10 if h < 29 else 0.50,
+        }
+        for h in range(60)
+    ]
+    coordinator = _make_coordinator(mock_hass, attributes={"raw_today": items})
+    at_two = NOW.replace(hour=2)
+
+    start, end = coordinator._priced_window_bounds(at_two)
+    assert start < at_two < end, "the window we are standing in"
+    assert start.day == yesterday.day
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=at_two):
+        series = coordinator._price_series()
+        price = coordinator._window_price_ct(series, at_two)
+
+    assert price is not None, "the running window is covered by the series"
+    assert price < 20.0, "the cheap night we are in, not the dear one to come"

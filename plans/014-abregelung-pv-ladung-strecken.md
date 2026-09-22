@@ -92,7 +92,8 @@ aus dem Netz nach. Deshalb misst 3.7.0 erst.
 - Die **Gegenprobe**: stündliche Maxima der Einspeiseleistung über 14 Tage aus dem Recorder.
   Eigener `statistics_during_period`-Aufruf mit `{"max"}` — eine Leistung ist `measurement` und
   hat `change` überhaupt nicht, also lässt sich der Aufruf des Lastprofils nicht mitbenutzen.
-  Daraus `model_vs_measured_pct`, die Zahl, wegen der es diese Version gibt.
+  Daraus `model_vs_envelope_pct`, die Zahl, wegen der es diese Version gibt: das Tagesmodell gegen
+  eine obere Schranke, die kein einzelner Tag überbieten kann.
 - Zwei Felder: `curtailment_limit_w` (die Grenze in W, nicht der Prozentsatz) und
   `curtailment_feed_in_entity`.
 - Die Funktion ist **abgeschaltet, solange keine Heute-Prognoseentität eingetragen ist**:
@@ -123,7 +124,7 @@ Obergrenze liest. Dabei ist die Lehre aus der Abendrettung zu beachten: ein Ad-h
 
 ## Offene Fragen
 
-1. **Wie weit trägt die Glocke?** Die erste Frage, die `model_vs_measured_pct` beantwortet. Reicht
+1. **Wie weit trägt die Glocke?** Die erste Frage, die `model_vs_envelope_pct` beantwortet. Reicht
    sie nicht, ist der nächste Schritt kein Deckel, sondern ein besseres Tagesprofil.
 2. **Zwei Ladewege.** Lädt der Wechselrichter DC-seitig, ist der Ladestrom nicht derselbe, den die
    Effizienzbänder aus 3.3.0 an AC-Messungen gelernt haben.

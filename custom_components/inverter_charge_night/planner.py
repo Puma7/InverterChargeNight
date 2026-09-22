@@ -235,7 +235,12 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
     surplus = surplus_kwh(p)
 
     evening_kwh = evening_reserve_kwh(p)
-    evening_dropped = p.high_price_window is not None and evening_kwh == 0.0
+    # Asking the gate rather than inferring it from a zero. A period whose load
+    # profile happens to be zero also gives 0.0 kWh, and reporting that as
+    # "prices dropped the reserve" names a decision no price ever made.
+    evening_dropped = p.high_price_window is not None and not evening_reserve_pays(
+        p.window_price_ct, p.evening_price_ct, p.charge_efficiency, RESERVE_DROP_MARGIN_CT
+    )
     # The sun charges the battery before the evening does, so only the part it
     # will not cover has to be bought tonight.
     evening_shortfall = _from_battery_kwh(evening_shortfall_kwh(p), p.discharge_efficiency)

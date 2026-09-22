@@ -284,6 +284,18 @@ def parse_price_series(
     of a daily window out of a module that has no business knowing about it.
     """
     now = _aware(now, tz)
+    # Today and tomorrow usually arrive as two separate attributes - Nordpool
+    # publishes raw_today and raw_tomorrow, and the others are shaped the same
+    # way. Stopping at the first one leaves a series that ends at midnight, and
+    # then mean_price_ct refuses every window that crosses it, which is every
+    # night window there is. So matching attributes are merged, and only ones
+    # that agree on the value key and the unit: two lists that disagree about
+    # either are not two halves of one series.
+    merged: list[PriceInterval] = []
+    merged_names: list[str] = []
+    ref_value_key: str | None = None
+    ref_unit: str | None = None
+
     for name, items in _candidate_lists(attributes):
         parsed = _read_items(items, tz)
         if parsed is None:
@@ -292,6 +304,8 @@ def parse_price_series(
         unit = _resolve_unit(entity_unit, unit_override, value_key)
         if unit is None:
             return None, "no_unit"
+        if ref_value_key is not None and (value_key, unit) != (ref_value_key, ref_unit):
+            continue
         closed = _close_intervals(read)
         if closed is None:
             continue
@@ -317,37 +331,46 @@ def parse_price_series(
         if len(intervals) < MIN_SERIES_ITEMS:
             continue
 
-        # Two intervals with the same bounds are one interval seen twice. Two
-        # that merely share a wall clock hour are a daylight saving fall-back,
-        # and they differ in their offset, so this keeps both.
-        seen: set[tuple[datetime, datetime]] = set()
-        unique = [
-            interval
-            for interval in intervals
-            if (interval.start, interval.end) not in seen
-            and not seen.add((interval.start, interval.end))  # type: ignore[func-returns-value]
-        ]
+        if ref_value_key is None:
+            ref_value_key, ref_unit = value_key, unit
+        merged.extend(intervals)
+        merged_names.append(name)
 
-        median_total = _median([interval.ct_per_kwh for interval in unique])
-        if median_total < MIN_PLAUSIBLE_TOTAL_CT and day_surcharge == 0:
-            # An exchange price with the grid fees and taxes still missing. It
-            # looks exactly like a price and is short by the larger part of the
-            # bill, which is enough to invert the decision it feeds.
-            return None, "looks_like_exchange_price"
-        if unique[-1].end < now:
-            return None, "stale"
+    if ref_value_key is None or ref_unit is None or len(merged) < MIN_SERIES_ITEMS:
+        return None, "no_series_found"
 
-        return (
-            PriceSeries(
-                intervals=tuple(unique),
-                source_attribute=name,
-                value_key=value_key,
-                unit=unit,
-                surcharge_ct=day_surcharge,
-            ),
-            "",
-        )
-    return None, "no_series_found"
+    merged.sort(key=lambda interval: interval.start)
+    # Two intervals with the same bounds are one interval seen twice - which is
+    # now the normal case, because today and tomorrow usually overlap by a day.
+    # Two that merely share a wall clock hour are a daylight saving fall-back,
+    # and they differ in their offset, so this keeps both.
+    seen: set[tuple[datetime, datetime]] = set()
+    unique = [
+        interval
+        for interval in merged
+        if (interval.start, interval.end) not in seen
+        and not seen.add((interval.start, interval.end))  # type: ignore[func-returns-value]
+    ]
+
+    median_total = _median([interval.ct_per_kwh for interval in unique])
+    if median_total < MIN_PLAUSIBLE_TOTAL_CT and float(surcharge_ct) == 0:
+        # An exchange price with the grid fees and taxes still missing. It
+        # looks exactly like a price and is short by the larger part of the
+        # bill, which is enough to invert the decision it feeds.
+        return None, "looks_like_exchange_price"
+    if unique[-1].end < now:
+        return None, "stale"
+
+    return (
+        PriceSeries(
+            intervals=tuple(unique),
+            source_attribute="+".join(merged_names),
+            value_key=ref_value_key,
+            unit=ref_unit,
+            surcharge_ct=float(surcharge_ct),
+        ),
+        "",
+    )
 
 
 def mean_price_ct(series: PriceSeries | None, start: datetime, end: datetime) -> float | None:

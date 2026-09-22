@@ -770,3 +770,29 @@ def test_a_higher_house_load_leaves_less_to_spill():
     quiet = _curtailment(house_load_kw_profile=[0.2] * 24)
     busy = _curtailment(house_load_kw_profile=[3.0] * 24)
     assert busy.overflow_kwh < quiet.overflow_kwh
+
+
+def test_a_zero_load_period_is_not_a_price_decision():
+    """``evening_reserve_dropped`` names a decision, so a price has to have made it.
+
+    It used to be inferred from "the reserve came out as 0 kWh", and a period
+    whose load profile happens to be zero gives exactly that. The flag then
+    told the diagnostics that prices had dropped the reserve when no price was
+    ever read.
+    """
+    plan = plan_target_soc(
+        _plan_input(house_load_kw_profile=[0.0] * 24, high_price_window=EVENING)
+    )
+    assert plan.evening_reserve_kwh == 0.0
+    assert plan.evening_reserve_dropped is False, "no price said anything here"
+
+    # And the real thing still reports itself.
+    dropped = plan_target_soc(
+        _plan_input(
+            forecast_kwh_next_day=0.0,
+            high_price_window=EVENING,
+            window_price_ct=38.0,
+            evening_price_ct=22.0,
+        )
+    )
+    assert dropped.evening_reserve_dropped is True

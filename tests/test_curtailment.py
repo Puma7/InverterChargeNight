@@ -276,7 +276,12 @@ async def test_the_attributes_hold_the_model_next_to_the_measurement(mock_hass):
     assert attrs["measured_hours_at_the_cap"] == 5
     assert attrs["measured_peak_w_by_hour"]["12"] == 9000
     assert "3" in attrs["measured_peak_w_by_hour"], "a quiet hour is still a reading"
-    assert attrs["model_vs_measured_pct"] > 0
+    # An upper envelope, not a day: each entry is the highest that hour ever
+    # reached in 14 days, so no real day can beat it. A model above 100 % is
+    # therefore claiming an overflow the inverter has never come close to.
+    assert attrs["measured_overflow_kwh_envelope"] > 0
+    assert 0 < attrs["model_vs_envelope_pct"] <= 100.0
+    assert "model_vs_measured_pct" not in attrs, "the old name compared kW with kWh"
     assert attrs["clamped_by"] is None
 
 
@@ -398,3 +403,35 @@ async def test_an_unusable_plan_input_still_leaves_the_user_minimum_as_the_floor
 
     assert outlook is not None, "the reserve is optional; the cap arithmetic is not"
     assert outlook.morning_target_soc >= 10.0
+
+
+@pytest.mark.asyncio
+async def test_the_documented_attribute_names_are_the_ones_emitted(mock_hass):
+    """A rename that misses the docs leaves users reading a missing attribute.
+
+    Exactly what happened to ``model_vs_measured_pct``: the emitted name moved
+    and the README, the sensor's own docstring and the plan all still named the
+    old one. Anybody building a template from those would have got nothing back
+    and no error.
+    """
+    import re
+    from pathlib import Path
+
+    from custom_components.inverter_charge_night import sensor as sensor_module
+
+    mock_hass.states.async_set(FEED_IN, "5000", {"unit_of_measurement": "W"})
+    _recorder(mock_hass, _peak_rows(FEED_IN, lambda h: 9000.0 if 11 <= h <= 15 else 500.0))
+    coordinator = _make_coordinator(mock_hass, {CONF_CURTAILMENT_FEED_IN_ENTITY: FEED_IN})
+    coordinator.last_curtailment_outlook = await _outlook(coordinator)
+    emitted = set(await coordinator.curtailment_attributes())
+
+    # Only this sensor's own prose: the efficiency search has attributes of its
+    # own whose names start the same way, and they are none of this test's
+    # business.
+    readme = Path(__file__).resolve().parents[1].joinpath("README.md").read_text()
+    start = readme.index("### The feed-in cap")
+    section = readme[start : readme.index("\n## ", start)]
+    prose = (sensor_module.CurtailmentOutlookSensor.__doc__ or "") + section
+    named = set(re.findall(r"`{1,2}(model_vs_\w+|measured_overflow\w*)`{1,2}", prose))
+    assert named, "the guard is worthless if it matches nothing"
+    assert named <= emitted, f"documented but not emitted: {sorted(named - emitted)}"

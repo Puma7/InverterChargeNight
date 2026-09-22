@@ -361,3 +361,90 @@ def test_a_naive_query_does_not_raise():
         MIDNIGHT.replace(hour=18, tzinfo=None),
         MIDNIGHT.replace(hour=21, tzinfo=None),
     ) == pytest.approx(30.0)
+
+
+def _day_hours(day: datetime, count: int, price: float) -> list[dict]:
+    return [
+        {
+            "start": (day + timedelta(hours=hour)).isoformat(),
+            "end": (day + timedelta(hours=hour + 1)).isoformat(),
+            "value": price,
+        }
+        for hour in range(count)
+    ]
+
+
+def test_today_and_tomorrow_are_merged_into_one_series():
+    """Nordpool, EPEX and ENTSO-e publish the two days as two attributes.
+
+    Stopping at the first one leaves a series that ends at midnight, and then
+    ``mean_price_ct`` refuses every stretch that crosses it - which is every
+    night window there is. The price gate shipped in 3.6.0 was inert for a
+    23:00 to 05:00 window on all of them.
+    """
+    today = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = today + timedelta(days=1)
+    series, reason = parse_price_series(
+        {
+            "raw_today": _day_hours(today, 24, 0.30),
+            "raw_tomorrow": _day_hours(tomorrow, 24, 0.20),
+        },
+        entity_unit="EUR/kWh",
+        tz=TZ,
+        now=NOW,
+    )
+
+    assert reason == ""
+    assert series is not None
+    assert len(series.intervals) == 48
+    assert "raw_today" in series.source_attribute
+    assert "raw_tomorrow" in series.source_attribute
+
+    # The window that used to be refused: 23:00 tonight to 05:00 tomorrow.
+    window = mean_price_ct(
+        series, today + timedelta(hours=23), tomorrow + timedelta(hours=5)
+    )
+    assert window is not None, "a night window must be covered end to end"
+    # One hour at 30 ct, five at 20 ct.
+    assert window == pytest.approx((30.0 + 5 * 20.0) / 6)
+
+
+def test_a_list_that_disagrees_about_the_unit_is_not_merged_in():
+    """Two halves of one series agree on the value key and the unit.
+
+    Anything else is a different series that happens to sit on the same entity,
+    and merging it would average two things that are not comparable.
+    """
+    today = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+    series, reason = parse_price_series(
+        {
+            "raw_today": _day_hours(today, 24, 0.30),
+            "something_else": [
+                {"start": (today + timedelta(hours=h)).isoformat(), "cost": 5.0}
+                for h in range(24)
+            ],
+        },
+        entity_unit="EUR/kWh",
+        tz=TZ,
+        now=NOW,
+    )
+
+    assert reason == ""
+    assert series is not None
+    assert len(series.intervals) == 24
+    assert series.source_attribute == "raw_today"
+
+
+def test_an_overlapping_day_is_counted_once():
+    """Today and tomorrow usually overlap by a day on these entities."""
+    today = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+    series, reason = parse_price_series(
+        {"raw_today": _day_hours(today, 24, 0.30), "prices": _day_hours(today, 24, 0.30)},
+        entity_unit="EUR/kWh",
+        tz=TZ,
+        now=NOW,
+    )
+
+    assert reason == ""
+    assert series is not None
+    assert len(series.intervals) == 24, "the same hour twice is one hour"
