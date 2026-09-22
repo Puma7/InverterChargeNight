@@ -1817,3 +1817,31 @@ async def test_options_teardown_is_not_overtaken_by_its_own_persist(mock_hass):
         "number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}
     ) in mock_hass.services.async_call.await_args_list
     assert coordinator.config[CONF_MIN_SOC_ENTITY] == "number.new_min_soc"
+
+
+@pytest.mark.asyncio
+async def test_switching_the_integration_back_on_resumes_the_running_window(
+    mock_hass, coordinator
+):
+    """Whole-repo review, finding 4.
+
+    Switched off and on again inside the window, the integration only asked
+    for a refresh - and the update returns at once for a window that is not
+    active. Nothing started it again: the night went uncharged until the next
+    start trigger, a day later. Switching skip next off already re-checks the
+    window; switching the integration on has to do the same.
+    """
+    from custom_components.inverter_charge_night.switch import InverterChargeNightSwitch
+
+    await _start_and_apply(mock_hass, coordinator)
+    switch = InverterChargeNightSwitch(coordinator, coordinator.entry)
+    switch.async_write_ha_state = MagicMock()
+
+    await switch.async_turn_off()
+    assert coordinator.is_active is False
+
+    await switch.async_turn_on()
+
+    assert coordinator.is_enabled is True
+    assert coordinator.is_active is True, "the window has to be picked up again"
+    assert coordinator.initial_calculated_soc == EXPECTED_TARGET
