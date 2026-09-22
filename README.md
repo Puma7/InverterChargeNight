@@ -879,7 +879,9 @@ action:
 Charges the battery from the grid to a level, for a while (`duration`, two hours by default).
 Everything the night window does applies — the house connection limit, the settings captured
 beforehand and restored when it ends. Refused while the configured window is running: that one
-has the tariff behind it.
+has the tariff behind it. Also refused in the `Morning Discharge` mode, together with
+`block_discharge` and the evening rescue: there the window machinery drives the battery down, and
+a charge or a hold would do nothing while reporting success.
 
 ```yaml
 alias: Top the battery up before the expensive block

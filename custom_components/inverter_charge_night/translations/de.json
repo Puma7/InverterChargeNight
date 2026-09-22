@@ -620,7 +620,7 @@
   },
   "exceptions": {
     "adhoc_refused": {
-      "message": "Der Wechselrichter konnte gerade nicht angesteuert werden. Vielleicht läuft das eingerichtete Fenster, vielleicht ist Notstrombetrieb aktiv, vielleicht ist der Ladestand nicht lesbar — im Protokoll steht, was davon."
+      "message": "Der Wechselrichter konnte gerade nicht angesteuert werden. Vielleicht läuft das eingerichtete Fenster, vielleicht ist der Morgenentlademodus gewählt, vielleicht ist Notstrombetrieb aktiv, vielleicht ist der Ladestand nicht lesbar — im Protokoll steht, was davon."
     },
     "entity_not_available": {
       "message": "Die benötigte Entität {entity_id} ist noch nicht verfügbar"

@@ -620,7 +620,7 @@
   },
   "exceptions": {
     "adhoc_refused": {
-      "message": "The inverter could not be driven right now. The configured window may be running, backup mode may be active, or the battery level cannot be read - the log says which."
+      "message": "The inverter could not be driven right now. The configured window may be running, the morning discharge mode may be selected, backup mode may be active, or the battery level cannot be read - the log says which."
     },
     "entity_not_available": {
       "message": "Required entity {entity_id} is not yet available"

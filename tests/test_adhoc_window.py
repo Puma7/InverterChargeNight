@@ -618,3 +618,58 @@ async def test_the_configured_start_trigger_takes_over_from_an_adhoc_window(mock
     )
     assert coordinator.initial_calculated_soc is not None
     assert coordinator.initial_calculated_soc != 60.0, "the night plans its own target"
+
+
+@pytest.mark.asyncio
+async def test_the_morning_discharge_mode_refuses_an_adhoc_window(mock_hass):
+    """Whole-repo review, finding 3.
+
+    Every ad-hoc window charges or holds; in the morning discharge mode the
+    window machinery drives the battery down. charge_to to 80 % at 40 % counted
+    as reached at once, wrote nothing - and reported success.
+    """
+    from custom_components.inverter_charge_night.const import (
+        CONF_FORCE_DISCHARGE_SWITCH,
+        CONF_OPERATION_MODE,
+        MODE_MORNING_DISCHARGE,
+    )
+
+    mock_hass.states.async_set("switch.force", "off")
+    coordinator = _make_coordinator(
+        mock_hass,
+        {CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE, CONF_FORCE_DISCHARGE_SWITCH: "switch.force"},
+    )
+
+    assert await _open(coordinator, target=80.0, grid=True) is False
+    assert coordinator.is_active is False
+    assert coordinator._adhoc_until is None
+    mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_morning_discharge_mode_does_not_try_to_rescue(mock_hass, caplog):
+    """The window would be refused on every poll; the rescue does not ask."""
+    from custom_components.inverter_charge_night.const import (
+        CONF_OPERATION_MODE,
+        MODE_MORNING_DISCHARGE,
+    )
+    from custom_components.inverter_charge_night.planner import EveningOutlook
+
+    coordinator = _make_coordinator(mock_hass, {CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE})
+    coordinator.last_evening_outlook = EveningOutlook(
+        zone_start=ZONE_START,
+        zone_end=ZONE_START + timedelta(hours=3),
+        required_soc=60.0,
+        projected_soc=20.0,
+        missing_kwh=4.0,
+        pv_to_come_kwh=0.0,
+        load_to_come_kwh=2.0,
+        forecast_available=True,
+    )
+    coordinator.async_open_adhoc_window = AsyncMock(return_value=False)
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=AFTERNOON):
+        await coordinator._maybe_rescue_the_evening()
+
+    coordinator.async_open_adhoc_window.assert_not_awaited()
+    assert coordinator._rescue_stage == 0

@@ -3918,7 +3918,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         outlook = self.last_evening_outlook
         if outlook is None or outlook.missing_kwh <= 0:
             return
-        if not self.is_enabled or self._is_backup_active():
+        if not self.is_enabled or self._is_backup_active() or self.is_discharge_mode:
+            # The ad-hoc window would refuse the discharge mode on every poll
             return
         current_soc = self._current_battery_soc()
         if current_soc is None:
@@ -4014,8 +4015,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         configured times.
 
         Refused while a configured window runs (that one has the tariff behind
-        it), while the integration is off, during backup mode, and for an end
-        that is already past. ``allow_grid_charge=False`` holds what is in the
+        it), while the integration is off, in the morning discharge mode, during
+        backup mode, and for an end that is already past. ``allow_grid_charge=False`` holds what is in the
         battery without buying more.
         """
         now = dt_util.now()
@@ -4024,6 +4025,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         if not self.is_enabled:
             _LOGGER.info("Ad-hoc window (%s) refused: the integration is switched off", reason)
+            return False
+        if self.is_discharge_mode:
+            # Every ad-hoc window charges or holds. In this mode the window
+            # machinery drives the battery down: a target above the battery
+            # counts as reached at once, and nothing is written at all - while
+            # the caller is told it worked.
+            _LOGGER.info(
+                "Ad-hoc window (%s) refused: it charges or holds, and the morning "
+                "discharge mode drives the battery the other way",
+                reason,
+            )
             return False
         if self._is_backup_active():
             _LOGGER.info("Ad-hoc window (%s) refused: backup mode is active", reason)
