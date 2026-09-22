@@ -28,7 +28,8 @@ fails its own test when reverted.
   the last conflict decision, and is empty when there was none.
 - **During an ad-hoc window the price pair described two different windows.** The night price is
   always the configured window's, but the bridge then starts at the ad-hoc deadline. The fixed
-  prices decide in that case.
+  prices decide in that case — also when the ad-hoc deadline happens to equal the configured end,
+  which the first version of this fix let through (found by Codex).
 - **The help texts named one reason for falling back to the fixed prices; there are three.** Before
   the next day's prices are out, during an ad-hoc window, and always in the morning-discharge mode.
 

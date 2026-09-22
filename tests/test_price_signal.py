@@ -527,6 +527,25 @@ async def test_an_ad_hoc_deadline_is_not_priced_against_the_configured_night(moc
 
 
 @pytest.mark.asyncio
+async def test_an_ad_hoc_window_ending_with_the_configured_one_is_still_not_a_pair(mock_hass):
+    """Codex on #8: detect the ad-hoc window, not unequal end times.
+
+    charge_to at 21:00 for eight hours ends at 05:00, exactly where the
+    configured window ends. The end times then agree, yet the window buying
+    is the ad-hoc one, whose hours the configured window's mean does not price.
+    """
+    coordinator = _make_coordinator(
+        mock_hass, extra=STATIC_PRICES, attributes={"raw_today": _priced(36)}
+    )
+    coordinator._adhoc_until = TONIGHT + timedelta(hours=6)  # 05:00, the configured end
+
+    prices, source = await _plan_prices(coordinator)
+
+    assert prices == (14.0, 30.0, 8.0)
+    assert source == "static"
+
+
+@pytest.mark.asyncio
 async def test_an_uncovered_entity_with_no_fixed_prices_leaves_the_bridge_winning(mock_hass):
     """The likeliest setup of all: a price entity, a feed-in price, no fixed night or day.
 

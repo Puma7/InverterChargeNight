@@ -1103,7 +1103,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         The pair also has to describe **one** window. ``window_ct`` is always
         the configured window, but during an ad-hoc window ``window_end`` is the
         ad-hoc deadline, and a day stretch starting there would be priced
-        against the night of a different window. Then the fixed fields decide.
+        against the night of a different window. Then the fixed fields decide -
+        also when the ad-hoc deadline happens to equal the configured end.
 
         Feed-in stays a fixed field: no price source publishes a feed-in tariff.
         Without it the triple is None, exactly as before, and the bridge wins.
@@ -1121,7 +1122,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if feed_in is None:
             return None, None
 
-        if series is not None and window_ct is not None and pv_crossover > window_end:
+        if (
+            series is not None
+            and window_ct is not None
+            and pv_crossover > window_end
+            # Asked directly, not inferred from the end times: an ad-hoc window
+            # can end exactly where the configured one does and still buy in
+            # hours the configured window's mean does not price.
+            and self._adhoc_until is None
+        ):
             _, priced_end = self._priced_window_bounds(now)
             if window_end == priced_end:
                 day_ct = mean_price_ct(series, window_end, pv_crossover)
