@@ -5,6 +5,44 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.1] - 2026-09-22
+
+A review of 3.8.0. Nine findings; six held up and are fixed, one only partly, one is a known
+approximation now documented instead of changed, one is a cleanup folded into the fixes. Every fix
+fails its own test when reverted.
+
+### Fixed
+
+- **The options and reconfigure flows validated values they were about to discard.** A field the
+  user cleared was still checked at its old value, because validation ran on the stored entry
+  merged with the form and the cleared field was only removed on saving. Clearing the price entity
+  while keeping the feed-in price passed the new rule on the entity being removed. Older than this
+  release, too: clearing the night price passed "all three prices or none" on the old night price
+  and saved two of the three. Validation now sees exactly what is saved.
+- **`conflict_prices_source` reported whichever calculation ran last.** Four paths build the
+  planner's input — the real plan, the curtailment outlook on every poll, the evening-reserve floor
+  and the read-only `plan_target_soc` action — and all of them set it. The source is now returned
+  rather than stored, and only the real plan records it. The read-only action no longer changes
+  anything.
+- **It also named a source when no conflict had been decided.** It now describes the prices behind
+  the last conflict decision, and is empty when there was none.
+- **During an ad-hoc window the price pair described two different windows.** The night price is
+  always the configured window's, but the bridge then starts at the ad-hoc deadline. The fixed
+  prices decide in that case.
+- **The help texts named one reason for falling back to the fixed prices; there are three.** Before
+  the next day's prices are out, during an ad-hoc window, and always in the morning-discharge mode.
+
+### Changed
+
+- The window's mean price is computed once per plan and shared by the conflict branch and the
+  evening-reserve gate, so the two can no longer disagree.
+
+### Known approximation, documented rather than changed
+
+- The day price is the mean over the whole bridge, while the energy left uncovered is the end of
+  the bridge. Pricing that tail needs the size of the conflict, which only the planner knows.
+  Written up in `plans/012`.
+
 ## [3.8.0] - 2026-09-22
 
 ### Added

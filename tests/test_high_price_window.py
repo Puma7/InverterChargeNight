@@ -114,7 +114,7 @@ async def test_the_plan_input_carries_the_period_and_the_margin(mock_hass):
     )
 
     with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 15, 2, 0)):
-        plan_input, _ = await coordinator._build_plan_input(5.0, True)
+        plan_input, _, _ = await coordinator._build_plan_input(5.0, True)
 
     assert plan_input.high_price_window == (
         datetime(2026, 1, 15, 18, 0),

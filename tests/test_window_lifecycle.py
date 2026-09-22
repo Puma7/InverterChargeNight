@@ -915,16 +915,20 @@ async def test_house_load_profile_falls_back_to_average(mock_hass, caplog, recor
 
 
 def test_prices_require_all_three(bridge):
-    assert bridge._prices_ct() is None
+    # No price entity: the fixed fields decide, all three or nothing.
+    def fixed():
+        return bridge._conflict_prices(None, None, WINDOW_END, WINDOW_END, PV_CROSSOVER)
+
+    assert fixed() == (None, None)
     bridge.config = {**BRIDGE_CONFIG, CONF_NIGHT_PRICE_CT: 14.0, CONF_DAY_PRICE_CT: 30.0}
-    assert bridge._prices_ct() is None
+    assert fixed() == (None, None)
     bridge.config = {
         **BRIDGE_CONFIG,
         CONF_NIGHT_PRICE_CT: 14.0,
         CONF_DAY_PRICE_CT: 30.0,
         CONF_FEED_IN_PRICE_CT: 8.0,
     }
-    assert bridge._prices_ct() == (14.0, 30.0, 8.0)
+    assert fixed() == ((14.0, 30.0, 8.0), "static")
 
 
 # 13. Discharge block ------------------------------------------------------------

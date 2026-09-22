@@ -88,6 +88,18 @@ Jede Stufe ist für sich nützlich und auslieferbar.
 Offen bleiben nur `force_discharge_to` (bräuchte ein Ad-hoc-Fenster in Entladerichtung) und
 `set_charge_power_limit` (schriebe ohne Fenster und damit ohne Restore).
 
+**Nachtrag 22.09. zu den Konfliktpreisen (Review nach 3.8.0), bekannte Näherung:** der
+Tagpreis ist der Mittelwert über die ganze Überbrückung. Ungedeckt bleibt aber das *Ende* der
+Überbrückung — die letzten Stunden vor dem PV-Übergang, morgens oft die teuersten. Genauso ist der
+Nachtpreis der Mittelwert über das ganze Fenster, obwohl bei einer Nachplanung mitten im Fenster
+nur der Rest gekauft wird. Beides zu präzisieren verlangt die Größe des Konflikts
+(`lower - upper`), und die kennt nur der Planer. Der saubere Weg: der Planer bekommt die
+Preisreihe statt eines fertigen Tripels und preist das Ende der Überbrückung selbst (Last rückwärts
+vom Übergang aufintegrieren, bis die ungedeckte Menge erreicht ist; Entladewirkungsgrad beachten).
+**Nicht nebenbei**: das berührt den reinen Planer und die Paarregel zugleich. Das Review zeigte am
+eigenen Beispiel keinen Umschlag der Entscheidung — es ist eine Genauigkeitsfrage, kein
+Fehlverhalten.
+
 **Nachtrag 22.09. zu `set_charge_power_limit`:** der Plan für 3.8.0 hielt den Einwand für
 überholt, weil ein Ad-hoc-Fenster am Ende alles zurücksetzt. Das stimmt, war aber nur die halbe
 Prüfung. Am Code nachgesehen scheitern **beide** denkbaren Wege, aus zwei unabhängigen Gründen:

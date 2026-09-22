@@ -466,7 +466,17 @@ def _process_step(
     user cleared (absent from ``user_input``) are removed so that clearing a
     field in the reconfigure or options flow actually takes effect.
     """
-    errors = _errors_for(step_keys, _validate_user_input({**data, **user_input}, hass))
+    # Validate exactly what is about to be saved. A field of this step that the
+    # user cleared is absent from user_input but still in data, and validating
+    # {**data, **user_input} judged the entry by a value it was about to drop:
+    # clear the price entity in the options flow, keep the feed-in price, and
+    # the rule "feed-in alone needs an entity" passed on the entity that was
+    # being removed. The same held for every rule that weighs one field of a
+    # step against another - clearing the night price passed "all three prices
+    # or none" on the old night price, and saved two of the three.
+    candidate = {key: value for key, value in data.items() if key not in step_keys}
+    candidate.update(user_input)
+    errors = _errors_for(step_keys, _validate_user_input(candidate, hass))
     if errors:
         return errors
     for key in step_keys:

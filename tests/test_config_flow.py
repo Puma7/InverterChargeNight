@@ -685,3 +685,53 @@ def test_the_feed_in_price_alone_is_enough_with_a_price_entity(
 
     got = {key for key, reason in errors.items() if reason == "all_prices_required"}
     assert got == refused
+
+
+@pytest.mark.parametrize(
+    "stored,submitted,refused",
+    [
+        # Review finding: clear the entity, keep feed-in. Validation used to see the
+        # stored entity and pass, and the entry was saved feed-in-only without one.
+        (
+            {"price_entity": "sensor.prices", "feed_in_price_ct": 8.0},
+            {"feed_in_price_ct": 8.0},
+            {"night_price_ct", "day_price_ct"},
+        ),
+        # The same root cause, older than this release: clear the night price and
+        # "all three or none" passed on the old night price, saving two of three.
+        (
+            {"night_price_ct": 14.0, "day_price_ct": 30.0, "feed_in_price_ct": 8.0},
+            {"day_price_ct": 30.0, "feed_in_price_ct": 8.0},
+            {"night_price_ct"},
+        ),
+        # And clearing all three together is a legitimate edit.
+        (
+            {"night_price_ct": 14.0, "day_price_ct": 30.0, "feed_in_price_ct": 8.0},
+            {},
+            set(),
+        ),
+    ],
+    ids=["cleared_entity", "cleared_night_price", "cleared_all_prices"],
+)
+def test_a_cleared_field_is_validated_as_cleared(mock_hass, stored, submitted, refused):
+    """Validation has to judge what is about to be saved, not what is being replaced.
+
+    In the options and reconfigure flows a field the user empties is absent from
+    the submitted input but still present in the stored entry. _process_step
+    removes it when saving - and used to validate before removing it, so every
+    rule weighing one field of a step against another saw the old value.
+    """
+    from custom_components.inverter_charge_night import config_flow
+
+    mock_hass.states.async_set("sensor.prices", "0.30", {"unit_of_measurement": "EUR/kWh"})
+    data = dict(stored)
+
+    with patch.object(config_flow.er, "async_get") as registry:
+        registry.return_value.async_get.return_value = None
+        errors = config_flow._process_step(
+            mock_hass, data, config_flow.STEP_ADVANCED_KEYS, submitted
+        )
+
+    assert {k for k, v in errors.items() if v == "all_prices_required"} == refused
+    if refused:
+        assert data == stored, "a refused step must leave the stored entry untouched"
