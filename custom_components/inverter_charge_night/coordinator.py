@@ -1954,16 +1954,41 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return True
 
     async def _write_raised_min_soc_floor(self) -> None:
-        """Write the floor to the min SOC entity when it sits above the target.
+        """Write the window's floor to the min SOC entity at the window start.
 
-        Only then: with floor == charge target nothing about the existing
-        control flow changes, and _control_charge writes it on the next update
-        as it always did.
+        Above the charge target it always has to go now. Equal to the target it
+        is normally left to _control_charge on the next update - but that update
+        returns early when the battery is already at the target and never gets
+        there, and the periodic verification sleeps a whole update interval
+        before its first round. A hold is always that case: its target *is* the
+        level it finds. So the battery went on running the house for up to an
+        hour after the evening rescue said to hold it.
+
+        Only where the min SOC is what holds the battery. A block over the
+        discharge switch or limit already holds from _apply_discharge_block, and
+        a configured window with the block switched off keeps doing exactly what
+        it did before plan 009 - that one is the user's choice. An ad-hoc hold
+        with the block switched off is not: holding is the whole of what it was
+        opened for, and the min SOC is the only lever it has.
+
+        When the target is not reached yet, _control_charge still writes it -
+        writing it here as well would start the charge a step early, and on an
+        inverter that buys up to its min SOC that is not this function's call.
         """
         target_soc = self.current_target_soc()
         floor_soc = self.inverter_floor_soc(target_soc)
-        if target_soc is None or floor_soc is None or floor_soc <= target_soc:
+        if target_soc is None or floor_soc is None:
             return
+        if floor_soc <= target_soc:
+            method = self._discharge_block_method()
+            holds_by_min_soc = method == DISCHARGE_BLOCK_VIA_MIN_SOC or (
+                method is None and self._adhoc_until is not None
+            )
+            if not holds_by_min_soc:
+                return
+            current_soc = self._current_battery_soc()
+            if current_soc is None or not self._is_target_reached(current_soc, target_soc):
+                return
         entity_id = self.config.get(CONF_MIN_SOC_ENTITY)
         if not entity_id:
             return
@@ -3957,6 +3982,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._adhoc_target_soc = target_soc
             self._adhoc_allow_grid_charge = allow_grid_charge
             self._adhoc_reason = reason
+            # A new target has to be judged afresh. The poll only ever *sets*
+            # target_reached, so a hold that had reached the level it found
+            # left it True, and every later poll skipped control - stage 2 of
+            # the evening rescue moved its target and then never bought.
+            # _replan_in_window clears it for exactly this reason.
+            self.target_reached = False
             self._persist_state()
             await self._calculate_initial_soc()
             return True

@@ -512,3 +512,76 @@ async def test_a_restart_during_a_rescue_picks_the_window_back_up(mock_hass):
     assert restarted.calculated_soc == 62.0, "with the target it was opened with"
     assert restarted._adhoc_until == ZONE_START
     restarted._reset_settings.assert_not_awaited()
+
+
+async def _poll(coordinator, now):
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=now
+    ):
+        return await coordinator._async_update_data()
+
+
+@pytest.mark.asyncio
+async def test_stage_two_actually_buys_after_stage_one_held(mock_hass):
+    """Whole-repo review, finding 1: moving the target is not the same as charging.
+
+    Stage 1 holds at the level it finds, so its first poll sees the target as
+    reached and sets target_reached. Stage 2 then raises the target. The 3.7.1
+    fix made the target move - and its test checked exactly that, and nothing
+    after it. But target_reached stayed True, the poll only ever sets it and
+    never clears it, and control is skipped while it is True: the grid switch
+    was never turned on. _replan_in_window clears it for the same reason; the
+    extend path forgot to.
+    """
+    coordinator = _make_coordinator(mock_hass)
+    # Stage 1: hold at the current 40 %.
+    assert await _open(coordinator, target=40.0, grid=False) is True
+    await _poll(coordinator, AFTERNOON + timedelta(minutes=5))
+    assert coordinator.target_reached is True, "holding at the level it finds is reached"
+
+    # Stage 2: the evening needs 62 %, buying allowed.
+    late = AFTERNOON + timedelta(hours=2)
+    assert await _open(coordinator, target=62.0, grid=True, now=late) is True
+    mock_hass.services.async_call.reset_mock()
+    await _poll(coordinator, late + timedelta(minutes=1))
+
+    assert coordinator.target_reached is False, "40 % is not 62 %"
+    assert any(
+        c.args[:2] == ("switch", "turn_on") and c.args[2].get("entity_id") == GRID
+        for c in mock_hass.services.async_call.await_args_list
+    ), "stage 2 exists to buy - the grid switch has to go on"
+
+
+@pytest.mark.parametrize(
+    "block_mode",
+    ["auto", "off"],
+    ids=["block_over_min_soc", "block_switched_off"],
+)
+@pytest.mark.asyncio
+async def test_holding_writes_the_floor_straight_away(mock_hass, block_mode):
+    """Whole-repo review, finding 10: a hold has to hold from the first poll.
+
+    Holding means raising the inverter's min SOC to the level the battery is
+    at, so the house stops drawing it down. The claim was that this floor only
+    reached the inverter after a full update interval - up to an hour of the
+    battery the rescue exists to protect being emptied into the house.
+    """
+    from custom_components.inverter_charge_night.const import CONF_DISCHARGE_BLOCK_MODE
+
+    # With the block switched off a configured window writes nothing at its
+    # start, deliberately - but an ad-hoc hold has no other job than holding,
+    # and the min SOC is then the only lever it has.
+    coordinator = _make_coordinator(mock_hass, {CONF_DISCHARGE_BLOCK_MODE: block_mode})
+    mock_hass.states.async_set(BATTERY, "55", {"unit_of_measurement": "%"})
+    mock_hass.services.async_call.reset_mock()
+
+    assert await _open(coordinator, target=55.0, grid=False) is True
+    await _poll(coordinator, AFTERNOON + timedelta(minutes=1))
+
+    floor_writes = [
+        c.args[2]["value"]
+        for c in mock_hass.services.async_call.await_args_list
+        if c.args[:2] == ("number", "set_value") and c.args[2].get("entity_id") == MIN_SOC
+    ]
+    assert floor_writes, "nothing was written to the inverter's min SOC at all"
+    assert floor_writes[-1] == pytest.approx(55.0), "the floor has to sit at the held level"
