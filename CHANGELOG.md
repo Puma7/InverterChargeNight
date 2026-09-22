@@ -43,6 +43,50 @@ fails its own test when reverted.
   the bridge. Pricing that tail needs the size of the conflict, which only the planner knows.
   Written up in `plans/012`.
 
+### Fixed — a review of the whole repository
+
+The review above only looked at the last merge. A second one read the whole package. Ten
+findings: eight held up and are fixed, one only where it is safe to fix, one did not hold up.
+Every fix fails its own test when reverted.
+
+- **The evening rescue neither held nor bought.** Stage one's hold is reached the moment it
+  starts, so the min SOC that does the holding was not written until the periodic verification
+  came round, up to an hour later. Stage two raised the target but left `target_reached` set, so
+  every later poll skipped control and the grid switch never went on. The 3.7.1 fix for this
+  stage only moved the target. The hold is now written at once where the min SOC is the lever (a
+  block over the min SOC, or a hold with the block switched off).
+- **The configured window inherited a running ad-hoc window.** The start trigger bypassed the
+  check that lets the configured window win, so the night took over the ad-hoc target, its
+  deadline and its grid-charge setting, and was ended at that deadline. The configured window now
+  takes over.
+- **Replacing an inverter entity in the options mid-window left the old one at the night's
+  settings.** The window ran on with the new entities and restored those at its end; the old min
+  SOC kept the night's floor and the old grid switch stayed on. Such a change now ends the window
+  on the entities it wrote to, and it starts again on the new ones.
+- **Switching the integration back on inside the window did nothing until the next night.** It
+  now picks the window up again, as switching skip next off already did.
+- **A window starting in the hour the clocks skip in spring did not start at all.** Home
+  Assistant moves such a trigger to the next day. The polling update now starts a window whose
+  start trigger was missed, as it already ended one whose end trigger was.
+- **An efficiency test whose setpoint did not reach the inverter was recorded anyway**, under a
+  power it was never taken at. It is not started now.
+
+### Changed
+
+- **The evening outlook needs a forecast entity for today.** Without one it read the tomorrow
+  entity, which in the afternoon is tomorrow, and the rescue acted on the wrong day's sun. It now
+  stays empty instead, like the curtailment outlook.
+- **`charge_to`, `block_discharge` and the evening rescue are refused in the morning-discharge
+  mode.** The window machinery drives the battery down there: a charge counted as reached at
+  once, wrote nothing and reported success.
+
+### Did not hold up
+
+- The evening shortfall credits the day's surplus at `1 / discharge efficiency` instead of the
+  charge efficiency. That is right for a DC-coupled hybrid inverter, where the PV reaches the
+  battery without the AC conversion the charge efficiency describes. The reasoning is now next to
+  the formula.
+
 ## [3.8.0] - 2026-09-22
 
 ### Added
