@@ -472,3 +472,43 @@ async def test_a_restart_during_an_adhoc_window_does_not_leave_a_dead_deadline(m
     assert restarted._window_end_datetime(after) > after, (
         "the window end must never be a timestamp in the past"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_restart_during_a_rescue_picks_the_window_back_up(mock_hass):
+    """The other half of the restart fix, and the half that keeps the evening.
+
+    ``is_active`` is not persisted, so after a restart the deadline comes back
+    and the window does not. Clearing a deadline that has passed stops it from
+    poisoning later windows - but a rescue interrupted *before* its deadline has
+    to carry on, or the battery it was holding is released an hour before the
+    expensive period it was holding it for.
+
+    Worse than merely not resuming: with the window not active, the "settings
+    from an earlier window are still on the inverter" branch fires on the next
+    poll and resets the inverter - undoing the hold the persisted deadline
+    existed to preserve.
+
+    This goes through a real restore from the persisted options rather than
+    setting the fields by hand, because the restore is where it went wrong.
+    """
+    coordinator = _make_coordinator(mock_hass)
+    assert await _open(coordinator, target=62.0, until=ZONE_START, grid=False) is True
+    persisted = dict(coordinator.entry.options)
+
+    # Home Assistant restarts at 15:00, three hours before the period begins.
+    at_restart = AFTERNOON + timedelta(hours=1)
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=at_restart
+    ):
+        restarted = _make_coordinator(mock_hass, options=persisted)
+        assert restarted._adhoc_until == ZONE_START, "the deadline must survive the restart"
+        assert restarted.is_active is False, "and the window, by design, does not"
+        restarted._reset_settings = AsyncMock(return_value=True)
+
+        await restarted._check_current_window()
+
+    assert restarted.is_active is True, "the interrupted rescue must carry on"
+    assert restarted.calculated_soc == 62.0, "with the target it was opened with"
+    assert restarted._adhoc_until == ZONE_START
+    restarted._reset_settings.assert_not_awaited()
