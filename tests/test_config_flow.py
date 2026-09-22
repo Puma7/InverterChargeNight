@@ -633,3 +633,55 @@ def test_only_entity_ids_are_looked_up_as_entities(mock_hass):
         registry.return_value.async_get.return_value = None
         errors = config_flow._validate_user_input({CONF_CURTAILMENT_LIMIT_W: 9000.0}, mock_hass)
     assert CONF_CURTAILMENT_LIMIT_W not in errors
+
+
+@pytest.mark.parametrize(
+    "with_entity,prices,refused",
+    [
+        # The setup this release exists for, and the one Codex found unreachable:
+        # a price entity supplies night and day, so feed-in alone is complete.
+        (True, {"feed_in_price_ct": 8.0}, set()),
+        (True, {"night_price_ct": 14.0, "day_price_ct": 30.0, "feed_in_price_ct": 8.0}, set()),
+        (True, {}, set()),
+        # A lone night price with an entity is a fallback that never takes
+        # effect - the planner only uses the fixed night and day as a pair.
+        (True, {"night_price_ct": 14.0, "feed_in_price_ct": 8.0}, {"day_price_ct"}),
+        # Without an entity nothing changes: all three or none.
+        (False, {"feed_in_price_ct": 8.0}, {"night_price_ct", "day_price_ct"}),
+        (False, {"night_price_ct": 14.0, "day_price_ct": 30.0}, {"feed_in_price_ct"}),
+        (False, {"night_price_ct": 14.0, "day_price_ct": 30.0, "feed_in_price_ct": 8.0}, set()),
+    ],
+    ids=[
+        "entity_feed_in_only",
+        "entity_all_three",
+        "entity_none",
+        "entity_lone_night",
+        "no_entity_feed_in_only",
+        "no_entity_missing_feed_in",
+        "no_entity_all_three",
+    ],
+)
+def test_the_feed_in_price_alone_is_enough_with_a_price_entity(
+    mock_hass, with_entity, prices, refused
+):
+    """Codex on PR #7: the feed-in-only path could not be configured in the UI.
+
+    The coordinator handled it and a test proved that - but that test built the
+    coordinator directly, past the form, and the form still demanded all three
+    prices. Anybody with a price entity would have had to invent a night and a
+    day price just to get through it.
+    """
+    from custom_components.inverter_charge_night import config_flow
+    from custom_components.inverter_charge_night.const import CONF_PRICE_ENTITY
+
+    user_input: dict[str, object] = dict(prices)
+    if with_entity:
+        mock_hass.states.async_set("sensor.prices", "0.30", {"unit_of_measurement": "EUR/kWh"})
+        user_input[CONF_PRICE_ENTITY] = "sensor.prices"
+
+    with patch.object(config_flow.er, "async_get") as registry:
+        registry.return_value.async_get.return_value = None
+        errors = config_flow._validate_user_input(user_input, mock_hass)
+
+    got = {key for key, reason in errors.items() if reason == "all_prices_required"}
+    assert got == refused

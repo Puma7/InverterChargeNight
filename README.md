@@ -245,7 +245,11 @@ To find entities:
      the way through the inverter. The bridge energy and the evening reserve are sized with it,
      so the battery holds what the house will actually get
    - **Night / Day / Feed-in Price** (optional): Tariffs in ct/kWh. Set all three or none; the
-     Bridge planner uses them to decide a conflict between bridging and PV headroom.
+     Bridge planner uses them to decide a conflict between bridging and PV headroom. With a
+     **price entity** configured, the entity supplies night and day, and the **feed-in price on its
+     own** is a complete setup -- no price source publishes a feed-in tariff, so that one is always
+     entered by hand. Night and day then only serve as a fallback for when the entity does not
+     cover the night.
 
 3. **Submit the configuration**
    - Review all settings

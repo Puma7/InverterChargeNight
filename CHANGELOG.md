@@ -22,7 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `conflict_prices_source`.
 
 The feed-in price stays a fixed field, because no price source publishes one; without it nothing
-changes. In the morning-discharge mode the bridge is empty every day — the sun is up before the
+changes. **With a price entity, the feed-in price on its own is now a complete setup** — the form
+used to demand all three fixed prices, so the path this release adds could not be configured
+without inventing a night and a day price first. A lone night or day price is still refused: the
+planner only ever uses the fixed pair together, so one of them alone would never take effect. In the morning-discharge mode the bridge is empty every day — the sun is up before the
 window ends — so that mode always uses the fixed fields, which is the right answer when there is
 nothing to bridge.
 
