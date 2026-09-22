@@ -20,7 +20,7 @@
           "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
           "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
           "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
-          "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft.",
+          "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft. Abendprognose und Abregelungsprognose brauchen sie und bleiben ohne sie leer.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
           "battery_capacity": "Gesamtkapazität des Speichers in kWh, z. B. 35,8."
         }
@@ -174,7 +174,7 @@
           "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
           "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
           "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
-          "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft.",
+          "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft. Abendprognose und Abregelungsprognose brauchen sie und bleiben ohne sie leer.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
           "battery_capacity": "Gesamtkapazität des Speichers in kWh, z. B. 35,8."
         }
@@ -358,7 +358,7 @@
           "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
           "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
           "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
-          "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft.",
+          "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft. Abendprognose und Abregelungsprognose brauchen sie und bleiben ohne sie leer.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
           "battery_capacity": "Gesamtkapazität des Speichers in kWh, z. B. 35,8."
         }

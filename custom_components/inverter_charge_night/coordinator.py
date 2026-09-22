@@ -1397,9 +1397,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         with nobody having set the snow nights. By mid-afternoon it is already
         decidable, and there is still time to do something about it.
 
-        ``None`` when there is no high-price period configured, when the
-        battery cannot be read, or when the configuration makes the arithmetic
-        impossible. None of those are reasons to act.
+        ``None`` when there is no high-price period configured, without a
+        forecast entity for *today*, when the battery cannot be read, or when
+        the configuration makes the arithmetic impossible. None of those are
+        reasons to act.
         """
         now = dt_util.now()
         zone = self._high_price_window(now)
@@ -1420,14 +1421,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 zone[0].isoformat(timespec="minutes"),
             )
             return None
+        today_entity = self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)
+        if not today_entity:
+            # The tomorrow entity is no stand-in here: in the afternoon it is
+            # tomorrow. A sunny tomorrow hid today's shortfall, a dull one
+            # invented one, and stage one acts on it. Same rule as the
+            # curtailment outlook - no answer rather than the wrong day's.
+            return None
         current_soc = self._current_battery_soc()
         if current_soc is None:
             return None
         sunrise, sunset = self._sun_times(now, now)
-        forecast_kwh, forecast_available = self._parse_forecast_energy(
-            self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)
-            or self.config.get(CONF_PV_FORECAST_ENTITY)
-        )
+        forecast_kwh, forecast_available = self._parse_forecast_energy(today_entity)
         try:
             return evening_outlook(
                 now=now,

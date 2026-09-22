@@ -186,7 +186,9 @@ To find entities:
    - **PV Forecast Entity (tomorrow)**: Forecast for the next day, used when the window runs
      before midnight
    - **PV Forecast Today Entity** (optional): Today's forecast, used when the window runs after
-     midnight; falls back to the entity above when unset
+     midnight; falls back to the entity above when unset. The evening outlook (and with it the
+     evening rescue) and the curtailment outlook need it: they never read tomorrow's forecast as
+     today's, and stay empty without it
    - **Battery SOC Sensor**: The sensor showing the current SOC in percent
    - **Battery Capacity**: Total capacity in kWh (e.g., `35.8`)
 
@@ -417,7 +419,9 @@ The night plan buys for the high-price period in advance. The rescue is what hap
 plan turns out to have been too optimistic — snow on the panels, say, with the snow nights not
 set. By mid-afternoon it is already decidable, and there is still time.
 
-`sensor.…_evening_outlook` carries the shortfall in kWh, normally 0. When it is not:
+`sensor.…_evening_outlook` carries the shortfall in kWh, normally 0. It needs a forecast entity
+for **today**: in the afternoon the tomorrow entity is tomorrow, and the rescue would act on the
+wrong day's sun. Without one the sensor stays empty and nothing is rescued. When it is not 0:
 
 1. **The discharge is blocked** — automatically. The house then runs from the sun, and from the
    grid at the day tariff when the sun is not enough, rather than from a battery that is needed

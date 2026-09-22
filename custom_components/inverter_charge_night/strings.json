@@ -20,7 +20,7 @@
           "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
           "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
-          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
+          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set. The evening outlook and the curtailment outlook need it and stay empty without it.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)"
         }
@@ -174,7 +174,7 @@
           "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
           "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
-          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
+          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set. The evening outlook and the curtailment outlook need it and stay empty without it.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)"
         }
@@ -358,7 +358,7 @@
           "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
           "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
-          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
+          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set. The evening outlook and the curtailment outlook need it and stay empty without it.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)"
         }

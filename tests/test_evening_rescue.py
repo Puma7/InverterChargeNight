@@ -32,6 +32,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_HIGH_PRICE_START,
     CONF_MIN_SOC_ENTITY,
     CONF_PV_FORECAST_ENTITY,
+    CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_START_TIME,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
@@ -331,11 +332,11 @@ async def test_holding_does_not_lock_out_the_buying_that_follows_it(mock_hass):
             "next_setting": "2026-06-01T21:00:00+00:00",
         },
     )
-    coordinator = _make_coordinator(mock_hass)
+    coordinator = _make_coordinator(mock_hass, {CONF_PV_FORECAST_TODAY_ENTITY: "sensor.pv_today"})
     # After the helper, which sets its own defaults: a nearly empty battery and
     # a day that will not fill it, so the shortfall is still there at 16:30.
     mock_hass.states.async_set("sensor.soc", "12", {"unit_of_measurement": "%"})
-    mock_hass.states.async_set("sensor.pv", "0.5", {"unit_of_measurement": "kWh"})
+    mock_hass.states.async_set("sensor.pv_today", "0.5", {"unit_of_measurement": "kWh"})
     coordinator.evening_rescue_charge = True
 
     with patch(CALL_LATER, return_value=MagicMock()), patch(
