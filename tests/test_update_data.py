@@ -448,7 +448,13 @@ async def test_update_outside_a_window_never_resets_the_inverter(mock_hass):
     )
     coordinator.is_active = False
 
-    data = await coordinator._async_update_data()
+    # Pinned outside the default 00:00-05:59 window: inside it the poll starts
+    # a window whose start trigger was missed.
+    with patch(
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
+        return_value=datetime(2026, 1, 15, 12, 0),
+    ):
+        data = await coordinator._async_update_data()
 
     assert data["is_active"] is False
     mock_hass.services.async_call.assert_not_awaited()

@@ -4515,6 +4515,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self.curtailment_attributes() if self.is_enabled else {}
         )
         await self._maybe_rescue_the_evening()
+        if self.is_enabled and not self.is_active and not self._ending:
+            # Safety net for a lost start trigger, the counterpart of the one
+            # for the end below: a start in the hour the clocks skip in spring
+            # never fires that day (Home Assistant moves the pattern to the
+            # next day). The window check applies every refusal - skip next,
+            # a handed-back inverter, backup mode, the date range. The end
+            # minute is left out: the end trigger has just ended the window
+            # there, and the clock check is inclusive at the end.
+            now = dt_util.now()
+            start, end = self._window_times()
+            if self._is_time_between(now.time(), start, end) and (now.hour, now.minute) != (
+                end.hour,
+                end.minute,
+            ):
+                await self._check_current_window()
         if not self.is_enabled or not self.is_active:
             return inactive_data
         if self._is_backup_active():

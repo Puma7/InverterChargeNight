@@ -665,7 +665,9 @@ async def test_window_end_clears_plan(mock_hass, bridge):
     assert bridge.last_plan is None
     assert bridge.planned_charge_power_w is None
     assert bridge._pv_crossover is None
-    data = await bridge._async_update_data()
+    # After the end: inside the window the poll would start it again
+    with patch(NOW, return_value=WINDOW_END + timedelta(minutes=1)):
+        data = await bridge._async_update_data()
     assert "plan_reason" not in data
 
 
@@ -1845,3 +1847,39 @@ async def test_switching_the_integration_back_on_resumes_the_running_window(
     assert coordinator.is_enabled is True
     assert coordinator.is_active is True, "the window has to be picked up again"
     assert coordinator.initial_calculated_soc == EXPECTED_TARGET
+
+
+@pytest.mark.asyncio
+async def test_a_missed_window_start_is_caught_by_the_polling_update(mock_hass, coordinator):
+    """Whole-repo review, finding 5.
+
+    A start time in the hour the clocks skip in spring never fires that day -
+    Home Assistant moves the pattern to the next day. The end had a safety net
+    in the polling update; the start had none, so the night went uncharged.
+    """
+    assert coordinator.is_active is False
+
+    await coordinator._async_update_data()
+
+    assert coordinator.is_active is True, "the poll has to start the window it finds itself in"
+    assert coordinator.initial_calculated_soc == EXPECTED_TARGET
+
+
+@pytest.mark.asyncio
+async def test_the_poll_does_not_restart_a_window_in_its_end_minute(mock_hass, coordinator):
+    """The end trigger has just ended it; the clock check is inclusive at the end."""
+    with patch(NOW, return_value=datetime(2026, 1, 15, 5, 59, 30)):
+        await coordinator._async_update_data()
+
+    assert coordinator.is_active is False
+    mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_poll_leaves_a_skipped_window_alone(mock_hass, coordinator):
+    coordinator.skip_next = True
+
+    await coordinator._async_update_data()
+
+    assert coordinator.is_active is False
+    mock_hass.services.async_call.assert_not_awaited()
