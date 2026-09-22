@@ -8,6 +8,7 @@ lives in its own module so that ``__init__.py`` stays a thin setup shim.
 import asyncio
 import logging
 import math
+from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -174,6 +175,18 @@ from .util import parse_time_str
 
 _LOGGER = logging.getLogger(__name__)
 
+# Every entity a window writes to. A window has to end on the entities it
+# wrote to, so an options change that replaces one of them ends it first.
+_WINDOW_WRITTEN_ENTITY_KEYS = (
+    CONF_MIN_SOC_ENTITY,
+    CONF_GRID_CHARGE_SWITCH,
+    CONF_FORCE_DISCHARGE_SWITCH,
+    CONF_DISCHARGE_BLOCK_SWITCH,
+    CONF_DISCHARGE_LIMIT_ENTITY,
+    CONF_CHARGE_POWER_ENTITY,
+    CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
+)
+
 type InverterChargeNightConfigEntry = ConfigEntry[InverterChargeNightCoordinator]
 
 # A failed reset at window end is retried after these delays (seconds), then
@@ -248,6 +261,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # listeners or write the window target back to the inverter in between.
     _ending: bool = False
     _switching_mode: bool = False
+    # Set while the options update tears a window down; see async_update_entry
+    _reconfiguring: bool = False
     # True once async_unload_entry started: no new timers may be armed.
     _unloading: bool = False
     # House connection limit (plan 008): read by the sensor and by the teardown
@@ -3381,7 +3396,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     end.strftime("%H:%M"),
                 )
                 for handler, trigger_time in (
-                    (self._on_window_start, start),
+                    (self._on_scheduled_window_start, start),
                     (self._on_scheduled_window_end, end),
                 ):
                     self._time_triggers.append(
@@ -3589,6 +3604,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         except Exception as err:  # pylint: disable=broad-except
             _LOGGER.error("Error checking current window: %s", err, exc_info=True)
+
+    async def _on_scheduled_window_start(self, now: datetime) -> None:
+        """Time-trigger entry point: the configured window reached its start time.
+
+        The configured window wins over an ad-hoc one, as in
+        _check_current_window: it has the tariff behind it. Started directly on
+        top of a running ad-hoc window it would inherit that window's target,
+        deadline and grid-charge setting, and be ended at the ad-hoc deadline
+        with nothing to start it again that night.
+        """
+        if self._adhoc_until is not None:
+            _LOGGER.info(
+                "Ending the ad-hoc window (%s): the configured window is starting",
+                self._adhoc_reason,
+            )
+            await self._on_window_end(now)
+        await self._on_window_start(now)
 
     async def _on_window_start(self, now: datetime) -> None:
         """Handle window start."""
@@ -3833,6 +3865,31 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.operation_mode = mode
         finally:
             self._switching_mode = False
+
+    async def async_release_changed_entities(self, new_config: Mapping[str, Any]) -> None:
+        """End a running window whose inverter entities the options are replacing.
+
+        Its end has to address the entities it wrote to: the night target on
+        the min SOC, grid charging, the discharge block, the charge limits.
+        Left running on the new configuration, its end restores the new
+        entities and the old ones keep the night's floor and grid charging for
+        good. Called while ``self.config`` is still the old configuration; the
+        window check after the swap starts the window again on the new one.
+        """
+        if not self.is_active:
+            return
+        changed = [
+            key
+            for key in _WINDOW_WRITTEN_ENTITY_KEYS
+            if self.config.get(key) != new_config.get(key)
+        ]
+        if not changed:
+            return
+        _LOGGER.info(
+            "The options replace %s while a window is running - ending it on the old entities",
+            ", ".join(changed),
+        )
+        await self._on_window_end(dt_util.now())
 
     async def _maybe_rescue_the_evening(self) -> None:
         """Act on a shortfall the outlook has already worked out (plan 013).

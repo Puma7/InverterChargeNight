@@ -585,3 +585,36 @@ async def test_holding_writes_the_floor_straight_away(mock_hass, block_mode):
     ]
     assert floor_writes, "nothing was written to the inverter's min SOC at all"
     assert floor_writes[-1] == pytest.approx(55.0), "the floor has to sit at the held level"
+
+
+@pytest.mark.asyncio
+async def test_the_configured_start_trigger_takes_over_from_an_adhoc_window(mock_hass):
+    """Whole-repo review, finding 2: the configured window wins, by its trigger too.
+
+    Plan 013 settled it: when the configured window begins during an ad-hoc one,
+    the configured one wins - it has the tariff behind it. _check_current_window
+    does that. The start *trigger* calls _on_window_start directly, which has no
+    such check, so the configured window inherited the ad-hoc window's target,
+    its deadline and its grid-charge setting - and was then ended at the ad-hoc
+    deadline, with nothing to start it again that night.
+    """
+    coordinator = _make_coordinator(mock_hass)
+    coordinator._reset_absolute_charge_power = AsyncMock()
+    # charge_to at 22:00 for two hours: runs past the 23:00 configured start.
+    evening = datetime(2026, 6, 1, 22, 0)
+    assert await _open(coordinator, target=60.0, until=evening + timedelta(hours=2), grid=True, now=evening)
+
+    start = datetime(2026, 6, 1, 23, 0)
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=start
+    ):
+        await coordinator._on_scheduled_window_start(start)
+
+    assert coordinator.is_active is True
+    assert coordinator._adhoc_until is None, "the ad-hoc window has to hand over"
+    assert coordinator._adhoc_target_soc is None
+    assert coordinator._window_end_datetime(start) == datetime(2026, 6, 2, 5, 0), (
+        "the configured window ends at its own time, not at the ad-hoc deadline"
+    )
+    assert coordinator.initial_calculated_soc is not None
+    assert coordinator.initial_calculated_soc != 60.0, "the night plans its own target"

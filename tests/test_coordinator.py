@@ -492,6 +492,7 @@ async def test_async_update_entry_ignores_options_only_change(mock_hass, mock_co
     coordinator = MagicMock()
     coordinator.config = mock_config_entry.data
     coordinator.async_request_refresh = AsyncMock()
+    coordinator._reconfiguring = False
     mock_config_entry.runtime_data = coordinator
     mock_config_entry.options = {CONF_RUNTIME_STATE: {"is_enabled": False}}
 
