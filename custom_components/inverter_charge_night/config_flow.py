@@ -421,7 +421,17 @@ def _validate_user_input(
             errors[CONF_CHARGE_POWER_ENTITY] = "required_entity"
 
     prices_set = [key for key in _PRICE_KEYS if user_input.get(key) is not None]
-    if prices_set and len(prices_set) != len(_PRICE_KEYS):
+    # With a price entity the night and day prices come from it, and only the
+    # feed-in tariff is left that no price source publishes. So the feed-in
+    # price on its own is a complete setup there - and demanding the two fixed
+    # ones as well would make users invent fallback numbers before the entity
+    # could decide anything. Every other partial combination is still refused:
+    # a lone night or day price would be a fallback that never takes effect,
+    # because the planner only ever uses the fixed night and day as a pair.
+    feed_in_only_with_entity = bool(user_input.get(CONF_PRICE_ENTITY)) and prices_set == [
+        CONF_FEED_IN_PRICE_CT
+    ]
+    if prices_set and len(prices_set) != len(_PRICE_KEYS) and not feed_in_only_with_entity:
         for key in _PRICE_KEYS:
             if key not in prices_set:
                 errors[key] = "all_prices_required"

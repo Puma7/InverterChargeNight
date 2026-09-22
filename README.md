@@ -245,7 +245,11 @@ To find entities:
      the way through the inverter. The bridge energy and the evening reserve are sized with it,
      so the battery holds what the house will actually get
    - **Night / Day / Feed-in Price** (optional): Tariffs in ct/kWh. Set all three or none; the
-     Bridge planner uses them to decide a conflict between bridging and PV headroom.
+     Bridge planner uses them to decide a conflict between bridging and PV headroom. With a
+     **price entity** configured, the entity supplies night and day, and the **feed-in price on its
+     own** is a complete setup -- no price source publishes a feed-in tariff, so that one is always
+     entered by hand. Night and day then only serve as a fallback for when the entity does not
+     cover the night.
 
 3. **Submit the configuration**
    - Review all settings
@@ -333,6 +337,15 @@ Load** is used for every hour.
   cost of leaving the bridge uncovered (day price minus night price) and takes the cheaper one.
   Without tariffs the bridge wins, because grid energy by day costs more than the feed-in
   tariff that is lost when PV finds no room.
+
+  With a price entity configured, the night and day prices come from it instead: the window's
+  own mean price, and the mean over the bridge from the window end to the PV crossover. They are
+  taken **as a pair or not at all** -- the decision turns on their difference, and a difference
+  between an entity's night and a hand-entered day would partly be a difference between two ways
+  of writing a price down. When the entity does not cover both stretches, both come from the
+  fixed fields. The feed-in price is always the fixed field, because no price source publishes
+  one. `sensor.…_price_signal` shows which source the last plan used in
+  `conflict_prices_source`.
 
 The chosen bound and its inputs are exposed as attributes of
 `sensor.inverter_charge_night_calculated_soc` (`plan_reason`, `bridge_kwh`, `surplus_kwh`,

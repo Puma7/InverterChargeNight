@@ -5,6 +5,42 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-09-22
+
+### Added
+
+- **The price entity now decides the planner's conflict too.** When the bridge and the PV
+  headroom cannot both be satisfied, the planner weighs the day price against the night price.
+  After 3.6.0 those still came from the three fixed fields, even with a price entity that knew
+  what tonight and tomorrow morning actually cost. Now the night price is the window's own mean
+  and the day price the mean over the bridge — the stretch from the window end to the PV
+  crossover that the house would otherwise buy at.
+- **Taken as a pair or not at all.** The decision turns on the difference between the two, and a
+  difference between an entity's night and a hand-entered day is partly a difference between two
+  ways of writing a price down. When the entity cannot cover both stretches, both come from the
+  fixed fields. `sensor.…_price_signal` shows which source the last plan used, in
+  `conflict_prices_source`.
+
+The feed-in price stays a fixed field, because no price source publishes one; without it nothing
+changes. **With a price entity, the feed-in price on its own is now a complete setup** — the form
+used to demand all three fixed prices, so the path this release adds could not be configured
+without inventing a night and a day price first. A lone night or day price is still refused: the
+planner only ever uses the fixed pair together, so one of them alone would never take effect. In the morning-discharge mode the bridge is empty every day — the sun is up before the
+window ends — so that mode always uses the fixed fields, which is the right answer when there is
+nothing to bridge.
+
+### Not in this release, deliberately
+
+- **`set_charge_power_limit`.** Planned for this release and not built, because checking it
+  against the code showed both ways of building it fail. As an ad-hoc window it would also raise
+  the min SOC floor and so block discharging — a side effect nobody asked for. As a cap inside a
+  running window it writes nothing at all in the default `headroom` planner mode without a house
+  connection limit, and an action that silently does nothing is the worst kind. The version that
+  works needs an ad-hoc window that caps power without setting a floor, which is the same building
+  block curtailment stage two needs — so the two get planned together.
+- **`force_discharge_to`**, for the same reason in a larger form: direction is entry
+  configuration, not a window property, and about a dozen code paths branch on it.
+
 ## [3.7.1] - 2026-09-20
 
 A review of code that shipped unreviewed. PR #5 was looked at once, at 13:00:14, and the earliest
