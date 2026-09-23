@@ -63,7 +63,9 @@ Every fix fails its own test when reverted.
 - **Replacing an inverter entity in the options mid-window left the old one at the night's
   settings.** The window ran on with the new entities and restored those at its end; the old min
   SOC kept the night's floor and the old grid switch stayed on. Such a change now ends the window
-  on the entities it wrote to, and it starts again on the new ones.
+  on the entities it wrote to, and it starts again on the new ones. The window check stands down
+  while that happens: the refresh at the end of the teardown would otherwise start the window
+  again on the old entities before the swap (found by Codex, where this fix met the next one).
 - **Switching the integration back on inside the window did nothing until the next night.** It
   now picks the window up again, as switching skip next off already did.
 - **A window starting in the hour the clocks skip in spring did not start at all.** Home

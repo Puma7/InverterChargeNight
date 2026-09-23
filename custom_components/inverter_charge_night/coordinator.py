@@ -3516,6 +3516,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # listeners here would write the window target back afterwards.
                 _LOGGER.debug("Window end in progress - skipping the window check")
                 return
+            if self._reconfiguring:
+                # The options are replacing entities and the old configuration is
+                # still in place: a window started now would write to entities
+                # nobody restores. The check after the swap starts it again.
+                _LOGGER.debug("Options update in progress - skipping the window check")
+                return
 
             if self.skip_next:
                 if self.is_active:

@@ -866,12 +866,19 @@ async def test_switching_the_integration_back_on_takes_the_inverter_back(mock_ha
     assert coordinator._hands_off_until == WINDOW_END
 
     coordinator.is_enabled = False
+    coordinator._start_periodic_verification = AsyncMock()
     switch = InverterChargeNightSwitch(coordinator, coordinator.entry)
     switch.async_write_ha_state = MagicMock()
-    await switch.async_turn_on()
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
+        return_value=INSIDE_WINDOW,
+    ):
+        await switch.async_turn_on()
 
     assert coordinator._hands_off_until is None
     assert _runtime_state(coordinator)["hands_off_until"] is None
+    # Taken back inside the window, the window runs again straight away
+    assert coordinator.is_active is True
 
 
 @pytest.mark.asyncio

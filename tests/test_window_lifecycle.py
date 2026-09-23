@@ -1883,3 +1883,52 @@ async def test_the_poll_leaves_a_skipped_window_alone(mock_hass, coordinator):
 
     assert coordinator.is_active is False
     mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_refresh_at_the_teardown_does_not_restart_the_window_on_the_old_entities(
+    mock_hass,
+):
+    """Codex on #8: fix 9 and fix 5 met in the middle.
+
+    Ending the window for an entity swap refreshes at its end, and Home
+    Assistant runs that first refresh at once. The poll then found itself
+    inside the window with none active and started it again - on the old
+    configuration, which the outer update had not swapped yet. The end of that
+    window would restore only the new entities.
+    """
+    _real_task_runner(mock_hass)
+    _persisting(mock_hass)
+    _register_inverter(mock_hass)
+    mock_hass.states.async_set("number.new_min_soc", "15")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.entry.runtime_data = coordinator
+    coordinator.update_time_triggers = MagicMock()
+    coordinator._setup_backup_mode_listener = MagicMock()
+    coordinator.review_discharge_block_risk = MagicMock()
+    try:
+        await _start_and_apply(mock_hass, coordinator)
+        # What DataUpdateCoordinator does with the first request: run it now
+        async def _refresh_now() -> None:
+            await coordinator._async_update_data()
+
+        coordinator.async_request_refresh = AsyncMock(side_effect=_refresh_now)
+
+        coordinator.entry.data = {**CONFIG, CONF_MIN_SOC_ENTITY: "number.new_min_soc"}
+        await async_update_entry(mock_hass, coordinator.entry)
+
+        old_writes = [
+            c.args[2]["value"]
+            for c in mock_hass.services.async_call.await_args_list
+            if c.args[1] == "set_value" and c.args[2]["entity_id"] == MIN_SOC
+        ]
+        assert old_writes[-1] == DEFAULT_MIN, "restarted on the old entities mid-teardown"
+        # The window runs again - on the new entity, whose own value is kept
+        assert coordinator.is_active is True
+        assert coordinator.original_min_soc == 15.0
+        assert any(
+            c.args[2].get("entity_id") == "number.new_min_soc"
+            for c in mock_hass.services.async_call.await_args_list
+        )
+    finally:
+        await coordinator._stop_periodic_verification()
