@@ -96,6 +96,8 @@ async def test_async_update_entry_updates_backup_listener(mock_hass, mock_config
     coordinator.update_time_triggers = MagicMock()
     coordinator.async_request_refresh = AsyncMock()
     coordinator.async_apply_operation_mode = AsyncMock()
+    coordinator.async_release_changed_entities = AsyncMock()
+    coordinator._reconfiguring = False
     coordinator._setup_backup_mode_listener = MagicMock()
 
     mock_config_entry.runtime_data = coordinator

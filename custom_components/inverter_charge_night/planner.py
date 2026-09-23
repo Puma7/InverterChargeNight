@@ -175,6 +175,15 @@ def evening_shortfall_kwh(p: PlanInput) -> float:
 
     Without a usable forecast the surplus counts for nothing: a surplus nobody
     can see is one nobody may plan on.
+
+    Reserve and surplus are both house side and are netted there; the caller
+    grosses the difference up for the way out of the battery. That credits the
+    surplus at ``1 / discharge_efficiency`` rather than at the grid charge
+    efficiency, which is right for a DC-coupled hybrid inverter: the forecast
+    is AC output, and the PV reaches the battery on the DC side without the AC
+    conversion the grid charge efficiency describes. ``evening_outlook`` uses
+    the charge efficiency instead - the conservative direction, for a check
+    that acts on its own.
     """
     covered_by_pv = surplus_kwh(p) if p.forecast_available else 0.0
     return max(0.0, evening_reserve_kwh(p) - covered_by_pv)

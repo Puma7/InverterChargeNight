@@ -64,6 +64,10 @@ class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):
         self.coordinator.clear_hands_off()
         self.coordinator._persist_state()
         self.async_write_ha_state()
+        # Inside the window it has to start again now: the update returns at
+        # once for a window that is not active, and the start trigger is a day
+        # away. Switching skip next off does the same.
+        await self.coordinator._check_current_window()
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:

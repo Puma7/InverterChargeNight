@@ -20,7 +20,7 @@
           "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
           "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
-          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
+          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set. The evening outlook and the curtailment outlook need it and stay empty without it.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)"
         }
@@ -144,7 +144,7 @@
           "bridge_reserve_kwh": "Safety reserve in kWh added to the bridge energy (default 0.5).",
           "charge_efficiency": "Grid-to-battery charge efficiency (0.5-1.0, default 0.9), used to plan the charge power for the remaining window time.",
           "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
-          "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom. With a price entity configured below, the entity supplies night and day and only the feed-in price is needed — these two then only serve as a fallback for when the entity does not cover the night.",
+          "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom. With a price entity configured below, the entity supplies night and day and only the feed-in price is needed — these two then only serve as a fallback for whenever the entity cannot price both the window and the morning after it — before the next day's prices are published, during an ad-hoc window, and always in the morning-discharge mode, which has no morning to bridge.",
           "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the night price; with a price entity, both may be left empty).",
           "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh. No price source publishes one, so this is always entered by hand — and with a price entity it is the only one of the three you need.",
           "price_entity": "Optional: a sensor whose attributes carry today's and tomorrow's hourly prices — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them. The integration does not need to know which one it is; it recognises the series by its shape and reports what it matched on the price sensor. Leave empty to keep using the three fixed prices above.",
@@ -174,7 +174,7 @@
           "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
           "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
-          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
+          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set. The evening outlook and the curtailment outlook need it and stay empty without it.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)"
         }
@@ -298,7 +298,7 @@
           "bridge_reserve_kwh": "Safety reserve in kWh added to the bridge energy (default 0.5).",
           "charge_efficiency": "Grid-to-battery charge efficiency (0.5-1.0, default 0.9), used to plan the charge power for the remaining window time.",
           "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
-          "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom. With a price entity configured below, the entity supplies night and day and only the feed-in price is needed — these two then only serve as a fallback for when the entity does not cover the night.",
+          "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom. With a price entity configured below, the entity supplies night and day and only the feed-in price is needed — these two then only serve as a fallback for whenever the entity cannot price both the window and the morning after it — before the next day's prices are published, during an ad-hoc window, and always in the morning-discharge mode, which has no morning to bridge.",
           "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the night price; with a price entity, both may be left empty).",
           "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh. No price source publishes one, so this is always entered by hand — and with a price entity it is the only one of the three you need.",
           "price_entity": "Optional: a sensor whose attributes carry today's and tomorrow's hourly prices — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them. The integration does not need to know which one it is; it recognises the series by its shape and reports what it matched on the price sensor. Leave empty to keep using the three fixed prices above.",
@@ -358,7 +358,7 @@
           "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
           "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured.",
-          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set.",
+          "pv_forecast_today_entity": "Optional: TODAY's PV forecast entity (e.g. sensor.solcast_forecast_today). Used automatically when the window runs after midnight. Falls back to the main forecast entity if not set. The evening outlook and the curtailment outlook need it and stay empty without it.",
           "battery_soc_entity": "Select the sensor that shows current battery state of charge (%)",
           "battery_capacity": "Total battery capacity in kWh (e.g., 35.8)"
         }
@@ -482,7 +482,7 @@
           "bridge_reserve_kwh": "Safety reserve in kWh added to the bridge energy (default 0.5).",
           "charge_efficiency": "Grid-to-battery charge efficiency (0.5-1.0, default 0.9), used to plan the charge power for the remaining window time.",
           "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
-          "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom. With a price entity configured below, the entity supplies night and day and only the feed-in price is needed — these two then only serve as a fallback for when the entity does not cover the night.",
+          "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom. With a price entity configured below, the entity supplies night and day and only the feed-in price is needed — these two then only serve as a fallback for whenever the entity cannot price both the window and the morning after it — before the next day's prices are published, during an ad-hoc window, and always in the morning-discharge mode, which has no morning to bridge.",
           "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the night price; with a price entity, both may be left empty).",
           "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh. No price source publishes one, so this is always entered by hand — and with a price entity it is the only one of the three you need.",
           "price_entity": "Optional: a sensor whose attributes carry today's and tomorrow's hourly prices — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them. The integration does not need to know which one it is; it recognises the series by its shape and reports what it matched on the price sensor. Leave empty to keep using the three fixed prices above.",
@@ -620,7 +620,7 @@
   },
   "exceptions": {
     "adhoc_refused": {
-      "message": "The inverter could not be driven right now. The configured window may be running, backup mode may be active, or the battery level cannot be read - the log says which."
+      "message": "The inverter could not be driven right now. The configured window may be running, the morning discharge mode may be selected, backup mode may be active, or the battery level cannot be read - the log says which."
     },
     "entity_not_available": {
       "message": "Required entity {entity_id} is not yet available"

@@ -665,7 +665,9 @@ async def test_window_end_clears_plan(mock_hass, bridge):
     assert bridge.last_plan is None
     assert bridge.planned_charge_power_w is None
     assert bridge._pv_crossover is None
-    data = await bridge._async_update_data()
+    # After the end: inside the window the poll would start it again
+    with patch(NOW, return_value=WINDOW_END + timedelta(minutes=1)):
+        data = await bridge._async_update_data()
     assert "plan_reason" not in data
 
 
@@ -915,16 +917,20 @@ async def test_house_load_profile_falls_back_to_average(mock_hass, caplog, recor
 
 
 def test_prices_require_all_three(bridge):
-    assert bridge._prices_ct() is None
+    # No price entity: the fixed fields decide, all three or nothing.
+    def fixed():
+        return bridge._conflict_prices(None, None, WINDOW_END, WINDOW_END, PV_CROSSOVER)
+
+    assert fixed() == (None, None)
     bridge.config = {**BRIDGE_CONFIG, CONF_NIGHT_PRICE_CT: 14.0, CONF_DAY_PRICE_CT: 30.0}
-    assert bridge._prices_ct() is None
+    assert fixed() == (None, None)
     bridge.config = {
         **BRIDGE_CONFIG,
         CONF_NIGHT_PRICE_CT: 14.0,
         CONF_DAY_PRICE_CT: 30.0,
         CONF_FEED_IN_PRICE_CT: 8.0,
     }
-    assert bridge._prices_ct() == (14.0, 30.0, 8.0)
+    assert fixed() == ((14.0, 30.0, 8.0), "static")
 
 
 # 13. Discharge block ------------------------------------------------------------
@@ -1735,3 +1741,194 @@ async def test_mode_switch_blocks_verification_during_the_reset(mock_hass):
         c.args[:2] == ("number", "set_value") and c.args[2]["value"] == 65.0
         for c in mock_hass.services.async_call.await_args_list
     )
+
+
+@pytest.mark.asyncio
+async def test_options_entity_change_restores_the_entities_the_window_wrote_to(mock_hass):
+    """Whole-repo review, finding 9: a new entity in the options, mid-window.
+
+    The window writes the night target to the min SOC entity and switches grid
+    charging on. Swapping either entity in the options dialog left the window
+    running on the new configuration, so its end restored the new entities -
+    and the old ones kept the night's floor and grid charging for good.
+    """
+    _real_task_runner(mock_hass)
+    _persisting(mock_hass)
+    _register_inverter(mock_hass)
+    new_min_soc, new_grid = "number.new_min_soc", "switch.new_grid"
+    mock_hass.states.async_set(new_min_soc, "15")
+    mock_hass.states.async_set(new_grid, "off")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.entry.runtime_data = coordinator
+    coordinator.update_time_triggers = MagicMock()
+    coordinator._setup_backup_mode_listener = MagicMock()
+    coordinator.review_discharge_block_risk = MagicMock()
+    try:
+        await _start_and_apply(mock_hass, coordinator)
+        assert coordinator.is_active is True
+        mock_hass.services.async_call.reset_mock()
+
+        coordinator.entry.data = {
+            **CONFIG,
+            CONF_MIN_SOC_ENTITY: new_min_soc,
+            CONF_GRID_CHARGE_SWITCH: new_grid,
+        }
+        await async_update_entry(mock_hass, coordinator.entry)
+
+        # The old entities are given back before the new ones take over
+        assert mock_hass.services.async_call.await_args_list[:2] == [
+            call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
+            call("switch", "turn_off", {"entity_id": GRID}),
+        ]
+        assert coordinator.original_min_soc is None
+    finally:
+        await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_options_teardown_is_not_overtaken_by_its_own_persist(mock_hass):
+    """Persisting during the teardown re-enters the update listener.
+
+    That run must not swap the new configuration in while the reset is still
+    addressing the entities the window wrote to.
+    """
+    _register_inverter(mock_hass, grid="on")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.entry.runtime_data = coordinator
+    coordinator.update_time_triggers = MagicMock()
+    coordinator._setup_backup_mode_listener = MagicMock()
+    coordinator.review_discharge_block_risk = MagicMock()
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.is_active = True
+    coordinator.original_min_soc = DEFAULT_MIN
+    seen: list[str | None] = []
+    real_reset = coordinator._reset_settings
+
+    async def _reset_and_re_enter() -> bool:
+        # what _persist_state triggers in production: the update listener runs
+        await async_update_entry(mock_hass, coordinator.entry)
+        seen.append(coordinator.config.get(CONF_MIN_SOC_ENTITY))
+        return await real_reset()
+
+    coordinator._reset_settings = _reset_and_re_enter
+    coordinator.entry.data = {**CONFIG, CONF_MIN_SOC_ENTITY: "number.new_min_soc"}
+    await async_update_entry(mock_hass, coordinator.entry)
+
+    assert seen == [MIN_SOC], "the reset ran on the new configuration"
+    assert call(
+        "number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}
+    ) in mock_hass.services.async_call.await_args_list
+    assert coordinator.config[CONF_MIN_SOC_ENTITY] == "number.new_min_soc"
+
+
+@pytest.mark.asyncio
+async def test_switching_the_integration_back_on_resumes_the_running_window(
+    mock_hass, coordinator
+):
+    """Whole-repo review, finding 4.
+
+    Switched off and on again inside the window, the integration only asked
+    for a refresh - and the update returns at once for a window that is not
+    active. Nothing started it again: the night went uncharged until the next
+    start trigger, a day later. Switching skip next off already re-checks the
+    window; switching the integration on has to do the same.
+    """
+    from custom_components.inverter_charge_night.switch import InverterChargeNightSwitch
+
+    await _start_and_apply(mock_hass, coordinator)
+    switch = InverterChargeNightSwitch(coordinator, coordinator.entry)
+    switch.async_write_ha_state = MagicMock()
+
+    await switch.async_turn_off()
+    assert coordinator.is_active is False
+
+    await switch.async_turn_on()
+
+    assert coordinator.is_enabled is True
+    assert coordinator.is_active is True, "the window has to be picked up again"
+    assert coordinator.initial_calculated_soc == EXPECTED_TARGET
+
+
+@pytest.mark.asyncio
+async def test_a_missed_window_start_is_caught_by_the_polling_update(mock_hass, coordinator):
+    """Whole-repo review, finding 5.
+
+    A start time in the hour the clocks skip in spring never fires that day -
+    Home Assistant moves the pattern to the next day. The end had a safety net
+    in the polling update; the start had none, so the night went uncharged.
+    """
+    assert coordinator.is_active is False
+
+    await coordinator._async_update_data()
+
+    assert coordinator.is_active is True, "the poll has to start the window it finds itself in"
+    assert coordinator.initial_calculated_soc == EXPECTED_TARGET
+
+
+@pytest.mark.asyncio
+async def test_the_poll_does_not_restart_a_window_in_its_end_minute(mock_hass, coordinator):
+    """The end trigger has just ended it; the clock check is inclusive at the end."""
+    with patch(NOW, return_value=datetime(2026, 1, 15, 5, 59, 30)):
+        await coordinator._async_update_data()
+
+    assert coordinator.is_active is False
+    mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_poll_leaves_a_skipped_window_alone(mock_hass, coordinator):
+    coordinator.skip_next = True
+
+    await coordinator._async_update_data()
+
+    assert coordinator.is_active is False
+    mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_refresh_at_the_teardown_does_not_restart_the_window_on_the_old_entities(
+    mock_hass,
+):
+    """Codex on #8: fix 9 and fix 5 met in the middle.
+
+    Ending the window for an entity swap refreshes at its end, and Home
+    Assistant runs that first refresh at once. The poll then found itself
+    inside the window with none active and started it again - on the old
+    configuration, which the outer update had not swapped yet. The end of that
+    window would restore only the new entities.
+    """
+    _real_task_runner(mock_hass)
+    _persisting(mock_hass)
+    _register_inverter(mock_hass)
+    mock_hass.states.async_set("number.new_min_soc", "15")
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.entry.runtime_data = coordinator
+    coordinator.update_time_triggers = MagicMock()
+    coordinator._setup_backup_mode_listener = MagicMock()
+    coordinator.review_discharge_block_risk = MagicMock()
+    try:
+        await _start_and_apply(mock_hass, coordinator)
+        # What DataUpdateCoordinator does with the first request: run it now
+        async def _refresh_now() -> None:
+            await coordinator._async_update_data()
+
+        coordinator.async_request_refresh = AsyncMock(side_effect=_refresh_now)
+
+        coordinator.entry.data = {**CONFIG, CONF_MIN_SOC_ENTITY: "number.new_min_soc"}
+        await async_update_entry(mock_hass, coordinator.entry)
+
+        old_writes = [
+            c.args[2]["value"]
+            for c in mock_hass.services.async_call.await_args_list
+            if c.args[1] == "set_value" and c.args[2]["entity_id"] == MIN_SOC
+        ]
+        assert old_writes[-1] == DEFAULT_MIN, "restarted on the old entities mid-teardown"
+        # The window runs again - on the new entity, whose own value is kept
+        assert coordinator.is_active is True
+        assert coordinator.original_min_soc == 15.0
+        assert any(
+            c.args[2].get("entity_id") == "number.new_min_soc"
+            for c in mock_hass.services.async_call.await_args_list
+        )
+    finally:
+        await coordinator._stop_periodic_verification()

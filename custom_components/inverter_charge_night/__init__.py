@@ -249,6 +249,13 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
         _LOGGER.error("Coordinator not found for entry %s", entry.entry_id)
         return
 
+    if coordinator._reconfiguring:
+        # Persisting state during the teardown below updates the entry and
+        # lands here again. That run would swap the configuration in while the
+        # reset is still addressing the old entities; the outer run swaps it
+        # once the teardown is done.
+        return
+
     if coordinator.config == entry.data:
         # Only entry.options changed: the coordinator persists its runtime state
         # there (see _persist_state), which must not re-register triggers or
@@ -270,9 +277,16 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     # would leave force discharge on while grid charge is switched back on. The
     # select entity goes through the same method. Done before the config is
     # swapped so the reset still addresses the entities it wrote to.
-    await coordinator.async_apply_operation_mode(
-        entry.data.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE)
-    )
+    coordinator._reconfiguring = True
+    try:
+        await coordinator.async_apply_operation_mode(
+            entry.data.get(CONF_OPERATION_MODE, DEFAULT_OPERATION_MODE)
+        )
+        # Same reason for a window whose entities are being replaced: its end
+        # has to reach the entities it wrote to.
+        await coordinator.async_release_changed_entities(entry.data)
+    finally:
+        coordinator._reconfiguring = False
 
     # Update coordinator config reference
     coordinator.config = entry.data

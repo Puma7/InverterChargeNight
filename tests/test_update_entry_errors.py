@@ -20,6 +20,8 @@ async def test_async_update_entry_update_time_triggers_error(mock_hass, mock_con
     coordinator.update_time_triggers.side_effect = Exception("boom")
     coordinator.async_request_refresh = AsyncMock()
     coordinator.async_apply_operation_mode = AsyncMock()
+    coordinator.async_release_changed_entities = AsyncMock()
+    coordinator._reconfiguring = False
     mock_config_entry.runtime_data = coordinator
 
     await async_update_entry(mock_hass, mock_config_entry)
@@ -34,6 +36,8 @@ async def test_async_update_entry_rearms_backup_mode_listener(mock_hass, mock_co
     coordinator.config = {}
     coordinator.async_request_refresh = AsyncMock()
     coordinator.async_apply_operation_mode = AsyncMock()
+    coordinator.async_release_changed_entities = AsyncMock()
+    coordinator._reconfiguring = False
     mock_config_entry.runtime_data = coordinator
 
     await async_update_entry(mock_hass, mock_config_entry)
@@ -50,6 +54,8 @@ async def test_async_update_entry_backup_listener_error(mock_hass, mock_config_e
     coordinator._setup_backup_mode_listener.side_effect = Exception("boom")
     coordinator.async_request_refresh = AsyncMock()
     coordinator.async_apply_operation_mode = AsyncMock()
+    coordinator.async_release_changed_entities = AsyncMock()
+    coordinator._reconfiguring = False
     mock_config_entry.runtime_data = coordinator
 
     await async_update_entry(mock_hass, mock_config_entry)

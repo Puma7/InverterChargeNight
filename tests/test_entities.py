@@ -237,6 +237,7 @@ async def test_inverter_charge_night_switch_on_off():
     coordinator.is_enabled = False
     coordinator.async_disable = AsyncMock()
     coordinator.async_request_refresh = AsyncMock()
+    coordinator._check_current_window = AsyncMock()
     entry = _make_entry()
     switch = InverterChargeNightSwitch(coordinator, entry)
     switch.hass = MagicMock()
@@ -244,6 +245,7 @@ async def test_inverter_charge_night_switch_on_off():
 
     await switch.async_turn_on()
     assert coordinator.is_enabled is True
+    coordinator._check_current_window.assert_awaited_once()
     coordinator.async_request_refresh.assert_awaited()
 
     # The teardown itself lives in the coordinator, so the switch and the

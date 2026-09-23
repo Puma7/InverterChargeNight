@@ -4,6 +4,7 @@ Unlike ``tests/test_setup.py`` the coordinator is not patched. The strict
 ``mock_hass`` fixture provides ``bus``/``loop`` mocks so Home Assistant's own
 ``async_track_time_change`` / ``async_track_state_change_event`` run for real.
 """
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,6 +23,9 @@ from custom_components.inverter_charge_night.const import (
     CONF_GRID_CHARGE_SWITCH,
     CONF_MIN_SOC_ENTITY,
 )
+
+
+OUTSIDE_WINDOW = datetime(2026, 1, 15, 12, 0)
 
 
 def _prepare_entry(mock_config_entry, extra: dict | None = None):
@@ -45,7 +49,13 @@ async def _setup(mock_hass, entry) -> InverterChargeNightCoordinator:
     try:
         with patch("custom_components.inverter_charge_night.ir.async_delete_issue"
     ), patch(
-        "custom_components.inverter_charge_night.ir.async_get"):
+        "custom_components.inverter_charge_night.ir.async_get"
+    ), patch(
+        # Outside the default 00:00-05:59 window: inside it the first refresh
+        # starts a window whose start trigger it finds missed.
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
+        return_value=OUTSIDE_WINDOW,
+    ):
             assert await async_setup_entry(mock_hass, entry) is True
     finally:
         current_entry.reset(token)

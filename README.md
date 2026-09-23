@@ -186,7 +186,9 @@ To find entities:
    - **PV Forecast Entity (tomorrow)**: Forecast for the next day, used when the window runs
      before midnight
    - **PV Forecast Today Entity** (optional): Today's forecast, used when the window runs after
-     midnight; falls back to the entity above when unset
+     midnight; falls back to the entity above when unset. The evening outlook (and with it the
+     evening rescue) and the curtailment outlook need it: they never read tomorrow's forecast as
+     today's, and stay empty without it
    - **Battery SOC Sensor**: The sensor showing the current SOC in percent
    - **Battery Capacity**: Total capacity in kWh (e.g., `35.8`)
 
@@ -248,8 +250,10 @@ To find entities:
      Bridge planner uses them to decide a conflict between bridging and PV headroom. With a
      **price entity** configured, the entity supplies night and day, and the **feed-in price on its
      own** is a complete setup -- no price source publishes a feed-in tariff, so that one is always
-     entered by hand. Night and day then only serve as a fallback for when the entity does not
-     cover the night.
+     entered by hand. Night and day then only serve as a fallback for whenever the entity cannot
+     price both the window and the morning after it: before the next day's prices are published,
+     during an ad-hoc window, and always in the morning-discharge mode, which has no morning to
+     bridge.
 
 3. **Submit the configuration**
    - Review all settings
@@ -344,8 +348,14 @@ Load** is used for every hour.
   between an entity's night and a hand-entered day would partly be a difference between two ways
   of writing a price down. When the entity does not cover both stretches, both come from the
   fixed fields. The feed-in price is always the fixed field, because no price source publishes
-  one. `sensor.…_price_signal` shows which source the last plan used in
-  `conflict_prices_source`.
+  one. `sensor.…_price_signal` shows in `conflict_prices_source` where the prices behind the last
+  conflict decision came from -- `entity` or `static` -- and nothing when the last plan had no
+  conflict to decide.
+
+  The day price is the mean over the whole bridge. Strictly, the energy left uncovered is the
+  *end* of the bridge, the last hours before the crossover, and those are often the dearest of
+  the morning; pricing just that tail needs the size of the conflict, which only the planner
+  knows. It is a known approximation, not a guarantee.
 
 The chosen bound and its inputs are exposed as attributes of
 `sensor.inverter_charge_night_calculated_soc` (`plan_reason`, `bridge_kwh`, `surplus_kwh`,
@@ -409,7 +419,9 @@ The night plan buys for the high-price period in advance. The rescue is what hap
 plan turns out to have been too optimistic — snow on the panels, say, with the snow nights not
 set. By mid-afternoon it is already decidable, and there is still time.
 
-`sensor.…_evening_outlook` carries the shortfall in kWh, normally 0. When it is not:
+`sensor.…_evening_outlook` carries the shortfall in kWh, normally 0. It needs a forecast entity
+for **today**: in the afternoon the tomorrow entity is tomorrow, and the rescue would act on the
+wrong day's sun. Without one the sensor stays empty and nothing is rescued. When it is not 0:
 
 1. **The discharge is blocked** — automatically. The house then runs from the sun, and from the
    grid at the day tariff when the sun is not enough, rather than from a battery that is needed
@@ -867,7 +879,9 @@ action:
 Charges the battery from the grid to a level, for a while (`duration`, two hours by default).
 Everything the night window does applies — the house connection limit, the settings captured
 beforehand and restored when it ends. Refused while the configured window is running: that one
-has the tariff behind it.
+has the tariff behind it. Also refused in the `Morning Discharge` mode, together with
+`block_discharge` and the evening rescue: there the window machinery drives the battery down, and
+a charge or a hold would do nothing while reporting success.
 
 ```yaml
 alias: Top the battery up before the expensive block

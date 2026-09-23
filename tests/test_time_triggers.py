@@ -196,6 +196,28 @@ def test_setup_and_remove_time_triggers(mock_hass):
     trigger.assert_called()
 
 
+def test_the_start_trigger_goes_through_the_scheduled_entry_point(mock_hass):
+    """The start trigger has to end a running ad-hoc window first (finding 2).
+
+    _on_scheduled_window_start does that; _on_window_start is also what opens
+    the ad-hoc window itself, so it cannot.
+    """
+    coordinator = _make_coordinator(
+        mock_hass, {CONF_START_TIME: "00:00", CONF_END_TIME: "05:59"}
+    )
+    with patch(
+        "custom_components.inverter_charge_night.coordinator.async_track_time_change",
+        return_value=MagicMock(),
+    ) as track:
+        coordinator.setup_time_triggers()
+
+    handlers = {call.args[1] for call in track.call_args_list}
+    assert handlers == {
+        coordinator._on_scheduled_window_start,
+        coordinator._on_scheduled_window_end,
+    }
+
+
 def test_update_time_triggers_updates_listener(mock_hass):
     coordinator = _make_coordinator(
         mock_hass,

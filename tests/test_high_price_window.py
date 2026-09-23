@@ -28,6 +28,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_OPERATION_MODE,
     CONF_PLANNER_MODE,
     CONF_PV_FORECAST_ENTITY,
+    CONF_PV_FORECAST_TODAY_ENTITY,
     CONF_START_TIME,
     CONF_USER_MAX_SOC,
     CONF_USER_MIN_SOC,
@@ -114,7 +115,7 @@ async def test_the_plan_input_carries_the_period_and_the_margin(mock_hass):
     )
 
     with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 15, 2, 0)):
-        plan_input, _ = await coordinator._build_plan_input(5.0, True)
+        plan_input, _, _ = await coordinator._build_plan_input(5.0, True)
 
     assert plan_input.high_price_window == (
         datetime(2026, 1, 15, 18, 0),
@@ -318,9 +319,30 @@ def _outlook_coordinator(mock_hass, soc="50", forecast="20"):
             "next_setting": "2026-06-01T21:00:00+00:00",
         },
     )
-    coordinator = _make_coordinator(mock_hass)
+    # Today's forecast has its own entity; the outlook never reads tomorrow's
+    coordinator = _make_coordinator(mock_hass, {CONF_PV_FORECAST_TODAY_ENTITY: "sensor.pv"})
     coordinator._house_load_profile = AsyncMock(return_value=[0.5] * 24)
     return coordinator
+
+
+@pytest.mark.asyncio
+async def test_the_outlook_never_reads_tomorrows_forecast_as_today(mock_hass):
+    """Whole-repo review, finding 6.
+
+    Without a today entity the outlook fell back to the tomorrow entity. In the
+    afternoon Solcast's tomorrow is tomorrow: a sunny forecast for tomorrow hid
+    today's shortfall, a dull one invented one - and stage one blocks the
+    discharge on it. The curtailment outlook refuses the fallback for exactly
+    this reason; better no answer than an answer about the wrong day.
+    """
+    coordinator = _outlook_coordinator(mock_hass, soc="12")
+    coordinator.config = {
+        k: v for k, v in coordinator.config.items() if k != CONF_PV_FORECAST_TODAY_ENTITY
+    }
+    mock_hass.states.async_set("sensor.pv", "60", {"unit_of_measurement": "kWh"})
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 6, 1, 14, 0)):
+        assert await coordinator.async_evening_outlook() is None
 
 
 @pytest.mark.asyncio

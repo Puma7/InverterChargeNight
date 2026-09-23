@@ -5,6 +5,91 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.1] - 2026-09-22
+
+A review of 3.8.0. Nine findings; six held up and are fixed, one only partly, one is a known
+approximation now documented instead of changed, one is a cleanup folded into the fixes. Every fix
+fails its own test when reverted.
+
+### Fixed
+
+- **The options and reconfigure flows validated values they were about to discard.** A field the
+  user cleared was still checked at its old value, because validation ran on the stored entry
+  merged with the form and the cleared field was only removed on saving. Clearing the price entity
+  while keeping the feed-in price passed the new rule on the entity being removed. Older than this
+  release, too: clearing the night price passed "all three prices or none" on the old night price
+  and saved two of the three. Validation now sees exactly what is saved.
+- **`conflict_prices_source` reported whichever calculation ran last.** Four paths build the
+  planner's input — the real plan, the curtailment outlook on every poll, the evening-reserve floor
+  and the read-only `plan_target_soc` action — and all of them set it. The source is now returned
+  rather than stored, and only the real plan records it. The read-only action no longer changes
+  anything.
+- **It also named a source when no conflict had been decided.** It now describes the prices behind
+  the last conflict decision, and is empty when there was none.
+- **During an ad-hoc window the price pair described two different windows.** The night price is
+  always the configured window's, but the bridge then starts at the ad-hoc deadline. The fixed
+  prices decide in that case — also when the ad-hoc deadline happens to equal the configured end,
+  which the first version of this fix let through (found by Codex).
+- **The help texts named one reason for falling back to the fixed prices; there are three.** Before
+  the next day's prices are out, during an ad-hoc window, and always in the morning-discharge mode.
+
+### Changed
+
+- The window's mean price is computed once per plan and shared by the conflict branch and the
+  evening-reserve gate, so the two can no longer disagree.
+
+### Known approximation, documented rather than changed
+
+- The day price is the mean over the whole bridge, while the energy left uncovered is the end of
+  the bridge. Pricing that tail needs the size of the conflict, which only the planner knows.
+  Written up in `plans/012`.
+
+### Fixed — a review of the whole repository
+
+The review above only looked at the last merge. A second one read the whole package. Ten
+findings: eight held up and are fixed, one only where it is safe to fix, one did not hold up.
+Every fix fails its own test when reverted.
+
+- **The evening rescue neither held nor bought.** Stage one's hold is reached the moment it
+  starts, so the min SOC that does the holding was not written until the periodic verification
+  came round, up to an hour later. Stage two raised the target but left `target_reached` set, so
+  every later poll skipped control and the grid switch never went on. The 3.7.1 fix for this
+  stage only moved the target. The hold is now written at once where the min SOC is the lever (a
+  block over the min SOC, or a hold with the block switched off).
+- **The configured window inherited a running ad-hoc window.** The start trigger bypassed the
+  check that lets the configured window win, so the night took over the ad-hoc target, its
+  deadline and its grid-charge setting, and was ended at that deadline. The configured window now
+  takes over.
+- **Replacing an inverter entity in the options mid-window left the old one at the night's
+  settings.** The window ran on with the new entities and restored those at its end; the old min
+  SOC kept the night's floor and the old grid switch stayed on. Such a change now ends the window
+  on the entities it wrote to, and it starts again on the new ones. The window check stands down
+  while that happens: the refresh at the end of the teardown would otherwise start the window
+  again on the old entities before the swap (found by Codex, where this fix met the next one).
+- **Switching the integration back on inside the window did nothing until the next night.** It
+  now picks the window up again, as switching skip next off already did.
+- **A window starting in the hour the clocks skip in spring did not start at all.** Home
+  Assistant moves such a trigger to the next day. The polling update now starts a window whose
+  start trigger was missed, as it already ended one whose end trigger was.
+- **An efficiency test whose setpoint did not reach the inverter was recorded anyway**, under a
+  power it was never taken at. It is not started now.
+
+### Changed
+
+- **The evening outlook needs a forecast entity for today.** Without one it read the tomorrow
+  entity, which in the afternoon is tomorrow, and the rescue acted on the wrong day's sun. It now
+  stays empty instead, like the curtailment outlook.
+- **`charge_to`, `block_discharge` and the evening rescue are refused in the morning-discharge
+  mode.** The window machinery drives the battery down there: a charge counted as reached at
+  once, wrote nothing and reported success.
+
+### Did not hold up
+
+- The evening shortfall credits the day's surplus at `1 / discharge efficiency` instead of the
+  charge efficiency. That is right for a DC-coupled hybrid inverter, where the PV reaches the
+  battery without the AC conversion the charge efficiency describes. The reasoning is now next to
+  the formula.
+
 ## [3.8.0] - 2026-09-22
 
 ### Added

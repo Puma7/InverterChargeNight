@@ -512,3 +512,164 @@ async def test_a_restart_during_a_rescue_picks_the_window_back_up(mock_hass):
     assert restarted.calculated_soc == 62.0, "with the target it was opened with"
     assert restarted._adhoc_until == ZONE_START
     restarted._reset_settings.assert_not_awaited()
+
+
+async def _poll(coordinator, now):
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=now
+    ):
+        return await coordinator._async_update_data()
+
+
+@pytest.mark.asyncio
+async def test_stage_two_actually_buys_after_stage_one_held(mock_hass):
+    """Whole-repo review, finding 1: moving the target is not the same as charging.
+
+    Stage 1 holds at the level it finds, so its first poll sees the target as
+    reached and sets target_reached. Stage 2 then raises the target. The 3.7.1
+    fix made the target move - and its test checked exactly that, and nothing
+    after it. But target_reached stayed True, the poll only ever sets it and
+    never clears it, and control is skipped while it is True: the grid switch
+    was never turned on. _replan_in_window clears it for the same reason; the
+    extend path forgot to.
+    """
+    coordinator = _make_coordinator(mock_hass)
+    # Stage 1: hold at the current 40 %.
+    assert await _open(coordinator, target=40.0, grid=False) is True
+    await _poll(coordinator, AFTERNOON + timedelta(minutes=5))
+    assert coordinator.target_reached is True, "holding at the level it finds is reached"
+
+    # Stage 2: the evening needs 62 %, buying allowed.
+    late = AFTERNOON + timedelta(hours=2)
+    assert await _open(coordinator, target=62.0, grid=True, now=late) is True
+    mock_hass.services.async_call.reset_mock()
+    await _poll(coordinator, late + timedelta(minutes=1))
+
+    assert coordinator.target_reached is False, "40 % is not 62 %"
+    assert any(
+        c.args[:2] == ("switch", "turn_on") and c.args[2].get("entity_id") == GRID
+        for c in mock_hass.services.async_call.await_args_list
+    ), "stage 2 exists to buy - the grid switch has to go on"
+
+
+@pytest.mark.parametrize(
+    "block_mode",
+    ["auto", "off"],
+    ids=["block_over_min_soc", "block_switched_off"],
+)
+@pytest.mark.asyncio
+async def test_holding_writes_the_floor_straight_away(mock_hass, block_mode):
+    """Whole-repo review, finding 10: a hold has to hold from the first poll.
+
+    Holding means raising the inverter's min SOC to the level the battery is
+    at, so the house stops drawing it down. The claim was that this floor only
+    reached the inverter after a full update interval - up to an hour of the
+    battery the rescue exists to protect being emptied into the house.
+    """
+    from custom_components.inverter_charge_night.const import CONF_DISCHARGE_BLOCK_MODE
+
+    # With the block switched off a configured window writes nothing at its
+    # start, deliberately - but an ad-hoc hold has no other job than holding,
+    # and the min SOC is then the only lever it has.
+    coordinator = _make_coordinator(mock_hass, {CONF_DISCHARGE_BLOCK_MODE: block_mode})
+    mock_hass.states.async_set(BATTERY, "55", {"unit_of_measurement": "%"})
+    mock_hass.services.async_call.reset_mock()
+
+    assert await _open(coordinator, target=55.0, grid=False) is True
+    await _poll(coordinator, AFTERNOON + timedelta(minutes=1))
+
+    floor_writes = [
+        c.args[2]["value"]
+        for c in mock_hass.services.async_call.await_args_list
+        if c.args[:2] == ("number", "set_value") and c.args[2].get("entity_id") == MIN_SOC
+    ]
+    assert floor_writes, "nothing was written to the inverter's min SOC at all"
+    assert floor_writes[-1] == pytest.approx(55.0), "the floor has to sit at the held level"
+
+
+@pytest.mark.asyncio
+async def test_the_configured_start_trigger_takes_over_from_an_adhoc_window(mock_hass):
+    """Whole-repo review, finding 2: the configured window wins, by its trigger too.
+
+    Plan 013 settled it: when the configured window begins during an ad-hoc one,
+    the configured one wins - it has the tariff behind it. _check_current_window
+    does that. The start *trigger* calls _on_window_start directly, which has no
+    such check, so the configured window inherited the ad-hoc window's target,
+    its deadline and its grid-charge setting - and was then ended at the ad-hoc
+    deadline, with nothing to start it again that night.
+    """
+    coordinator = _make_coordinator(mock_hass)
+    coordinator._reset_absolute_charge_power = AsyncMock()
+    # charge_to at 22:00 for two hours: runs past the 23:00 configured start.
+    evening = datetime(2026, 6, 1, 22, 0)
+    assert await _open(coordinator, target=60.0, until=evening + timedelta(hours=2), grid=True, now=evening)
+
+    start = datetime(2026, 6, 1, 23, 0)
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=start
+    ):
+        await coordinator._on_scheduled_window_start(start)
+
+    assert coordinator.is_active is True
+    assert coordinator._adhoc_until is None, "the ad-hoc window has to hand over"
+    assert coordinator._adhoc_target_soc is None
+    assert coordinator._window_end_datetime(start) == datetime(2026, 6, 2, 5, 0), (
+        "the configured window ends at its own time, not at the ad-hoc deadline"
+    )
+    assert coordinator.initial_calculated_soc is not None
+    assert coordinator.initial_calculated_soc != 60.0, "the night plans its own target"
+
+
+@pytest.mark.asyncio
+async def test_the_morning_discharge_mode_refuses_an_adhoc_window(mock_hass):
+    """Whole-repo review, finding 3.
+
+    Every ad-hoc window charges or holds; in the morning discharge mode the
+    window machinery drives the battery down. charge_to to 80 % at 40 % counted
+    as reached at once, wrote nothing - and reported success.
+    """
+    from custom_components.inverter_charge_night.const import (
+        CONF_FORCE_DISCHARGE_SWITCH,
+        CONF_OPERATION_MODE,
+        MODE_MORNING_DISCHARGE,
+    )
+
+    mock_hass.states.async_set("switch.force", "off")
+    coordinator = _make_coordinator(
+        mock_hass,
+        {CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE, CONF_FORCE_DISCHARGE_SWITCH: "switch.force"},
+    )
+
+    assert await _open(coordinator, target=80.0, grid=True) is False
+    assert coordinator.is_active is False
+    assert coordinator._adhoc_until is None
+    mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_morning_discharge_mode_does_not_try_to_rescue(mock_hass, caplog):
+    """The window would be refused on every poll; the rescue does not ask."""
+    from custom_components.inverter_charge_night.const import (
+        CONF_OPERATION_MODE,
+        MODE_MORNING_DISCHARGE,
+    )
+    from custom_components.inverter_charge_night.planner import EveningOutlook
+
+    coordinator = _make_coordinator(mock_hass, {CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE})
+    coordinator.last_evening_outlook = EveningOutlook(
+        zone_start=ZONE_START,
+        zone_end=ZONE_START + timedelta(hours=3),
+        required_soc=60.0,
+        projected_soc=20.0,
+        missing_kwh=4.0,
+        pv_to_come_kwh=0.0,
+        load_to_come_kwh=2.0,
+        forecast_available=True,
+    )
+    coordinator.async_open_adhoc_window = AsyncMock(return_value=False)
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=AFTERNOON):
+        await coordinator._maybe_rescue_the_evening()
+
+    coordinator.async_open_adhoc_window.assert_not_awaited()
+    assert coordinator._rescue_stage == 0

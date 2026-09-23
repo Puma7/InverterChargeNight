@@ -247,7 +247,7 @@ async def test_a_cheap_evening_reaches_the_plan(mock_hass):
             return_value=(NOW.replace(hour=7), NOW.replace(hour=19))
         )
         with patch(f"{COORDINATOR}.dt_util.now", return_value=NOW.replace(hour=2)):
-            plan_input, _ = await coordinator._build_plan_input(0.0, True)
+            plan_input, _, _ = await coordinator._build_plan_input(0.0, True)
         return plan_input
 
     dear = await _plan(dear_evening)
@@ -338,8 +338,8 @@ async def _plan_prices(coordinator, sunrise=SUNRISE_0700):
     coordinator._house_load_profile = AsyncMock(return_value=[0.5] * 24)
     coordinator._sun_times = MagicMock(return_value=(sunrise, sunrise + timedelta(hours=12)))
     with patch(f"{COORDINATOR}.dt_util.now", return_value=NOW):
-        plan_input, _ = await coordinator._build_plan_input(10.0, True)
-    return plan_input.prices_ct
+        plan_input, _, source = await coordinator._build_plan_input(10.0, True)
+    return plan_input.prices_ct, source
 
 
 @pytest.mark.asyncio
@@ -354,10 +354,10 @@ async def test_the_conflict_prices_come_from_the_entity_when_it_covers_both(mock
         mock_hass, extra=STATIC_PRICES, attributes={"raw_today": _priced(36)}
     )
 
-    prices = await _plan_prices(coordinator)
+    prices, source = await _plan_prices(coordinator)
 
     assert prices == pytest.approx((20.0, 38.0, 8.0))
-    assert coordinator._conflict_prices_source == "entity"
+    assert source == "entity"
 
 
 @pytest.mark.asyncio
@@ -372,10 +372,10 @@ async def test_night_and_day_come_from_one_source_or_neither(mock_hass):
         mock_hass, extra=STATIC_PRICES, attributes={"raw_today": _priced(30)}
     )
 
-    prices = await _plan_prices(coordinator)
+    prices, source = await _plan_prices(coordinator)
 
     assert prices == (14.0, 30.0, 8.0), "both fixed, not the entity's night and a fixed day"
-    assert coordinator._conflict_prices_source == "static"
+    assert source == "static"
 
 
 @pytest.mark.asyncio
@@ -391,10 +391,10 @@ async def test_an_empty_bridge_falls_back_to_the_fixed_prices(mock_hass):
     )
 
     # Sunrise 03:00, crossover 04:00 - before the 05:00 window end.
-    prices = await _plan_prices(coordinator, sunrise=TONIGHT + timedelta(hours=4))
+    prices, source = await _plan_prices(coordinator, sunrise=TONIGHT + timedelta(hours=4))
 
     assert prices == (14.0, 30.0, 8.0)
-    assert coordinator._conflict_prices_source == "static"
+    assert source == "static"
 
 
 @pytest.mark.asyncio
@@ -407,21 +407,142 @@ async def test_without_a_feed_in_price_there_is_no_triple_whatever_the_entity_sa
     extra = {k: v for k, v in STATIC_PRICES.items() if k != CONF_FEED_IN_PRICE_CT}
     coordinator = _make_coordinator(mock_hass, extra=extra, attributes={"raw_today": _priced(36)})
 
-    assert await _plan_prices(coordinator) is None
-    assert coordinator._conflict_prices_source is None
+    assert await _plan_prices(coordinator) == (None, None)
+
+
+# Prices chosen so the two sources decide the conflict *differently*. With the
+# fixed ones, bridging costs 25 - 5 = 20 and headroom 30 - 25 = 5, so headroom
+# wins. With the entity's 20 ct night and 38 ct bridge it is 15 against 18, so
+# the bridge wins. A verdict that flips with the source is the proof that the
+# entity's numbers actually reach the planner - checking the tuple alone would
+# not catch prices_ct being dropped on the way.
+FLIP_PRICES = {
+    CONF_NIGHT_PRICE_CT: 25.0,
+    CONF_DAY_PRICE_CT: 30.0,
+    CONF_FEED_IN_PRICE_CT: 5.0,
+    CONF_PV_CROSSOVER_DELAY_MIN: 60,
+}
+
+
+async def _real_plan(coordinator, forecast_kwh=60.0):
+    """The plan the window acts on, through _plan_target - not a projection."""
+    coordinator._house_load_profile = AsyncMock(return_value=[0.5] * 24)
+    coordinator._sun_times = MagicMock(
+        return_value=(SUNRISE_0700, SUNRISE_0700 + timedelta(hours=12))
+    )
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=NOW):
+        return await coordinator._plan_target(forecast_kwh, True)
+
+
+@pytest.mark.asyncio
+async def test_the_entity_prices_change_the_conflict_verdict(mock_hass):
+    """The same fixed prices; only whether the entity covers both stretches differs."""
+    covered = _make_coordinator(mock_hass, extra=FLIP_PRICES, attributes={"raw_today": _priced(36)})
+    plan = await _real_plan(covered)
+    assert plan.reason == "conflict_bridge_wins"
+    assert covered._conflict_prices_source == "entity"
+
+    # 30 hours: the bridge is not covered, so the fixed pair decides - and flips it.
+    uncovered = _make_coordinator(
+        mock_hass, extra=FLIP_PRICES, attributes={"raw_today": _priced(30)}
+    )
+    plan = await _real_plan(uncovered)
+    assert plan.reason == "conflict_headroom_wins"
+    assert uncovered._conflict_prices_source == "static"
 
 
 @pytest.mark.asyncio
 async def test_the_price_sensor_says_where_the_conflict_prices_came_from(mock_hass):
     coordinator = _make_coordinator(
-        mock_hass, extra=STATIC_PRICES, attributes={"raw_today": _priced(36)}
+        mock_hass, extra=FLIP_PRICES, attributes={"raw_today": _priced(36)}
     )
-    await _plan_prices(coordinator)
+    await _real_plan(coordinator)
 
     with patch(f"{COORDINATOR}.dt_util.now", return_value=NOW):
         snapshot = coordinator.price_snapshot()
 
     assert snapshot["conflict_prices_source"] == "entity"
+
+
+@pytest.mark.asyncio
+async def test_a_projection_does_not_overwrite_what_the_plan_decided_on(mock_hass):
+    """Review finding: every caller of _build_plan_input used to set the source.
+
+    The curtailment outlook runs on every poll and the plan_target_soc action is
+    read-only, yet whichever ran last decided what the sensor reported. Here the
+    entity stops covering the bridge after the plan - exactly what happens the
+    next afternoon before tomorrow's prices are out - and a projection must not
+    turn the plan's "entity" into its own "static".
+    """
+    coordinator = _make_coordinator(
+        mock_hass, extra=FLIP_PRICES, attributes={"raw_today": _priced(36)}
+    )
+    await _real_plan(coordinator)
+    assert coordinator._conflict_prices_source == "entity"
+
+    mock_hass.states.async_set(
+        PRICE, "0.30", {"unit_of_measurement": "EUR/kWh", "raw_today": _priced(30)}
+    )
+    # preview_plan reads the forecast from its entity rather than taking one, so
+    # the same 60 kWh the plan used has to be on it for the bounds to conflict.
+    mock_hass.states.async_set("sensor.pv", "60", {"unit_of_measurement": "kWh"})
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=NOW):
+        preview = await coordinator.preview_plan()
+
+    assert preview is not None
+    assert preview[0].reason == "conflict_headroom_wins", "the projection saw the new prices"
+    assert coordinator._conflict_prices_source == "entity", "and left the plan's source alone"
+
+
+@pytest.mark.asyncio
+async def test_no_conflict_means_no_conflict_price_source(mock_hass):
+    """A source names the prices behind a conflict decision; no conflict, no source."""
+    coordinator = _make_coordinator(
+        mock_hass, extra=FLIP_PRICES, attributes={"raw_today": _priced(36)}
+    )
+    plan = await _real_plan(coordinator, forecast_kwh=0.0)
+
+    assert plan.reason not in ("conflict_bridge_wins", "conflict_headroom_wins")
+    assert coordinator._conflict_prices_source is None
+
+
+@pytest.mark.asyncio
+async def test_an_ad_hoc_deadline_is_not_priced_against_the_configured_night(mock_hass):
+    """Review finding: the pair has to describe one window.
+
+    The night price is always the configured window's, but during an ad-hoc
+    window the bridge starts at the ad-hoc deadline. A day stretch from there,
+    set against another window's night, is not a pair - so the fixed fields
+    decide, even with an entity that would cover both.
+    """
+    coordinator = _make_coordinator(
+        mock_hass, extra=STATIC_PRICES, attributes={"raw_today": _priced(36)}
+    )
+    coordinator._adhoc_until = TONIGHT + timedelta(hours=2)  # 01:00, not the 05:00 end
+
+    prices, source = await _plan_prices(coordinator)
+
+    assert prices == (14.0, 30.0, 8.0)
+    assert source == "static"
+
+
+@pytest.mark.asyncio
+async def test_an_ad_hoc_window_ending_with_the_configured_one_is_still_not_a_pair(mock_hass):
+    """Codex on #8: detect the ad-hoc window, not unequal end times.
+
+    charge_to at 21:00 for eight hours ends at 05:00, exactly where the
+    configured window ends. The end times then agree, yet the window buying
+    is the ad-hoc one, whose hours the configured window's mean does not price.
+    """
+    coordinator = _make_coordinator(
+        mock_hass, extra=STATIC_PRICES, attributes={"raw_today": _priced(36)}
+    )
+    coordinator._adhoc_until = TONIGHT + timedelta(hours=6)  # 05:00, the configured end
+
+    prices, source = await _plan_prices(coordinator)
+
+    assert prices == (14.0, 30.0, 8.0)
+    assert source == "static"
 
 
 @pytest.mark.asyncio
@@ -439,5 +560,4 @@ async def test_an_uncovered_entity_with_no_fixed_prices_leaves_the_bridge_winnin
         attributes={"raw_today": _priced(30)},  # stops one hour into the bridge
     )
 
-    assert await _plan_prices(coordinator) is None
-    assert coordinator._conflict_prices_source is None
+    assert await _plan_prices(coordinator) == (None, None)
