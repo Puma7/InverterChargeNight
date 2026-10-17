@@ -251,7 +251,7 @@ def test_corrupt_configured_fuse_never_disables_the_connection_guard(rig, bad_fu
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("change", ["deadline", "disabled", "inactive", "ending", "reconfiguring", "target-reached"])
+@pytest.mark.parametrize("change", ["deadline", "disabled", "inactive", "ending", "reconfiguring", "unloading", "target-reached"])
 async def test_permission_revoked_during_min_soc_write_cannot_start_charge(rig, change):
     hass, coordinator, clock = rig
     coordinator.is_active = True
@@ -270,6 +270,8 @@ async def test_permission_revoked_during_min_soc_write_cannot_start_charge(rig, 
             coordinator._ending = True
         elif change == "reconfiguring":
             coordinator._reconfiguring = True
+        elif change == "unloading":
+            coordinator._unloading = True
         else:
             hass.states.async_set(BATTERY, "80")
 

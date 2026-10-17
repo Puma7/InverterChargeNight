@@ -5022,7 +5022,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _charge_permission_current(self) -> bool:
         """Check live lifecycle and the absolute deadline at the command sink."""
-        if not self.is_active or not self.is_enabled or self._ending or self._reconfiguring:
+        if (not self.is_active or not self.is_enabled or self._ending
+                or self._reconfiguring or self._unloading):
             return False
         now = dt_util.now()
         if self._adhoc_until is not None:

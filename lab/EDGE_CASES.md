@@ -17,7 +17,7 @@ ist kein zulässiger Kostenkompromiss.
 | Inselkontakt fehlt oder hat unbekannten Zustand | Teilweise als Netzbetrieb behandelt | Konfigurierte, unbestätigte Kontakte sperren die Regelung |
 | SoC fehlt, ist NaN/unendlich oder außerhalb 0–100 % | Ungültige Werte konnten bis in den Steuerpfad gelangen | Laufende Netzladung wird pausiert, kein neuer Start |
 | Grenzwert quittiert, aber ignoriert | Erfolgreicher Serviceaufruf konnte als wirksame Grenze gelten | Begrenzung wird vor Einschalten zurückgelesen; zu hoher Istwert löst einen unabhängigen Stopp aus |
-| Inselbetrieb, Fensterende, Deaktivierung oder Zielerreichung während eines Befehls | Früher geprüfte Freigabe konnte veralten | Erneute Prüfung direkt vor dem Einschalten und nach einer abgewarteten Begrenzung |
+| Inselbetrieb, Fensterende, Deaktivierung, Entladen der Integration oder Zielerreichung während eines Befehls | Früher geprüfte Freigabe konnte veralten | Erneute Prüfung direkt vor dem Einschalten und nach einer abgewarteten Begrenzung |
 | Rücksprung nach abgeschlossenem Fenster | Kalenderzeit konnte dieselbe Nacht erneut öffnen | Gespeicherter Abschluss verhindert erneutes Öffnen, auch nach Neustart |
 | Rückwärts gestellte Uhr | Ein negativer Messwert-Abstand/Schreibabstand konnte plausibel wirken | Zukunftsmessung ist ungültig; Schreibbremse blockiert nicht unbegrenzt |
 | Beschädigte Anschlussgrenze | Ein ungültiger konfigurierter Wert konnte die Begrenzung abschalten | Explizit ungültige Sicherungs-/Dauergrenze ergibt kein Ladebudget |
@@ -28,15 +28,15 @@ nicht konfigurierte Anschlussbegrenzung wird durch diese Änderung nicht erfunde
 
 ## Reproduzierbare Nachweise
 
-- Vollständige Suite: **1.170 Tests bestanden**, jeweils mit Python 3.14 / HA
+- Vollständige Suite: **1.171 Tests bestanden**, jeweils mit Python 3.14 / HA
   2026.10.2 und Python 3.13 / HA 2025.2.0. Gesamtabdeckung mindestens **96,3 %**;
   die bestehende 96-%-Schwelle wird beibehalten. Mypy und Pyright jeweils 0 Fehler.
 - **4.096 deterministische Kombinationen** aus Hauslast, tatsächlicher
   Batterielast, Sollwert und defekten Leistungsdaten, mit einem unabhängigen
   physikalischen Budget als Vergleich. Diese sind in 32 der Tests enthalten.
 - Gegenprobe auf unverändertem Commit
-  `7d809de3e08ef927625faba57d032514541fbf8f`: Die 129 Tests aus
-  `test_calendar_fault_campaign.py` ergeben **75 fehlgeschlagen, 54 bestanden**.
+  `7d809de3e08ef927625faba57d032514541fbf8f`: Die 130 Tests aus
+  `test_calendar_fault_campaign.py` ergeben **76 fehlgeschlagen, 54 bestanden**.
   Das sind fehlgeschlagene Fälle, nicht 75 voneinander unabhängige Fehler.
 - **16 getrennte echte HA-Prozesse**, **2.306 Prüfungen**, zusammen etwa
   **80,84 simulierte physikalische Stunden**. Sommerzeit, Winterzeit,
