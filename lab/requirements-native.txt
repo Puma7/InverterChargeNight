@@ -1,0 +1,19 @@
+# Experimental Windows development runtime, pinned to the tested HA release.
+homeassistant==2026.10.2
+time-machine==2.19.0
+gTTS==2.5.4
+home-assistant-frontend==20260930.4
+pykoplenti==1.5.0
+pymodbus==3.16.1
+pyotp==2.10.0
+PyQRCode==1.2.1
+PyTurboJPEG==1.8.3
+ha-ffmpeg==3.2.2
+mutagen==1.48.1
+rf-protocols==4.3.0
+gazetteer-matcher==1.1.0
+hassil==3.12.1
+home-assistant-intents==2026.10.6
+# Windows: install these first with lab/build_windows_audio.py (relative MSVC paths).
+pymicro-vad==1.0.1; sys_platform != 'win32'
+pyspeex-noise==1.0.2; sys_platform != 'win32'

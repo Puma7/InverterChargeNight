@@ -1,0 +1,32 @@
+name: inverter-charge-night-lab
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:${HA_VERSION:-2026.10.2}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HA_PORT:-8123}:8123"
+      - "127.0.0.1:7070:7070"
+    environment:
+      TZ: Europe/Berlin
+    volumes:
+      - ./runtime:/config
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8123/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+  evcc:
+    image: evcc/evcc:0.317.1
+    restart: unless-stopped
+    network_mode: service:homeassistant
+    depends_on:
+      homeassistant:
+        condition: service_healthy
+    volumes:
+      - ./runtime/evcc:/config
+    command: ["--config", "/config/evcc.yaml", "--database", "/config/evcc.db"]

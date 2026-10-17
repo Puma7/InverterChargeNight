@@ -1,0 +1,44 @@
+load_scenario:
+  name: Szenario laden
+  description: Setzt den virtuellen Wechselrichter und seine Energiezähler zurück.
+  fields:
+    scenario:
+      required: true
+      selector:
+        select:
+          options:
+            - winter_cloudy
+            - winter_sunny
+            - summer_surplus
+            - ev_charging
+            - almost_full
+            - forecast_failure
+            - inverter_offline
+            - rejected_commands
+            - island
+            - two_ev_22kw
+            - cooking_and_heat_pump
+            - phase_imbalance
+            - manual_transfer
+            - grid_outage
+            - overvoltage
+            - undervoltage
+            - phase_loss
+            - ev_undercurrent
+            - pv_snow
+            - pv_string_failure
+            - meter_failure
+step:
+  name: Akkuzeit vorspulen
+  description: Berechnet Akku und Energieflüsse. Die Uhr des HA-Schedulers bleibt unverändert.
+  fields:
+    seconds:
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 86400
+          unit_of_measurement: s
+refresh:
+  name: Ladeplanung aktualisieren
+  description: Aktualisiert die an die direkten Labor-Entitäten gebundene Planung sofort.

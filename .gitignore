@@ -2,6 +2,7 @@
 .mypy_cache/
 .pytest_cache/
 .venv/
+.venv-lab/
 __pycache__/
 
 # Local run artefacts
