@@ -33,8 +33,8 @@
           "end_time": "End Time",
           "user_min_soc": "Minimum SOC",
           "user_max_soc": "Maximum SOC",
-          "default_min_soc": "Default Min SOC to restore at end time",
-          "forecast_error_margin": "Forecast Error Margin",
+          "default_min_soc": "Fallback minimum SOC when restoring inverter settings",
+          "forecast_error_margin": "Additional battery headroom for PV generation",
           "planner_mode": "Planner Mode",
           "high_price_start": "High-price period, start",
           "high_price_end": "High-price period, end",
@@ -45,8 +45,8 @@
           "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
-          "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
-          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
+          "default_min_soc": "ICN normally restores the minimum SOC read before charging. This fallback is used only when that original value is unavailable. New setups initially use the chosen target minimum, e.g. 8%.",
+          "forecast_error_margin": "Increases assumed PV yield by this percentage. Example: a 10 kWh forecast plus 10% reserves space for 11 kWh. More PV headroom can lower the night charging target. Use bridge reserve to allow additional morning energy.",
           "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
@@ -191,8 +191,8 @@
           "end_time": "End Time",
           "user_min_soc": "Minimum SOC",
           "user_max_soc": "Maximum SOC",
-          "default_min_soc": "Default Min SOC to restore at end time",
-          "forecast_error_margin": "Forecast Error Margin",
+          "default_min_soc": "Fallback minimum SOC when restoring inverter settings",
+          "forecast_error_margin": "Additional battery headroom for PV generation",
           "planner_mode": "Planner Mode",
           "high_price_start": "High-price period, start",
           "high_price_end": "High-price period, end",
@@ -203,8 +203,8 @@
           "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
-          "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
-          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
+          "default_min_soc": "ICN normally restores the minimum SOC read before charging. This fallback is used only when that original value is unavailable. New setups initially use the chosen target minimum, e.g. 8%.",
+          "forecast_error_margin": "Increases assumed PV yield by this percentage. Example: a 10 kWh forecast plus 10% reserves space for 11 kWh. More PV headroom can lower the night charging target. Use bridge reserve to allow additional morning energy.",
           "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
@@ -401,15 +401,19 @@
         }
       },
       "meters": {
-        "title": "Energy meters for efficiency measurements",
-        "description": "Only for separate AC and DC battery charging energy meters. Supply both in kWh or leave both empty. Whole-house and PV daily energy meters are not battery charging meters.",
+        "title": "Efficiency measurements and energy meters",
+        "description": "Edit AC/DC power measurements here, or clear them with efficiency search disabled, without enabling search. Changing measurement bindings can require learning efficiency again. Energy counters must measure separate AC/DC battery charging energy: supply both in kWh or leave both empty. House consumption and PV daily counters are unsuitable.",
         "data": {
           "charge_energy_sent_entity": "Energy meter: drawn for charging",
-          "charge_energy_received_entity": "Energy meter: stored in the battery"
+          "charge_energy_received_entity": "Energy meter: stored in the battery",
+          "charge_power_sent_entity": "AC input power used only for battery charging",
+          "charge_power_received_entity": "DC charging power received by battery"
         },
         "data_description": {
           "charge_energy_sent_entity": "Optional but better: a kWh meter of the energy the charger takes in. With both meters the efficiency search measures the energy that really flowed instead of integrating a power reading.",
-          "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above."
+          "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
+          "charge_power_sent_entity": "KostalKore: “Grid to Battery Power”, e.g. sensor.kostal_lab_grid_to_battery_power. Only AC used to charge the battery, not house import or inverter “AC Power”. PV must not add charging input during measurement.",
+          "charge_power_received_entity": "KostalKore: “Battery Power”, e.g. sensor.kostal_lab_battery_power. DC charging power; the sign is handled. Must be separate from the AC input measurement."
         }
       },
       "grid": {
@@ -433,8 +437,8 @@
         "description": "Optional planning adjustments. PV headroom leaves space for tomorrow’s generation. Bridge mode also accounts for house use between the charging window ending and PV meeting demand. Supply a house consumption energy meter or a realistic average load. Defaults are estimates.",
         "data": {
           "planner_mode": "Planner Mode",
-          "forecast_error_margin": "Forecast Error Margin",
-          "default_min_soc": "Normal discharge floor outside charging window",
+          "forecast_error_margin": "Additional battery headroom for PV generation",
+          "default_min_soc": "Fallback minimum SOC when restoring inverter settings",
           "pv_forecast_today_entity": "PV energy forecast for today",
           "house_load_entity": "House Consumption Energy Meter",
           "avg_house_load_kw": "Average House Load",
@@ -442,9 +446,9 @@
           "bridge_reserve_kwh": "Bridge Reserve"
         },
         "data_description": {
-          "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
-          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
-          "default_min_soc": "Normal inverter discharge floor when ICN holds no charging or evening reserve. For new setups initially equal to the target minimum.",
+          "planner_mode": "Bridge mode also plans house consumption from the window ending until expected PV supply. Use the load and delay fields on this page. PV headroom reserves space for forecast generation without additionally planning morning use.",
+          "forecast_error_margin": "Increases assumed PV yield by this percentage. Example: a 10 kWh forecast plus 10% reserves space for 11 kWh. More PV headroom can lower the night charging target. Use bridge reserve to allow additional morning energy.",
+          "default_min_soc": "ICN normally restores the minimum SOC read before charging. This fallback is used only when that original value is unavailable. New setups initially use the chosen target minimum, e.g. 8%.",
           "pv_forecast_today_entity": "Today’s full-day energy forecast in kWh. Improves matching after midnight. Different from measured generation today.",
           "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
           "avg_house_load_kw": "Average house load in kW, used by the Bridge planner when no consumption meter is configured or no statistics are available yet (default 0.5).",
@@ -609,7 +613,7 @@
         "title": "Setup",
         "description": "Less common settings. Disabling removes that feature from the draft; apply to make it effective.",
         "menu_options": {
-          "meters": "Energy meters for efficiency measurements",
+          "meters": "Efficiency measurements and energy meters",
           "backup": "Detect island operation",
           "hardware": "Additional hardware limits",
           "runtime": "Other settings",
@@ -620,7 +624,7 @@
       },
       "summary": {
         "title": "Setup",
-        "description": "**{name}**\n\nCharging window **{start}–{end}**, time zone **{timezone}**.\n\nBattery **{capacity} kWh gross**, normal discharge floor **{floor}%**, calculated usable energy above it **{usable} kWh**.\n\nPlanned target bounds: **{target_min}–{target_max}%**.\n\nCharging power control: **{power_control}**. With a control: **{power_min}–{power_max} W**; a configured house import limit applies additionally.\n\n✓ configured, — off: efficiency search **{efficiency}** · poor PV yield detection **{pv_shortfall}**.\n\nSelected controls and measurements:\n{controls}\n\nVerify the correct inverter. Apply settings activates the configuration. Returning to the overview retains the draft. Inside the charging window, grid charging may start immediately after applying if the plan and measurements permit it.",
+        "description": "**{name}**\n\nCharging window **{start}–{end}**, time zone **{timezone}**.\n\nBattery **{capacity} kWh gross**, fallback discharge floor **{floor}%**, calculated usable energy above it **{usable} kWh**.\n\nPlanned target bounds: **{target_min}–{target_max}%**.\n\nCharging power control: **{power_control}**. With a control: **{power_min}–{power_max} W**; a configured house import limit applies additionally.\n\n✓ configured, — off: efficiency search **{efficiency}** · poor PV yield detection **{pv_shortfall}**.\n\nSelected controls and measurements:\n{controls}\n\nVerify the correct inverter. Apply settings activates the configuration. Returning to the overview retains the draft. Inside the charging window, grid charging may start immediately after applying if the plan and measurements permit it.",
         "menu_options": {
           "finish": "Apply settings now",
           "setup": "Back to overview"
@@ -742,8 +746,8 @@
           "end_time": "End Time",
           "user_min_soc": "Minimum SOC",
           "user_max_soc": "Maximum SOC",
-          "default_min_soc": "Default Min SOC to restore at end time",
-          "forecast_error_margin": "Forecast Error Margin",
+          "default_min_soc": "Fallback minimum SOC when restoring inverter settings",
+          "forecast_error_margin": "Additional battery headroom for PV generation",
           "planner_mode": "Planner Mode",
           "high_price_start": "High-price period, start",
           "high_price_end": "High-price period, end",
@@ -754,8 +758,8 @@
           "end_time": "Time when the window should end and settings are reset. Hour:minute, 24-hour format. The window may span midnight.",
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
-          "default_min_soc": "Min SOC value to restore at end time (often 8 %)",
-          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
+          "default_min_soc": "ICN normally restores the minimum SOC read before charging. This fallback is used only when that original value is unavailable. New setups initially use the chosen target minimum, e.g. 8%.",
+          "forecast_error_margin": "Increases assumed PV yield by this percentage. Example: a 10 kWh forecast plus 10% reserves space for 11 kWh. More PV headroom can lower the night charging target. Use bridge reserve to allow additional morning energy.",
           "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
@@ -948,15 +952,19 @@
         }
       },
       "meters": {
-        "title": "Energy meters for efficiency measurements",
-        "description": "Only for separate AC and DC battery charging energy meters. Supply both in kWh or leave both empty. Whole-house and PV daily energy meters are not battery charging meters.",
+        "title": "Efficiency measurements and energy meters",
+        "description": "Edit AC/DC power measurements here, or clear them with efficiency search disabled, without enabling search. Changing measurement bindings can require learning efficiency again. Energy counters must measure separate AC/DC battery charging energy: supply both in kWh or leave both empty. House consumption and PV daily counters are unsuitable.",
         "data": {
           "charge_energy_sent_entity": "Energy meter: drawn for charging",
-          "charge_energy_received_entity": "Energy meter: stored in the battery"
+          "charge_energy_received_entity": "Energy meter: stored in the battery",
+          "charge_power_sent_entity": "AC input power used only for battery charging",
+          "charge_power_received_entity": "DC charging power received by battery"
         },
         "data_description": {
           "charge_energy_sent_entity": "Optional but better: a kWh meter of the energy the charger takes in. With both meters the efficiency search measures the energy that really flowed instead of integrating a power reading.",
-          "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above."
+          "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
+          "charge_power_sent_entity": "KostalKore: “Grid to Battery Power”, e.g. sensor.kostal_lab_grid_to_battery_power. Only AC used to charge the battery, not house import or inverter “AC Power”. PV must not add charging input during measurement.",
+          "charge_power_received_entity": "KostalKore: “Battery Power”, e.g. sensor.kostal_lab_battery_power. DC charging power; the sign is handled. Must be separate from the AC input measurement."
         }
       },
       "grid": {
@@ -980,8 +988,8 @@
         "description": "Optional planning adjustments. PV headroom leaves space for tomorrow’s generation. Bridge mode also accounts for house use between the charging window ending and PV meeting demand. Supply a house consumption energy meter or a realistic average load. Defaults are estimates.",
         "data": {
           "planner_mode": "Planner Mode",
-          "forecast_error_margin": "Forecast Error Margin",
-          "default_min_soc": "Normal discharge floor outside charging window",
+          "forecast_error_margin": "Additional battery headroom for PV generation",
+          "default_min_soc": "Fallback minimum SOC when restoring inverter settings",
           "pv_forecast_today_entity": "PV energy forecast for today",
           "house_load_entity": "House Consumption Energy Meter",
           "avg_house_load_kw": "Average House Load",
@@ -989,9 +997,9 @@
           "bridge_reserve_kwh": "Bridge Reserve"
         },
         "data_description": {
-          "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
-          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
-          "default_min_soc": "Normal inverter discharge floor when ICN holds no charging or evening reserve. For new setups initially equal to the target minimum.",
+          "planner_mode": "Bridge mode also plans house consumption from the window ending until expected PV supply. Use the load and delay fields on this page. PV headroom reserves space for forecast generation without additionally planning morning use.",
+          "forecast_error_margin": "Increases assumed PV yield by this percentage. Example: a 10 kWh forecast plus 10% reserves space for 11 kWh. More PV headroom can lower the night charging target. Use bridge reserve to allow additional morning energy.",
+          "default_min_soc": "ICN normally restores the minimum SOC read before charging. This fallback is used only when that original value is unavailable. New setups initially use the chosen target minimum, e.g. 8%.",
           "pv_forecast_today_entity": "Today’s full-day energy forecast in kWh. Improves matching after midnight. Different from measured generation today.",
           "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
           "avg_house_load_kw": "Average house load in kW, used by the Bridge planner when no consumption meter is configured or no statistics are available yet (default 0.5).",
@@ -1156,7 +1164,7 @@
         "title": "Setup",
         "description": "Less common settings. Disabling removes that feature from the draft; apply to make it effective.",
         "menu_options": {
-          "meters": "Energy meters for efficiency measurements",
+          "meters": "Efficiency measurements and energy meters",
           "backup": "Detect island operation",
           "hardware": "Additional hardware limits",
           "runtime": "Other settings",
@@ -1167,7 +1175,7 @@
       },
       "summary": {
         "title": "Setup",
-        "description": "**{name}**\n\nCharging window **{start}–{end}**, time zone **{timezone}**.\n\nBattery **{capacity} kWh gross**, normal discharge floor **{floor}%**, calculated usable energy above it **{usable} kWh**.\n\nPlanned target bounds: **{target_min}–{target_max}%**.\n\nCharging power control: **{power_control}**. With a control: **{power_min}–{power_max} W**; a configured house import limit applies additionally.\n\n✓ configured, — off: efficiency search **{efficiency}** · poor PV yield detection **{pv_shortfall}**.\n\nSelected controls and measurements:\n{controls}\n\nVerify the correct inverter. Apply settings activates the configuration. Returning to the overview retains the draft. Inside the charging window, grid charging may start immediately after applying if the plan and measurements permit it.",
+        "description": "**{name}**\n\nCharging window **{start}–{end}**, time zone **{timezone}**.\n\nBattery **{capacity} kWh gross**, fallback discharge floor **{floor}%**, calculated usable energy above it **{usable} kWh**.\n\nPlanned target bounds: **{target_min}–{target_max}%**.\n\nCharging power control: **{power_control}**. With a control: **{power_min}–{power_max} W**; a configured house import limit applies additionally.\n\n✓ configured, — off: efficiency search **{efficiency}** · poor PV yield detection **{pv_shortfall}**.\n\nSelected controls and measurements:\n{controls}\n\nVerify the correct inverter. Apply settings activates the configuration. Returning to the overview retains the draft. Inside the charging window, grid charging may start immediately after applying if the plan and measurements permit it.",
         "menu_options": {
           "finish": "Apply settings now",
           "setup": "Back to overview"

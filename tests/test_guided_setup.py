@@ -422,3 +422,16 @@ async def test_explicit_grid_disable_wins_over_a_concurrent_binding_addition(gui
     mock_config_entry.data = {**mock_config_entry.data, CONF_GRID_IMPORT_ENTITY: "sensor.new_grid"}
     await flow.async_step_grid_off()
     assert CONF_GRID_IMPORT_ENTITY not in flow._merged_data()
+
+
+@pytest.mark.asyncio
+async def test_disabled_efficiency_measurements_can_be_cleared_without_reenabling_search(guide, mock_hass, mock_config_entry):
+    mock_config_entry.data = {**mock_config_entry.data, CONF_AUTO_EFFICIENT_CHARGE: False,
+        CONF_CHARGE_POWER_SENT_ENTITY: "sensor.old_ac", CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.old_dc"}
+    flow = cf.OptionsFlowHandler(mock_config_entry); flow.hass = mock_hass
+    await flow.async_step_init()
+    await flow.async_step_meters({})
+    assert CONF_CHARGE_POWER_SENT_ENTITY not in flow._merged_data()
+    assert CONF_CHARGE_POWER_RECEIVED_ENTITY not in flow._merged_data()
+    assert flow._merged_data()[CONF_AUTO_EFFICIENT_CHARGE] is False
+    assert (await flow.async_step_finish())["type"] == "create_entry"
