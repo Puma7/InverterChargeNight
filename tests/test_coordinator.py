@@ -87,6 +87,7 @@ def test_is_backup_active(mock_hass):
 
 
 def test_accumulate_auto_energy_updates_totals(mock_hass):
+    mock_hass.states.async_set("sun.sun", "below_horizon")
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     coordinator = _make_coordinator(
         mock_hass,
@@ -103,16 +104,18 @@ def test_accumulate_auto_energy_updates_totals(mock_hass):
     coordinator._auto_last_received_w = 900.0
     coordinator._auto_energy_sent_wh = 0.0
     coordinator._auto_energy_received_wh = 0.0
-    coordinator._get_power_w = MagicMock(side_effect=[1000, 900])
+    coordinator._get_power_w = lambda entity: 1000 if entity == "sensor.sent" else 900
 
-    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=now):
-        coordinator._accumulate_auto_energy()
+    for seconds in range(30, 3601, 30):
+        with patch("custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=now - timedelta(hours=1) + timedelta(seconds=seconds)):
+            coordinator._accumulate_auto_energy()
 
-    assert coordinator._auto_energy_sent_wh == 1000.0
-    assert coordinator._auto_energy_received_wh == 900.0
+    assert coordinator._auto_energy_sent_wh == pytest.approx(1000.0)
+    assert coordinator._auto_energy_received_wh == pytest.approx(900.0)
 
 
 def test_finalize_auto_test_records_best(mock_hass):
+    mock_hass.states.async_set("sun.sun", "below_horizon")
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     coordinator = _make_coordinator(mock_hass, {})
     coordinator._auto_test_active = True
@@ -153,6 +156,7 @@ def test_finalize_auto_test_discards_short_duration(mock_hass):
 
 @pytest.mark.asyncio
 async def test_handle_auto_charge_uses_best_power_and_disables(mock_hass):
+    mock_hass.states.async_set("sun.sun", "below_horizon")
     mock_hass.states.async_set("switch.grid", "on")
     mock_hass.config_entries.async_update_entry = MagicMock()
 
@@ -199,6 +203,7 @@ def test_select_next_auto_test_power_none_when_range_invalid(mock_hass):
 
 @pytest.mark.asyncio
 async def test_handle_auto_charge_missing_entities_no_action(mock_hass):
+    mock_hass.states.async_set("sun.sun", "below_horizon")
     mock_hass.services.async_call = AsyncMock()
     coordinator = _make_coordinator(
         mock_hass,
@@ -384,7 +389,9 @@ def test_restore_state_from_options(mock_hass):
 def test_persist_state_round_trip_next_to_auto_efficiency_data(mock_hass):
     _persisting_hass(mock_hass)
     history = {CONF_AUTO_EFFICIENCY_DATA: {"history": {"5000": 0.1}, "best_power_w": 5000}}
-    first = _make_coordinator(mock_hass, {}, options=dict(history))
+    first = _make_coordinator(mock_hass, {})
+    history[CONF_AUTO_EFFICIENCY_DATA]["measurement_signature"] = first._efficiency_signature()
+    first.entry.options = dict(history)
     first.is_enabled = False
     first.override_soc = 70.0
     first.original_min_soc = 5.0
@@ -412,6 +419,7 @@ def test_persist_state_round_trip_next_to_auto_efficiency_data(mock_hass):
         "original_absolute_charge_power": None,
         "pending_reset": True,
         "snow_nights": 3,
+        "pv_yield": first._pv_yield.snapshot(),
         "hands_off_until": None,
         "adhoc_until": None,
         "adhoc_reason": None,

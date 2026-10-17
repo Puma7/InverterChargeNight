@@ -128,7 +128,9 @@
           "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
           "price_surcharge_window_ct": "Zuschlag im Fenster",
           "curtailment_limit_w": "Einspeisegrenze",
-          "curtailment_feed_in_entity": "Einspeiseleistung"
+          "curtailment_feed_in_entity": "Einspeiseleistung",
+          "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
+          "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -152,7 +154,9 @@
           "price_surcharge_ct": "Was deine Rechnung auf das drauflegt, was die Entität zeigt — Netzentgelt, Umlagen, Steuern, MwSt. Tibber zeigt bereits den Vollpreis, dort bleibt das auf 0. aWATTar, EPEX Spot, Nordpool und ENTSO-e zeigen meist nur die Börse; in Deutschland sind das typisch 20–25 ct/kWh Unterschied. Ein Fehler hier sieht nicht nach einem Fehler aus — 6 ct und 32 ct sind beide plausible Zahlen, und die Abendreserve fällt auf der falschen genau andersherum aus.",
           "price_surcharge_window_ct": "Dasselbe für die Stunden deines günstigen Fensters — hier sitzt das reduzierte §14a-Netzentgelt. Leer lassen, wenn der Zuschlag rund um die Uhr derselbe ist.",
           "curtailment_limit_w": "Optional: was deine Anlage höchstens ins Netz geben darf, in Watt — die 60-%- oder 70-%-Begrenzung am Netzverknüpfungspunkt. Trag die Grenze selbst ein, nicht den Prozentsatz: 0,60 × Anlagenleistung in Watt, bei 15 kWp und 60 % also 9000. Leer lassen, wenn du nicht begrenzt bist. Gedrosselt wird davon nichts; es zeigt nur, wie viel Mittagssonne die Grenze wegwirft, weil der Speicher schon voll war.",
-          "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch."
+          "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch.",
+          "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
+          "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt."
         }
       },
       "reconfigure": {
@@ -282,7 +286,9 @@
           "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
           "price_surcharge_window_ct": "Zuschlag im Fenster",
           "curtailment_limit_w": "Einspeisegrenze",
-          "curtailment_feed_in_entity": "Einspeiseleistung"
+          "curtailment_feed_in_entity": "Einspeiseleistung",
+          "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
+          "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -306,7 +312,9 @@
           "price_surcharge_ct": "Was deine Rechnung auf das drauflegt, was die Entität zeigt — Netzentgelt, Umlagen, Steuern, MwSt. Tibber zeigt bereits den Vollpreis, dort bleibt das auf 0. aWATTar, EPEX Spot, Nordpool und ENTSO-e zeigen meist nur die Börse; in Deutschland sind das typisch 20–25 ct/kWh Unterschied. Ein Fehler hier sieht nicht nach einem Fehler aus — 6 ct und 32 ct sind beide plausible Zahlen, und die Abendreserve fällt auf der falschen genau andersherum aus.",
           "price_surcharge_window_ct": "Dasselbe für die Stunden deines günstigen Fensters — hier sitzt das reduzierte §14a-Netzentgelt. Leer lassen, wenn der Zuschlag rund um die Uhr derselbe ist.",
           "curtailment_limit_w": "Optional: was deine Anlage höchstens ins Netz geben darf, in Watt — die 60-%- oder 70-%-Begrenzung am Netzverknüpfungspunkt. Trag die Grenze selbst ein, nicht den Prozentsatz: 0,60 × Anlagenleistung in Watt, bei 15 kWp und 60 % also 9000. Leer lassen, wenn du nicht begrenzt bist. Gedrosselt wird davon nichts; es zeigt nur, wie viel Mittagssonne die Grenze wegwirft, weil der Speicher schon voll war.",
-          "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch."
+          "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch.",
+          "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
+          "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt."
         }
       },
       "review": {
@@ -486,7 +494,9 @@
           "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
           "price_surcharge_window_ct": "Zuschlag im Fenster",
           "curtailment_limit_w": "Einspeisegrenze",
-          "curtailment_feed_in_entity": "Einspeiseleistung"
+          "curtailment_feed_in_entity": "Einspeiseleistung",
+          "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
+          "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -510,7 +520,9 @@
           "price_surcharge_ct": "Was deine Rechnung auf das drauflegt, was die Entität zeigt — Netzentgelt, Umlagen, Steuern, MwSt. Tibber zeigt bereits den Vollpreis, dort bleibt das auf 0. aWATTar, EPEX Spot, Nordpool und ENTSO-e zeigen meist nur die Börse; in Deutschland sind das typisch 20–25 ct/kWh Unterschied. Ein Fehler hier sieht nicht nach einem Fehler aus — 6 ct und 32 ct sind beide plausible Zahlen, und die Abendreserve fällt auf der falschen genau andersherum aus.",
           "price_surcharge_window_ct": "Dasselbe für die Stunden deines günstigen Fensters — hier sitzt das reduzierte §14a-Netzentgelt. Leer lassen, wenn der Zuschlag rund um die Uhr derselbe ist.",
           "curtailment_limit_w": "Optional: was deine Anlage höchstens ins Netz geben darf, in Watt — die 60-%- oder 70-%-Begrenzung am Netzverknüpfungspunkt. Trag die Grenze selbst ein, nicht den Prozentsatz: 0,60 × Anlagenleistung in Watt, bei 15 kWp und 60 % also 9000. Leer lassen, wenn du nicht begrenzt bist. Gedrosselt wird davon nichts; es zeigt nur, wie viel Mittagssonne die Grenze wegwirft, weil der Speicher schon voll war.",
-          "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch."
+          "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch.",
+          "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
+          "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt."
         }
       },
       "review": {
@@ -708,6 +720,10 @@
     "communication_unconfirmed": {
       "title": "Stopp unbestätigt",
       "description": "Ein Geräte-Stopp ist nicht bestätigt; die letzten Gerätesollwerte können weiterwirken."
+    },
+    "pv_yield_shortfall": {
+      "title": "PV-Ertrag stark ausgefallen",
+      "description": "{name}: Erwartet waren {expected} kWh, gemessen wurden {actual} kWh. Die nächste reguläre Nacht lädt bis zum eingestellten Maximal-SoC. Bitte PV-Anlage, Prognose und mögliche Schneeauflage prüfen. Die Ursache ist nicht automatisch bestimmt."
     }
   },
   "services": {

@@ -6,6 +6,8 @@ lives in its own module so that ``__init__.py`` stays a thin setup shim.
 """
 
 import asyncio
+import hashlib
+import json
 import logging
 import math
 from collections.abc import Mapping
@@ -26,7 +28,11 @@ from homeassistant.helpers.recorder import DATA_INSTANCE, get_instance
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
 
+from .pv_yield import PVYieldMonitor
+
 from .const import (
+    CONF_AUTO_PV_SHORTFALL,
+    CONF_PV_ENERGY_TODAY_ENTITY,
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_DEFAULT_MIN_SOC,
@@ -342,6 +348,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.override_soc: float | None = None
         # Snow on the modules: the next N windows charge to the user maximum,
         # ignoring the forecast. Counts down at every window end.
+        self._pv_yield_notice: tuple[str, str] | None = None
+        self._pv_yield = PVYieldMonitor()
         self.snow_nights: int = 0
         self._original_absolute_charge_power: float | None = None
         # What we last wrote there ourselves. Without it a fresh capture
@@ -408,6 +416,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_stale_logged = False
         self._grid_own_draw_logged = False
         self._backup_unreadable_logged = False
+        self._auto_search_deferred = False
         self._auto_range_warned = False
         self._backup_unknown_logged: set[str] = set()
         self._grid_plan_request_w = None
@@ -423,6 +432,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._original_discharge_block: bool | None = None
         self._discharge_block_logged: str | None = None
         self._restore_state()
+        saved = self.entry.options.get(CONF_AUTO_EFFICIENCY_DATA)
+        if isinstance(saved, dict) and saved and "measurement_signature" not in saved:
+            # Older versions did not bind measurements to a sensor/hardware
+            # configuration. Their provenance cannot be established safely.
+            self._save_auto_efficiency_data({"history": {}})
 
     def enable_communication_monitoring(self) -> None:
         """Enable user-facing incident reporting after real HA entry setup."""
@@ -441,6 +455,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "title_interrupted": translations[prefix + "interrupted.title"],
             "title_recovered": translations[prefix + "recovered.title"],
         })
+        pv_prefix = f"component.{DOMAIN}.issues.pv_yield_shortfall."
+        self._pv_yield_notice = (translations[pv_prefix + "title"], translations[pv_prefix + "description"])
+
 
     def setup_communication_listener(self) -> None:
         """Wake the coordinator on loss/recovery instead of waiting for its poll."""
@@ -477,7 +494,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async def check_staleness(now: datetime) -> None:
             # A silent sensor does not emit an unavailable state. Check the
             # existing meter freshness policy even with a long planning poll.
-            if self._communication_faults() or self._pending_reset or (
+            if self._auto_test_active:
+                self._accumulate_auto_energy()
+            if self._auto_measurement_is_complete() or self._communication_faults() or self._pending_reset or (
                 self._communication is not None and self._communication.faults
             ):
                 await self.async_request_refresh()
@@ -604,6 +623,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "adhoc_allow_grid_charge": self._adhoc_allow_grid_charge,
             "evening_rescue_charge": self.evening_rescue_charge,
             "snow_nights": self.snow_nights,
+            "pv_yield": self._pv_yield.snapshot(),
         }
         self.hass.config_entries.async_update_entry(self.entry, options=options)
 
@@ -613,6 +633,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not isinstance(raw, dict):
             return
         state: dict[str, Any] = raw
+        self._pv_yield = PVYieldMonitor(state.get("pv_yield"))
         if isinstance(state.get("is_enabled"), bool):
             self.is_enabled = state["is_enabled"]
         if isinstance(state.get("evening_rescue_charge"), bool):
@@ -744,6 +765,57 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._reset_retry_count = 0
         self._schedule_reset_retry()
 
+    def _automatic_pv_shortfall_active(self) -> bool:
+        return bool(self.config.get(CONF_AUTO_PV_SHORTFALL)) and self._adhoc_until is None and self._pv_yield.active_for(
+            self._window_end_datetime(dt_util.now()).date()
+        )
+
+    def pv_yield_attributes(self) -> dict[str, Any]:
+        return {**self._pv_yield.snapshot(),
+                "enabled": bool(self.config.get(CONF_AUTO_PV_SHORTFALL)),
+                "automatic_full_charge": self._automatic_pv_shortfall_active()}
+
+    def _observe_pv_yield(self) -> None:
+        if not self.config.get(CONF_AUTO_PV_SHORTFALL) or self.is_discharge_mode:
+            return
+        now = dt_util.now()
+        sun = self.hass.states.get(SUN_ENTITY_ID)
+        if sun is None or not all(dt_util.parse_datetime(str(sun.attributes.get(key, ""))) for key in ("next_rising", "next_setting")):
+            return
+        sunrise, sunset = self._sun_times(now, now)
+        sunset -= timedelta(days=(sunset.date() - now.date()).days)
+        forecast, available = self._parse_forecast_energy(self.config.get(CONF_PV_FORECAST_TODAY_ENTITY))
+        entity = self.config.get(CONF_PV_ENERGY_TODAY_ENTITY)
+        state = self.hass.states.get(entity) if entity else None
+        age = self._state_age_s(state, now)
+        energy = self._read_energy_wh(str(entity)) if state is not None else None
+        actual = energy / 1000 if energy is not None and age is not None and 0 <= age <= 1800 else None
+        before = self._pv_yield.snapshot()
+        incident = self._pv_yield.observe(now, sunrise, sunset, forecast if available else None, actual)
+        if before != self._pv_yield.snapshot():
+            self._persist_state()
+        if incident:
+            ir.async_create_issue(
+                self.hass, DOMAIN, f"pv_yield_shortfall_{self.entry.entry_id}",
+                is_fixable=False, severity=ir.IssueSeverity.WARNING,
+                translation_key="pv_yield_shortfall",
+                translation_placeholders={"name": self.entry.title,
+                    "expected": str(self._pv_yield.expected_kwh),
+                    "actual": str(self._pv_yield.actual_kwh)},
+            )
+            if self._pv_yield_notice is not None:
+                from homeassistant.components import persistent_notification
+                title, description = self._pv_yield_notice
+                persistent_notification.async_create(
+                    self.hass, description.format(name=self.entry.title,
+                        expected=self._pv_yield.expected_kwh, actual=self._pv_yield.actual_kwh),
+                    title=title, notification_id=f"icn_pv_yield_{self.entry.entry_id}",
+                )
+        elif self._pv_yield.status == "normal":
+            ir.async_delete_issue(self.hass, DOMAIN, f"pv_yield_shortfall_{self.entry.entry_id}")
+
+
+
     def current_target_soc(self) -> float | None:
         """The SOC the inverter should hold right now: snow mode, else manual override, else the plan.
 
@@ -751,7 +823,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         to charge to the user maximum would reach its target instantly and do
         nothing at all, so the counter is ignored (and not counted down) there.
         """
-        if self.snow_nights > 0 and not self.is_discharge_mode:
+        if (self.snow_nights > 0 or self._automatic_pv_shortfall_active()) and not self.is_discharge_mode:
             user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC))
             if self.override_soc is not None and self.override_soc != user_max_soc:
                 _LOGGER.debug(
@@ -1836,19 +1908,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
     async def _plan_charge_power(self, target_soc: float) -> None:
-        """Plan the AC charge power for the remaining window (plan 006, step 6).
+        """Prefer the measured optimum, then apply the connection budget.
 
-        ``required`` is the constant power that reaches the target in time. The
-        setpoint stays within [min, max] charge power and, when the efficiency
-        finder has an optimum and ``required`` is below it, does not exceed the
-        optimum. The value is always computed for the ``planned_charge_power``
-        sensor; it is written to the AC charge limit in bridge mode and, since
-        plan 008, whenever a house connection limit is configured - a protection
-        must not depend on the planner mode. It is never written while the
-        finder owns the limit, and only when it moves by more than
-        PLANNED_POWER_WRITE_THRESHOLD_W. The house connection limit is applied
-        after the calculation and before the write; that order is what keeps the
-        setpoint from ever exceeding what the connection can carry.
+        Without an optimum, spread the required energy across the window. A
+        higher required power may override the optimum to meet the deadline,
+        but never the configured maximum or the available house connection.
+        Only an actively measuring finder owns the limit instead of this plan.
         """
         self.planned_charge_power_w = None
         self.planned_power_is_applied = False
@@ -1881,21 +1946,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         min_w = float(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000))
         max_w = float(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000))
-        ceiling = max_w
         # Per band where one has been searched, battery-wide otherwise (plan 015)
         best = self.best_charge_power_w(current_soc)
-        if best is not None and required <= best:
-            ceiling = max(min_w, min(max_w, float(best)))
-        setpoint = float(round(max(min_w, min(required, ceiling))))
+        # Prefer the measured optimum, finishing early rather than stretching
+        # an inefficient trickle across the whole window. Only a deadline that
+        # needs more power overrides it; the connection budget always wins.
+        preferred = max(required, float(best)) if best is not None else required
+        setpoint = float(round(max(min_w, min(preferred, max_w))))
         # What the battery would draw without the house connection limit. Kept
         # so the sensor can say whether the limit is actually holding it back.
         self._grid_plan_request_w = setpoint
         # Plan, then limit, then write - never the other way round (plan 008).
         setpoint = self._grid_limited_setpoint(setpoint)
         self.planned_charge_power_w = setpoint
-        if self.auto_efficient_charge or self._auto_test_active:
+        if self._auto_test_active:
             return
-        if not self._planner_mode_is_bridge and not self._grid_limit_configured():
+        if best is None and not self._planner_mode_is_bridge and not self._grid_limit_configured():
             # The planner only owns the setpoint in bridge mode, but the house
             # connection limit is a protection and must not depend on the mode.
             return
@@ -2801,6 +2867,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._persist_state()
         return True
 
+    def _efficiency_signature(self) -> str:
+        """Bind measured losses to this measurement path without publishing IDs."""
+        keys = (
+            CONF_CHARGE_POWER_ENTITY, CONF_CHARGE_POWER_SENT_ENTITY,
+            CONF_CHARGE_POWER_RECEIVED_ENTITY, CONF_CHARGE_ENERGY_SENT_ENTITY,
+            CONF_CHARGE_ENERGY_RECEIVED_ENTITY, CONF_BATTERY_SOC_ENTITY,
+            CONF_BATTERY_CAPACITY,
+        )
+        payload = [2, *(self.config.get(key) for key in keys)]
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+    def _efficiency_window_key(self) -> str:
+        """Failures apply to this charging opportunity, never to the loss curve."""
+        return self._window_end_datetime(dt_util.now()).isoformat()
+
     def get_auto_efficiency_data(self) -> dict[str, Any]:
         """Load persisted auto efficiency data from entry options.
 
@@ -2809,25 +2890,31 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         moved makes the stored bounds - and with them the conclusions drawn
         from the old samples - meaningless.
         """
-        data = dict(self.entry.options.get(CONF_AUTO_EFFICIENCY_DATA, {}))
+        data: dict[str, Any] = dict(self.entry.options.get(CONF_AUTO_EFFICIENCY_DATA, {}))
         data.setdefault("history", {})
         bounds = data.get("bounds_w")
         current = [
             int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000)),
             int(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000)),
         ]
-        if isinstance(bounds, list) and [int(b) for b in bounds] != current:
+        signature = data.get("measurement_signature")
+        changed = signature is not None and signature != self._efficiency_signature()
+        if changed or (isinstance(bounds, list) and [int(b) for b in bounds] != current):
             _LOGGER.info(
                 "Charge power range changed from %s to %s - starting the efficiency search over",
                 bounds,
                 current,
             )
-            data = {"history": {}, "bounds_w": current}
+            data = dict[str, Any](history={}, bounds_w=current)
+        data["measurement_signature"] = self._efficiency_signature()
+        if data.get("failed_window") != self._efficiency_window_key():
+            data.pop("failed", None)
         return data
 
     def _save_auto_efficiency_data(self, data: dict[str, Any]) -> None:
         """Persist auto efficiency data to entry options."""
         options = dict(self.entry.options)
+        data["measurement_signature"] = self._efficiency_signature()
         options[CONF_AUTO_EFFICIENCY_DATA] = data
         self.hass.config_entries.async_update_entry(self.entry, options=options)
 
@@ -2836,16 +2923,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return int(round(value_w / step_w) * step_w)
 
     def _select_next_auto_test_power_w(self) -> int | None:
-        """The next charge power to measure, or None when the search is over.
+        """Golden-section search using valid measurements only.
 
-        Golden-section search over [range_min, range_max]. None means one thing
-        only: there is nothing left to learn, because the interval is down to
-        one step. A point that cannot be measured - the battery is full before
-        the measurement completes, or the inverter never followed the setpoint -
-        narrows the interval like a measured one instead of ending the search,
-        which would otherwise stop with large unexplored stretches and keep a
-        far-from-optimal "best" for good.
+        Transient failures defer the search until another charging window.
+        They never prove that neighbouring, unmeasured powers are inefficient.
         """
+        self._auto_search_deferred = False
         min_w = int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000))
         max_w = int(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000))
         if min_w >= max_w:
@@ -2863,8 +2946,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data = self.get_auto_efficiency_data()
         history = {int(k): v for k, v in data.get("history", {}).items()}
         failed = {int(k): int(v) for k, v in dict(data.get("failed", {})).items()}
-        # A power that could not be measured repeatedly counts as done, so the
-        # search moves on instead of asking for the same sample every night.
+        # Retries are bounded per window; failure never counts as a loss sample.
         unmeasurable = {p for p, n in failed.items() if n >= AUTO_TEST_MAX_ATTEMPTS}
         range_min = int(data.get("range_min_w", min_w))
         range_max = int(data.get("range_max_w", max_w))
@@ -2899,18 +2981,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._save_auto_efficiency_data(data)
                 return True
 
-            if c in unmeasurable:
-                # Not measurable here, and it will not become measurable on
-                # another night: take it out of the interval and carry on.
-                range_min = min(c + step_w, range_max)
-                if not _narrow(range_min, range_max):
-                    return None
-                continue
-            if d in unmeasurable:
-                range_max = max(d - step_w, range_min)
-                if not _narrow(range_min, range_max):
-                    return None
-                continue
+            if c in unmeasurable or d in unmeasurable:
+                # A full/cold battery, BMS taper or a busy connection says
+                # nothing about losses at neighbouring powers. Never narrow
+                # the search using a failed measurement. Retry next window.
+                for point in (c, d):
+                    if point not in history and point not in unmeasurable:
+                        return point
+                self._auto_search_deferred = True
+                return None
             if c in history and d in history:
                 if history[c] <= history[d]:
                     range_max = d
@@ -3061,6 +3140,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "search_range_w": [data.get("range_min_w"), data.get("range_max_w")],
             "measured_energy_kwh": round(self._auto_energy_sent_wh / 1000.0, 3),
             "last_result": self._auto_last_result,
+            "deferred_until_next_window": self._auto_search_deferred,
             "measurement_source": "energy meters" if self._energy_meter_entities() else "power sensors",
             # Plan 015: what has been measured where on the battery, and which
             # of those bands is far enough along to overrule the overall best.
@@ -3132,14 +3212,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_last_sample_time = now
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
-        self._auto_last_sent_w = None
-        self._auto_last_received_w = None
+        self._auto_last_sent_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_SENT_ENTITY))
+        self._auto_last_received_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY))
+        if self._auto_last_sent_w is None or self._auto_last_received_w is None:
+            self._discard_auto_test("power telemetry is unavailable at measurement start")
+            return
         meters = self._energy_meter_entities()
         if meters is not None:
             start_sent = self._read_energy_wh(meters[0])
             start_received = self._read_energy_wh(meters[1])
-            if start_sent is not None and start_received is not None:
-                self._auto_meter_start = (start_sent, start_received)
+            if start_sent is None or start_received is None:
+                self._discard_auto_test("configured energy counters are unavailable")
+                return
+            self._auto_meter_start = (start_sent, start_received)
         _LOGGER.debug(
             "Efficiency test at %s W settled, measuring from now (%s)",
             self._auto_test_power_w,
@@ -3157,6 +3242,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if not self._auto_test_active or self._auto_test_start is None:
             return
+        sun = self.hass.states.get(SUN_ENTITY_ID)
+        if sun is None or sun.state != "below_horizon":
+            self._discard_auto_test("daylight or unknown sun state can contaminate the AC/DC comparison")
+            return
         now = self._efficiency_now()
         if self._auto_measure_start is None:
             if elapsed_seconds(now, self._auto_test_start) < AUTO_TEST_SETTLE_S:
@@ -3167,7 +3256,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
         sent_w = self._get_power_w(sent_entity)
         received_w = self._get_power_w(received_entity)
+        for entity in (sent_entity, received_entity):
+            state = self.hass.states.get(entity) if entity else None
+            age = self._state_age_s(state, dt_util.now())
+            if age is not None and (age < -5 or age > 60):
+                self._discard_auto_test("power telemetry is stale; retrying after recovery")
+                return
         if sent_w is None or received_w is None:
+            self._discard_auto_test("power telemetry is unavailable; retrying after recovery")
+            return
+        if self._auto_meter_start is not None and self._measured_energy_wh() is None:
+            self._discard_auto_test("energy counters were reset or became unavailable")
             return
         last_time = self._auto_last_sample_time
         if last_time is None:
@@ -3176,7 +3275,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._auto_last_received_w = received_w
             return
         delta_h = elapsed_seconds(now, last_time) / 3600.0
-        if delta_h <= 0:
+        if delta_h < 0 or (delta_h > 60 / 3600 and self._auto_meter_start is None):
+            self._discard_auto_test("measurement clock or sample continuity was interrupted")
+            return
+        if delta_h == 0:
             return
         previous_sent = self._auto_last_sent_w
         previous_received = self._auto_last_received_w
@@ -3266,31 +3368,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._reset_auto_test_state()
 
     def _record_failed_attempt(self, power_w: int, too_short: bool) -> None:
-        """Remember that this power could not be measured.
-
-        A power the battery cannot absorb for long enough - because it is full
-        before the measurement is over - is not going to become measurable on
-        the next night either. After a few attempts the search stops offering
-        it, instead of asking for the same impossible sample for ever.
-        """
+        """Bound retries within this window without modifying the loss curve."""
         data = self.get_auto_efficiency_data()
         failed = {int(k): int(v) for k, v in dict(data.get("failed", {})).items()}
         attempts = failed.get(power_w, 0) + 1
         failed[power_w] = attempts
         data["failed"] = {str(k): v for k, v in failed.items()}
-        if too_short and attempts >= AUTO_TEST_MAX_ATTEMPTS:
-            # Too high for the energy the window has left: lower the ceiling.
-            range_max = int(data.get("range_max_w", power_w))
-            new_max = max(int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000)), power_w - 100)
-            if new_max < range_max:
-                data["range_max_w"] = new_max
-                _LOGGER.info(
-                    "Efficiency search: %d W could not be measured %d times - the battery is "
-                    "full before a measurement completes, so the search now stops at %d W",
-                    power_w,
-                    attempts,
-                    new_max,
-                )
+        data["failed_window"] = self._efficiency_window_key()
         self._save_auto_efficiency_data(data)
 
     @staticmethod
@@ -3389,6 +3473,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._auto_test_active or self._auto_test_start is None or self._auto_test_power_w is None:
             self._reset_auto_test_state()
             return
+        sun = self.hass.states.get(SUN_ENTITY_ID)
+        if sun is None or sun.state != "below_horizon":
+            self._discard_auto_test("daylight or unknown sun state can contaminate the AC/DC comparison")
+            return
         power_w = self._auto_test_power_w
         if self._auto_measure_start is None:
             self._discard_auto_test("it never got past the %d s settling time", AUTO_TEST_SETTLE_S)
@@ -3412,7 +3500,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         average_w = sent_wh / (duration / 3600.0)
-        if average_w < AUTO_TEST_MIN_FOLLOW_RATIO * power_w:
+        if not AUTO_TEST_MIN_FOLLOW_RATIO * power_w <= average_w <= power_w / AUTO_TEST_MIN_FOLLOW_RATIO:
             # The inverter charged at something else - a full battery, the BMS
             # tapering near the top, or another limit. Filing this under the
             # test power would compare two different things.
@@ -3489,6 +3577,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._finalize_auto_test()
                 await self._reset_ac_charge_limit()
             return
+        sun = self.hass.states.get("sun.sun")
+        if sun is None or sun.state != "below_horizon":
+            if self._auto_test_active:
+                self._discard_auto_test("daylight or unknown sun state can contaminate the AC/DC comparison")
+            return
         if self._is_backup_active():
             # No inverter writes in backup mode; the window end restores the limit
             if self._auto_test_active:
@@ -3529,6 +3622,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._finalize_auto_test()
 
         candidate = self._select_next_auto_test_power_w()
+        if self._auto_search_deferred:
+            return
         if candidate is None:
             data = self.get_auto_efficiency_data()
             best_power = data.get("best_power_w")
@@ -3537,7 +3632,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # connection limit may cap it. That cap belongs to this moment,
                 # not to the result, so the user's own value stays on record and
                 # the window end restores it. What carries the result forward is
-                # best_power_w: the planner uses it as its ceiling from now on.
+                # best_power_w: the planner prefers it in subsequent windows.
                 await self._set_ac_charge_limit_w(best_power)
                 self._persist_state()
                 if self.auto_efficient_charge:
@@ -3890,7 +3985,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _calculate_initial_soc(self) -> None:
         """Calculate and store the initial SOC for this charging period."""
-        if self.snow_nights > 0 and not self.is_discharge_mode:
+        if (self.snow_nights > 0 or self._automatic_pv_shortfall_active()) and not self.is_discharge_mode:
             # Snow on the modules: the forecast is wrong by definition, so it
             # is not read. Charge to the user maximum for this window.
             # Discharge windows are left alone (see current_target_soc).
@@ -4706,6 +4801,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Observe lost channels before control, retaining independent stop paths."""
+        self._observe_pv_yield()
         faults = self._update_communication_health()
         if faults and self.is_active and not self._ending and not self._unloading:
             # No raised ceiling may replace a protective zero while the stop

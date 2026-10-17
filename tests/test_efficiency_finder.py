@@ -58,8 +58,11 @@ def test_efficiency_energy_and_minimum_duration_use_real_elapsed_time(finder, mo
     finder._auto_measure_start = begin
     finder._auto_last_sample_time = begin
     _power(mock_hass, 5000, 4500)
+    for seconds in range(30, 301, 30):
+        instant = (begin.astimezone(UTC) + timedelta(seconds=seconds)).astimezone(begin.tzinfo)
+        with patch.object(finder, "_efficiency_now", return_value=instant):
+            finder._accumulate_auto_energy()
     with patch.object(finder, "_efficiency_now", return_value=end):
-        finder._accumulate_auto_energy()
         assert finder._auto_energy_sent_wh == pytest.approx(5000 * 300 / 3600)
         assert finder._auto_measurement_is_complete() is True
 
@@ -74,6 +77,7 @@ CONFIG = {
 
 def _make(hass, config=None) -> InverterChargeNightCoordinator:
     """A coordinator whose efficiency data really round-trips through options."""
+    hass.states.async_set("sun.sun", "below_horizon")
     entry = MagicMock()
     entry.entry_id = "entry_1"
     entry.title = "Test"
@@ -105,6 +109,7 @@ def _meters(hass, sent_kwh, received_kwh):
 @pytest_asyncio.fixture
 async def finder(mock_hass):
     hass = mock_hass
+    hass.states.async_set("sun.sun", "below_horizon")
     hass.states.async_set(AC_LIMIT, "6000", {"unit_of_measurement": "W"})
     _power(hass, 0, 0)
     coordinator = _make(hass)
@@ -125,16 +130,24 @@ def _measure(coordinator, hass, *, power_w, samples, minutes, settle=True):
         coordinator._auto_last_received_w = None
         coordinator._auto_energy_sent_wh = 0.0
         coordinator._auto_energy_received_wh = 0.0
+    _power(hass, *samples[0])
     if settle:
         now = START + timedelta(seconds=AUTO_TEST_SETTLE_S + 1)
         with patch(NOW, return_value=now):
             coordinator._accumulate_auto_energy()  # begins the measurement
-    step = timedelta(minutes=minutes / max(1, len(samples)))
+    import math
+    segment_seconds = minutes * 60 / max(1, len(samples))
+    count = max(1, math.ceil(segment_seconds / 30))
+    previous = samples[0]
     for sent_w, received_w in samples:
-        now = now + step
-        _power(hass, sent_w, received_w)
-        with patch(NOW, return_value=now):
-            coordinator._accumulate_auto_energy()
+        for index in range(1, count + 1):
+            ratio = index / count
+            now += timedelta(seconds=segment_seconds / count)
+            _power(hass, previous[0] + (sent_w - previous[0]) * ratio,
+                   previous[1] + (received_w - previous[1]) * ratio)
+            with patch(NOW, return_value=now):
+                coordinator._accumulate_auto_energy()
+        previous = (sent_w, received_w)
     return now
 
 
@@ -281,7 +294,7 @@ def test_a_test_that_never_settled_is_refused(mock_hass, finder):
 # --- 3. A power that cannot be measured at all -------------------------------
 
 
-def test_a_power_that_never_completes_lowers_the_ceiling(mock_hass, finder, caplog):
+def test_short_measurements_never_lower_the_search_ceiling(mock_hass, finder, caplog):
     """20 kW into a small battery is full before the measurement is over.
 
     Without this the search would ask for the same impossible sample every
@@ -293,10 +306,10 @@ def test_a_power_that_never_completes_lowers_the_ceiling(mock_hass, finder, capl
         with patch(NOW, return_value=end):
             finder._finalize_auto_test()
 
-    data = finder.get_auto_efficiency_data()
+    data = finder.entry.options[CONF_AUTO_EFFICIENCY_DATA]
     assert data["failed"]["15000"] == AUTO_TEST_MAX_ATTEMPTS
-    assert data["range_max_w"] == 14900
-    assert "the battery is full before a measurement completes" in caplog.text
+    assert "range_max_w" not in data
+    assert "only" in caplog.text
 
 
 def test_the_search_skips_a_power_it_cannot_measure(mock_hass, finder):
@@ -304,15 +317,17 @@ def test_the_search_skips_a_power_it_cannot_measure(mock_hass, finder):
     options[CONF_AUTO_EFFICIENCY_DATA] = {
         "history": {},
         "failed": {str(c): AUTO_TEST_MAX_ATTEMPTS for c in (8300, 12700)},
+        "failed_window": finder._efficiency_window_key(),
     }
     finder.entry.options = options
 
     candidate = finder._select_next_auto_test_power_w()
 
-    assert candidate not in (8300, 12700)
+    assert candidate is None
+    assert finder._auto_search_deferred is True
 
 
-def test_an_unmeasurable_power_narrows_the_interval_instead_of_ending_the_search(
+def test_unmeasurable_powers_defer_without_excluding_unmeasured_intervals(
     mock_hass, finder
 ):
     """Ending there would keep a far-from-optimal best for good.
@@ -325,16 +340,17 @@ def test_an_unmeasurable_power_narrows_the_interval_instead_of_ending_the_search
     options[CONF_AUTO_EFFICIENCY_DATA] = {
         "history": {},
         "failed": {str(c): AUTO_TEST_MAX_ATTEMPTS for c in (8300, 12700)},
+        "failed_window": finder._efficiency_window_key(),
     }
     finder.entry.options = options
 
     candidate = finder._select_next_auto_test_power_w()
 
-    assert candidate is not None, "the search must carry on"
-    assert candidate not in (8300, 12700)
+    assert candidate is None
+    assert finder._auto_search_deferred is True
     # ... and the interval really moved, so the next round asks something new
     narrowed = finder.get_auto_efficiency_data()
-    assert narrowed["range_min_w"] > 1000 or narrowed["range_max_w"] < 20000
+    assert "range_min_w" not in narrowed and "range_max_w" not in narrowed
 
 
 def test_the_search_ends_only_when_the_interval_is_exhausted(mock_hass, finder):
@@ -568,3 +584,103 @@ async def test_an_unfinished_measurement_keeps_running(mock_hass, finder):
     assert finder._auto_test_active is True
     assert finder.get_auto_efficiency_data()["history"] == {}
     assert not finder._start_auto_test.called
+
+
+@pytest.mark.parametrize("fault", ["unavailable", "stale", "gap", "backwards"])
+def test_interrupted_power_measurement_never_bridges_missing_energy(finder, mock_hass, fault):
+    _power(mock_hass, 5000, 4500)
+    finder._auto_test_active = True
+    finder._auto_test_power_w = 5000
+    finder._auto_test_start = START - timedelta(minutes=2)
+    with patch(NOW, return_value=START):
+        finder._begin_auto_measurement(START)
+    if fault == "unavailable":
+        mock_hass.states.async_set(SENT, "unavailable")
+    elif fault == "stale":
+        mock_hass.states.get(SENT).last_reported = START - timedelta(minutes=10)
+    next_time = START + timedelta(seconds=90 if fault == "gap" else -10 if fault == "backwards" else 30)
+    with patch(NOW, return_value=next_time):
+        finder._accumulate_auto_energy()
+    assert not finder._auto_test_active
+    assert finder.get_auto_efficiency_data()["history"] == {}
+    assert finder._auto_energy_sent_wh == 0
+    assert finder._auto_last_result["discarded"]
+
+
+def test_measurement_signature_invalidates_changed_sensor_paths(finder):
+    finder._save_auto_efficiency_data({"history": {"5000": .1}, "best_power_w": 5000})
+    assert finder.best_charge_power_w() == 5000
+    finder.config = {**finder.config, CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.replaced"}
+    assert finder.best_charge_power_w() is None
+    assert finder.get_auto_efficiency_data()["history"] == {}
+
+
+def test_transient_failure_is_retried_in_a_future_window(finder):
+    with patch(NOW, return_value=START):
+        for point in (8300, 12700):
+            for _ in range(AUTO_TEST_MAX_ATTEMPTS):
+                finder._record_failed_attempt(point, too_short=False)
+        assert finder._select_next_auto_test_power_w() is None
+        assert finder._auto_search_deferred
+    with patch(NOW, return_value=START + timedelta(days=1)):
+        assert finder._select_next_auto_test_power_w() == 8300
+        assert not finder._auto_search_deferred
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sun_state", [None, "above_horizon"])
+async def test_solar_contamination_defers_search_without_saving_losses(finder, mock_hass, sun_state):
+    finder.auto_efficient_charge = True
+    finder._auto_test_active = True
+    if sun_state is None:
+        mock_hass.states.async_remove("sun.sun")
+    else:
+        mock_hass.states.async_set("sun.sun", sun_state)
+    await finder._handle_auto_charge()
+    assert not finder._auto_test_active
+    assert finder.get_auto_efficiency_data()["history"] == {}
+    mock_hass.services.async_call.assert_not_awaited()
+
+
+def test_legacy_measurements_without_provenance_are_invalidated(mock_hass):
+    entry = MagicMock()
+    entry.entry_id, entry.title, entry.data = "legacy", "Legacy", CONFIG
+    entry.options = {CONF_AUTO_EFFICIENCY_DATA: {"history": {"10000": .01}, "best_power_w": 10000}}
+    InverterChargeNightCoordinator(mock_hass, entry)
+    saved = mock_hass.config_entries.async_update_entry.call_args.kwargs["options"][CONF_AUTO_EFFICIENCY_DATA]
+    assert saved["history"] == {}
+    assert "best_power_w" not in saved
+    assert "measurement_signature" in saved
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "reset"])
+def test_counter_failure_discards_live_measurement_without_pruning(metered, mock_hass, failure):
+    end = _measure(metered, mock_hass, power_w=5000, samples=[(5000, 4500)], minutes=1)
+    if failure == "unavailable":
+        mock_hass.states.async_set(METER_SENT, "unavailable")
+    else:
+        _meters(mock_hass, 0, 0)
+    with patch(NOW, return_value=end + timedelta(seconds=10)):
+        metered._accumulate_auto_energy()
+    assert not metered._auto_test_active
+    assert metered.get_auto_efficiency_data()["history"] == {}
+    assert "counters" in metered._auto_last_result["discarded"]
+
+
+def test_sunrise_at_target_stop_cannot_commit_contaminated_sample(finder, mock_hass):
+    end = _measure(finder, mock_hass, power_w=5000, samples=[(5000, 4500)], minutes=10)
+    mock_hass.states.async_set("sun.sun", "above_horizon")
+    with patch(NOW, return_value=end):
+        finder._finalize_auto_test()
+    assert finder.get_auto_efficiency_data()["history"] == {}
+    assert not finder._auto_test_active
+
+
+def test_missing_configured_counter_never_falls_back_to_guessed_power_energy(metered, mock_hass):
+    mock_hass.states.async_set(METER_SENT, "unavailable")
+    _power(mock_hass, 5000, 4500)
+    metered._auto_test_active = True
+    metered._auto_test_power_w = 5000
+    metered._begin_auto_measurement(START)
+    assert not metered._auto_test_active
+    assert metered._auto_meter_start is None

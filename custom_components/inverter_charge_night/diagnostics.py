@@ -16,6 +16,7 @@ from .coordinator import InverterChargeNightConfigEntry, InverterChargeNightCoor
 REDACT_KEYS = {
     "price_entity",
     "pv_forecast_entity",
+    "pv_energy_today_entity",
     "battery_soc_entity",
     "min_soc_entity",
     "grid_charge_switch",
@@ -58,6 +59,7 @@ async def async_get_config_entry_diagnostics(
             )
         data["state"] = {
             "communication": coordinator.communication_diagnostics(),
+            "pv_yield": coordinator.pv_yield_attributes(),
             "is_active": coordinator.is_active,
             "is_enabled": coordinator.is_enabled,
             "operation_mode": coordinator.operation_mode,

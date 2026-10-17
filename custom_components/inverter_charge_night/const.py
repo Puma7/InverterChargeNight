@@ -65,6 +65,8 @@ CONF_AUTO_EFFICIENCY_DATA = "auto_efficiency_data"
 CONF_RUNTIME_STATE = "runtime_state"  # entry.options key: flags that survive a restart
 CONF_ABSOLUTE_MAX_CHARGE_POWER_W = "absolute_max_charge_power_w"
 CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY = "absolute_max_charge_power_entity"
+CONF_AUTO_PV_SHORTFALL = "auto_pv_shortfall"
+CONF_PV_ENERGY_TODAY_ENTITY = "pv_energy_today_entity"
 CONF_PV_FORECAST_TODAY_ENTITY = "pv_forecast_today_entity"
 CONF_FORCE_DISCHARGE_SWITCH = "force_discharge_switch"
 
@@ -281,6 +283,8 @@ AUTO_EFFICIENCY_KEYS: frozenset[str] = frozenset(
         "range_max_w",
         "failed",
         "bounds_w",
+        "measurement_signature",
+        "failed_window",
         # Per state-of-charge band (plan 015). Missing from this set the whole
         # band store would be dropped on every setup by _migrate_entry_data.
         "bands",

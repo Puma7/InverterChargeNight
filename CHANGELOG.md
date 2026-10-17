@@ -5,6 +5,16 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.0] - 2026-10-17
+
+### Changed
+- Prefer the measured efficient charging power, bounded by remaining house connection capacity. Increase power only when the remaining charging window requires it; stop at target SOC.
+- Efficiency measurements reject interrupted/stale power data, daytime solar contamination and setpoints the inverter does not follow. Transient failures defer a measurement without permanently excluding unmeasured powers. Changing measurement bindings invalidates cached losses.
+- Load and price integration use real elapsed time across daylight saving transitions.
+
+### Added
+- Optional severe PV shortfall detection: compare a morning full-day forecast with fresh daily PV energy after sunset. With at least 5 kWh expected and at most 15% delivered, charge to the configured maximum SOC during the next regular night. Expose the observation and a Home Assistant repair warning; do not claim to identify snow as the cause.
+
 ## [3.8.1] - 2026-09-22
 
 A review of 3.8.0. Nine findings; six held up and are fixed, one only partly, one is a known

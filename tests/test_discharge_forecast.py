@@ -68,6 +68,8 @@ def _make_coordinator(mock_hass, mock_config_entry, mode=MODE_MORNING_DISCHARGE,
         coord._original_absolute_charge_power = None
         coord._original_ac_charge_power = None
         coord._pending_reset = False
+        from custom_components.inverter_charge_night.pv_yield import PVYieldMonitor
+        coord._pv_yield = PVYieldMonitor()
         coord.snow_nights = 0
         coord._reset_retry_unsub = None
         coord._reset_retry_count = 0

@@ -485,6 +485,7 @@ async def test_set_ac_charge_limit_skips_write_without_readable_original(mock_ha
 
 @pytest.mark.asyncio
 async def test_finder_completion_writes_the_best_power_and_keeps_the_original(mock_hass):
+    mock_hass.states.async_set("sun.sun", "below_horizon")
     """The result is written, and the user's own limit stays recoverable.
 
     It used to be dropped ("the best value is meant to stay on the inverter"),
