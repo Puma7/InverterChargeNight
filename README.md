@@ -1338,6 +1338,12 @@ For issues, questions, or contributions:
 
 ## Contributing
 
+For a full local Home Assistant instance with a simulated battery, PV forecasts,
+house/EV loads and an optional Kostal REST/Modbus emulator, see
+[the Home Assistant laboratory](lab/README.md). It includes a Compose setup,
+an experimental Windows development runner and acceptance checks using real
+Home Assistant config flows, entities and services.
+
 Issues and pull requests are welcome. The repository runs its checks in CI and they all have to
 pass:
 

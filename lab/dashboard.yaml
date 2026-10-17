@@ -1,0 +1,278 @@
+title: Inverter Charge Night Labor
+views:
+- title: Nachtladung
+  path: charging
+  cards:
+  - type: markdown
+    content: '## Virtueller Speicher · 35,8 kWh
+
+      Tarif: **23:00–05:00, Oktober–März**, Europe/Berlin.
+
+      Alle Geräte hier sind simuliert. Werte und Tarif sind Beispieldaten.
+
+      **Physics Speed** beschleunigt nur den Akku, nicht die HA-Uhr.
+
+      Für einen Sofortversuch unten „Auf 70 % laden“ drücken.
+
+      '
+  - type: gauge
+    entity: sensor.icn_lab_battery_soc
+    name: Akku-Ladestand
+    min: 0
+    max: 100
+    severity:
+      red: 0
+      yellow: 15
+      green: 40
+  - type: entities
+    title: Wechselrichter und Prognose
+    entities:
+    - sensor.icn_lab_battery_soc
+    - number.icn_lab_min_soc
+    - switch.icn_lab_grid_charge
+    - number.icn_lab_charge_limit
+    - switch.icn_lab_block_discharge
+    - sensor.icn_lab_grid_power
+    - sensor.icn_lab_charge_ac_power
+    - sensor.icn_lab_battery_power
+    - sensor.icn_lab_forecast_today
+    - sensor.icn_lab_forecast_tomorrow
+    show_header_toggle: false
+  - type: history-graph
+    title: Ladestand und Ladeziel am Wechselrichter
+    hours_to_show: 6
+    entities:
+    - sensor.icn_lab_battery_soc
+    - number.icn_lab_min_soc
+  - type: entities
+    title: Simulation einstellen
+    entities:
+    - number.icn_lab_physics_speed
+    - number.icn_lab_set_soc
+    - number.icn_lab_house_load
+    - number.icn_lab_ev_load
+    - number.icn_lab_pv_power
+    - number.icn_lab_set_forecast_today
+    - number.icn_lab_set_forecast_tomorrow
+    - sensor.icn_lab_simulated_hours
+    show_header_toggle: false
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+    - type: button
+      name: Winter · bewölkt
+      icon: mdi:weather-cloudy
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.load_scenario
+        data:
+          scenario: winter_cloudy
+    - type: button
+      name: Winter · sonnig
+      icon: mdi:weather-sunny
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.load_scenario
+        data:
+          scenario: winter_sunny
+    - type: button
+      name: Auto lädt mit 22 kW
+      icon: mdi:car-electric
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.load_scenario
+        data:
+          scenario: ev_charging
+    - type: button
+      name: Auf 70 % laden
+      icon: mdi:battery-charging
+      tap_action:
+        action: perform-action
+        perform_action: inverter_charge_night.charge_to
+        data:
+          target_soc: 70
+          duration:
+            hours: 2
+    - type: button
+      name: Eine Akku-Minute
+      icon: mdi:fast-forward
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.step
+        data:
+          seconds: 60
+    - type: button
+      name: Wechselrichter zurücksetzen
+      icon: mdi:restore
+      tap_action:
+        action: perform-action
+        perform_action: inverter_charge_night.reset_inverter
+  - type: entities
+    title: Fehlerfälle
+    entities:
+    - switch.icn_lab_online
+    - switch.icn_lab_forecast_available
+    - switch.icn_lab_reject_writes
+    - switch.icn_lab_backup
+    - binary_sensor.icn_lab_island_mode
+    - sensor.icn_lab_unserved_power
+    show_header_toggle: false
+  - type: entities
+    title: Energiebilanz
+    entities:
+    - sensor.icn_lab_grid_charge_energy
+    - sensor.icn_lab_stored_energy
+    - sensor.icn_lab_discharged_energy
+    - sensor.icn_lab_house_energy
+    - sensor.icn_lab_grid_import_energy
+    - sensor.icn_lab_grid_export_energy
+    - sensor.icn_lab_pv_energy
+    show_header_toggle: false
+- title: Netz und Verbraucher
+  path: grid
+  cards:
+  - type: markdown
+    content: '## Gemeinsamer Netzanschluss
+
+      **3 × 63 A**, Beispielbudget **80 % = 34,776 kW**. evcc regelt zwei Wallboxen.
+
+      [evcc öffnen](http://127.0.0.1:7070/)
+
+
+      ICN erhält für seine Leistungsgrenze das Maximum aus Gesamtleistung und
+
+      hochgerechneter höchstbelasteter Phase. Die Netzwerte stehen in den Sensorattributen.
+
+      Die manuelle Umschaltbox ist ein eigener Eingang, unabhängig vom Backup-Signal.
+
+      Spannungsgrenzen 207–253 V sind Modellannahmen. Schutzgerätekennlinien sind
+      nicht modelliert.
+
+      '
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+    - type: button
+      name: Zwei Autos mit je 22 kW
+      icon: mdi:ev-station
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.load_scenario
+        data:
+          scenario: two_ev_22kw
+    - type: button
+      name: Kochen, Wärmepumpe und zwei Autos
+      icon: mdi:stove
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.load_scenario
+        data:
+          scenario: cooking_and_heat_pump
+    - type: button
+      name: Manuelle Insel-Umschaltung
+      icon: mdi:transmission-tower-off
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.load_scenario
+        data:
+          scenario: manual_transfer
+    - type: button
+      name: Netz fällt aus
+      icon: mdi:power-plug-off
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.load_scenario
+        data:
+          scenario: grid_outage
+    - type: button
+      name: Überspannung L1
+      icon: mdi:flash-alert
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.load_scenario
+        data:
+          scenario: overvoltage
+    - type: button
+      name: Unterspannung L2
+      icon: mdi:flash-alert-outline
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.load_scenario
+        data:
+          scenario: undervoltage
+    - type: button
+      name: Schnee trotz guter Prognose
+      icon: mdi:snowflake
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.load_scenario
+        data:
+          scenario: pv_snow
+    - type: button
+      name: Ein PV-String fällt aus
+      icon: mdi:solar-panel
+      tap_action:
+        action: perform-action
+        perform_action: icn_simulator.load_scenario
+        data:
+          scenario: pv_string_failure
+  - type: entities
+    title: Netz und Umschaltbox
+    entities:
+    - sensor.icn_lab_grid_power
+    - sensor.icn_lab_grid_guard_power
+    - binary_sensor.icn_lab_overcurrent
+    - binary_sensor.icn_lab_charge_inhibit
+    - binary_sensor.icn_lab_voltage_ok
+    - switch.icn_lab_public_grid_available
+    - switch.icn_lab_manual_transfer_island
+    - switch.icn_lab_backup
+    - switch.icn_lab_simulated_protection_trip
+    - switch.icn_lab_grid_meter_online
+    - number.icn_lab_voltage_l1
+    - number.icn_lab_voltage_l2
+    - number.icn_lab_voltage_l3
+    - sensor.icn_lab_unserved_power
+    show_header_toggle: false
+  - type: entities
+    title: Zwei Wallboxen, von evcc geregelt
+    entities:
+    - sensor.icn_lab_ev_power
+    - switch.icn_lab_ev_1_connected
+    - switch.icn_lab_ev_2_connected
+    - switch.icn_lab_ev_1_enabled
+    - switch.icn_lab_ev_2_enabled
+    - number.icn_lab_ev_1_current_limit
+    - number.icn_lab_ev_2_current_limit
+    - number.icn_lab_ev_1_demand
+    - number.icn_lab_ev_2_demand
+    - switch.icn_lab_ev_1_stalled
+    - switch.icn_lab_ev_2_stalled
+    show_header_toggle: false
+  - type: entities
+    title: Haushaltsverbraucher
+    entities:
+    - sensor.icn_lab_total_house_load
+    - number.icn_lab_house_load
+    - number.icn_lab_heat_pump
+    - number.icn_lab_cooker
+    - number.icn_lab_oven
+    - number.icn_lab_microwave
+    - number.icn_lab_washer
+    - number.icn_lab_dryer
+    - number.icn_lab_dishwasher
+    - number.icn_lab_extra_l1
+    show_header_toggle: false
+  - type: entities
+    title: PV-Strings und Schnee
+    entities:
+    - sensor.icn_lab_effective_pv
+    - number.icn_lab_pv_string_1
+    - number.icn_lab_pv_string_2
+    - switch.icn_lab_pv_string_1_available
+    - switch.icn_lab_pv_string_2_available
+    - number.icn_lab_snow_cover
+    - sensor.icn_lab_forecast_tomorrow
+    show_header_toggle: false

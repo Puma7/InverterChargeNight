@@ -1,0 +1,10 @@
+{
+  "domain": "icn_simulator",
+  "name": "Inverter Charge Night Laboratory",
+  "version": "0.1.0",
+  "documentation": "https://github.com/Puma7/InverterChargeNight",
+  "codeowners": ["@Puma7"],
+  "dependencies": ["number", "switch", "sensor", "binary_sensor"],
+  "iot_class": "calculated",
+  "requirements": []
+}
