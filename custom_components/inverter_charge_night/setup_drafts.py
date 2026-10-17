@@ -29,7 +29,10 @@ class SetupDrafts:
         cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
         return {key: value for key, value in raw.items()
                 if isinstance(value, dict) and isinstance(value.get("updated"), str)
-                and value["updated"] >= cutoff and isinstance(value.get("data"), dict)}
+                and value["updated"] >= cutoff and isinstance(value.get("data"), dict)
+                and isinstance(value.get("baseline", {}), dict)
+                and isinstance(value.get("explicit_features", []), list)
+                and all(isinstance(field, str) for field in value.get("explicit_features", []))}
 
     async def list(self, scope: str) -> dict[str, Any]:
         async with self._lock:

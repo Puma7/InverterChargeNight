@@ -1536,6 +1536,8 @@ class OptionsFlowHandler(GuidedSetupMixin, config_entries.OptionsFlow):
             # Cleanup yields to update listeners, which may persist newer
             # teardown/runtime options. HA writes this payload synchronously
             # after the step returns; capture it only after the final await.
+            # Without a draft neither this path nor HA's options finalization
+            # suspends: a queued listener persists after finalization instead.
             result["data"] = dict(self._config_entry.options)
         return result
 

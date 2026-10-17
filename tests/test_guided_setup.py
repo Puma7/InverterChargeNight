@@ -435,3 +435,52 @@ async def test_disabled_efficiency_measurements_can_be_cleared_without_reenablin
     assert CONF_CHARGE_POWER_RECEIVED_ENTITY not in flow._merged_data()
     assert flow._merged_data()[CONF_AUTO_EFFICIENT_CHARGE] is False
     assert (await flow.async_step_finish())["type"] == "create_entry"
+
+
+@pytest.mark.parametrize("metadata", [{"baseline": None}, {"baseline": []},
+    {"explicit_features": None}, {"explicit_features": 7}, {"explicit_features": [None]},
+    {"explicit_features": ["auto_efficient_charge", {}]}])
+@pytest.mark.asyncio
+async def test_malformed_draft_metadata_is_rejected_before_resume(mock_hass, draft_store, metadata):
+    store = get_drafts(mock_hass)
+    await store.save("broken", "new", {"name": "Broken"}, {})
+    await store.save("valid", "new", {"name": "Valid"}, {})
+    draft_store[f"{DOMAIN}.setup_drafts"]["broken"].update(metadata)
+    assert set(await store.list("new")) == {"valid"}
+
+
+@pytest.mark.asyncio
+async def test_legacy_options_finalize_before_scheduled_listener_persists_new_runtime(guide, mock_hass, mock_config_entry):
+    from tests.test_config_flow import RECONFIGURE_ENTITIES_INPUT, TIME_SOC_INPUT, POWER_INPUT, ADVANCED_INPUT
+    flow = cf.OptionsFlowHandler(mock_config_entry); flow.hass = mock_hass
+    flow.handler = mock_config_entry.entry_id
+    mock_hass.config_entries.async_get_known_entry.return_value = mock_config_entry
+    mock_config_entry.options = {CONF_RUNTIME_STATE: {"active": True}}
+    await flow.async_step_init(RECONFIGURE_ENTITIES_INPUT)
+    await flow.async_step_time_soc(TIME_SOC_INPUT)
+    await flow.async_step_power(POWER_INPUT)
+    await flow.async_step_advanced(ADVANCED_INPUT)
+    assert flow._draft_id is None
+    order, listeners = [], []
+    async def persist_teardown():
+        await asyncio.sleep(0)
+        mock_config_entry.options = {CONF_RUNTIME_STATE: {"active": False}}
+        order.append("listener")
+    def update(entry, **kwargs):
+        if "data" in kwargs:
+            mock_config_entry.data = kwargs["data"]
+            listeners.append(asyncio.create_task(persist_teardown()))
+        if "options" in kwargs:
+            mock_config_entry.options = dict(kwargs["options"])
+            order.append("HA options finalization")
+        return True
+    mock_hass.config_entries.async_update_entry.side_effect = update
+    # Exercise the complete real HA step-to-finalization path, including any
+    # framework work between the handler returning and options being written.
+    manager = config_entries.OptionsFlowManager(mock_hass)
+    flow.flow_id = "legacy-options-regression"
+    manager._async_add_flow_progress(flow)
+    await manager._async_handle_step(flow, "finish", None)
+    await asyncio.gather(*listeners)
+    assert order == ["HA options finalization", "listener"]
+    assert mock_config_entry.options[CONF_RUNTIME_STATE] == {"active": False}
