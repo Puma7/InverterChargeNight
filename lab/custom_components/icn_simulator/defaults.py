@@ -36,25 +36,48 @@ def planner_defaults(capacity=35.8):
 
 
 async def configure_planner(hass, data):
-    """Use public flow APIs; never manufacture .storage/config entries."""
-    from custom_components.inverter_charge_night.config_flow import (
-        STEP_USER_KEYS, STEP_TIME_SOC_KEYS, STEP_POWER_KEYS, STEP_ADVANCED_KEYS,
-    )
+    """Use the production guided pages through Home Assistant's public flow API."""
+    from custom_components.inverter_charge_night.config_flow import _GUIDED_GROUPS
     if any(entry.data.get("min_soc_entity") == data["min_soc_entity"]
            for entry in hass.config_entries.async_entries("inverter_charge_night")):
         return None
     result = await hass.config_entries.flow.async_init(
         "inverter_charge_night", context={"source": "user"})
-    for step_id, keys in [("user", STEP_USER_KEYS), ("time_soc", STEP_TIME_SOC_KEYS),
-                          ("power", STEP_POWER_KEYS), ("advanced", STEP_ADVANCED_KEYS)]:
-        if result.get("step_id") != step_id:
-            raise RuntimeError(f"Unexpected wizard result: {result}")
+
+    async def choose(step):
+        nonlocal result
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"next_step_id": step})
+
+    for group, keys in _GUIDED_GROUPS.items():
+        if group == "grid" and "grid_max_continuous_w" not in data:
+            continue
+        if group == "grid_fuse" and ("main_fuse_a" not in data or "grid_max_continuous_w" in data):
+            continue
+        if group == "pv_shortfall" and not data.get("auto_pv_shortfall"):
+            continue
+        if group == "efficiency" and not all(data.get(key) for key in (
+                "charge_power_entity", "charge_power_sent_entity", "charge_power_received_entity")):
+            continue
+        if group not in ("basics", "schedule"):
+            await choose("features")
+            if group in ("planning", "evening", "season", "pv_shortfall", "prices"):
+                await choose("planning_features")
+            elif group in ("meters", "backup", "hardware", "grid_fuse", "runtime"):
+                await choose("advanced_features")
+        await choose(group)
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {key: data[key] for key in keys if key in data})
-        if result.get("errors"):
-            raise RuntimeError(f"Lab wizard validation failed: {result['errors']}")
-    if result.get("step_id") == "review":
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "finish"})
+        if result.get("errors") or result.get("step_id") != "setup":
+            raise RuntimeError(f"Lab guided setup failed at {group}: {result}")
+    if not data.get("auto_efficient_charge"):
+        await choose("features")
+        await choose("advanced_features")
+        await choose("disable_features")
+        await choose("efficiency_off")
+        await choose("setup")
+    await choose("summary")
+    await choose("finish")
     if result["type"] != "create_entry":
         raise RuntimeError(f"Lab setup did not create an entry: {result}")
     return result["result"]

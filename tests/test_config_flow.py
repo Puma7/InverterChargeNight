@@ -136,15 +136,15 @@ def test_validate_date_optional():
 
 
 @pytest.mark.asyncio
-async def test_config_flow_shows_first_step(mock_hass):
+async def test_config_flow_shows_first_step(mock_hass, entity_registry, draft_store):
     flow = _config_flow(mock_hass)
 
     result = await flow.async_step_user()
 
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "user"
-    assert result["errors"] == {}
-    assert _defaults(result)[CONF_OPERATION_MODE] == MODE_NIGHT_CHARGE
+    assert result["type"] == FlowResultType.MENU
+    assert result["step_id"] == "setup"
+    assert result["menu_options"] == ["basics", "schedule", "features", "summary", "save_draft"]
+    assert flow._data[CONF_OPERATION_MODE] == MODE_NIGHT_CHARGE
 
 
 @pytest.mark.asyncio
@@ -253,7 +253,7 @@ async def test_config_flow_reports_errors_in_their_own_step(mock_hass, entity_re
 
 
 @pytest.mark.asyncio
-async def test_reconfigure_flow_updates_entry(mock_hass, mock_config_entry, entity_registry):
+async def test_reconfigure_flow_updates_entry(mock_hass, mock_config_entry, entity_registry, draft_store):
     mock_config_entry.data = {
         **mock_config_entry.data,
         CONF_BACKUP_MODE_ENTITY: "binary_sensor.backup",
@@ -265,8 +265,9 @@ async def test_reconfigure_flow_updates_entry(mock_hass, mock_config_entry, enti
     )
 
     result = await flow.async_step_reconfigure()
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "reconfigure"
+    assert result["type"] == FlowResultType.MENU
+    assert result["step_id"] == "setup"
+    result = await flow.async_step_basics()
     assert _defaults(result)[CONF_MIN_SOC_ENTITY] == "number.kostal_min_soc"
     assert _defaults(result)[CONF_BATTERY_CAPACITY] == 10.0
 
@@ -388,15 +389,16 @@ async def test_options_flow_requires_auto_entities(mock_hass, mock_config_entry,
 
 
 @pytest.mark.asyncio
-async def test_options_flow_success_keeps_options(mock_hass, mock_config_entry, entity_registry):
+async def test_options_flow_success_keeps_options(mock_hass, mock_config_entry, entity_registry, draft_store):
     mock_config_entry.options = {CONF_AUTO_EFFICIENCY_DATA: {"history": [1, 2]}}
     flow = OptionsFlowHandler(mock_config_entry)
     mock_hass.config = SimpleNamespace(time_zone="Europe/Berlin")
     flow.hass = mock_hass
 
     result = await flow.async_step_init()
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "init"
+    assert result["type"] == FlowResultType.MENU
+    assert result["step_id"] == "setup"
+    result = await flow.async_step_basics()
     assert _defaults(result)[CONF_PV_FORECAST_ENTITY] == "sensor.pv_forecast"
 
     result = await flow.async_step_init(ENTITIES_INPUT)
@@ -594,8 +596,9 @@ def test_every_step_labels_exactly_its_fields():
         assert set(step["data"]) == expected, (section, step_id)
         assert set(step["data_description"]) == expected, (section, step_id)
         assert step["title"] and step["description"], (section, step_id)
-    assert set(strings["config"]["step"]) == {step for section, step in STEP_SCHEMAS if section == "config"} | {"review"}
-    assert set(strings["options"]["step"]) == {step for section, step in STEP_SCHEMAS if section == "options"} | {"review"}
+    guided = set(config_flow._GUIDED_GROUPS) | {"setup", "features", "planning_features", "advanced_features", "summary", "resume_draft", "disable_features"}
+    for section in ("config", "options"):
+        assert set(strings[section]["step"]) == {step for ns, step in STEP_SCHEMAS if ns == section} | {"review"} | guided
 
 
 def test_every_config_key_is_collected_by_exactly_one_step():

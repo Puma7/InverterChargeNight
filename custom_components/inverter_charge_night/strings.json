@@ -331,6 +331,339 @@
           "reconfigure_power": "Edit power and efficiency search",
           "reconfigure_advanced": "Edit advanced settings"
         }
+      },
+      "basics": {
+        "title": "1 · Inverter and battery",
+        "description": "Select the four entities and enter the battery’s **gross capacity**. Matching entities are suggested when exactly one KostalKore inverter is found; verify them before saving. Choose a forecast integration’s sensor, not an ICN output. Only the charging window remains after this page. **The inverter is not changed yet.**\n\nEntity IDs containing “kostal_lab” are examples; the prefix depends on your device name.",
+        "data": {
+          "name": "Name for this setup",
+          "min_soc_entity": "Set inverter minimum battery SOC",
+          "grid_charge_switch": "Enable inverter grid charging",
+          "battery_soc_entity": "Measure current battery SOC",
+          "battery_capacity": "Gross battery capacity",
+          "pv_forecast_entity": "PV energy forecast for tomorrow"
+        },
+        "data_description": {
+          "name": "Any descriptive name, for example “House battery”. Does not rename inverter entities.",
+          "min_soc_entity": "KostalKore: “Battery min SoC”, e.g. number.kostal_lab_battery_min_soc. Writable minimum SOC in %, not measured battery charge.",
+          "grid_charge_switch": "KostalKore: “Battery Manual Charge”, e.g. switch.kostal_lab_battery_manual_charge. Enables charging from the public grid.",
+          "battery_soc_entity": "KostalKore: “Battery SoC”, e.g. sensor.kostal_lab_battery_soc. Measured battery state of charge in %.",
+          "battery_capacity": "Total nameplate capacity in kWh, not usable capacity. Example: 35.8 kWh gross at an 8% floor gives 32.936 kWh usable.",
+          "pv_forecast_entity": "Tomorrow’s full-day PV forecast in kWh, e.g. sensor.solcast_pv_forecast_forecast_tomorrow (depends on forecast integration). KostalKore provides measurements, not weather forecasts. Do not select an ICN evening outlook."
+        }
+      },
+      "schedule": {
+        "title": "2 · Charging window and state of charge",
+        "description": "Times use Home Assistant’s time zone **{timezone}**, including daylight saving time. The window can cross midnight, for example 23:01–04:58. Minimum and maximum bound the planned target; maximum does not mean charging to full every night. Saving returns to the overview.",
+        "data": {
+          "start_time": "Cheap charging window starts",
+          "end_time": "Cheap charging window ends",
+          "user_min_soc": "Lower bound for planned charging target",
+          "user_max_soc": "Upper bound for planned charging target"
+        },
+        "data_description": {
+          "start_time": "Local time when ordinary grid charging is allowed to begin.",
+          "end_time": "Local time when charging must end. For an overnight window, this is on the following day.",
+          "user_min_soc": "The planned target cannot be lower than this percentage. Respect the battery’s technical minimum, e.g. 8%.",
+          "user_max_soc": "The planned target cannot exceed this percentage. Use 100% for full capacity or your preferred lower ceiling."
+        }
+      },
+      "charging": {
+        "title": "Limit charging power",
+        "description": "Configure this when charging power is adjustable. Without a power control, the inverter determines charging power. These watt limits alone do not limit house import; configure the house connection limit too. KostalKore: Battery max charge limit (Modbus), **not Active Power Set Point in %**.\n\nEntity IDs containing “kostal_lab” are examples; the prefix depends on your device name.",
+        "data": {
+          "charge_power_entity": "Set inverter charging power (watt control)",
+          "min_charge_power_w": "Lowest usable charging power",
+          "max_charge_power_w": "Highest permitted charging power"
+        },
+        "data_description": {
+          "charge_power_entity": "KostalKore: “Battery max charge limit (Modbus)”, e.g. number.kostal_lab_battery_max_charge_limit_modbus. Verified battery power ceiling in watts; availability depends on model. Active Power Set Point in % is unsuitable. The additional absolute ceiling is a different feature.",
+          "min_charge_power_w": "Lowest stable and useful charging power. Charging pauses when remaining house headroom is lower.",
+          "max_charge_power_w": "Upper bound for planning and efficiency search. Must not exceed inverter, battery and installation ratings. House connection limits apply additionally."
+        }
+      },
+      "efficiency": {
+        "title": "Set up efficiency search",
+        "description": "Saving enables automatic search. All five fields are required. Compare AC charging input with DC power received by the battery. KostalKore: **Grid to Battery Power** and **Battery Power**; **AC Power is inverter output and is unsuitable**. Verify measurement direction and boundaries. Search runs during suitable night charging, not immediately. Disable it under other features.\n\nEntity IDs containing “kostal_lab” are examples; the prefix depends on your device name.",
+        "data": {
+          "charge_power_entity": "Set inverter charging power (watt control)",
+          "charge_power_sent_entity": "AC input power used only for battery charging",
+          "charge_power_received_entity": "DC charging power received by battery",
+          "min_charge_power_w": "Lowest usable charging power",
+          "max_charge_power_w": "Highest permitted charging power"
+        },
+        "data_description": {
+          "charge_power_entity": "KostalKore: “Battery max charge limit (Modbus)”, e.g. number.kostal_lab_battery_max_charge_limit_modbus. Verified battery power ceiling in watts; availability depends on model. Active Power Set Point in % is unsuitable. The additional absolute ceiling is a different feature.",
+          "charge_power_sent_entity": "KostalKore: “Grid to Battery Power”, e.g. sensor.kostal_lab_grid_to_battery_power. Only AC used to charge the battery, not house import or inverter “AC Power”. PV must not add charging input during measurement.",
+          "charge_power_received_entity": "KostalKore: “Battery Power”, e.g. sensor.kostal_lab_battery_power. DC charging power; the sign is handled. Must be separate from the AC input measurement.",
+          "min_charge_power_w": "Lowest stable and useful charging power. Charging pauses when remaining house headroom is lower.",
+          "max_charge_power_w": "Upper bound for planning and efficiency search. Must not exceed inverter, battery and installation ratings. House connection limits apply additionally."
+        }
+      },
+      "meters": {
+        "title": "Energy meters for efficiency measurements",
+        "description": "Only for separate AC and DC battery charging energy meters. Supply both in kWh or leave both empty. Whole-house and PV daily energy meters are not battery charging meters.",
+        "data": {
+          "charge_energy_sent_entity": "Energy meter: drawn for charging",
+          "charge_energy_received_entity": "Energy meter: stored in the battery"
+        },
+        "data_description": {
+          "charge_energy_sent_entity": "Optional but better: a kWh meter of the energy the charger takes in. With both meters the efficiency search measures the energy that really flowed instead of integrating a power reading.",
+          "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above."
+        }
+      },
+      "grid": {
+        "title": "Limit house connection import",
+        "description": "All four fields are required. Measure **total house grid import**, including cars, house and battery; import must be positive. Enter the permitted continuous import budget. Example: 40,000 W − 33,000 W cars − 1,000 W house = at most 6,000 W for battery charging, less safety headroom. A watt power control is required. Software does not replace electrical protection.",
+        "data": {
+          "grid_import_entity": "Measure total house grid import",
+          "grid_max_continuous_w": "Permitted continuous house grid import",
+          "grid_headroom_w": "Safety headroom below import budget",
+          "charge_power_entity": "Set inverter charging power (watt control)"
+        },
+        "data_description": {
+          "grid_import_entity": "Total import measured at the house grid connection, positive in W or kW. Include battery and cars. The KostalKore meter and sign depend on model and must be verified.",
+          "grid_max_continuous_w": "Continuous import budget in W shared by every consumer. Use the limit determined for the installation.",
+          "grid_headroom_w": "Additional unused headroom in W, e.g. 500 W. Less available capacity reduces battery charging; below minimum charging power it pauses.",
+          "charge_power_entity": "KostalKore: “Battery max charge limit (Modbus)”, e.g. number.kostal_lab_battery_max_charge_limit_modbus. Verified battery power ceiling in watts; availability depends on model. Active Power Set Point in % is unsuitable. The additional absolute ceiling is a different feature."
+        }
+      },
+      "planning": {
+        "title": "PV forecast and morning reserve",
+        "description": "Optional planning adjustments. PV headroom leaves space for tomorrow’s generation. Bridge mode also accounts for house use between the charging window ending and PV meeting demand. Supply a house consumption energy meter or a realistic average load. Defaults are estimates.",
+        "data": {
+          "planner_mode": "Planner Mode",
+          "forecast_error_margin": "Forecast Error Margin",
+          "default_min_soc": "Normal discharge floor outside charging window",
+          "pv_forecast_today_entity": "PV energy forecast for today",
+          "house_load_entity": "House Consumption Energy Meter",
+          "avg_house_load_kw": "Average House Load",
+          "pv_crossover_delay_min": "PV Crossover Delay",
+          "bridge_reserve_kwh": "Bridge Reserve"
+        },
+        "data_description": {
+          "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
+          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
+          "default_min_soc": "Normal inverter discharge floor when ICN holds no charging or evening reserve. For new setups initially equal to the target minimum.",
+          "pv_forecast_today_entity": "Today’s full-day energy forecast in kWh. Improves matching after midnight. Different from measured generation today.",
+          "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
+          "avg_house_load_kw": "Average house load in kW, used by the Bridge planner when no consumption meter is configured or no statistics are available yet (default 0.5).",
+          "pv_crossover_delay_min": "Minutes after sunrise until the PV output exceeds the house load (default 90). The Bridge planner charges enough to bridge the window end until then.",
+          "bridge_reserve_kwh": "Safety reserve in kWh added to the bridge energy (default 0.5)."
+        }
+      },
+      "evening": {
+        "title": "Reserve for expensive evening hours",
+        "description": "Use this to reserve energy for a fixed expensive period. Set both times or leave both empty to disable the evening reserve. Consumption history estimates demand. Without a discharge-block switch, the minimum SOC is used.",
+        "data": {
+          "high_price_start": "High-price period, start",
+          "high_price_end": "High-price period, end",
+          "high_price_margin_pct": "Allowance on the evening's consumption",
+          "discharge_block_mode": "Discharge Block",
+          "discharge_block_switch": "Block Discharge Switch"
+        },
+        "data_description": {
+          "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
+          "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value.",
+          "discharge_block_mode": "Blocks the battery from discharging into the house during the window, so stored energy is kept for the day. A switch of the inverter is preferred; if there is none, the integration raises the min SOC instead and resets it at the window end.",
+          "discharge_block_switch": "Optional: switch entity of the inverter that blocks battery discharge (Kostal calls it \"battery discharge lock\"). Preferred over every other way; turned on at the window start and put back to its previous state at the window end."
+        }
+      },
+      "season": {
+        "title": "Active season",
+        "description": "Leave both dates empty for year-round operation. For winter, use 1 October through 31 March with yearly repeat enabled. Seasons crossing New Year are supported.",
+        "data": {
+          "active_start_date": "Active Start Date",
+          "active_end_date": "Active End Date",
+          "active_range_yearly": "Repeat the date range every year"
+        },
+        "data_description": {
+          "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_range_yearly": "On (recommended): only the day and month of the two dates above count, so the range comes back every year - a tariff season stands in a price sheet and holds until further notice. Off: the years count too, and the integration stops for good once the end date has passed. A range that crosses the new year (start after end, e.g. 1 November to 31 March) is always read as a season, because read absolutely it could not contain a single day."
+        }
+      },
+      "backup": {
+        "title": "Detect island operation",
+        "description": "Select a reliable island/backup status entity. Active or unavailable status prevents grid charging. Lab example: binary_sensor.icn_lab_charge_inhibit. Actual KostalKore availability and values depend on inverter model.",
+        "data": {
+          "backup_mode_entity": "Backup / island mode entity",
+          "backup_mode_states": "Backup mode states"
+        },
+        "data_description": {
+          "backup_mode_entity": "Optional but important: an entity that says whether the house is running on the battery instead of the grid. While it does, the integration changes nothing on the inverter - there is nothing to charge from, and a raised min SOC would stop the battery from supplying the house. A switch, a binary sensor, or a state sensor (see below). With a manual transfer switch, an input_boolean you flip yourself works just as well.",
+          "backup_mode_states": "Only needed when the entity above is a plain sensor rather than a switch: the states that mean the house is running on the battery, comma separated. A Kostal inverter reports “ESB” (Ersatzstrombetrieb) in its inverter state. Leave empty for a switch or binary sensor - on means backup there."
+        }
+      },
+      "pv_shortfall": {
+        "title": "Account for very low PV yield",
+        "description": "Saving enables this feature. Both sensors are required: today’s full-day forecast and actual PV energy generated today in kWh. A severe deficit after sunset raises the next night’s target to your maximum and produces a notice. This detects poor yield, not its cause.",
+        "data": {
+          "pv_forecast_today_entity": "PV energy forecast for today",
+          "pv_energy_today_entity": "Actual PV energy today"
+        },
+        "data_description": {
+          "pv_forecast_today_entity": "Today’s full-day energy forecast in kWh. Improves matching after midnight. Different from measured generation today.",
+          "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today."
+        }
+      },
+      "prices": {
+        "title": "Account for electricity prices",
+        "description": "Defaults are sufficient for ordinary operation. Enter all three fixed tariffs together. With a dynamic price sensor, only the feed-in tariff is additionally needed. Electrical limits always take precedence.",
+        "data": {
+          "night_price_ct": "Night Price",
+          "day_price_ct": "Day Price",
+          "feed_in_price_ct": "Feed-in Price",
+          "price_entity": "Electricity price entity",
+          "price_unit": "What the prices are in",
+          "price_surcharge_ct": "Surcharge on the exchange price",
+          "price_surcharge_window_ct": "Surcharge inside the window"
+        },
+        "data_description": {
+          "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom. With a price entity configured below, the entity supplies night and day and only the feed-in price is needed — these two then only serve as a fallback for whenever the entity cannot price both the window and the morning after it — before the next day's prices are published, during an ad-hoc window, and always in the morning-discharge mode, which has no morning to bridge.",
+          "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the night price; with a price entity, both may be left empty).",
+          "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh. No price source publishes one, so this is always entered by hand — and with a price entity it is the only one of the three you need.",
+          "price_entity": "Optional: a sensor whose attributes carry today's and tomorrow's hourly prices — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them. The integration does not need to know which one it is; it recognises the series by its shape and reports what it matched on the price sensor. Leave empty to keep using the three fixed prices above.",
+          "price_unit": "Leave on 'detect automatically' unless the entity carries no unit, or carries one that is wrong. Nothing is ever guessed here: with no unit from the entity, the attribute name or this field, the price entity is refused and the fixed prices are used — a wrong guess would be a factor of a hundred.",
+          "price_surcharge_ct": "What your bill adds on top of what the entity shows — grid fee, levies, taxes, VAT. Tibber already shows the full price, so leave this at 0. aWATTar, EPEX Spot, Nordpool and ENTSO-e usually show the exchange price alone; in Germany the difference is typically 20–25 ct/kWh. Getting this wrong does not look wrong — 6 ct and 32 ct are both plausible numbers, and the evening reserve comes out the other way round on the wrong one.",
+          "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock."
+        }
+      },
+      "hardware": {
+        "title": "Additional hardware limits",
+        "description": "Only configure verified hardware functions. The additional absolute ceiling needs both a value and its own, separate control entity. A direct house import budget in watts takes precedence over the fuse calculation.",
+        "data": {
+          "absolute_max_charge_power_entity": "Additional hardware ceiling: separate watt control",
+          "absolute_max_charge_power_w": "Additional hardware ceiling: power value",
+          "discharge_limit_entity": "Discharge Power Limit Entity"
+        },
+        "data_description": {
+          "absolute_max_charge_power_entity": "Usually leave empty. Only for an additional independent hardware ceiling; never reuse the ordinary charging control.",
+          "absolute_max_charge_power_w": "Usually leave empty. Supply only together with its separate hardware control.",
+          "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end."
+        }
+      },
+      "runtime": {
+        "title": "Other settings",
+        "description": "Settings for special installations and operating modes. Keep night charging selected for ordinary use. Morning discharge requires a dedicated force-discharge switch. Only change efficiency and curtailment settings when their meaning for your system is known.",
+        "data": {
+          "update_interval": "Update Interval",
+          "command_delay": "Command Delay",
+          "charge_efficiency": "Charge Efficiency",
+          "discharge_efficiency": "Discharge efficiency",
+          "curtailment_feed_in_entity": "Feed-in power entity",
+          "curtailment_limit_w": "Feed-in cap",
+          "operation_mode": "Operation Mode",
+          "force_discharge_switch": "Force discharge switch (required for Morning discharge)"
+        },
+        "data_description": {
+          "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
+          "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
+          "charge_efficiency": "Grid-to-battery charge efficiency (0.5-1.0, default 0.9), used to plan the charge power for the remaining window time.",
+          "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
+          "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
+          "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode."
+        }
+      },
+      "setup": {
+        "title": "Setup",
+        "description": "**ICN 3.10 · Setup overview**\n\nStart with **1. Inverter and battery** and **2. Charging window**. Then review and apply. Basic fields present: **{core_count}/6**.\n\nEach submitted page is saved as a draft and returns here. Reopen any section to go back and edit it. Save and close to pause; resume from the same setup later. Drafts are kept for 30 days. Unsubmitted browser inputs are not saved. Only Apply changes the running configuration.\n\nHome Assistant time zone: **{timezone}**.",
+        "menu_options": {
+          "basics": "1 · Inverter and battery",
+          "schedule": "2 · Charging window and state of charge",
+          "features": "Optional features",
+          "summary": "Review and finish",
+          "save_draft": "Save draft and close",
+          "resume_draft": "Resume saved draft"
+        }
+      },
+      "features": {
+        "title": "Setup",
+        "description": "No feature is required to complete basic setup. Configure only features whose entities you can identify.\n\n✓ configured, — off: efficiency search **{efficiency}** · house connection **{grid}**. Draft changes take effect only when finally applied.",
+        "menu_options": {
+          "charging": "Limit charging power",
+          "grid": "Limit house connection import",
+          "efficiency": "Set up efficiency search",
+          "planning_features": "Forecast, reserves and season",
+          "advanced_features": "Other features and hardware",
+          "setup": "Back to overview"
+        }
+      },
+      "planning_features": {
+        "title": "Setup",
+        "description": "Configure optional planning features individually or return to the overview.",
+        "menu_options": {
+          "planning": "PV forecast and morning reserve",
+          "evening": "Reserve for expensive evening hours",
+          "season": "Active season",
+          "pv_shortfall": "Account for very low PV yield",
+          "pv_shortfall_off": "Disable poor PV yield detection",
+          "prices": "Account for electricity prices",
+          "setup": "Back to overview"
+        }
+      },
+      "advanced_features": {
+        "title": "Setup",
+        "description": "Less common settings. Disabling removes that feature from the draft; apply to make it effective.",
+        "menu_options": {
+          "meters": "Energy meters for efficiency measurements",
+          "backup": "Detect island operation",
+          "hardware": "Additional hardware limits",
+          "runtime": "Other settings",
+          "setup": "Back to overview",
+          "grid_fuse": "Calculate import budget from fuse rating",
+          "disable_features": "Disable features"
+        }
+      },
+      "summary": {
+        "title": "Setup",
+        "description": "**{name}**\n\nCharging window **{start}–{end}**, time zone **{timezone}**.\n\nBattery **{capacity} kWh gross**, normal discharge floor **{floor}%**, calculated usable energy above it **{usable} kWh**.\n\nSelected controls and measurements:\n{controls}\n\nVerify the correct inverter. Apply settings activates the configuration. Returning to the overview retains the draft.",
+        "menu_options": {
+          "finish": "Apply settings now",
+          "setup": "Back to overview"
+        }
+      },
+      "resume_draft": {
+        "title": "Resume saved draft",
+        "description": "Select a saved draft. Timestamps are UTC. Unapplied settings do not control the inverter.",
+        "data": {
+          "draft": "Saved draft"
+        }
+      },
+      "grid_fuse": {
+        "title": "Calculate import budget from fuse rating",
+        "description": "Alternative to a direct watt budget. All fields are required. Budget is phases × voltage × fuse current × continuous-load percentage. Saving removes a prior direct watt budget. Use ratings determined for your installation.",
+        "data": {
+          "grid_import_entity": "Measure total house grid import",
+          "charge_power_entity": "Set inverter charging power (watt control)",
+          "main_fuse_a": "Main Fuse per Phase",
+          "grid_phases": "Phases of the House Connection",
+          "grid_voltage_v": "Phase Voltage",
+          "grid_continuous_pct": "Continuous Load Share",
+          "grid_headroom_w": "Safety headroom below import budget"
+        },
+        "data_description": {
+          "grid_import_entity": "Total import measured at the house grid connection, positive in W or kW. Include battery and cars. The KostalKore meter and sign depend on model and must be verified.",
+          "charge_power_entity": "KostalKore: “Battery max charge limit (Modbus)”, e.g. number.kostal_lab_battery_max_charge_limit_modbus. Verified battery power ceiling in watts; availability depends on model. Active Power Set Point in % is unsuitable. The additional absolute ceiling is a different feature.",
+          "main_fuse_a": "Main fuse of the house connection, per phase. 63 A on three phases is about 43 kW of nominal power. Needed unless you enter the maximum continuous power below.",
+          "grid_phases": "1 for a single-phase connection, 3 for a three-phase one.",
+          "grid_voltage_v": "Phase voltage of your grid, 230 V in Germany. Used together with the fuse size to work out the nominal power.",
+          "grid_continuous_pct": "Share of the nominal power that may be drawn for hours on end. 80 % leaves room for the heating of meter and terminal contacts; pick a lower value for an older meter.",
+          "grid_headroom_w": "Additional unused headroom in W, e.g. 500 W. Less available capacity reduces battery charging; below minimum charging power it pauses."
+        }
+      },
+      "disable_features": {
+        "title": "Disable features",
+        "description": "Changes the draft first. Apply settings to change the running configuration.",
+        "menu_options": {
+          "efficiency_off": "Disable efficiency search",
+          "grid_off": "Remove house connection limit",
+          "pv_shortfall_off": "Disable poor PV yield detection",
+          "setup": "Back to overview"
+        }
       }
     },
     "error": {
@@ -357,12 +690,16 @@
       "power_control_requires_watts": "This control must use W or kW. Percent, current and voltage controls are unsuitable here.",
       "separate_power_measurements": "AC input and DC output require separate measurement sensors.",
       "separate_power_controls": "Additional AC/DC ceiling and normal charging ceiling must use separate controls.",
-      "requires_charge_input_power": "Select KORE Grid to Battery Power; total AC Power does not measure battery grid charging."
+      "requires_charge_input_power": "Select KORE Grid to Battery Power; total AC Power does not measure battery grid charging.",
+      "draft_not_found": "This draft is no longer available. Select again.",
+      "draft_save_failed": "Saving failed. Retry; this step is not yet saved durably."
     },
     "abort": {
       "already_configured": "Integration is already configured",
       "already_in_progress": "Configuration flow is already in progress",
-      "reconfigure_successful": "Configuration updated"
+      "reconfigure_successful": "Configuration updated",
+      "draft_saved": "Draft saved. Reopen this setup and choose Resume saved draft. The inverter was not changed.",
+      "draft_save_failed": "The draft could not be saved. Check storage space and the Home Assistant log. The inverter was not changed."
     }
   },
   "options": {
@@ -535,6 +872,339 @@
           "advanced": "Edit advanced settings",
           "finish": "Save reviewed settings"
         }
+      },
+      "basics": {
+        "title": "1 · Inverter and battery",
+        "description": "Select the four entities and enter the battery’s **gross capacity**. Matching entities are suggested when exactly one KostalKore inverter is found; verify them before saving. Choose a forecast integration’s sensor, not an ICN output. Only the charging window remains after this page. **The inverter is not changed yet.**\n\nEntity IDs containing “kostal_lab” are examples; the prefix depends on your device name.",
+        "data": {
+          "name": "Name for this setup",
+          "min_soc_entity": "Set inverter minimum battery SOC",
+          "grid_charge_switch": "Enable inverter grid charging",
+          "battery_soc_entity": "Measure current battery SOC",
+          "battery_capacity": "Gross battery capacity",
+          "pv_forecast_entity": "PV energy forecast for tomorrow"
+        },
+        "data_description": {
+          "name": "Any descriptive name, for example “House battery”. Does not rename inverter entities.",
+          "min_soc_entity": "KostalKore: “Battery min SoC”, e.g. number.kostal_lab_battery_min_soc. Writable minimum SOC in %, not measured battery charge.",
+          "grid_charge_switch": "KostalKore: “Battery Manual Charge”, e.g. switch.kostal_lab_battery_manual_charge. Enables charging from the public grid.",
+          "battery_soc_entity": "KostalKore: “Battery SoC”, e.g. sensor.kostal_lab_battery_soc. Measured battery state of charge in %.",
+          "battery_capacity": "Total nameplate capacity in kWh, not usable capacity. Example: 35.8 kWh gross at an 8% floor gives 32.936 kWh usable.",
+          "pv_forecast_entity": "Tomorrow’s full-day PV forecast in kWh, e.g. sensor.solcast_pv_forecast_forecast_tomorrow (depends on forecast integration). KostalKore provides measurements, not weather forecasts. Do not select an ICN evening outlook."
+        }
+      },
+      "schedule": {
+        "title": "2 · Charging window and state of charge",
+        "description": "Times use Home Assistant’s time zone **{timezone}**, including daylight saving time. The window can cross midnight, for example 23:01–04:58. Minimum and maximum bound the planned target; maximum does not mean charging to full every night. Saving returns to the overview.",
+        "data": {
+          "start_time": "Cheap charging window starts",
+          "end_time": "Cheap charging window ends",
+          "user_min_soc": "Lower bound for planned charging target",
+          "user_max_soc": "Upper bound for planned charging target"
+        },
+        "data_description": {
+          "start_time": "Local time when ordinary grid charging is allowed to begin.",
+          "end_time": "Local time when charging must end. For an overnight window, this is on the following day.",
+          "user_min_soc": "The planned target cannot be lower than this percentage. Respect the battery’s technical minimum, e.g. 8%.",
+          "user_max_soc": "The planned target cannot exceed this percentage. Use 100% for full capacity or your preferred lower ceiling."
+        }
+      },
+      "charging": {
+        "title": "Limit charging power",
+        "description": "Configure this when charging power is adjustable. Without a power control, the inverter determines charging power. These watt limits alone do not limit house import; configure the house connection limit too. KostalKore: Battery max charge limit (Modbus), **not Active Power Set Point in %**.\n\nEntity IDs containing “kostal_lab” are examples; the prefix depends on your device name.",
+        "data": {
+          "charge_power_entity": "Set inverter charging power (watt control)",
+          "min_charge_power_w": "Lowest usable charging power",
+          "max_charge_power_w": "Highest permitted charging power"
+        },
+        "data_description": {
+          "charge_power_entity": "KostalKore: “Battery max charge limit (Modbus)”, e.g. number.kostal_lab_battery_max_charge_limit_modbus. Verified battery power ceiling in watts; availability depends on model. Active Power Set Point in % is unsuitable. The additional absolute ceiling is a different feature.",
+          "min_charge_power_w": "Lowest stable and useful charging power. Charging pauses when remaining house headroom is lower.",
+          "max_charge_power_w": "Upper bound for planning and efficiency search. Must not exceed inverter, battery and installation ratings. House connection limits apply additionally."
+        }
+      },
+      "efficiency": {
+        "title": "Set up efficiency search",
+        "description": "Saving enables automatic search. All five fields are required. Compare AC charging input with DC power received by the battery. KostalKore: **Grid to Battery Power** and **Battery Power**; **AC Power is inverter output and is unsuitable**. Verify measurement direction and boundaries. Search runs during suitable night charging, not immediately. Disable it under other features.\n\nEntity IDs containing “kostal_lab” are examples; the prefix depends on your device name.",
+        "data": {
+          "charge_power_entity": "Set inverter charging power (watt control)",
+          "charge_power_sent_entity": "AC input power used only for battery charging",
+          "charge_power_received_entity": "DC charging power received by battery",
+          "min_charge_power_w": "Lowest usable charging power",
+          "max_charge_power_w": "Highest permitted charging power"
+        },
+        "data_description": {
+          "charge_power_entity": "KostalKore: “Battery max charge limit (Modbus)”, e.g. number.kostal_lab_battery_max_charge_limit_modbus. Verified battery power ceiling in watts; availability depends on model. Active Power Set Point in % is unsuitable. The additional absolute ceiling is a different feature.",
+          "charge_power_sent_entity": "KostalKore: “Grid to Battery Power”, e.g. sensor.kostal_lab_grid_to_battery_power. Only AC used to charge the battery, not house import or inverter “AC Power”. PV must not add charging input during measurement.",
+          "charge_power_received_entity": "KostalKore: “Battery Power”, e.g. sensor.kostal_lab_battery_power. DC charging power; the sign is handled. Must be separate from the AC input measurement.",
+          "min_charge_power_w": "Lowest stable and useful charging power. Charging pauses when remaining house headroom is lower.",
+          "max_charge_power_w": "Upper bound for planning and efficiency search. Must not exceed inverter, battery and installation ratings. House connection limits apply additionally."
+        }
+      },
+      "meters": {
+        "title": "Energy meters for efficiency measurements",
+        "description": "Only for separate AC and DC battery charging energy meters. Supply both in kWh or leave both empty. Whole-house and PV daily energy meters are not battery charging meters.",
+        "data": {
+          "charge_energy_sent_entity": "Energy meter: drawn for charging",
+          "charge_energy_received_entity": "Energy meter: stored in the battery"
+        },
+        "data_description": {
+          "charge_energy_sent_entity": "Optional but better: a kWh meter of the energy the charger takes in. With both meters the efficiency search measures the energy that really flowed instead of integrating a power reading.",
+          "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above."
+        }
+      },
+      "grid": {
+        "title": "Limit house connection import",
+        "description": "All four fields are required. Measure **total house grid import**, including cars, house and battery; import must be positive. Enter the permitted continuous import budget. Example: 40,000 W − 33,000 W cars − 1,000 W house = at most 6,000 W for battery charging, less safety headroom. A watt power control is required. Software does not replace electrical protection.",
+        "data": {
+          "grid_import_entity": "Measure total house grid import",
+          "grid_max_continuous_w": "Permitted continuous house grid import",
+          "grid_headroom_w": "Safety headroom below import budget",
+          "charge_power_entity": "Set inverter charging power (watt control)"
+        },
+        "data_description": {
+          "grid_import_entity": "Total import measured at the house grid connection, positive in W or kW. Include battery and cars. The KostalKore meter and sign depend on model and must be verified.",
+          "grid_max_continuous_w": "Continuous import budget in W shared by every consumer. Use the limit determined for the installation.",
+          "grid_headroom_w": "Additional unused headroom in W, e.g. 500 W. Less available capacity reduces battery charging; below minimum charging power it pauses.",
+          "charge_power_entity": "KostalKore: “Battery max charge limit (Modbus)”, e.g. number.kostal_lab_battery_max_charge_limit_modbus. Verified battery power ceiling in watts; availability depends on model. Active Power Set Point in % is unsuitable. The additional absolute ceiling is a different feature."
+        }
+      },
+      "planning": {
+        "title": "PV forecast and morning reserve",
+        "description": "Optional planning adjustments. PV headroom leaves space for tomorrow’s generation. Bridge mode also accounts for house use between the charging window ending and PV meeting demand. Supply a house consumption energy meter or a realistic average load. Defaults are estimates.",
+        "data": {
+          "planner_mode": "Planner Mode",
+          "forecast_error_margin": "Forecast Error Margin",
+          "default_min_soc": "Normal discharge floor outside charging window",
+          "pv_forecast_today_entity": "PV energy forecast for today",
+          "house_load_entity": "House Consumption Energy Meter",
+          "avg_house_load_kw": "Average House Load",
+          "pv_crossover_delay_min": "PV Crossover Delay",
+          "bridge_reserve_kwh": "Bridge Reserve"
+        },
+        "data_description": {
+          "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
+          "forecast_error_margin": "Safety margin for forecast uncertainty (%). Added to forecast before calculation.",
+          "default_min_soc": "Normal inverter discharge floor when ICN holds no charging or evening reserve. For new setups initially equal to the target minimum.",
+          "pv_forecast_today_entity": "Today’s full-day energy forecast in kWh. Improves matching after midnight. Different from measured generation today.",
+          "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
+          "avg_house_load_kw": "Average house load in kW, used by the Bridge planner when no consumption meter is configured or no statistics are available yet (default 0.5).",
+          "pv_crossover_delay_min": "Minutes after sunrise until the PV output exceeds the house load (default 90). The Bridge planner charges enough to bridge the window end until then.",
+          "bridge_reserve_kwh": "Safety reserve in kWh added to the bridge energy (default 0.5)."
+        }
+      },
+      "evening": {
+        "title": "Reserve for expensive evening hours",
+        "description": "Use this to reserve energy for a fixed expensive period. Set both times or leave both empty to disable the evening reserve. Consumption history estimates demand. Without a discharge-block switch, the minimum SOC is used.",
+        "data": {
+          "high_price_start": "High-price period, start",
+          "high_price_end": "High-price period, end",
+          "high_price_margin_pct": "Allowance on the evening's consumption",
+          "discharge_block_mode": "Discharge Block",
+          "discharge_block_switch": "Block Discharge Switch"
+        },
+        "data_description": {
+          "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
+          "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value.",
+          "discharge_block_mode": "Blocks the battery from discharging into the house during the window, so stored energy is kept for the day. A switch of the inverter is preferred; if there is none, the integration raises the min SOC instead and resets it at the window end.",
+          "discharge_block_switch": "Optional: switch entity of the inverter that blocks battery discharge (Kostal calls it \"battery discharge lock\"). Preferred over every other way; turned on at the window start and put back to its previous state at the window end."
+        }
+      },
+      "season": {
+        "title": "Active season",
+        "description": "Leave both dates empty for year-round operation. For winter, use 1 October through 31 March with yearly repeat enabled. Seasons crossing New Year are supported.",
+        "data": {
+          "active_start_date": "Active Start Date",
+          "active_end_date": "Active End Date",
+          "active_range_yearly": "Repeat the date range every year"
+        },
+        "data_description": {
+          "active_start_date": "Optional: only run between this date and end date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_end_date": "Optional: only run between start date and this date (YYYY-MM-DD). Leave empty to always allow.",
+          "active_range_yearly": "On (recommended): only the day and month of the two dates above count, so the range comes back every year - a tariff season stands in a price sheet and holds until further notice. Off: the years count too, and the integration stops for good once the end date has passed. A range that crosses the new year (start after end, e.g. 1 November to 31 March) is always read as a season, because read absolutely it could not contain a single day."
+        }
+      },
+      "backup": {
+        "title": "Detect island operation",
+        "description": "Select a reliable island/backup status entity. Active or unavailable status prevents grid charging. Lab example: binary_sensor.icn_lab_charge_inhibit. Actual KostalKore availability and values depend on inverter model.",
+        "data": {
+          "backup_mode_entity": "Backup / island mode entity",
+          "backup_mode_states": "Backup mode states"
+        },
+        "data_description": {
+          "backup_mode_entity": "Optional but important: an entity that says whether the house is running on the battery instead of the grid. While it does, the integration changes nothing on the inverter - there is nothing to charge from, and a raised min SOC would stop the battery from supplying the house. A switch, a binary sensor, or a state sensor (see below). With a manual transfer switch, an input_boolean you flip yourself works just as well.",
+          "backup_mode_states": "Only needed when the entity above is a plain sensor rather than a switch: the states that mean the house is running on the battery, comma separated. A Kostal inverter reports “ESB” (Ersatzstrombetrieb) in its inverter state. Leave empty for a switch or binary sensor - on means backup there."
+        }
+      },
+      "pv_shortfall": {
+        "title": "Account for very low PV yield",
+        "description": "Saving enables this feature. Both sensors are required: today’s full-day forecast and actual PV energy generated today in kWh. A severe deficit after sunset raises the next night’s target to your maximum and produces a notice. This detects poor yield, not its cause.",
+        "data": {
+          "pv_forecast_today_entity": "PV energy forecast for today",
+          "pv_energy_today_entity": "Actual PV energy today"
+        },
+        "data_description": {
+          "pv_forecast_today_entity": "Today’s full-day energy forecast in kWh. Improves matching after midnight. Different from measured generation today.",
+          "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today."
+        }
+      },
+      "prices": {
+        "title": "Account for electricity prices",
+        "description": "Defaults are sufficient for ordinary operation. Enter all three fixed tariffs together. With a dynamic price sensor, only the feed-in tariff is additionally needed. Electrical limits always take precedence.",
+        "data": {
+          "night_price_ct": "Night Price",
+          "day_price_ct": "Day Price",
+          "feed_in_price_ct": "Feed-in Price",
+          "price_entity": "Electricity price entity",
+          "price_unit": "What the prices are in",
+          "price_surcharge_ct": "Surcharge on the exchange price",
+          "price_surcharge_window_ct": "Surcharge inside the window"
+        },
+        "data_description": {
+          "night_price_ct": "Optional: electricity price during the window in ct/kWh. Set all three prices or none; the Bridge planner uses them to decide a conflict between bridging and PV headroom. With a price entity configured below, the entity supplies night and day and only the feed-in price is needed — these two then only serve as a fallback for whenever the entity cannot price both the window and the morning after it — before the next day's prices are published, during an ad-hoc window, and always in the morning-discharge mode, which has no morning to bridge.",
+          "day_price_ct": "Optional: electricity price outside the window in ct/kWh (set together with the night price; with a price entity, both may be left empty).",
+          "feed_in_price_ct": "Optional: feed-in tariff in ct/kWh. No price source publishes one, so this is always entered by hand — and with a price entity it is the only one of the three you need.",
+          "price_entity": "Optional: a sensor whose attributes carry today's and tomorrow's hourly prices — Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and anything shaped like them. The integration does not need to know which one it is; it recognises the series by its shape and reports what it matched on the price sensor. Leave empty to keep using the three fixed prices above.",
+          "price_unit": "Leave on 'detect automatically' unless the entity carries no unit, or carries one that is wrong. Nothing is ever guessed here: with no unit from the entity, the attribute name or this field, the price entity is refused and the fixed prices are used — a wrong guess would be a factor of a hundred.",
+          "price_surcharge_ct": "What your bill adds on top of what the entity shows — grid fee, levies, taxes, VAT. Tibber already shows the full price, so leave this at 0. aWATTar, EPEX Spot, Nordpool and ENTSO-e usually show the exchange price alone; in Germany the difference is typically 20–25 ct/kWh. Getting this wrong does not look wrong — 6 ct and 32 ct are both plausible numbers, and the evening reserve comes out the other way round on the wrong one.",
+          "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock."
+        }
+      },
+      "hardware": {
+        "title": "Additional hardware limits",
+        "description": "Only configure verified hardware functions. The additional absolute ceiling needs both a value and its own, separate control entity. A direct house import budget in watts takes precedence over the fuse calculation.",
+        "data": {
+          "absolute_max_charge_power_entity": "Additional hardware ceiling: separate watt control",
+          "absolute_max_charge_power_w": "Additional hardware ceiling: power value",
+          "discharge_limit_entity": "Discharge Power Limit Entity"
+        },
+        "data_description": {
+          "absolute_max_charge_power_entity": "Usually leave empty. Only for an additional independent hardware ceiling; never reuse the ordinary charging control.",
+          "absolute_max_charge_power_w": "Usually leave empty. Supply only together with its separate hardware control.",
+          "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end."
+        }
+      },
+      "runtime": {
+        "title": "Other settings",
+        "description": "Settings for special installations and operating modes. Keep night charging selected for ordinary use. Morning discharge requires a dedicated force-discharge switch. Only change efficiency and curtailment settings when their meaning for your system is known.",
+        "data": {
+          "update_interval": "Update Interval",
+          "command_delay": "Command Delay",
+          "charge_efficiency": "Charge Efficiency",
+          "discharge_efficiency": "Discharge efficiency",
+          "curtailment_feed_in_entity": "Feed-in power entity",
+          "curtailment_limit_w": "Feed-in cap",
+          "operation_mode": "Operation Mode",
+          "force_discharge_switch": "Force discharge switch (required for Morning discharge)"
+        },
+        "data_description": {
+          "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
+          "command_delay": "Delay between min SOC and grid charge commands (seconds, default 0.1)",
+          "charge_efficiency": "Grid-to-battery charge efficiency (0.5-1.0, default 0.9), used to plan the charge power for the remaining window time.",
+          "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
+          "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
+          "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode."
+        }
+      },
+      "setup": {
+        "title": "Setup",
+        "description": "**ICN 3.10 · Setup overview**\n\nStart with **1. Inverter and battery** and **2. Charging window**. Then review and apply. Basic fields present: **{core_count}/6**.\n\nEach submitted page is saved as a draft and returns here. Reopen any section to go back and edit it. Save and close to pause; resume from the same setup later. Drafts are kept for 30 days. Unsubmitted browser inputs are not saved. Only Apply changes the running configuration.\n\nHome Assistant time zone: **{timezone}**.",
+        "menu_options": {
+          "basics": "1 · Inverter and battery",
+          "schedule": "2 · Charging window and state of charge",
+          "features": "Optional features",
+          "summary": "Review and finish",
+          "save_draft": "Save draft and close",
+          "resume_draft": "Resume saved draft"
+        }
+      },
+      "features": {
+        "title": "Setup",
+        "description": "No feature is required to complete basic setup. Configure only features whose entities you can identify.\n\n✓ configured, — off: efficiency search **{efficiency}** · house connection **{grid}**. Draft changes take effect only when finally applied.",
+        "menu_options": {
+          "charging": "Limit charging power",
+          "grid": "Limit house connection import",
+          "efficiency": "Set up efficiency search",
+          "planning_features": "Forecast, reserves and season",
+          "advanced_features": "Other features and hardware",
+          "setup": "Back to overview"
+        }
+      },
+      "planning_features": {
+        "title": "Setup",
+        "description": "Configure optional planning features individually or return to the overview.",
+        "menu_options": {
+          "planning": "PV forecast and morning reserve",
+          "evening": "Reserve for expensive evening hours",
+          "season": "Active season",
+          "pv_shortfall": "Account for very low PV yield",
+          "pv_shortfall_off": "Disable poor PV yield detection",
+          "prices": "Account for electricity prices",
+          "setup": "Back to overview"
+        }
+      },
+      "advanced_features": {
+        "title": "Setup",
+        "description": "Less common settings. Disabling removes that feature from the draft; apply to make it effective.",
+        "menu_options": {
+          "meters": "Energy meters for efficiency measurements",
+          "backup": "Detect island operation",
+          "hardware": "Additional hardware limits",
+          "runtime": "Other settings",
+          "setup": "Back to overview",
+          "grid_fuse": "Calculate import budget from fuse rating",
+          "disable_features": "Disable features"
+        }
+      },
+      "summary": {
+        "title": "Setup",
+        "description": "**{name}**\n\nCharging window **{start}–{end}**, time zone **{timezone}**.\n\nBattery **{capacity} kWh gross**, normal discharge floor **{floor}%**, calculated usable energy above it **{usable} kWh**.\n\nSelected controls and measurements:\n{controls}\n\nVerify the correct inverter. Apply settings activates the configuration. Returning to the overview retains the draft.",
+        "menu_options": {
+          "finish": "Apply settings now",
+          "setup": "Back to overview"
+        }
+      },
+      "resume_draft": {
+        "title": "Resume saved draft",
+        "description": "Select a saved draft. Timestamps are UTC. Unapplied settings do not control the inverter.",
+        "data": {
+          "draft": "Saved draft"
+        }
+      },
+      "grid_fuse": {
+        "title": "Calculate import budget from fuse rating",
+        "description": "Alternative to a direct watt budget. All fields are required. Budget is phases × voltage × fuse current × continuous-load percentage. Saving removes a prior direct watt budget. Use ratings determined for your installation.",
+        "data": {
+          "grid_import_entity": "Measure total house grid import",
+          "charge_power_entity": "Set inverter charging power (watt control)",
+          "main_fuse_a": "Main Fuse per Phase",
+          "grid_phases": "Phases of the House Connection",
+          "grid_voltage_v": "Phase Voltage",
+          "grid_continuous_pct": "Continuous Load Share",
+          "grid_headroom_w": "Safety headroom below import budget"
+        },
+        "data_description": {
+          "grid_import_entity": "Total import measured at the house grid connection, positive in W or kW. Include battery and cars. The KostalKore meter and sign depend on model and must be verified.",
+          "charge_power_entity": "KostalKore: “Battery max charge limit (Modbus)”, e.g. number.kostal_lab_battery_max_charge_limit_modbus. Verified battery power ceiling in watts; availability depends on model. Active Power Set Point in % is unsuitable. The additional absolute ceiling is a different feature.",
+          "main_fuse_a": "Main fuse of the house connection, per phase. 63 A on three phases is about 43 kW of nominal power. Needed unless you enter the maximum continuous power below.",
+          "grid_phases": "1 for a single-phase connection, 3 for a three-phase one.",
+          "grid_voltage_v": "Phase voltage of your grid, 230 V in Germany. Used together with the fuse size to work out the nominal power.",
+          "grid_continuous_pct": "Share of the nominal power that may be drawn for hours on end. 80 % leaves room for the heating of meter and terminal contacts; pick a lower value for an older meter.",
+          "grid_headroom_w": "Additional unused headroom in W, e.g. 500 W. Less available capacity reduces battery charging; below minimum charging power it pauses."
+        }
+      },
+      "disable_features": {
+        "title": "Disable features",
+        "description": "Changes the draft first. Apply settings to change the running configuration.",
+        "menu_options": {
+          "efficiency_off": "Disable efficiency search",
+          "grid_off": "Remove house connection limit",
+          "pv_shortfall_off": "Disable poor PV yield detection",
+          "setup": "Back to overview"
+        }
       }
     },
     "error": {
@@ -561,7 +1231,13 @@
       "power_control_requires_watts": "This control must use W or kW. Percent, current and voltage controls are unsuitable here.",
       "separate_power_measurements": "AC input and DC output require separate measurement sensors.",
       "separate_power_controls": "Additional AC/DC ceiling and normal charging ceiling must use separate controls.",
-      "requires_charge_input_power": "Select KORE Grid to Battery Power; total AC Power does not measure battery grid charging."
+      "requires_charge_input_power": "Select KORE Grid to Battery Power; total AC Power does not measure battery grid charging.",
+      "draft_not_found": "This draft is no longer available. Select again.",
+      "draft_save_failed": "Saving failed. Retry; this step is not yet saved durably."
+    },
+    "abort": {
+      "draft_saved": "Draft saved. Reopen this setup and choose Resume saved draft. The inverter was not changed.",
+      "draft_save_failed": "The draft could not be saved. Check storage space and the Home Assistant log. The inverter was not changed."
     }
   },
   "selector": {

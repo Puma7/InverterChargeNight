@@ -94,7 +94,7 @@ day will do.
   where it left off, and a restart *after* the window still cleans up.
 - **Manual overrides** — a target SOC override, a `Snow nights` counter that charges to the
   maximum while the modules are covered, and a `Skip next` switch for one-off exceptions.
-- **Full UI configuration** — a four-step wizard for setup, reconfigure and options, English and
+- **Full UI configuration** — a guided overview with short forms for setup, reconfigure and options, English and
   German, with diagnostics and repair issues.
 
 ## Requirements
@@ -172,92 +172,67 @@ To find entities:
    - Search for "Inverter Charge Night"
    - Click on it
 
-2. **Walk through the four wizard steps**. The same four steps are used for the initial setup,
-   for **Reconfigure** and for **Configure** (options), so every setting can be changed later.
+2. **Complete the two basic pages** from the setup overview:
+   - **Inverter and battery:** name, writable minimum-SOC number, grid-charge switch,
+     measured battery SOC, tomorrow’s PV forecast and **gross** battery capacity in kWh.
+   - **Charging window and state of charge:** start/end in Home Assistant’s configured
+     time zone, and the lower/upper bounds for the planned charging target. Windows may
+     cross midnight. For example, 35.8 kWh gross with an 8% floor leaves 32.936 kWh usable.
 
-   **Step 1 -- Entities**
-   - **Name**: Name for this integration instance
-   - **Operation Mode**: `Night Charge` (charge from the grid overnight) or
-     `Morning discharge (experimental)` (empty the battery into the morning peak on a summer day;
-     needs a force discharge switch — see [Morning discharge](docs/morning-discharge.md))
-   - **Minimum SOC entity**: The number entity that controls min SOC. It also identifies
-     this instance, so each inverter can only be configured once.
-   - **Grid charge switch**: The switch that enables or disables charging from the grid
-   - **PV Forecast Entity (tomorrow)**: Forecast for the next day, used when the window runs
-     before midnight
-   - **PV Forecast Today Entity** (optional): Today's forecast, used when the window runs after
-     midnight; falls back to the entity above when unset. The evening outlook (and with it the
-     evening rescue) and the curtailment outlook need it: they never read tomorrow's forecast as
-     today's, and stay empty without it
-   - **Battery SOC Sensor**: The sensor showing the current SOC in percent
-   - **Battery Capacity**: Total capacity in kWh (e.g., `35.8`)
+3. **Review and apply.** No partial config entry controls the inverter while setup is in
+   progress. Optional features can be configured now or later under **Configure**.
 
-   **Step 2 -- Time & SOC**
-   - **Start Time** / **End Time**: The window; it may span midnight (e.g., `22:00` to `05:59`)
-   - **Minimum SOC** / **Maximum SOC**: Hard bounds; every target is clamped into this range
-   - **Default Min SOC to restore at end time**: Used when the original value could not be read
-     (8 % on a Kostal, for example)
-   - **Forecast Error Margin**: Safety buffer added to the forecast before the calculation
-   - **Planner Mode**: `Headroom` (default) or `Bridge`, see [Planner Modes](#planner-modes)
-   - **High-price period, start / end** (optional): A period in which buying from the grid costs
-     *more* than usual — a §14a peak period, or the evening block of a dynamic tariff. See
-     [The evening reserve](#the-evening-reserve). Set both or neither.
-   - **Allowance on the evening's consumption** (default `0` %): Surcharge on the learned load
-     profile, which is an average — an evening with the oven on lies above it
+Each confirmed page is saved as a private Home Assistant draft and returns to the overview.
+Reopen a page to go back and edit it; other sections keep their values. **Save draft and close**
+pauses setup; reopen the same initial setup, Configure, or Reconfigure dialog and select
+**Resume saved draft**. Drafts survive a restart and are kept for 30 days. Text that has not
+been submitted from a browser form cannot be saved. Home Assistant’s standard form API does
+not offer an arbitrary extra Back button; the overview provides direct navigation between
+confirmed pages. Only **Apply settings now** creates or changes the active configuration.
 
-   **Step 3 -- Charge Power**
-   - **Min Charge Power** / **Max Charge Power**: The band the planner and the efficiency finder
-     may use (W)
-   - **Battery Charge Max (AC+DC)** and its **Entity** (optional): An absolute charge power limit
-     applied during AC charging and reset afterwards. Both belong together: setting one without
-     the other is rejected.
-   - **Battery Max AC Charge Limit Entity** (optional): The number entity the planned charge
-     power and the efficiency finder write to
-   - **Charge power drawn / arriving in the battery** (optional): The two power sensors the
-     efficiency search compares to measure the charging loss. "Drawn" is the AC side, "arriving"
-     the battery side
-   - **Energy meters drawn / stored** (optional): kWh meters of the same two quantities. They
-     make the measurement exact and are preferred over the power sensors when both are set
-   - **Efficiency search**: Enables the search; requires the AC limit entity and both power
-     sensors. See [Efficiency search](#efficiency-search)
-   - **Force Discharge Switch** (optional): Switch that forces discharge to the grid, used by
-     `Morning Discharge`
-   - **Discharge Power Limit Entity** (optional): Number entity set to 0 at the window start so
-     the house runs from the grid; the previous value is restored at the window end
+**KostalKore mapping examples** (the `kostal_lab` prefix depends on your device name):
 
-   **Step 4 -- Advanced**
-   - **Update Interval**: How often the coordinator refreshes (default `900` s)
-   - **Command Delay**: Delay between the min SOC and the grid charge command (default `0.1` s)
-   - **Active Start Date** / **Active End Date** (optional): Restrict the integration to a season
-   - **Repeat the date range every year** (default on): only the day and month of the two dates
-     count, so the season comes back every year. Switch it off to mean the years literally — the
-     integration then stops for good once the end date has passed, and says so in the repairs
-     page. A range crossing the new year (1 November to 31 March) is always read as a season.
-   - **Backup Mode Entity** (optional): While it is active, nothing is written to the inverter
-   - **House Consumption Energy Meter** (optional): Cumulative kWh meter; the Bridge planner
-     learns an hourly load profile from the last 14 days of recorder statistics
-   - **Average House Load**: Fallback load in kW when no meter is configured (default `0.5`)
-   - **PV Crossover Delay**: Minutes after sunrise until PV output exceeds the house load
-     (default `90`)
-   - **Bridge Reserve**: Safety reserve in kWh added to the bridge energy (default `0.5`)
-   - **Charge Efficiency**: Grid-to-battery efficiency used to plan the charge power
-     (default `0.9`)
-   - **Discharge Efficiency**: Battery-to-house efficiency (default `0.95`). The load profile and
-     the forecast are measured on the house side; what leaves the battery loses a few percent on
-     the way through the inverter. The bridge energy and the evening reserve are sized with it,
-     so the battery holds what the house will actually get
-   - **Night / Day / Feed-in Price** (optional): Tariffs in ct/kWh. Set all three or none; the
-     Bridge planner uses them to decide a conflict between bridging and PV headroom. With a
-     **price entity** configured, the entity supplies night and day, and the **feed-in price on its
-     own** is a complete setup -- no price source publishes a feed-in tariff, so that one is always
-     entered by hand. Night and day then only serve as a fallback for whenever the entity cannot
-     price both the window and the morning after it: before the next day's prices are published,
-     during an ad-hoc window, and always in the morning-discharge mode, which has no morning to
-     bridge.
+| ICN input | KostalKore entity name | Example entity ID |
+|---|---|---|
+| Set minimum SOC | Battery min SoC | `number.kostal_lab_battery_min_soc` |
+| Enable grid charging | Battery Manual Charge | `switch.kostal_lab_battery_manual_charge` |
+| Measure battery SOC | Battery SoC | `sensor.kostal_lab_battery_soc` |
+| Set battery charging power | Battery max charge limit (Modbus) | `number.kostal_lab_battery_max_charge_limit_modbus` |
+| AC input for battery charging | Grid to Battery Power | `sensor.kostal_lab_grid_to_battery_power` |
+| DC received by battery | Battery Power | `sensor.kostal_lab_battery_power` |
 
-3. **Submit the configuration**
-   - Review all settings
-   - Click **Submit**
+The first three bindings are suggested when there is one unambiguous KostalKore inverter.
+Suggestions follow registry identity, including renamed entities. Check the selected inverter
+before applying. Disabled entities and ambiguous multiple-inverter setups are not guessed.
+PV forecasts come from a forecast integration; ICN’s evening outlook is not a forecast input.
+**Active Power Set Point in percent is not a battery watt control. AC Power is inverter
+output, not the AC input required for efficiency search.** Hardware capabilities vary by model.
+
+**Optional features** have their own pages:
+
+- **Charging power:** normal charging limits and a verified watt control.
+- **House connection:** total grid import, permitted continuous watt budget, safety headroom
+  and the power control are required together. Alternatively calculate a budget from the
+  fuse rating under additional hardware settings. A direct watt budget takes precedence;
+  saving the fuse-based page removes the direct budget.
+- **Efficiency search:** requires the watt control, separate AC/DC power measurements and
+  a permitted power range. Saving this page enables search; results are learned during
+  suitable night charging. Separate energy counters are optional but must be configured as a pair.
+- **Forecast, reserves and season:** select PV headroom or morning bridging, today’s forecast,
+  house consumption history/average load, evening high-price reserve, seasonal dates,
+  low-PV-yield detection and tariffs individually.
+- **Other settings:** island-mode input, extra hardware ceilings, refresh interval and
+  command delay. Extra AC/DC ceilings need both a separate control and a value; ordinary
+  setups can leave them empty. Experimental morning discharge needs a force-discharge switch.
+
+Initial setup, Configure and Reconfigure use the same overview. Existing configuration,
+learned efficiency history and runtime state are retained when unrelated sections are edited.
+
+**Different appearance after a HACS installation:** the installed release tag can be older
+than `main` used by the lab. Compare the integration version with the release notes. Select
+an available release containing this setup, or explicitly redownload `main` in HACS, then
+restart Home Assistant and reopen the dialog. The local lab dashboard is separate from the
+integration setup and is not installed by HACS.
 
 ### Step 3: Verify Installation
 
@@ -286,7 +261,7 @@ What each one is for: [Entity List](#entity-list-end-user).
 ### Planner Modes
 
 The planner decides the target SOC for the window. Which formula it uses is set by **Planner
-Mode** in step 2 of the wizard; both clamp the result into the configured minimum and maximum
+Mode** under optional forecast and reserve settings; both clamp the result into the configured minimum and maximum
 SOC, and both fall back to a safe 50 % (instead of charging to the maximum) when no forecast is
 available.
 
@@ -450,7 +425,7 @@ completely. There is no grid to charge from, and — far more important — the 
 running window would stop the battery from supplying the house: the lights would go out with a
 full battery.
 
-Configure **Backup / island mode entity** in step 4 with whatever your installation offers:
+Configure **Backup / island mode entity** under optional island-mode settings with whatever your installation offers:
 
 - a switch or binary sensor: `on` means island operation;
 - a state sensor: add the states that mean island operation under **Backup mode states**, comma
@@ -474,7 +449,7 @@ costs 15 ct/kWh. Inverter and battery have a sweet spot somewhere in between the
 their maximum, and where it lies depends on the hardware — so the integration measures it
 rather than guessing.
 
-Switch on **Efficiency search** (step 3 of the wizard, or the switch of the same name) and,
+Switch on **Efficiency search** (its setup page, or the switch of the same name) and,
 while charging from the grid, it works through the charge power range:
 
 1. It writes a charge power and waits **two minutes** — the ramp to a new setpoint belongs to
@@ -617,7 +592,7 @@ offers:
    it, and the min SOC entity is the one this integration controls anyway. Raising it to the
    charge level the window started at leaves the stored energy where it is.
 
-**Discharge Block** (step 3 of the wizard) chooses between `Automatic` (the order above,
+**Discharge Block** (under optional evening-reserve settings) chooses between `Automatic` (the order above,
 default) and `Off` (the battery may discharge, as it did before this feature).
 
 #### Why the inverter may show a higher min SOC than the charge target
@@ -1074,8 +1049,8 @@ The integration updates every **15 minutes** (900 seconds) by default. This is d
 - Verify the time window and optional date range settings.
 
 **Settings need to be changed**
-- **Settings → Devices & Services → Inverter Charge Night → Configure** opens the same four-step
-  wizard as the initial setup and saves into the config entry.
+- **Settings → Devices & Services → Inverter Charge Night → Configure** opens the same guided
+  overview as the initial setup and saves into the config entry.
 - The three-dot menu of the entry offers **Reconfigure** for the same fields. Both ways accept a
   new min SOC entity, so a replaced inverter or a renamed entity can be pointed at without losing
   the entry -- only an entity that another entry already drives is refused, because two
