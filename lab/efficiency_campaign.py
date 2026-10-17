@@ -10,6 +10,8 @@ from unittest.mock import patch
 async def check_efficiency(hass, lab, planner, kore_entry, check):
     from homeassistant.util import dt as dt_util
 
+    sun = hass.states.get("sun.sun")
+    hass.states.async_set("sun.sun", "below_horizon", dict(sun.attributes) if sun else {})
     co = planner.runtime_data
     import logging
     logging.getLogger("custom_components.inverter_charge_night").setLevel(logging.INFO)
@@ -54,21 +56,21 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
     clock = [dt_util.now()]
     actual_hours = 0
     with patch.object(co, "_efficiency_now", side_effect=lambda: clock[0]):
-        for iteration in range(120):
+        for iteration in range(480):
             # Independent, smooth reference fixture with a unique optimum at
             # 8 kW. HA sensor values still come from the actual REST client.
             power = lab.plant.charge_limit
             lab.plant.charge_efficiency = .96 - .18 * ((power - 8000) / 7000) ** 2
-            lab.plant.advance(120)
-            actual_hours += 1 / 30
-            clock[0] += timedelta(seconds=120)
+            lab.plant.advance(30)
+            actual_hours += 1 / 120
+            clock[0] += timedelta(seconds=30)
             lab.publish()
             await modbus.async_refresh()
             await grid_switch.coordinator.async_refresh()
             await process.async_refresh()
             await hass.async_block_till_done()
             await co._handle_auto_charge()
-            if iteration % 15 == 0:
+            if iteration % 60 == 0:
                 print(f"Finder sample {iteration}: state={co.auto_test_state}, enabled={co.auto_efficient_charge}, grid={lab.plant.grid_charge}, target_reached={co.target_reached}, SOC={lab.plant.soc:.1f}, results={co.get_auto_efficiency_data()}", flush=True)
             if not co.auto_efficient_charge:
                 break

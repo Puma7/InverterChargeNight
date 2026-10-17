@@ -128,7 +128,9 @@
           "price_surcharge_ct": "Surcharge on the exchange price",
           "price_surcharge_window_ct": "Surcharge inside the window",
           "curtailment_limit_w": "Feed-in cap",
-          "curtailment_feed_in_entity": "Feed-in power entity"
+          "curtailment_feed_in_entity": "Feed-in power entity",
+          "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
+          "pv_energy_today_entity": "Actual PV energy today"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -152,7 +154,9 @@
           "price_surcharge_ct": "What your bill adds on top of what the entity shows — grid fee, levies, taxes, VAT. Tibber already shows the full price, so leave this at 0. aWATTar, EPEX Spot, Nordpool and ENTSO-e usually show the exchange price alone; in Germany the difference is typically 20–25 ct/kWh. Getting this wrong does not look wrong — 6 ct and 32 ct are both plausible numbers, and the evening reserve comes out the other way round on the wrong one.",
           "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock.",
           "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
-          "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so."
+          "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
+          "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
+          "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today."
         }
       },
       "reconfigure": {
@@ -282,7 +286,9 @@
           "price_surcharge_ct": "Surcharge on the exchange price",
           "price_surcharge_window_ct": "Surcharge inside the window",
           "curtailment_limit_w": "Feed-in cap",
-          "curtailment_feed_in_entity": "Feed-in power entity"
+          "curtailment_feed_in_entity": "Feed-in power entity",
+          "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
+          "pv_energy_today_entity": "Actual PV energy today"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -306,7 +312,9 @@
           "price_surcharge_ct": "What your bill adds on top of what the entity shows — grid fee, levies, taxes, VAT. Tibber already shows the full price, so leave this at 0. aWATTar, EPEX Spot, Nordpool and ENTSO-e usually show the exchange price alone; in Germany the difference is typically 20–25 ct/kWh. Getting this wrong does not look wrong — 6 ct and 32 ct are both plausible numbers, and the evening reserve comes out the other way round on the wrong one.",
           "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock.",
           "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
-          "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so."
+          "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
+          "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
+          "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today."
         }
       },
       "review": {
@@ -486,7 +494,9 @@
           "price_surcharge_ct": "Surcharge on the exchange price",
           "price_surcharge_window_ct": "Surcharge inside the window",
           "curtailment_limit_w": "Feed-in cap",
-          "curtailment_feed_in_entity": "Feed-in power entity"
+          "curtailment_feed_in_entity": "Feed-in power entity",
+          "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
+          "pv_energy_today_entity": "Actual PV energy today"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -510,7 +520,9 @@
           "price_surcharge_ct": "What your bill adds on top of what the entity shows — grid fee, levies, taxes, VAT. Tibber already shows the full price, so leave this at 0. aWATTar, EPEX Spot, Nordpool and ENTSO-e usually show the exchange price alone; in Germany the difference is typically 20–25 ct/kWh. Getting this wrong does not look wrong — 6 ct and 32 ct are both plausible numbers, and the evening reserve comes out the other way round on the wrong one.",
           "price_surcharge_window_ct": "The same, for the hours of your cheap window — this is where a reduced §14a grid fee lives. Leave empty when the surcharge is the same around the clock.",
           "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
-          "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so."
+          "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
+          "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
+          "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today."
         }
       },
       "review": {
@@ -708,6 +720,10 @@
     "communication_unconfirmed": {
       "title": "Stop unconfirmed",
       "description": "A device stop is unconfirmed; the last device setpoints may remain active."
+    },
+    "pv_yield_shortfall": {
+      "title": "Severe PV yield shortfall",
+      "description": "{name}: expected {expected} kWh, measured {actual} kWh. The next regular night charges to the configured maximum SOC. Check the PV system, forecast and possible snow cover. The cause has not been automatically determined."
     }
   },
   "services": {

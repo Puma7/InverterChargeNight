@@ -29,7 +29,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from .const import (
     CURTAILMENT_INTEGRATION_STEP_MIN,
@@ -123,15 +123,21 @@ def integrate_load(profile: Sequence[float], start: datetime, end: datetime) -> 
     """
     if len(profile) != 24:
         raise ValueError(f"Load profile needs 24 hourly values, got {len(profile)}")
+    zone = start.tzinfo
+    # Advance along real time: a local hour can be absent or occur twice.
+    if zone is not None:
+        start = start.astimezone(UTC)
+        end = end.astimezone(UTC)
     if end <= start:
         return 0.0
     energy_kwh = 0.0
     cursor = start
     while cursor < end:
-        next_hour = (cursor + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-        segment_end = min(next_hour, end)
+        local = cursor.astimezone(zone) if zone is not None else cursor
+        seconds_left = 3600 - local.minute * 60 - local.second - local.microsecond / 1_000_000
+        segment_end = min(cursor + timedelta(seconds=seconds_left), end)
         hours = (segment_end - cursor).total_seconds() / 3600.0
-        energy_kwh += float(profile[cursor.hour]) * hours
+        energy_kwh += float(profile[local.hour]) * hours
         cursor = segment_end
     return energy_kwh
 

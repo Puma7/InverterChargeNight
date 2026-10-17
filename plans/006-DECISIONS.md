@@ -89,12 +89,13 @@ Kostenoptimierung aufgehen.
    Sollwert in beiden Modi, damit der Plan vor dem Umschalten beobachtet werden kann. Im Modus `headroom`
    bleibt das AC-Ladelimit unangetastet (heutiges Verhalten). Während der Effizienzsucher aktiv ist, schreibt
    der Planer ebenfalls nicht; der Sucher besitzt das Limit.
-2. **Regel für die Ladeleistung**: `required = (Ziel − Ist) · Kapazität / Reststunden / Wirkungsgrad`;
-   Sollwert = `required`, geklemmt auf `[min_charge_power_w, max_charge_power_w]`. Liegt ein Effizienzoptimum
-   vor und ist `required` kleiner als das Optimum, ist das Optimum die Obergrenze (Sollwert also `required`,
-   mindestens `min_charge_power_w`). Liegt `required` über dem Optimum, gewinnt die Fensterfrist. Damit die
-   556 W aus dem Plan-Beispiel tatsächlich geschrieben werden, muss `min_charge_power_w` unter 556 W liegen;
-   mit dem Standard 1000 W werden 1000 W geschrieben. Geschrieben wird nur bei mehr als 100 W Änderung.
+2. **Ladeleistung ab 3.9.0:** `required = (Ziel - Ist) × Kapazität / Reststunden / Wirkungsgrad`.
+   Mit gemessenem Effizienzwert ist der Sollwert `max(required, Optimum)`, begrenzt auf
+   `[min_charge_power_w, max_charge_power_w]` und anschließend auf die freie Hausanschlussleistung.
+   Ohne Messwert gilt weiterhin `required`. Damit lädt der Akku bevorzugt effizient und beendet
+   die Netzladung am Ziel-SoC; die Fensterfrist darf mehr Leistung anfordern, niemals mehr als
+   das Anschlussbudget. Auch im Modus `headroom` wird ein vorhandener Effizienzwert angewendet.
+   Nur eine laufende Messung besitzt das Ladelimit; ein wartender Sucher blockiert den Planer nicht.
 3. **Ziel im Fenster nur nach oben.** Bei jedem Poll wird neu geplant, `Ziel = max(bisher, Plan)`. Ein
    Plan mit `reason = fallback` (Forecast im Fenster ausgefallen) verändert ein bestehendes Ziel nie.
    Ein steigendes Ziel setzt `target_reached` zurück, sodass die Netzladung wieder anläuft.

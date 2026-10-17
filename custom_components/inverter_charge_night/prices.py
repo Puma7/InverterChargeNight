@@ -24,7 +24,7 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta, tzinfo
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
 from .const import (
@@ -77,6 +77,7 @@ class PriceSeries:
     value_key: str
     unit: str
     surcharge_ct: float
+    time_zone: tzinfo | None = None
 
     def horizon_end(self) -> datetime | None:
         """The end of the last interval, or None when the series is empty."""
@@ -117,7 +118,7 @@ def _as_datetime(value: Any, tz: tzinfo) -> datetime | None:
             return None
     else:
         return None
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=tz)
+    return _aware(parsed, tz)
 
 
 def _aware(value: datetime, tz: tzinfo) -> datetime:
@@ -127,7 +128,8 @@ def _aware(value: datetime, tz: tzinfo) -> datetime:
     ``now`` or a naive query bound would raise on the first comparison - and
     this module promises not to raise.
     """
-    return value if value.tzinfo is not None else value.replace(tzinfo=tz)
+    aware = value if value.tzinfo is not None else value.replace(tzinfo=tz)
+    return aware.astimezone(UTC)
 
 
 def _normalized(key: str) -> str:
@@ -368,6 +370,7 @@ def parse_price_series(
             value_key=ref_value_key,
             unit=ref_unit,
             surcharge_ct=float(surcharge_ct),
+            time_zone=tz,
         ),
         "",
     )
@@ -385,7 +388,7 @@ def mean_price_ct(series: PriceSeries | None, start: datetime, end: datetime) ->
     """
     if series is None or not series.intervals:
         return None
-    zone = series.intervals[0].start.tzinfo
+    zone = series.time_zone or series.intervals[0].start.tzinfo
     if zone is not None:
         start = _aware(start, zone)
         end = _aware(end, zone)
@@ -395,11 +398,13 @@ def mean_price_ct(series: PriceSeries | None, start: datetime, end: datetime) ->
     weighted = 0.0
     cursor = start
     for interval in series.intervals:
-        if interval.end <= cursor:
+        interval_start = _aware(interval.start, zone) if zone is not None else interval.start
+        interval_end = _aware(interval.end, zone) if zone is not None else interval.end
+        if interval_end <= cursor:
             continue
-        if interval.start > cursor:
+        if interval_start > cursor:
             return None  # a gap: the stretch is not covered
-        segment_end = min(interval.end, end)
+        segment_end = min(interval_end, end)
         seconds = (segment_end - cursor).total_seconds()
         if seconds > 0:
             weighted += interval.ct_per_kwh * seconds

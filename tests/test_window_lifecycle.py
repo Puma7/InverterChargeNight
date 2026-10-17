@@ -1213,18 +1213,18 @@ async def test_planned_power_two_kwh_in_four_hours_writes_556_w(mock_hass, power
         await _start_with_target(powered, 60.0)
         data = await powered._async_update_data()
 
-    assert powered.planned_charge_power_w == 556.0
-    assert data["planned_charge_power_w"] == 556.0
+    assert powered.planned_charge_power_w == 3000.0
+    assert data["planned_charge_power_w"] == 3000.0
     assert mock_hass.services.async_call.await_args_list == [
         # The bridge target (28.1 %) is below the 40 % in the battery, so the
         # window start raises the min SOC floor to 40 % first (plan 009).
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 40.0}),
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}),
         call("switch", "turn_on", {"entity_id": GRID}),
-        call("number", "set_value", {"entity_id": AC_LIMIT, "value": 556.0}, blocking=True),
+        call("number", "set_value", {"entity_id": AC_LIMIT, "value": 3000.0}, blocking=True),
     ]
     assert powered._original_ac_charge_power == 6000.0
-    assert powered._planned_setpoint_written_w == 556.0
+    assert powered._planned_setpoint_written_w == 3000.0
 
 
 @pytest.mark.asyncio
@@ -1253,14 +1253,13 @@ async def test_planned_power_small_change_is_not_written(mock_hass, powered):
         mock_hass.states.async_set(BATTERY, "41")
         await powered._async_update_data()
         mock_hass.services.async_call.assert_not_awaited()
-        assert powered.planned_charge_power_w == 528.0
+        assert powered.planned_charge_power_w == 3000.0
 
     # Two hours later, still 1.9 kWh missing: 1056 W, 500 W above the written value
     with patch(NOW, return_value=datetime(2026, 1, 15, 3, 59)):
         await powered._async_update_data()
-    mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": AC_LIMIT, "value": 1056.0}, blocking=True
-    )
+    mock_hass.services.async_call.assert_not_awaited()
+    assert powered.planned_charge_power_w == 3000.0
 
 
 @pytest.mark.asyncio
@@ -1269,7 +1268,7 @@ async def test_planned_power_above_optimum_follows_deadline(mock_hass, powered):
     with patch(NOW, return_value=datetime(2026, 1, 15, 4, 59)):
         await _start_with_target(powered, 60.0)  # 2 kWh in 1 h -> 2222 W <= 3000
         await powered._async_update_data()
-        assert powered.planned_charge_power_w == 2222.0
+        assert powered.planned_charge_power_w == 3000.0
         mock_hass.states.async_set(MIN_SOC, "60")
         mock_hass.states.async_set(GRID, "on")
         mock_hass.services.async_call.reset_mock()
@@ -1304,15 +1303,13 @@ async def test_headroom_mode_reports_planned_power_but_does_not_write(mock_hass)
 
 
 @pytest.mark.asyncio
-async def test_planned_power_not_written_while_finder_runs(mock_hass, powered):
+async def test_planned_power_is_applied_while_finder_is_waiting(mock_hass, powered):
     powered.auto_efficient_charge = True
     with patch(NOW, return_value=FOUR_HOURS_LEFT):
         await _start_with_target(powered, 60.0)
         await powered._async_update_data()
-
-    assert powered.planned_charge_power_w == 556.0
-    for awaited in mock_hass.services.async_call.await_args_list:
-        assert awaited.args[2]["entity_id"] != AC_LIMIT
+    assert powered.planned_charge_power_w == 3000.0
+    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 3000.0}, blocking=True) in mock_hass.services.async_call.await_args_list
 
 
 @pytest.mark.asyncio

@@ -1310,3 +1310,40 @@ async def test_the_connection_limit_and_the_discharge_block_run_together(mock_ha
         assert coordinator._window_floor_soc is None
     finally:
         await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("foreign,own,expected", [(34000, 0, 6000), (34000, 5000, 6000), (1000, 6000, 11000), (39500, 0, 0), (45000, 0, 0)])
+async def test_measured_optimum_yields_to_ev_and_house_load(mock_hass, foreign, own, expected):
+    """40 kW - 22 kW EV - 11 kW EV - 1 kW house = 6 kW battery."""
+    _register(mock_hass, import_w=str(foreign + own))
+    mock_hass.states.async_set(GRID, "on" if own else "off")
+    mock_hass.states.async_set(SENT, str(own), {"unit_of_measurement": "W"})
+    mock_hass.states.get(SENT).last_reported = FOUR_HOURS_LEFT
+    co = _make_coordinator(mock_hass, {**LIMITED_CONFIG,
+        CONF_GRID_MAX_CONTINUOUS_W: 40000, CONF_GRID_HEADROOM_W: 0,
+        CONF_BATTERY_CAPACITY: 35.8, CONF_MIN_CHARGE_POWER_W: 1000,
+        CONF_MAX_CHARGE_POWER_W: 20000, CONF_CHARGE_POWER_SENT_ENTITY: SENT})
+    co.entry.options = {CONF_AUTO_EFFICIENCY_DATA: {"history": {"11000": .05}, "best_power_w": 11000,
+        "measurement_signature": co._efficiency_signature()}}
+    co.is_active = True
+    await co._plan_charge_power(70)
+    assert co.planned_charge_power_w == expected
+    assert _ac_writes(mock_hass) == [expected]
+
+
+@pytest.mark.asyncio
+async def test_optimum_resumes_after_ev_load_falls(mock_hass):
+    _register(mock_hass, import_w="34000")
+    co = _make_coordinator(mock_hass, {**LIMITED_CONFIG, CONF_GRID_MAX_CONTINUOUS_W: 40000,
+        CONF_GRID_HEADROOM_W: 0, CONF_MAX_CHARGE_POWER_W: 20000})
+    co.entry.options = {CONF_AUTO_EFFICIENCY_DATA: {"best_power_w": 11000, "history": {"11000": .05},
+        "measurement_signature": co._efficiency_signature()}}
+    co.is_active = True
+    await co._plan_charge_power(70)
+    assert co.planned_charge_power_w == 6000
+    _set_import(mock_hass, "1000")
+    co.is_active = True
+    await co._plan_charge_power(70)
+    assert co.planned_charge_power_w == 11000
+    assert _ac_writes(mock_hass) == [6000, 11000]

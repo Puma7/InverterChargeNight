@@ -29,6 +29,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er, selector
 
 from .const import (
+    CONF_AUTO_PV_SHORTFALL,
+    CONF_PV_ENERGY_TODAY_ENTITY,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
     CONF_ACTIVE_END_DATE,
@@ -183,6 +185,8 @@ STEP_POWER_KEYS: tuple[str, ...] = (
     CONF_DISCHARGE_BLOCK_MODE,
 )
 STEP_ADVANCED_KEYS: tuple[str, ...] = (
+    CONF_AUTO_PV_SHORTFALL,
+    CONF_PV_ENERGY_TODAY_ENTITY,
     CONF_UPDATE_INTERVAL,
     CONF_COMMAND_DELAY,
     CONF_ACTIVE_START_DATE,
@@ -267,6 +271,7 @@ def _normalize_date_value(value: str | date | None) -> str | None:
 # in the state machine, and Home Assistant lowercases what it is given. A plain
 # number in this list aborts the whole config flow with an AttributeError.
 _ENTITY_KEYS_TO_VALIDATE = [
+    CONF_PV_ENERGY_TODAY_ENTITY,
     CONF_PRICE_ENTITY,
     CONF_MIN_SOC_ENTITY,
     CONF_GRID_CHARGE_SWITCH,
@@ -442,6 +447,11 @@ def _validate_user_input(
         for key in _PRICE_KEYS:
             if key not in prices_set:
                 errors[key] = "all_prices_required"
+
+    if user_input.get(CONF_AUTO_PV_SHORTFALL):
+        for key in (CONF_PV_FORECAST_TODAY_ENTITY, CONF_PV_ENERGY_TODAY_ENTITY):
+            if not user_input.get(key):
+                errors[key] = "required_entity"
 
     # Validate entities exist
     entity_registry = er.async_get(hass)
@@ -772,6 +782,8 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
     """Step 4: update interval, command delay, active dates and backup mode."""
     return vol.Schema(
         {
+            _required(CONF_AUTO_PV_SHORTFALL, defaults, False): _bool_selector(),
+            _optional(CONF_PV_ENERGY_TODAY_ENTITY, defaults.get(CONF_PV_ENERGY_TODAY_ENTITY)): _entity_selector("sensor", "energy"),
             _required(
                 CONF_UPDATE_INTERVAL, defaults, DEFAULT_UPDATE_INTERVAL
             ): _number_selector(60, 3600, 60, "s", selector.NumberSelectorMode.SLIDER),

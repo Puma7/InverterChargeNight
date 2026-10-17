@@ -274,10 +274,14 @@ def test_a_finished_measurement_lands_in_its_band_and_battery_wide(mock_hass):
         mock_hass,
         {
             CONF_BATTERY_SOC_ENTITY: "sensor.soc",
+            "charge_power_sent_entity": "sensor.sent",
+            "charge_power_received_entity": "sensor.received",
             CONF_MIN_CHARGE_POWER_W: 1000,
             CONF_MAX_CHARGE_POWER_W: 10000,
         },
     )
+    mock_hass.states.async_set("sensor.sent", "5000", {"unit_of_measurement": "W"})
+    mock_hass.states.async_set("sensor.received", "4600", {"unit_of_measurement": "W"})
     saved: dict = {}
     coordinator.get_auto_efficiency_data = MagicMock(return_value=saved)
     coordinator._save_auto_efficiency_data = MagicMock()

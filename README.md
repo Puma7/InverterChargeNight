@@ -483,9 +483,12 @@ while charging from the grid, it works through the charge power range:
    between their readings, or reading the two energy meters if you configured them.
 3. It records the loss `1 − received / drawn` for that power and moves on to the next
    candidate, halving the remaining range each time (golden-section search).
-4. When the range is narrower than 100 W it stores the optimum, leaves it on the inverter and
-   switches itself off. `sensor.…_best_charge_power` keeps the result, and the planner never
-   asks for more than the optimum once it exists.
+4. When the range is narrower than 100 W it stores the best measured power and switches itself
+   off. `sensor.…_best_charge_power` keeps the result. Subsequent charging prefers that power
+   and stops at target SOC, rather than spreading a less efficient trickle across the window.
+   The deadline may require more power; the configured maximum and free house connection
+   capacity always constrain the final setpoint. For example, a 40 kW budget minus 22 kW and
+   11 kW cars and 1 kW house leaves 6 kW, even with an 11 kW optimum.
 
 Because it takes several measurements per window, a six-hour window is usually enough to find
 the optimum; it does not need a week of nights.
@@ -495,11 +498,21 @@ the optimum; it does not need a week of nights.
 - a measurement where the inverter did not follow the setpoint — a battery that is nearly full
   tapers the charge, and a sample taken at 3 kW must not be filed under 10 kW;
 - a measurement that was too short or moved too little energy (this also happens when the
-  battery is full before the measurement is done — after two such attempts that power is
-  treated as unmeasurable and the search lowers its ceiling);
+  battery is full before the measurement is done); after two failures the unresolved search
+  waits for another charging window without excluding unmeasured powers;
 - a loss below zero, which would mean the battery received more than was drawn: the two
   sensors are measuring the same side of the charger;
-- a loss above 50 %, which is a wiring or unit problem, not an inverter.
+- a loss above 50 %, which suggests a sensor, wiring or unit problem;
+- unavailable or stale power readings, an interrupted sample stream or a backwards clock;
+- daylight or an unknown `sun.sun` state, because PV entering the battery would contaminate
+  the AC/DC comparison. Regular charging continues under the normal planner while waiting.
+
+The search assumes a smooth, single-basin loss curve and has 100 W setpoint resolution. Its
+result is an estimate from the measured conditions, not an exact lifetime hardware constant.
+Temperature, SOC and changed hardware can move it. Sensor bindings and battery capacity are
+fingerprinted: changing them invalidates old measurements. Measurements from versions before
+3.9.0 are discarded once because their sensor provenance cannot be established; enable the
+search again to obtain a fresh result.
 
 `sensor.…_efficiency_search` shows what is going on, and its `last_result` attribute names the
 reason whenever a measurement was discarded. If every measurement is discarded, the sensors are
@@ -517,6 +530,21 @@ battery side.
 > working on its old result until the bands fill in. A measurement that runs across more than two
 > bands is a blend and is kept battery-wide only. `sensor.…_efficiency_search` shows what has been
 > measured where, and which bands are in use.
+
+### Automatic PV shortfall detection
+
+In Advanced options, **Automatically allow for severe PV shortfalls** requires a full-day
+forecast for today and **Actual PV energy today**, a whole-array daily energy counter
+(Wh/kWh/MWh, reset daily). The morning forecast is retained before sunrise plus two hours;
+after sunset it is compared with an actual reading reported within 30 minutes. At least
+5 kWh expected and no more than 15% delivered arms charging to your configured maximum SOC
+for the next regular night only. Missing/stale data or a partial first observation day does
+not arm it. Your manual Snow nights counter remains independent.
+
+A repair warning, persistent notification and the calculated-SOC sensor's `pv_yield`
+attributes explain the decision. Low yield can mean snow, shading, a string fault or a
+wrong forecast; the integration does not identify the cause. For an immediate one-night
+snow override before a complete day has been observed, set **Snow nights** to 1.
 
 ### House connection
 
