@@ -9,11 +9,18 @@ way the result is stored differ.
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import date
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-import voluptuous as vol
+# Current HA (Python 3.14) aliases voluptuous to probatio at runtime. Static
+# checkers cannot see that alias; use its real types for the current CI leg.
+# Keep the runtime import compatible with older HA's voluptuous engine.
+if TYPE_CHECKING and sys.version_info >= (3, 14):
+    import probatio as vol
+else:
+    import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult

@@ -19,9 +19,16 @@ and raises a translated error instead of failing quietly.
 from __future__ import annotations
 
 import logging
+import sys
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
-import voluptuous as vol
+# HA aliases this module to probatio on the current Python 3.14 runtime.
+# Reflect that in static checks while retaining the older HA runtime import.
+if TYPE_CHECKING and sys.version_info >= (3, 14):
+    import probatio as vol
+else:
+    import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import (

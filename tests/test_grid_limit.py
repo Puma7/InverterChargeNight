@@ -875,10 +875,26 @@ async def test_the_listener_is_debounced(mock_hass, limited):
         await limited._react_to_grid_import()
         mock_hass.services.async_call.reset_mock()
 
-        _set_import(mock_hass, "40000")
+        _set_import(mock_hass, "35000")
         await limited._react_to_grid_import()
 
     assert _ac_writes(mock_hass) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target_reached", [False, True])
+async def test_zero_headroom_bypasses_debounce_without_repeated_writes(mock_hass, limited, target_reached):
+    await _start_with_target(limited, 100.0)
+    await limited._async_update_data()
+    limited.target_reached = target_reached
+    mock_hass.services.async_call.reset_mock()
+    _set_import(mock_hass, "49000")
+    # A load step one second after the last write must release the battery.
+    with patch(NOW, return_value=limited._grid_limit_last_write + timedelta(seconds=1)):
+        await limited._react_to_grid_import()
+        await limited._react_to_grid_import()
+    assert _ac_writes(mock_hass) == [0.0]
+    assert limited._planned_setpoint_written_w == 0
 
 
 @pytest.mark.asyncio
