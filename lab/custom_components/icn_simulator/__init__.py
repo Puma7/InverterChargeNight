@@ -81,9 +81,13 @@ async def async_setup(hass, config):
     for platform in ("number", "switch", "sensor", "binary_sensor"):
         await discovery.async_load_platform(hass, platform, DOMAIN, {}, config)
 
+    def selected_controller(entry):
+        target = getattr(lab, "controller_entry_id", None)
+        return entry.entry_id == target if target else entry.title == "ICN Lab"
+
     async def refresh_planner():
         for entry in hass.config_entries.async_entries("inverter_charge_night"):
-            if entry.title == "ICN Lab" or entry.entry_id == getattr(lab, "controller_entry_id", None):
+            if selected_controller(entry):
                 coordinator = getattr(entry, "runtime_data", None)
                 if coordinator is not None:
                     await coordinator.async_refresh()
@@ -92,7 +96,7 @@ async def async_setup(hass, config):
         # Restore a running controller before replacing plant state.
         if lab.plant.online and not lab.plant.charge_inhibit and hass.services.has_service("inverter_charge_night", "reset_inverter"):
             for entry in hass.config_entries.async_entries("inverter_charge_night"):
-                if entry.title == "ICN Lab":
+                if selected_controller(entry):
                     await hass.services.async_call("inverter_charge_night", "reset_inverter",
                         {"config_entry_id": entry.entry_id}, blocking=True)
         capacity = lab.plant.capacity
