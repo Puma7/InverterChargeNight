@@ -1000,10 +1000,10 @@ def _merge_setup_data(current: Mapping[str, Any], opened: Mapping[str, Any],
     initial = _guided_defaults(opened)
     data = dict(current)
     for key in _ALL_STEP_KEYS:
-        if key not in collected and key in opened:
+        if key not in collected and (key in opened or key in (explicit or set())):
             data.pop(key, None)
     for key, value in collected.items():
-        if key in data and initial.get(key) == value and key not in (explicit or set()):
+        if (key in current or key in opened) and initial.get(key) == value and key not in (explicit or set()):
             continue
         data[key] = value
     return data
@@ -1056,7 +1056,7 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
 
     async def async_step_disable_features(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="disable_features", menu_options=[
-            "efficiency_off", "grid_off", "pv_shortfall_off", "setup"])
+            "efficiency_off", "grid_off", "pv_shortfall_off", "charging_off", "setup"])
 
     async def async_step_grid_fuse(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self._guided_form("grid_fuse", user_input)
@@ -1087,7 +1087,10 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
                 self._data = candidate
                 if flag:
                     self._explicit_features = {*(self._explicit_features or set()), flag}
-                if group == "schedule" and self._draft_scope() == "new":
+                if group == "planning":
+                    self._explicit_features = {*(self._explicit_features or set()), CONF_DEFAULT_MIN_SOC}
+                if (group == "schedule" and self._draft_scope() == "new"
+                        and CONF_DEFAULT_MIN_SOC not in (self._explicit_features or set())):
                     self._data[CONF_DEFAULT_MIN_SOC] = self._data[CONF_USER_MIN_SOC]
                 try:
                     await self._save_setup_draft()
@@ -1227,6 +1230,17 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
 
     async def async_step_grid_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         self._data.pop(CONF_GRID_IMPORT_ENTITY, None)
+        self._explicit_features = {*(self._explicit_features or set()), CONF_GRID_IMPORT_ENTITY}
+        return await self._save_disabled_feature()
+
+    async def async_step_charging_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            return await self.async_step_disable_features()
+        if self._data.get(CONF_AUTO_EFFICIENT_CHARGE) or self._data.get(CONF_GRID_IMPORT_ENTITY):
+            return self.async_show_form(step_id="charging_off", data_schema=vol.Schema({}),
+                                        errors={"base": "disable_dependent_features"}, last_step=False)
+        self._data.pop(CONF_CHARGE_POWER_ENTITY, None)
+        self._explicit_features = {*(self._explicit_features or set()), CONF_CHARGE_POWER_ENTITY}
         return await self._save_disabled_feature()
 
     async def async_step_pv_shortfall_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -1518,6 +1532,10 @@ class OptionsFlowHandler(GuidedSetupMixin, config_entries.OptionsFlow):
         result = await self._async_save()
         if result.get("type") != "form":
             await self._remove_setup_draft()
+            # Cleanup yields to update listeners, which may persist newer
+            # teardown/runtime options. HA writes this payload synchronously
+            # after the step returns; capture it only after the final await.
+            result["data"] = dict(self._config_entry.options)
         return result
 
     def _merged_data(self) -> dict[str, Any]:

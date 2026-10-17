@@ -357,3 +357,68 @@ async def test_explicit_efficiency_setup_restarts_search_even_if_previous_search
         CONF_CHARGE_POWER_SENT_ENTITY: "sensor.ac", CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.dc",
         CONF_MIN_CHARGE_POWER_W: 1000, CONF_MAX_CHARGE_POWER_W: 15000})
     assert flow._merged_data()[CONF_AUTO_EFFICIENT_CHARGE] is True
+
+
+@pytest.mark.asyncio
+async def test_schedule_edit_does_not_replace_a_separately_confirmed_discharge_floor(guide, mock_hass):
+    await guide.async_step_user()
+    await guide.async_step_basics(BASIC)
+    await guide.async_step_schedule(SCHEDULE)
+    schema = (await guide.async_step_planning())["data_schema"]
+    await guide.async_step_planning(schema({CONF_DEFAULT_MIN_SOC: 20}))
+    await guide.async_step_save_draft()
+    resumed = _config_flow(mock_hass)
+    await resumed.async_step_user()
+    await resumed.async_step_resume_draft({"draft": guide._draft_id})
+    await resumed.async_step_schedule({**SCHEDULE, CONF_START_TIME: "23:15:00"})
+    assert resumed._data[CONF_DEFAULT_MIN_SOC] == 20
+    assert (await resumed.async_step_finish())["data"][CONF_DEFAULT_MIN_SOC] == 20
+
+
+@pytest.mark.asyncio
+async def test_overlapping_dialog_does_not_restore_a_deleted_backup_input(guide, mock_hass, mock_config_entry):
+    mock_config_entry.data = {**mock_config_entry.data, CONF_BACKUP_MODE_ENTITY: "binary_sensor.backup"}
+    flow = cf.OptionsFlowHandler(mock_config_entry); flow.hass = mock_hass
+    await flow.async_step_init()
+    mock_config_entry.data = {key: value for key, value in mock_config_entry.data.items() if key != CONF_BACKUP_MODE_ENTITY}
+    await flow.async_step_schedule(SCHEDULE)
+    assert (await flow.async_step_finish())["type"] == "create_entry"
+    assert CONF_BACKUP_MODE_ENTITY not in mock_hass.config_entries.async_update_entry.call_args.kwargs["data"]
+
+
+@pytest.mark.asyncio
+async def test_options_payload_captures_runtime_state_written_during_draft_cleanup(guide, mock_hass, mock_config_entry):
+    mock_config_entry.options = {CONF_RUNTIME_STATE: {"active": True}, CONF_AUTO_EFFICIENCY_DATA: {"best": 8000}}
+    flow = cf.OptionsFlowHandler(mock_config_entry); flow.hass = mock_hass
+    await flow.async_step_init()
+    await flow.async_step_schedule(SCHEDULE)
+    async def teardown_during_cleanup():
+        await asyncio.sleep(0)
+        mock_config_entry.options = {CONF_RUNTIME_STATE: {"active": False}, CONF_AUTO_EFFICIENCY_DATA: {"best": 8000}}
+    with patch.object(flow, "_remove_setup_draft", side_effect=teardown_during_cleanup):
+        result = await flow.async_step_finish()
+    assert result["data"][CONF_RUNTIME_STATE] == {"active": False}
+    assert result["data"][CONF_AUTO_EFFICIENCY_DATA] == {"best": 8000}
+
+
+@pytest.mark.asyncio
+async def test_unused_charging_control_can_be_removed_without_disabling_protection_silently(guide):
+    await guide.async_step_user()
+    guide._data.update({CONF_CHARGE_POWER_ENTITY: "number.old_control", CONF_AUTO_EFFICIENT_CHARGE: True})
+    blocked = await guide.async_step_charging_off()
+    assert blocked["errors"]["base"] == "disable_dependent_features"
+    assert guide._data[CONF_CHARGE_POWER_ENTITY] == "number.old_control"
+    assert (await guide.async_step_charging_off({}))["step_id"] == "disable_features"
+    await guide.async_step_efficiency_off()
+    await guide.async_step_grid_off()
+    await guide.async_step_charging_off()
+    assert CONF_CHARGE_POWER_ENTITY not in guide._data
+
+
+@pytest.mark.asyncio
+async def test_explicit_grid_disable_wins_over_a_concurrent_binding_addition(guide, mock_hass, mock_config_entry):
+    flow = cf.OptionsFlowHandler(mock_config_entry); flow.hass = mock_hass
+    await flow.async_step_init()
+    mock_config_entry.data = {**mock_config_entry.data, CONF_GRID_IMPORT_ENTITY: "sensor.new_grid"}
+    await flow.async_step_grid_off()
+    assert CONF_GRID_IMPORT_ENTITY not in flow._merged_data()

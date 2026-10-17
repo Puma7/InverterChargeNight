@@ -662,8 +662,13 @@
           "efficiency_off": "Disable efficiency search",
           "grid_off": "Remove house connection limit",
           "pv_shortfall_off": "Disable poor PV yield detection",
-          "setup": "Back to overview"
+          "setup": "Back to overview",
+          "charging_off": "Remove charging power control"
         }
+      },
+      "charging_off": {
+        "title": "Remove charging power control",
+        "description": "Disable efficiency search and house import limiting first. They require a watt control. Continue returns to feature selection. Active configuration changes only when finally applied."
       }
     },
     "error": {
@@ -692,7 +697,8 @@
       "separate_power_controls": "Additional AC/DC ceiling and normal charging ceiling must use separate controls.",
       "requires_charge_input_power": "Select KORE Grid to Battery Power; total AC Power does not measure battery grid charging.",
       "draft_not_found": "This draft is no longer available. Select again.",
-      "draft_save_failed": "Saving failed. Retry; this step is not yet saved durably."
+      "draft_save_failed": "Saving failed. Retry; this step is not yet saved durably.",
+      "disable_dependent_features": "Disable efficiency search and house connection limiting first."
     },
     "abort": {
       "already_configured": "Integration is already configured",
@@ -1203,8 +1209,13 @@
           "efficiency_off": "Disable efficiency search",
           "grid_off": "Remove house connection limit",
           "pv_shortfall_off": "Disable poor PV yield detection",
-          "setup": "Back to overview"
+          "setup": "Back to overview",
+          "charging_off": "Remove charging power control"
         }
+      },
+      "charging_off": {
+        "title": "Remove charging power control",
+        "description": "Disable efficiency search and house import limiting first. They require a watt control. Continue returns to feature selection. Active configuration changes only when finally applied."
       }
     },
     "error": {
@@ -1233,7 +1244,8 @@
       "separate_power_controls": "Additional AC/DC ceiling and normal charging ceiling must use separate controls.",
       "requires_charge_input_power": "Select KORE Grid to Battery Power; total AC Power does not measure battery grid charging.",
       "draft_not_found": "This draft is no longer available. Select again.",
-      "draft_save_failed": "Saving failed. Retry; this step is not yet saved durably."
+      "draft_save_failed": "Saving failed. Retry; this step is not yet saved durably.",
+      "disable_dependent_features": "Disable efficiency search and house connection limiting first."
     },
     "abort": {
       "draft_saved": "Draft saved. Reopen this setup and choose Resume saved draft. The inverter was not changed.",

@@ -596,7 +596,7 @@ def test_every_step_labels_exactly_its_fields():
         assert set(step["data"]) == expected, (section, step_id)
         assert set(step["data_description"]) == expected, (section, step_id)
         assert step["title"] and step["description"], (section, step_id)
-    guided = set(config_flow._GUIDED_GROUPS) | {"setup", "features", "planning_features", "advanced_features", "summary", "resume_draft", "disable_features"}
+    guided = set(config_flow._GUIDED_GROUPS) | {"setup", "features", "planning_features", "advanced_features", "summary", "resume_draft", "disable_features", "charging_off"}
     for section in ("config", "options"):
         assert set(strings[section]["step"]) == {step for ns, step in STEP_SCHEMAS if ns == section} | {"review"} | guided
 

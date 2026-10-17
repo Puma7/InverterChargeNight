@@ -662,8 +662,13 @@
           "efficiency_off": "Effizienzsuche ausschalten",
           "grid_off": "Hausanschluss-Begrenzung entfernen",
           "pv_shortfall_off": "PV-Ertragsausfall-Erkennung ausschalten",
-          "setup": "Zurück zur Übersicht"
+          "setup": "Zurück zur Übersicht",
+          "charging_off": "Ladeleistungssteller entfernen"
         }
+      },
+      "charging_off": {
+        "title": "Ladeleistungssteller entfernen",
+        "description": "Zuerst Effizienzsuche und Hausanschluss-Begrenzung ausschalten. Ohne Watt-Steller können diese Funktionen nicht regeln. Mit „Weiter“ zurück zur Funktionsauswahl gehen. Die aktive Konfiguration bleibt bis zum abschließenden Übernehmen unverändert."
       }
     },
     "error": {
@@ -692,7 +697,8 @@
       "separate_power_controls": "Zusätzliche AC/DC-Grenze und normale Ladegrenze müssen unterschiedliche Stellgrößen sein.",
       "requires_charge_input_power": "KORE Grid to Battery Power auswählen; gesamte AC Power misst nicht die Batterie-Netzladung.",
       "draft_not_found": "Dieser Entwurf ist nicht mehr vorhanden. Bitte erneut wählen.",
-      "draft_save_failed": "Speichern fehlgeschlagen. Bitte erneut versuchen; dieser Schritt ist noch nicht dauerhaft gesichert."
+      "draft_save_failed": "Speichern fehlgeschlagen. Bitte erneut versuchen; dieser Schritt ist noch nicht dauerhaft gesichert.",
+      "disable_dependent_features": "Zuerst Effizienzsuche und Hausanschluss-Begrenzung ausschalten."
     },
     "abort": {
       "already_configured": "Dieser Wechselrichter ist bereits eingerichtet",
@@ -1203,8 +1209,13 @@
           "efficiency_off": "Effizienzsuche ausschalten",
           "grid_off": "Hausanschluss-Begrenzung entfernen",
           "pv_shortfall_off": "PV-Ertragsausfall-Erkennung ausschalten",
-          "setup": "Zurück zur Übersicht"
+          "setup": "Zurück zur Übersicht",
+          "charging_off": "Ladeleistungssteller entfernen"
         }
+      },
+      "charging_off": {
+        "title": "Ladeleistungssteller entfernen",
+        "description": "Zuerst Effizienzsuche und Hausanschluss-Begrenzung ausschalten. Ohne Watt-Steller können diese Funktionen nicht regeln. Mit „Weiter“ zurück zur Funktionsauswahl gehen. Die aktive Konfiguration bleibt bis zum abschließenden Übernehmen unverändert."
       }
     },
     "error": {
@@ -1233,7 +1244,8 @@
       "separate_power_controls": "Zusätzliche AC/DC-Grenze und normale Ladegrenze müssen unterschiedliche Stellgrößen sein.",
       "requires_charge_input_power": "KORE Grid to Battery Power auswählen; gesamte AC Power misst nicht die Batterie-Netzladung.",
       "draft_not_found": "Dieser Entwurf ist nicht mehr vorhanden. Bitte erneut wählen.",
-      "draft_save_failed": "Speichern fehlgeschlagen. Bitte erneut versuchen; dieser Schritt ist noch nicht dauerhaft gesichert."
+      "draft_save_failed": "Speichern fehlgeschlagen. Bitte erneut versuchen; dieser Schritt ist noch nicht dauerhaft gesichert.",
+      "disable_dependent_features": "Zuerst Effizienzsuche und Hausanschluss-Begrenzung ausschalten."
     },
     "abort": {
       "draft_saved": "Entwurf gespeichert. Starte diese Einrichtung erneut und wähle „Gespeicherten Entwurf fortsetzen“. Der Wechselrichter wurde nicht verändert.",
