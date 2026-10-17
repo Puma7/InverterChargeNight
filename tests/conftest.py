@@ -192,3 +192,20 @@ def create_mock_service_call(domain: str, service: str, **kwargs):
     call.service = service
     call.data = kwargs
     return call
+
+
+@pytest.fixture
+def draft_store(monkeypatch):
+    """Real draft repository with a durable-memory stand-in for HA storage I/O."""
+    from copy import deepcopy
+    from custom_components.inverter_charge_night import setup_drafts
+    files = {}
+    class MemoryStore:
+        def __init__(self, hass, version, key, **kwargs):
+            self.key = key
+        async def async_load(self):
+            return deepcopy(files.get(self.key))
+        async def async_save(self, data):
+            files[self.key] = deepcopy(data)
+    monkeypatch.setattr(setup_drafts, "Store", MemoryStore)
+    return files

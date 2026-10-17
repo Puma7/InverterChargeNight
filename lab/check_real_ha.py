@@ -13,6 +13,7 @@ import json
 import logging
 from pathlib import Path
 import shutil
+import socket
 import sys
 import tempfile
 
@@ -60,7 +61,11 @@ async def main() -> None:
             return value.state
 
         try:
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                http_port = listener.getsockname()[1]
             result = await bootstrap.async_from_config_dict({
+                "http": {"server_host": "127.0.0.1", "server_port": http_port},
                 "homeassistant": {"time_zone": "Europe/Berlin", "latitude": 52.52,
                                   "longitude": 13.405, "elevation": 35},
                 "sun": {}, "recorder": {},
@@ -92,9 +97,36 @@ async def main() -> None:
                          "end_time": (now + timedelta(hours=2)).strftime("%H:%M")})
             data.pop("active_start_date")
             data.pop("active_end_date")
+            # Confirm, close, reconstruct the storage object and resume via the
+            # same public flow API used by the frontend. No partial active entry.
+            from custom_components.inverter_charge_night.config_flow import _GUIDED_GROUPS
+            from custom_components.inverter_charge_night.setup_drafts import get_drafts
+            wizard = await hass.config_entries.flow.async_init(
+                "inverter_charge_night", context={"source": "user"})
+            wizard = await hass.config_entries.flow.async_configure(wizard["flow_id"], {"next_step_id": "basics"})
+            wizard = await hass.config_entries.flow.async_configure(wizard["flow_id"],
+                {key: data[key] for key in _GUIDED_GROUPS["basics"]})
+            wizard = await hass.config_entries.flow.async_configure(wizard["flow_id"], {"next_step_id": "save_draft"})
+            check("confirmed setup can close without activating an entry", wizard.get("reason") == "draft_saved"
+                  and not hass.config_entries.async_entries("inverter_charge_night"))
+            draft_file = root / ".storage" / "inverter_charge_night.setup_drafts"
+            check("setup draft is actually persisted to disk", draft_file.is_file())
+            hass.data.pop("inverter_charge_night_setup_drafts")
+            wizard = await hass.config_entries.flow.async_init(
+                "inverter_charge_night", context={"source": "user"})
+            check("new dialog offers persisted draft", "resume_draft" in wizard["menu_options"])
+            wizard = await hass.config_entries.flow.async_configure(wizard["flow_id"], {"next_step_id": "resume_draft"})
+            draft_id = next(iter(wizard["data_schema"].schema.values())).config["options"][0]["value"]
+            wizard = await hass.config_entries.flow.async_configure(wizard["flow_id"], {"draft": draft_id})
+            wizard = await hass.config_entries.flow.async_configure(wizard["flow_id"], {"next_step_id": "basics"})
+            defaults = {key.schema: key.default() for key in wizard["data_schema"].schema
+                        if key.default is not __import__("voluptuous").UNDEFINED}
+            check("resumed page retains gross capacity", defaults["battery_capacity"] == 35.8)
+            hass.config_entries.flow.async_abort(wizard["flow_id"])
+            await get_drafts(hass).remove(draft_id)
             entry = await configure_planner(hass, data)
             await hass.async_block_till_done()
-            check("four-step production wizard creates a loaded entry",
+            check("guided production setup creates a loaded entry",
                   entry is not None and entry.state.value == "loaded", str(entry.state))
             coordinator = entry.runtime_data
             await coordinator.async_refresh()

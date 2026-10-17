@@ -1,9 +1,8 @@
 """Config flow for Inverter Charge Night integration.
 
-The configuration is collected in a four-step wizard (entities, time & SOC,
-charge power, advanced). The same four steps are used for the initial setup,
-the reconfigure flow and the options flow; only the ``step_id`` values and the
-way the result is stored differ.
+The guided setup uses a menu, short independently editable forms and durable
+drafts. Initial setup, reconfigure and options share the same pages. The former
+four-step entry points remain available to finish already-open legacy flows.
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ import logging
 import sys
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import date
+from uuid import uuid4
 from typing import TYPE_CHECKING, Any, cast
 
 # Current HA (Python 3.14) aliases voluptuous to probatio at runtime. Static
@@ -23,7 +23,7 @@ else:
     import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigEntryBaseFlow, ConfigFlowResult
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er, selector
@@ -130,6 +130,7 @@ from .const import (
     DEFAULT_GRID_HEADROOM_W,
 )
 from .util import parse_time_str
+from .setup_drafts import get_drafts
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -868,6 +869,13 @@ def _review_placeholders(hass: HomeAssistant, data: Mapping[str, Any]) -> dict[s
         "capacity": f"{capacity:g}",
         "floor": f"{floor:g}",
         "usable": f"{capacity * (100 - floor) / 100:.3f}",
+        "target_min": str(data.get(CONF_USER_MIN_SOC, DEFAULT_MIN_SOC)),
+        "target_max": str(data.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC)),
+        "power_min": str(data.get(CONF_MIN_CHARGE_POWER_W, DEFAULT_MIN_CHARGE_POWER_W)),
+        "power_max": str(data.get(CONF_MAX_CHARGE_POWER_W, DEFAULT_MAX_CHARGE_POWER_W)),
+        "power_control": str(data.get(CONF_CHARGE_POWER_ENTITY) or "—"),
+        "efficiency": "✓" if data.get(CONF_AUTO_EFFICIENT_CHARGE) else "—",
+        "pv_shortfall": "✓" if data.get(CONF_AUTO_PV_SHORTFALL) else "—",
         "controls": "\n".join(f"- `{data[key]}`" for key in (
             CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH, CONF_CHARGE_POWER_ENTITY,
             CONF_CHARGE_POWER_SENT_ENTITY, CONF_CHARGE_POWER_RECEIVED_ENTITY,
@@ -902,7 +910,347 @@ def _entry_using_min_soc_entity(
     return None
 
 
-class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+# Short, independently editable pages. Shared controls intentionally appear on
+# the feature pages which need them; unrelated settings are never cleared.
+_GUIDED_GROUPS: dict[str, tuple[str, ...]] = {
+    "basics": (CONF_NAME, CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH,
+               CONF_BATTERY_SOC_ENTITY, CONF_BATTERY_CAPACITY, CONF_PV_FORECAST_ENTITY),
+    "schedule": (CONF_START_TIME, CONF_END_TIME, CONF_USER_MIN_SOC, CONF_USER_MAX_SOC),
+    "charging": (CONF_CHARGE_POWER_ENTITY, CONF_MIN_CHARGE_POWER_W, CONF_MAX_CHARGE_POWER_W),
+    "efficiency": (CONF_CHARGE_POWER_ENTITY, CONF_CHARGE_POWER_SENT_ENTITY,
+                   CONF_CHARGE_POWER_RECEIVED_ENTITY, CONF_MIN_CHARGE_POWER_W,
+                   CONF_MAX_CHARGE_POWER_W),
+    "meters": (CONF_CHARGE_POWER_SENT_ENTITY, CONF_CHARGE_POWER_RECEIVED_ENTITY,
+               CONF_CHARGE_ENERGY_SENT_ENTITY, CONF_CHARGE_ENERGY_RECEIVED_ENTITY),
+    "grid": (CONF_GRID_IMPORT_ENTITY, CONF_GRID_MAX_CONTINUOUS_W,
+             CONF_GRID_HEADROOM_W, CONF_CHARGE_POWER_ENTITY),
+    "planning": (CONF_PLANNER_MODE, CONF_FORECAST_ERROR_MARGIN, CONF_DEFAULT_MIN_SOC,
+                 CONF_PV_FORECAST_TODAY_ENTITY, CONF_HOUSE_LOAD_ENTITY,
+                 CONF_AVG_HOUSE_LOAD_KW, CONF_PV_CROSSOVER_DELAY_MIN, CONF_BRIDGE_RESERVE_KWH),
+    "evening": (CONF_HIGH_PRICE_START, CONF_HIGH_PRICE_END, CONF_HIGH_PRICE_MARGIN_PCT,
+                CONF_DISCHARGE_BLOCK_MODE, CONF_DISCHARGE_BLOCK_SWITCH),
+    "season": (CONF_ACTIVE_START_DATE, CONF_ACTIVE_END_DATE, CONF_ACTIVE_RANGE_YEARLY),
+    "backup": (CONF_BACKUP_MODE_ENTITY, CONF_BACKUP_MODE_STATES),
+    "pv_shortfall": (CONF_PV_FORECAST_TODAY_ENTITY, CONF_PV_ENERGY_TODAY_ENTITY),
+    "prices": (CONF_NIGHT_PRICE_CT, CONF_DAY_PRICE_CT, CONF_FEED_IN_PRICE_CT,
+               CONF_PRICE_ENTITY, CONF_PRICE_UNIT, CONF_PRICE_SURCHARGE_CT,
+               CONF_PRICE_SURCHARGE_WINDOW_CT),
+    "hardware": (CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY, CONF_ABSOLUTE_MAX_CHARGE_POWER_W,
+                 CONF_DISCHARGE_LIMIT_ENTITY),
+    "grid_fuse": (CONF_GRID_IMPORT_ENTITY, CONF_CHARGE_POWER_ENTITY, CONF_MAIN_FUSE_A,
+                  CONF_GRID_PHASES, CONF_GRID_VOLTAGE_V, CONF_GRID_CONTINUOUS_PCT, CONF_GRID_HEADROOM_W),
+    "runtime": (CONF_UPDATE_INTERVAL, CONF_COMMAND_DELAY, CONF_CHARGE_EFFICIENCY,
+                CONF_DISCHARGE_EFFICIENCY, CONF_CURTAILMENT_FEED_IN_ENTITY,
+                CONF_CURTAILMENT_LIMIT_W, CONF_OPERATION_MODE, CONF_FORCE_DISCHARGE_SWITCH),
+}
+_BUILDERS = (_schema_entities, _schema_time_soc, _schema_power, _schema_advanced)
+_FEATURE_FLAGS = {"efficiency": CONF_AUTO_EFFICIENT_CHARGE,
+                  "pv_shortfall": CONF_AUTO_PV_SHORTFALL}
+_KORE_SUFFIXES = {
+    CONF_MIN_SOC_ENTITY: ("_devices:local_Battery:MinSoc", "_devices:local_Battery:MinSocRel"),
+    CONF_GRID_CHARGE_SWITCH: ("_devices:local_Battery:ManualCharge",),
+    CONF_BATTERY_SOC_ENTITY: ("_devices:local:battery_SoC",),
+    CONF_CHARGE_POWER_ENTITY: ("_modbus_bat_max_charge_limit",),
+    CONF_CHARGE_POWER_SENT_ENTITY: ("_devices:local_Grid2Bat_P",),
+    CONF_CHARGE_POWER_RECEIVED_ENTITY: ("_devices:local:battery_P",),
+}
+
+
+def _kostal_suggestions(hass: HomeAssistant, min_soc: str | None = None) -> dict[str, str]:
+    """Use registry identity, never a guessed or user-renamable entity ID."""
+    registry = er.async_get(hass)
+    groups: dict[str, dict[str, list[str]]] = {}
+    for entity in registry.entities.values():
+        if entity.platform != "kostal_kore" or entity.disabled_by or not entity.device_id:
+            continue
+        for key, suffixes in _KORE_SUFFIXES.items():
+            if entity.unique_id.endswith(suffixes):
+                groups.setdefault(entity.device_id, {}).setdefault(key, []).append(entity.entity_id)
+    candidates = [group for group in groups.values()
+                  if len(group.get(CONF_MIN_SOC_ENTITY, [])) == 1
+                  and (not min_soc or min_soc in group[CONF_MIN_SOC_ENTITY])]
+    if len(candidates) != 1:
+        return {}
+    return {key: values[0] for key, values in candidates[0].items() if len(values) == 1}
+
+
+def _guided_defaults(data: Mapping[str, Any]) -> dict[str, Any]:
+    result = dict(data)
+    for builder in _BUILDERS:
+        for marker in builder(result).schema:
+            if marker.schema not in result and marker.default is not vol.UNDEFINED:
+                result[marker.schema] = marker.default()
+    return result
+
+
+def _guided_schema(group: str, defaults: Mapping[str, Any]) -> vol.Schema:
+    fields = {marker.schema: (marker, validator)
+              for builder in _BUILDERS for marker, validator in builder(defaults).schema.items()}
+    required = set(_GUIDED_GROUPS[group]) if group in ("charging", "efficiency", "grid", "grid_fuse", "pv_shortfall") else set()
+    if defaults.get(CONF_AUTO_PV_SHORTFALL):
+        required.add(CONF_PV_FORECAST_TODAY_ENTITY)
+    return vol.Schema({(_required(key, defaults) if key in required else fields[key][0]): fields[key][1]
+                       for key in _GUIDED_GROUPS[group]})
+
+
+def _merge_setup_data(current: Mapping[str, Any], opened: Mapping[str, Any],
+                      collected_values: Mapping[str, Any],
+                      explicit: set[str] | None = None) -> dict[str, Any]:
+    """Keep runtime changes made while an options/reconfigure draft was open."""
+    collected = _finalize_data(collected_values)
+    initial = _guided_defaults(opened)
+    data = dict(current)
+    for key in _ALL_STEP_KEYS:
+        if key not in collected and (key in opened or key in (explicit or set())):
+            data.pop(key, None)
+    for key, value in collected.items():
+        if (key in current or key in opened) and initial.get(key) == value and key not in (explicit or set()):
+            continue
+        data[key] = value
+    return data
+
+
+class GuidedSetupMixin(ConfigEntryBaseFlow):
+    """Native HA menus, short forms, and durable drafts for all three flows."""
+
+    _data: dict[str, Any]
+    _guided = False
+    _draft_id: str | None = None
+    _explicit_features: set[str] | None = None
+
+    def _draft_scope(self) -> str:
+        entry = getattr(self, "_config_entry", None)
+        return str(entry.entry_id if entry else self.context.get("entry_id", "new"))
+
+    async def _guided_start(self) -> ConfigFlowResult:
+        self._guided = True
+        self._data = _guided_defaults(self._data)
+        if not self._data.get(CONF_MIN_SOC_ENTITY):
+            suggestions = _kostal_suggestions(self.hass)
+            self._data.update({key: value for key, value in suggestions.items()
+                               if key in _GUIDED_GROUPS["basics"]})
+        return await self.async_step_setup()
+
+    async def async_step_setup(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        drafts = await get_drafts(self.hass).list(self._draft_scope())
+        options = ["basics", "schedule", "features", "summary", "save_draft"]
+        if drafts:
+            options.append("resume_draft")
+        values = _review_placeholders(self.hass, self._data)
+        values["core_count"] = str(sum(bool(self._data.get(key)) for key in _GUIDED_GROUPS["basics"]))
+        return self.async_show_menu(step_id="setup", menu_options=options,
+                                    description_placeholders=values)
+
+    async def async_step_features(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="features", menu_options=[
+            "charging", "grid", "efficiency", "planning_features", "advanced_features", "setup"],
+            description_placeholders={"efficiency": "✓" if self._data.get(CONF_AUTO_EFFICIENT_CHARGE) else "—",
+                                      "grid": "✓" if self._data.get(CONF_GRID_IMPORT_ENTITY) else "—"})
+
+    async def async_step_planning_features(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="planning_features", menu_options=[
+            "planning", "evening", "season", "pv_shortfall", "pv_shortfall_off", "prices", "setup"])
+
+    async def async_step_advanced_features(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="advanced_features", menu_options=[
+            "meters", "backup", "hardware", "grid_fuse", "runtime", "disable_features", "setup"])
+
+    async def async_step_disable_features(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="disable_features", menu_options=[
+            "efficiency_off", "grid_off", "pv_shortfall_off", "charging_off", "setup"])
+
+    async def async_step_grid_fuse(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("grid_fuse", user_input)
+
+    async def _guided_form(self, group: str, user_input: dict[str, Any] | None) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        flag = _FEATURE_FLAGS.get(group)
+        if user_input is not None:
+            values = dict(user_input)
+            keys = _GUIDED_GROUPS[group]
+            if flag:
+                values[flag] = True
+                keys += (flag,)
+            candidate = dict(self._data)
+            if group == "grid_fuse":
+                candidate.pop(CONF_GRID_MAX_CONTINUOUS_W, None)
+            errors = _process_step(self.hass, candidate, keys, values)
+            for key in _GUIDED_GROUPS[group]:
+                if (group in ("basics", "charging", "efficiency", "grid", "grid_fuse", "pv_shortfall")
+                        and not values.get(key) and key != CONF_GRID_HEADROOM_W):
+                    errors[key] = "required_value"
+            if group == "basics" and values.get(CONF_MIN_SOC_ENTITY):
+                scope = self._draft_scope()
+                if _entry_using_min_soc_entity(self.hass, values[CONF_MIN_SOC_ENTITY],
+                                               None if scope == "new" else scope):
+                    errors[CONF_MIN_SOC_ENTITY] = "entity_used_by_other_entry"
+            if not errors:
+                self._data = candidate
+                if flag:
+                    self._explicit_features = {*(self._explicit_features or set()), flag}
+                if group == "planning":
+                    self._explicit_features = {*(self._explicit_features or set()), CONF_DEFAULT_MIN_SOC}
+                if (group == "schedule" and self._draft_scope() == "new"
+                        and CONF_DEFAULT_MIN_SOC not in (self._explicit_features or set())):
+                    self._data[CONF_DEFAULT_MIN_SOC] = self._data[CONF_USER_MIN_SOC]
+                try:
+                    await self._save_setup_draft()
+                except OSError:
+                    _LOGGER.exception("Could not save setup draft")
+                    errors["base"] = "draft_save_failed"
+                else:
+                    return await self.async_step_setup()
+        defaults = {**self._data, **(user_input or {})}
+        suggestions = _kostal_suggestions(self.hass, self._data.get(CONF_MIN_SOC_ENTITY))
+        defaults = {**suggestions, **defaults}
+        # Show an existing fuse-based budget as its equivalent direct watt value.
+        if group == "grid" and not defaults.get(CONF_GRID_MAX_CONTINUOUS_W) and defaults.get(CONF_MAIN_FUSE_A):
+            defaults[CONF_GRID_MAX_CONTINUOUS_W] = int(float(defaults[CONF_MAIN_FUSE_A])
+                * float(defaults[CONF_GRID_PHASES]) * float(defaults[CONF_GRID_VOLTAGE_V])
+                * float(defaults[CONF_GRID_CONTINUOUS_PCT]) / 100)
+        return self.async_show_form(step_id=group, data_schema=_guided_schema(group, defaults),
+                                    errors=errors, last_step=False,
+                                    description_placeholders={"timezone": str(self.hass.config.time_zone)})
+
+    async def _save_setup_draft(self) -> None:
+        if self._draft_id is None:
+            self._draft_id = uuid4().hex
+        baseline = getattr(self, "_opened_with", self._data)
+        await get_drafts(self.hass).save(self._draft_id, self._draft_scope(),
+            _finalize_data({key: value for key, value in self._data.items() if key in _ALL_STEP_KEYS}),
+            {key: value for key, value in baseline.items() if key in _ALL_STEP_KEYS},
+            sorted(self._explicit_features or set()))
+
+    async def async_step_save_draft(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        try:
+            await self._save_setup_draft()
+        except OSError:
+            _LOGGER.exception("Could not save setup draft")
+            return self.async_abort(reason="draft_save_failed")
+        return self.async_abort(reason="draft_saved")
+
+    async def async_step_resume_draft(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        drafts = await get_drafts(self.hass).list(self._draft_scope())
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            draft_id = user_input.get("draft")
+            if draft_id in drafts:
+                saved = drafts[draft_id]
+                self._data = _guided_defaults({key: value for key, value in saved["data"].items()
+                                               if key in _ALL_STEP_KEYS})
+                if hasattr(self, "_opened_with"):
+                    self._opened_with = dict(saved.get("baseline", {}))
+                self._draft_id = draft_id
+                self._explicit_features = {key for key in saved.get("explicit_features", [])
+                                           if key in _ALL_STEP_KEYS}
+                return await self.async_step_setup()
+            errors["draft"] = "draft_not_found"
+        choices: list[selector.SelectOptionDict] = [{"value": key, "label": f"{draft['data'].get(CONF_NAME, DEFAULT_NAME)} — {draft['updated'][:16]} UTC"}
+                   for key, draft in drafts.items()]
+        return self.async_show_form(step_id="resume_draft", errors=errors, data_schema=vol.Schema({
+            vol.Required("draft"): selector.SelectSelector(selector.SelectSelectorConfig(options=choices))}))
+
+    async def async_step_summary(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="summary", menu_options=["finish", "setup"],
+                                    description_placeholders=_review_placeholders(self.hass, self._data))
+
+    async def _guided_validate(self, data: dict[str, Any] | None = None) -> ConfigFlowResult | None:
+        errors = _validate_user_input(data if data is not None else self._data, self.hass)
+        for key in _GUIDED_GROUPS["basics"]:
+            if not self._data.get(key):
+                errors[key] = "required_value"
+        for group, keys in _GUIDED_GROUPS.items():
+            relevant = _errors_for(keys, errors)
+            if relevant:
+                result = await self._guided_form(group, None)
+                result["errors"] = relevant
+                return result
+        return None
+
+    async def _remove_setup_draft(self) -> None:
+        if self._draft_id:
+            try:
+                await get_drafts(self.hass).remove(self._draft_id)
+            except OSError:
+                _LOGGER.warning("Saved configuration, but could not remove its setup draft", exc_info=True)
+
+    async def async_step_basics(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("basics", user_input)
+
+    async def async_step_schedule(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("schedule", user_input)
+
+    async def async_step_charging(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("charging", user_input)
+
+    async def async_step_efficiency(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("efficiency", user_input)
+
+    async def async_step_meters(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("meters", user_input)
+
+    async def async_step_grid(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("grid", user_input)
+
+    async def async_step_planning(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("planning", user_input)
+
+    async def async_step_evening(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("evening", user_input)
+
+    async def async_step_season(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("season", user_input)
+
+    async def async_step_backup(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("backup", user_input)
+
+    async def async_step_pv_shortfall(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("pv_shortfall", user_input)
+
+    async def async_step_prices(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("prices", user_input)
+
+    async def async_step_hardware(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("hardware", user_input)
+
+    async def async_step_runtime(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("runtime", user_input)
+
+    async def _save_disabled_feature(self) -> ConfigFlowResult:
+        try:
+            await self._save_setup_draft()
+        except OSError:
+            _LOGGER.exception("Could not save setup draft")
+            return self.async_abort(reason="draft_save_failed")
+        return await self.async_step_features()
+
+    async def async_step_efficiency_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        self._data[CONF_AUTO_EFFICIENT_CHARGE] = False
+        self._explicit_features = {*(self._explicit_features or set()), CONF_AUTO_EFFICIENT_CHARGE}
+        return await self._save_disabled_feature()
+
+    async def async_step_grid_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        self._data.pop(CONF_GRID_IMPORT_ENTITY, None)
+        self._explicit_features = {*(self._explicit_features or set()), CONF_GRID_IMPORT_ENTITY}
+        return await self._save_disabled_feature()
+
+    async def async_step_charging_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            return await self.async_step_disable_features()
+        if self._data.get(CONF_AUTO_EFFICIENT_CHARGE) or self._data.get(CONF_GRID_IMPORT_ENTITY):
+            return self.async_show_form(step_id="charging_off", data_schema=vol.Schema({}),
+                                        errors={"base": "disable_dependent_features"}, last_step=False)
+        self._data.pop(CONF_CHARGE_POWER_ENTITY, None)
+        self._explicit_features = {*(self._explicit_features or set()), CONF_CHARGE_POWER_ENTITY}
+        return await self._save_disabled_feature()
+
+    async def async_step_pv_shortfall_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        self._data[CONF_AUTO_PV_SHORTFALL] = False
+        self._explicit_features = {*(self._explicit_features or set()), CONF_AUTO_PV_SHORTFALL}
+        return await self._save_disabled_feature()
+
+
+class InverterChargeNightConfigFlow(GuidedSetupMixin, config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Inverter Charge Night."""
 
     VERSION = 1
@@ -939,7 +1287,9 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Step 1 of 4: entities."""
+        """Start the guided setup; accept an already-open legacy wizard."""
+        if user_input is None:
+            return await self._guided_start()
         return await self._async_wizard_step(
             "user", STEP_USER_KEYS, _schema_entities, user_input, self.async_step_time_soc
         )
@@ -979,15 +1329,26 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Only commit after the user has reviewed the collected settings."""
-        invalid = _review_errors(self.hass, self._data)
+        if self._guided:
+            candidate = self._data
+            if self.source == config_entries.SOURCE_RECONFIGURE:
+                candidate = _merge_setup_data(self._get_reconfigure_entry().data, self._opened_with, self._data, self._explicit_features)
+            invalid_result = await self._guided_validate(candidate)
+            if invalid_result is not None:
+                return invalid_result
+        invalid = None if self._guided else _review_errors(self.hass, self._data)
         if invalid is not None:
             step_id, schema, errors = invalid
             if self.source == config_entries.SOURCE_RECONFIGURE:
                 step_id = "reconfigure" if step_id == "user" else "reconfigure_" + step_id
             return self.async_show_form(step_id=step_id, data_schema=schema(self._data), errors=errors)
         if self.source == config_entries.SOURCE_RECONFIGURE:
-            return await self._async_reconfigure_finish()
-        return await self._async_create()
+            result = await self._async_reconfigure_finish()
+        else:
+            result = await self._async_create()
+        if result.get("type") != "form":
+            await self._remove_setup_draft()
+        return result
 
     async def _async_create(self) -> ConfigFlowResult:
         data = _finalize_data(self._data)
@@ -1003,6 +1364,9 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Reconfigure step 1 of 4: entities."""
         if not self._data:
             self._data = dict(self._get_reconfigure_entry().data)
+            self._opened_with = dict(self._data)
+        if user_input is None:
+            return await self._guided_start()
         return await self._async_wizard_step(
             "reconfigure",
             STEP_USER_KEYS,
@@ -1048,8 +1412,8 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def _async_reconfigure_finish(self) -> ConfigFlowResult:
-        data = _finalize_data(self._data)
         entry = self._get_reconfigure_entry()
+        data = _merge_setup_data(entry.data, self._opened_with, self._data, self._explicit_features)
         # The min SOC entity identifies the inverter. Pointing this entry at an
         # inverter another entry already drives would leave two coordinators
         # fighting over it, so refuse that - but changing to a free inverter
@@ -1081,7 +1445,7 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 # ---------------------------------------------------------------------------
 
 
-class OptionsFlowHandler(config_entries.OptionsFlow):
+class OptionsFlowHandler(GuidedSetupMixin, config_entries.OptionsFlow):
     """Handle options flow for Inverter Charge Night."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
@@ -1119,7 +1483,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Options step 1 of 4: entities."""
+        """Open the editable setup overview."""
+        if user_input is None:
+            return await self._guided_start()
         return await self._async_wizard_step(
             "init", STEP_USER_KEYS, _schema_entities, user_input, self.async_step_time_soc
         )
@@ -1155,12 +1521,25 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         ], description_placeholders=_review_placeholders(self.hass, self._data))
 
     async def async_step_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        invalid = _review_errors(self.hass, self._merged_data())
+        if self._guided:
+            invalid_result = await self._guided_validate(self._merged_data())
+            if invalid_result is not None:
+                return invalid_result
+        invalid = None if self._guided else _review_errors(self.hass, self._merged_data())
         if invalid is not None:
             step_id, schema, errors = invalid
             return self.async_show_form(step_id="init" if step_id == "user" else step_id,
                                         data_schema=schema(self._data), errors=errors)
-        return await self._async_save()
+        result = await self._async_save()
+        if result.get("type") != "form":
+            await self._remove_setup_draft()
+            # Cleanup yields to update listeners, which may persist newer
+            # teardown/runtime options. HA writes this payload synchronously
+            # after the step returns; capture it only after the final await.
+            # Without a draft neither this path nor HA's options finalization
+            # suspends: a queued listener persists after finalization instead.
+            result["data"] = dict(self._config_entry.options)
+        return result
 
     def _merged_data(self) -> dict[str, Any]:
         """Merge the collected values over the *current* entry.data.
@@ -1174,16 +1553,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         keeps whatever entry.data holds now; only the fields the user actually
         changed (and the fields the user cleared) are written.
         """
-        collected = _finalize_data(self._data)
-        data = dict(self._config_entry.data)
-        for key in _ALL_STEP_KEYS:
-            if key not in collected:
-                data.pop(key, None)  # optional field cleared in the dialog
-        for key, value in collected.items():
-            if key in data and self._opened_with.get(key) == value:
-                continue  # untouched here; keep the value entry.data has now
-            data[key] = value
-        return data
+        return _merge_setup_data(self._config_entry.data, self._opened_with, self._data, self._explicit_features)
 
     async def _async_save(self) -> ConfigFlowResult:
         min_soc_entity = self._data.get(CONF_MIN_SOC_ENTITY)

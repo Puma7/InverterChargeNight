@@ -5,6 +5,22 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.0] - 2026-10-17
+
+### Changed
+- Replace the forced four-page setup with an overview, two short basic pages and separate optional feature pages, shared by setup, options and reconfigure.
+- Explain every input, gross battery capacity, time zone and the difference between control entities and measured power. Include concrete KostalKore entity examples in German and English.
+- Suggest unambiguous KostalKore bindings using entity registry identities, preserving renamed entity IDs and avoiding guesses across multiple inverters.
+
+### Added
+- Persist confirmed steps as private Home Assistant setup drafts for 30 days. Close, reopen and resume without creating an active partial entry; apply only after review.
+- Direct navigation back to the overview, individual feature configuration and explicit disable actions. Efficiency and house-limit pages show their prerequisites as required fields.
+
+### Fixed
+- Preserve runtime state and settings changed while a reconfigure draft is open, including resumed drafts. Explicit feature enable/disable actions still take effect when runtime switches change concurrently.
+- Reject malformed draft metadata before offering resume, keeping a damaged record from interrupting an otherwise valid setup.
+- Make the coupled inverter lab campaign independent of the real night-window clock: ad-hoc charge tests run outside the scheduled window.
+
 ## [3.9.0] - 2026-10-17
 
 ### Changed
