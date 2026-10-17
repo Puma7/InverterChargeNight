@@ -81,6 +81,15 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
           abs(data.get("best_power_w", 0) - 8000) <= 300, data.get("best_power_w"))
     check("recorded conversion loss matches the independent fixture",
           abs(data.get("best_loss", 1) - .04) <= .002, data.get("best_loss"))
+    # Exercise the normal update after completion, not just the search itself.
+    # The target needs much less power than the measured best in the remaining
+    # ad-hoc window, so this distinguishes preference from an ineffective cap.
+    await co.async_refresh()
+    check("normal planner actually applies the measured optimum through KORE",
+          co.planned_charge_power_w == data.get("best_power_w") and
+          lab.plant.charge_limit == data.get("best_power_w"),
+          {"planned": co.planned_charge_power_w, "device": lab.plant.charge_limit,
+           "best": data.get("best_power_w")})
     commands = [item["value"] for item in lab.commands if item["key"] == "charge_limit" and item["accepted"]]
     check("search actually writes multiple permitted device setpoints",
           len(set(commands)) >= 3 and all(0 <= value <= 15000 for value in commands), commands)

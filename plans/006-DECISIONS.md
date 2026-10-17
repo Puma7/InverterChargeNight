@@ -85,10 +85,9 @@ Kostenoptimierung aufgehen.
 
 ## Umsetzungsentscheidungen, die der Eigentümer kennen sollte
 
-1. **Ladeleistung wird nur im Modus `bridge` geschrieben.** Der Sensor `planned_charge_power` zeigt den
-   Sollwert in beiden Modi, damit der Plan vor dem Umschalten beobachtet werden kann. Im Modus `headroom`
-   bleibt das AC-Ladelimit unangetastet (heutiges Verhalten). Während der Effizienzsucher aktiv ist, schreibt
-   der Planer ebenfalls nicht; der Sucher besitzt das Limit.
+1. **Besitz des Ladelimits ab 3.9.0:** Der Planer schreibt im Modus `bridge`, bei vorhandenem
+   Effizienzwert und unabhängig vom Modus bei konfiguriertem Hausanschlusslimit. Nur eine
+   laufende Effizienzmessung besitzt das Limit stattdessen; ein wartender Sucher blockiert nicht.
 2. **Ladeleistung ab 3.9.0:** `required = (Ziel - Ist) × Kapazität / Reststunden / Wirkungsgrad`.
    Mit gemessenem Effizienzwert ist der Sollwert `max(required, Optimum)`, begrenzt auf
    `[min_charge_power_w, max_charge_power_w]` und anschließend auf die freie Hausanschlussleistung.

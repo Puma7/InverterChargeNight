@@ -87,6 +87,7 @@ def test_is_backup_active(mock_hass):
 
 
 def test_accumulate_auto_energy_updates_totals(mock_hass):
+    mock_hass.states.async_set("sun.sun", "below_horizon")
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     coordinator = _make_coordinator(
         mock_hass,
@@ -114,6 +115,7 @@ def test_accumulate_auto_energy_updates_totals(mock_hass):
 
 
 def test_finalize_auto_test_records_best(mock_hass):
+    mock_hass.states.async_set("sun.sun", "below_horizon")
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     coordinator = _make_coordinator(mock_hass, {})
     coordinator._auto_test_active = True

@@ -3221,8 +3221,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if meters is not None:
             start_sent = self._read_energy_wh(meters[0])
             start_received = self._read_energy_wh(meters[1])
-            if start_sent is not None and start_received is not None:
-                self._auto_meter_start = (start_sent, start_received)
+            if start_sent is None or start_received is None:
+                self._discard_auto_test("configured energy counters are unavailable")
+                return
+            self._auto_meter_start = (start_sent, start_received)
         _LOGGER.debug(
             "Efficiency test at %s W settled, measuring from now (%s)",
             self._auto_test_power_w,
@@ -3239,6 +3241,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         new setpoint belongs to no power in particular.
         """
         if not self._auto_test_active or self._auto_test_start is None:
+            return
+        sun = self.hass.states.get(SUN_ENTITY_ID)
+        if sun is None or sun.state != "below_horizon":
+            self._discard_auto_test("daylight or unknown sun state can contaminate the AC/DC comparison")
             return
         now = self._efficiency_now()
         if self._auto_measure_start is None:
@@ -3258,6 +3264,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return
         if sent_w is None or received_w is None:
             self._discard_auto_test("power telemetry is unavailable; retrying after recovery")
+            return
+        if self._auto_meter_start is not None and self._measured_energy_wh() is None:
+            self._discard_auto_test("energy counters were reset or became unavailable")
             return
         last_time = self._auto_last_sample_time
         if last_time is None:
@@ -3463,6 +3472,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if not self._auto_test_active or self._auto_test_start is None or self._auto_test_power_w is None:
             self._reset_auto_test_state()
+            return
+        sun = self.hass.states.get(SUN_ENTITY_ID)
+        if sun is None or sun.state != "below_horizon":
+            self._discard_auto_test("daylight or unknown sun state can contaminate the AC/DC comparison")
             return
         power_w = self._auto_test_power_w
         if self._auto_measure_start is None:

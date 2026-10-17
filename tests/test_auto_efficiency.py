@@ -268,6 +268,7 @@ def test_recording_a_sample_fills_the_band_and_its_best(mock_hass):
 
 
 def test_a_finished_measurement_lands_in_its_band_and_battery_wide(mock_hass):
+    mock_hass.states.async_set("sun.sun", "below_horizon")
     """The whole path: settle, measure, finalize - and both stores filled."""
     mock_hass.states.async_set("sensor.soc", "56", {"unit_of_measurement": "%"})
     coordinator = _make_coordinator(

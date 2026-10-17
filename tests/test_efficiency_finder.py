@@ -77,6 +77,7 @@ CONFIG = {
 
 def _make(hass, config=None) -> InverterChargeNightCoordinator:
     """A coordinator whose efficiency data really round-trips through options."""
+    hass.states.async_set("sun.sun", "below_horizon")
     entry = MagicMock()
     entry.entry_id = "entry_1"
     entry.title = "Test"
@@ -650,3 +651,36 @@ def test_legacy_measurements_without_provenance_are_invalidated(mock_hass):
     assert saved["history"] == {}
     assert "best_power_w" not in saved
     assert "measurement_signature" in saved
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "reset"])
+def test_counter_failure_discards_live_measurement_without_pruning(metered, mock_hass, failure):
+    end = _measure(metered, mock_hass, power_w=5000, samples=[(5000, 4500)], minutes=1)
+    if failure == "unavailable":
+        mock_hass.states.async_set(METER_SENT, "unavailable")
+    else:
+        _meters(mock_hass, 0, 0)
+    with patch(NOW, return_value=end + timedelta(seconds=10)):
+        metered._accumulate_auto_energy()
+    assert not metered._auto_test_active
+    assert metered.get_auto_efficiency_data()["history"] == {}
+    assert "counters" in metered._auto_last_result["discarded"]
+
+
+def test_sunrise_at_target_stop_cannot_commit_contaminated_sample(finder, mock_hass):
+    end = _measure(finder, mock_hass, power_w=5000, samples=[(5000, 4500)], minutes=10)
+    mock_hass.states.async_set("sun.sun", "above_horizon")
+    with patch(NOW, return_value=end):
+        finder._finalize_auto_test()
+    assert finder.get_auto_efficiency_data()["history"] == {}
+    assert not finder._auto_test_active
+
+
+def test_missing_configured_counter_never_falls_back_to_guessed_power_energy(metered, mock_hass):
+    mock_hass.states.async_set(METER_SENT, "unavailable")
+    _power(mock_hass, 5000, 4500)
+    metered._auto_test_active = True
+    metered._auto_test_power_w = 5000
+    metered._begin_auto_measurement(START)
+    assert not metered._auto_test_active
+    assert metered._auto_meter_start is None
