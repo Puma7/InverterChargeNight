@@ -5,6 +5,7 @@ Requires ../KostalKore checkout and ports 127.0.0.1:80 and :1502 free.
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 import json
 import logging
 import os
@@ -139,6 +140,12 @@ async def main():
             from custom_components.icn_simulator.defaults import configure_planner, planner_defaults
             defaults = planner_defaults()
             defaults.update(mapping)
+            # This campaign tests ad-hoc charging, which correctly refuses to
+            # interrupt an already-running scheduled night window.
+            from homeassistant.util import dt as dt_util
+            now = dt_util.now()
+            defaults.update(start_time=(now + timedelta(hours=6)).strftime("%H:%M"),
+                            end_time=(now + timedelta(hours=12)).strftime("%H:%M"))
             planner = await configure_planner(hass, defaults)
             await hass.async_block_till_done()
             check("ICN configures against real KORE entities", planner.state.value == "loaded", mapping)

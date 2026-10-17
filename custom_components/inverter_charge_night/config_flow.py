@@ -869,6 +869,13 @@ def _review_placeholders(hass: HomeAssistant, data: Mapping[str, Any]) -> dict[s
         "capacity": f"{capacity:g}",
         "floor": f"{floor:g}",
         "usable": f"{capacity * (100 - floor) / 100:.3f}",
+        "target_min": str(data.get(CONF_USER_MIN_SOC, DEFAULT_MIN_SOC)),
+        "target_max": str(data.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC)),
+        "power_min": str(data.get(CONF_MIN_CHARGE_POWER_W, DEFAULT_MIN_CHARGE_POWER_W)),
+        "power_max": str(data.get(CONF_MAX_CHARGE_POWER_W, DEFAULT_MAX_CHARGE_POWER_W)),
+        "power_control": str(data.get(CONF_CHARGE_POWER_ENTITY) or "—"),
+        "efficiency": "✓" if data.get(CONF_AUTO_EFFICIENT_CHARGE) else "—",
+        "pv_shortfall": "✓" if data.get(CONF_AUTO_PV_SHORTFALL) else "—",
         "controls": "\n".join(f"- `{data[key]}`" for key in (
             CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH, CONF_CHARGE_POWER_ENTITY,
             CONF_CHARGE_POWER_SENT_ENTITY, CONF_CHARGE_POWER_RECEIVED_ENTITY,
@@ -986,7 +993,8 @@ def _guided_schema(group: str, defaults: Mapping[str, Any]) -> vol.Schema:
 
 
 def _merge_setup_data(current: Mapping[str, Any], opened: Mapping[str, Any],
-                      collected_values: Mapping[str, Any]) -> dict[str, Any]:
+                      collected_values: Mapping[str, Any],
+                      explicit: set[str] | None = None) -> dict[str, Any]:
     """Keep runtime changes made while an options/reconfigure draft was open."""
     collected = _finalize_data(collected_values)
     initial = _guided_defaults(opened)
@@ -995,7 +1003,7 @@ def _merge_setup_data(current: Mapping[str, Any], opened: Mapping[str, Any],
         if key not in collected and key in opened:
             data.pop(key, None)
     for key, value in collected.items():
-        if key in data and initial.get(key) == value:
+        if key in data and initial.get(key) == value and key not in (explicit or set()):
             continue
         data[key] = value
     return data
@@ -1007,6 +1015,7 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
     _data: dict[str, Any]
     _guided = False
     _draft_id: str | None = None
+    _explicit_features: set[str] | None = None
 
     def _draft_scope(self) -> str:
         entry = getattr(self, "_config_entry", None)
@@ -1076,6 +1085,8 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
                     errors[CONF_MIN_SOC_ENTITY] = "entity_used_by_other_entry"
             if not errors:
                 self._data = candidate
+                if flag:
+                    self._explicit_features = {*(self._explicit_features or set()), flag}
                 if group == "schedule" and self._draft_scope() == "new":
                     self._data[CONF_DEFAULT_MIN_SOC] = self._data[CONF_USER_MIN_SOC]
                 try:
@@ -1103,7 +1114,8 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
         baseline = getattr(self, "_opened_with", self._data)
         await get_drafts(self.hass).save(self._draft_id, self._draft_scope(),
             _finalize_data({key: value for key, value in self._data.items() if key in _ALL_STEP_KEYS}),
-            {key: value for key, value in baseline.items() if key in _ALL_STEP_KEYS})
+            {key: value for key, value in baseline.items() if key in _ALL_STEP_KEYS},
+            sorted(self._explicit_features or set()))
 
     async def async_step_save_draft(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         try:
@@ -1125,6 +1137,8 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
                 if hasattr(self, "_opened_with"):
                     self._opened_with = dict(saved.get("baseline", {}))
                 self._draft_id = draft_id
+                self._explicit_features = {key for key in saved.get("explicit_features", [])
+                                           if key in _ALL_STEP_KEYS}
                 return await self.async_step_setup()
             errors["draft"] = "draft_not_found"
         choices: list[selector.SelectOptionDict] = [{"value": key, "label": f"{draft['data'].get(CONF_NAME, DEFAULT_NAME)} — {draft['updated'][:16]} UTC"}
@@ -1208,6 +1222,7 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
 
     async def async_step_efficiency_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         self._data[CONF_AUTO_EFFICIENT_CHARGE] = False
+        self._explicit_features = {*(self._explicit_features or set()), CONF_AUTO_EFFICIENT_CHARGE}
         return await self._save_disabled_feature()
 
     async def async_step_grid_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -1216,6 +1231,7 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
 
     async def async_step_pv_shortfall_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         self._data[CONF_AUTO_PV_SHORTFALL] = False
+        self._explicit_features = {*(self._explicit_features or set()), CONF_AUTO_PV_SHORTFALL}
         return await self._save_disabled_feature()
 
 
@@ -1301,7 +1317,7 @@ class InverterChargeNightConfigFlow(GuidedSetupMixin, config_entries.ConfigFlow,
         if self._guided:
             candidate = self._data
             if self.source == config_entries.SOURCE_RECONFIGURE:
-                candidate = _merge_setup_data(self._get_reconfigure_entry().data, self._opened_with, self._data)
+                candidate = _merge_setup_data(self._get_reconfigure_entry().data, self._opened_with, self._data, self._explicit_features)
             invalid_result = await self._guided_validate(candidate)
             if invalid_result is not None:
                 return invalid_result
@@ -1382,7 +1398,7 @@ class InverterChargeNightConfigFlow(GuidedSetupMixin, config_entries.ConfigFlow,
 
     async def _async_reconfigure_finish(self) -> ConfigFlowResult:
         entry = self._get_reconfigure_entry()
-        data = _merge_setup_data(entry.data, self._opened_with, self._data)
+        data = _merge_setup_data(entry.data, self._opened_with, self._data, self._explicit_features)
         # The min SOC entity identifies the inverter. Pointing this entry at an
         # inverter another entry already drives would leave two coordinators
         # fighting over it, so refuse that - but changing to a free inverter
@@ -1516,7 +1532,7 @@ class OptionsFlowHandler(GuidedSetupMixin, config_entries.OptionsFlow):
         keeps whatever entry.data holds now; only the fields the user actually
         changed (and the fields the user cleared) are written.
         """
-        return _merge_setup_data(self._config_entry.data, self._opened_with, self._data)
+        return _merge_setup_data(self._config_entry.data, self._opened_with, self._data, self._explicit_features)
 
     async def _async_save(self) -> ConfigFlowResult:
         min_soc_entity = self._data.get(CONF_MIN_SOC_ENTITY)

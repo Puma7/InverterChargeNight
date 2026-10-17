@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Direct navigation back to the overview, individual feature configuration and explicit disable actions. Efficiency and house-limit pages show their prerequisites as required fields.
 
 ### Fixed
-- Preserve runtime state and settings changed while a reconfigure draft is open, including resumed drafts.
+- Preserve runtime state and settings changed while a reconfigure draft is open, including resumed drafts. Explicit feature enable/disable actions still take effect when runtime switches change concurrently.
+- Make the coupled inverter lab campaign independent of the real night-window clock: ad-hoc charge tests run outside the scheduled window.
 
 ## [3.9.0] - 2026-10-17
 

@@ -620,7 +620,7 @@
       },
       "summary": {
         "title": "Setup",
-        "description": "**{name}**\n\nCharging window **{start}–{end}**, time zone **{timezone}**.\n\nBattery **{capacity} kWh gross**, normal discharge floor **{floor}%**, calculated usable energy above it **{usable} kWh**.\n\nSelected controls and measurements:\n{controls}\n\nVerify the correct inverter. Apply settings activates the configuration. Returning to the overview retains the draft.",
+        "description": "**{name}**\n\nCharging window **{start}–{end}**, time zone **{timezone}**.\n\nBattery **{capacity} kWh gross**, normal discharge floor **{floor}%**, calculated usable energy above it **{usable} kWh**.\n\nPlanned target bounds: **{target_min}–{target_max}%**.\n\nCharging power control: **{power_control}**. With a control: **{power_min}–{power_max} W**; a configured house import limit applies additionally.\n\n✓ configured, — off: efficiency search **{efficiency}** · poor PV yield detection **{pv_shortfall}**.\n\nSelected controls and measurements:\n{controls}\n\nVerify the correct inverter. Apply settings activates the configuration. Returning to the overview retains the draft. Inside the charging window, grid charging may start immediately after applying if the plan and measurements permit it.",
         "menu_options": {
           "finish": "Apply settings now",
           "setup": "Back to overview"
@@ -1161,7 +1161,7 @@
       },
       "summary": {
         "title": "Setup",
-        "description": "**{name}**\n\nCharging window **{start}–{end}**, time zone **{timezone}**.\n\nBattery **{capacity} kWh gross**, normal discharge floor **{floor}%**, calculated usable energy above it **{usable} kWh**.\n\nSelected controls and measurements:\n{controls}\n\nVerify the correct inverter. Apply settings activates the configuration. Returning to the overview retains the draft.",
+        "description": "**{name}**\n\nCharging window **{start}–{end}**, time zone **{timezone}**.\n\nBattery **{capacity} kWh gross**, normal discharge floor **{floor}%**, calculated usable energy above it **{usable} kWh**.\n\nPlanned target bounds: **{target_min}–{target_max}%**.\n\nCharging power control: **{power_control}**. With a control: **{power_min}–{power_max} W**; a configured house import limit applies additionally.\n\n✓ configured, — off: efficiency search **{efficiency}** · poor PV yield detection **{pv_shortfall}**.\n\nSelected controls and measurements:\n{controls}\n\nVerify the correct inverter. Apply settings activates the configuration. Returning to the overview retains the draft. Inside the charging window, grid charging may start immediately after applying if the plan and measurements permit it.",
         "menu_options": {
           "finish": "Apply settings now",
           "setup": "Back to overview"

@@ -329,3 +329,31 @@ def test_forecast_is_marked_required_where_an_enabled_feature_needs_it():
     schema = cf._guided_schema("planning", {CONF_AUTO_PV_SHORTFALL: True})
     marker = next(key for key in schema.schema if key.schema == CONF_PV_FORECAST_TODAY_ENTITY)
     assert isinstance(marker, vol.Required)
+
+
+@pytest.mark.asyncio
+async def test_explicit_disable_survives_resume_and_a_concurrent_runtime_enable(guide, mock_hass, mock_config_entry):
+    mock_config_entry.data = {**mock_config_entry.data, CONF_AUTO_EFFICIENT_CHARGE: False}
+    flow = cf.OptionsFlowHandler(mock_config_entry); flow.hass = mock_hass
+    await flow.async_step_init()
+    await flow.async_step_efficiency_off()
+    await flow.async_step_save_draft()
+    mock_config_entry.data = {**mock_config_entry.data, CONF_AUTO_EFFICIENT_CHARGE: True}
+    resumed = cf.OptionsFlowHandler(mock_config_entry); resumed.hass = mock_hass
+    await resumed.async_step_init()
+    await resumed.async_step_resume_draft({"draft": flow._draft_id})
+    assert resumed._merged_data()[CONF_AUTO_EFFICIENT_CHARGE] is False
+    assert (await resumed.async_step_finish())["type"] == "create_entry"
+    assert mock_hass.config_entries.async_update_entry.call_args.kwargs["data"][CONF_AUTO_EFFICIENT_CHARGE] is False
+
+
+@pytest.mark.asyncio
+async def test_explicit_efficiency_setup_restarts_search_even_if_previous_search_finished(guide, mock_hass, mock_config_entry):
+    mock_config_entry.data = {**mock_config_entry.data, CONF_AUTO_EFFICIENT_CHARGE: True}
+    flow = cf.OptionsFlowHandler(mock_config_entry); flow.hass = mock_hass
+    await flow.async_step_init()
+    mock_config_entry.data = {**mock_config_entry.data, CONF_AUTO_EFFICIENT_CHARGE: False}
+    await flow.async_step_efficiency({CONF_CHARGE_POWER_ENTITY: "number.charge",
+        CONF_CHARGE_POWER_SENT_ENTITY: "sensor.ac", CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.dc",
+        CONF_MIN_CHARGE_POWER_W: 1000, CONF_MAX_CHARGE_POWER_W: 15000})
+    assert flow._merged_data()[CONF_AUTO_EFFICIENT_CHARGE] is True

@@ -620,7 +620,7 @@
       },
       "summary": {
         "title": "Einrichtung",
-        "description": "**{name}**\n\nLadefenster **{start}–{end}**, Zeitzone **{timezone}**.\n\nAkku **{capacity} kWh brutto**, normale Entladeuntergrenze **{floor} %**, darüber rechnerisch **{usable} kWh** nutzbar.\n\nAusgewählte Steuer- und Messentitäten:\n{controls}\n\nPrüfe besonders die Zuordnung zum richtigen Wechselrichter. „Einstellungen jetzt übernehmen“ aktiviert die Konfiguration. Zur Übersicht zurückzukehren erhält den Entwurf.",
+        "description": "**{name}**\n\nLadefenster **{start}–{end}**, Zeitzone **{timezone}**.\n\nAkku **{capacity} kWh brutto**, normale Entladeuntergrenze **{floor} %**, darüber rechnerisch **{usable} kWh** nutzbar.\n\nGeplantes Ladeziel: **{target_min}–{target_max} %**.\n\nLadeleistungssteller: **{power_control}**. Nur mit Steller: **{power_min}–{power_max} W**; eine konfigurierte Anschlussbegrenzung gilt zusätzlich.\n\n✓ eingerichtet, — aus: Effizienzsuche **{efficiency}** · PV-Ertragsausfall **{pv_shortfall}**.\n\nAusgewählte Steuer- und Messentitäten:\n{controls}\n\nPrüfe besonders die Zuordnung zum richtigen Wechselrichter. „Einstellungen jetzt übernehmen“ aktiviert die Konfiguration. Zur Übersicht zurückzukehren erhält den Entwurf. Innerhalb des Ladefensters kann die Netzladung nach dem Übernehmen sofort beginnen, sofern der Plan und die Messwerte es zulassen.",
         "menu_options": {
           "finish": "Einstellungen jetzt übernehmen",
           "setup": "Zurück zur Übersicht"
@@ -1161,7 +1161,7 @@
       },
       "summary": {
         "title": "Einrichtung",
-        "description": "**{name}**\n\nLadefenster **{start}–{end}**, Zeitzone **{timezone}**.\n\nAkku **{capacity} kWh brutto**, normale Entladeuntergrenze **{floor} %**, darüber rechnerisch **{usable} kWh** nutzbar.\n\nAusgewählte Steuer- und Messentitäten:\n{controls}\n\nPrüfe besonders die Zuordnung zum richtigen Wechselrichter. „Einstellungen jetzt übernehmen“ aktiviert die Konfiguration. Zur Übersicht zurückzukehren erhält den Entwurf.",
+        "description": "**{name}**\n\nLadefenster **{start}–{end}**, Zeitzone **{timezone}**.\n\nAkku **{capacity} kWh brutto**, normale Entladeuntergrenze **{floor} %**, darüber rechnerisch **{usable} kWh** nutzbar.\n\nGeplantes Ladeziel: **{target_min}–{target_max} %**.\n\nLadeleistungssteller: **{power_control}**. Nur mit Steller: **{power_min}–{power_max} W**; eine konfigurierte Anschlussbegrenzung gilt zusätzlich.\n\n✓ eingerichtet, — aus: Effizienzsuche **{efficiency}** · PV-Ertragsausfall **{pv_shortfall}**.\n\nAusgewählte Steuer- und Messentitäten:\n{controls}\n\nPrüfe besonders die Zuordnung zum richtigen Wechselrichter. „Einstellungen jetzt übernehmen“ aktiviert die Konfiguration. Zur Übersicht zurückzukehren erhält den Entwurf. Innerhalb des Ladefensters kann die Netzladung nach dem Übernehmen sofort beginnen, sofern der Plan und die Messwerte es zulassen.",
         "menu_options": {
           "finish": "Einstellungen jetzt übernehmen",
           "setup": "Zurück zur Übersicht"

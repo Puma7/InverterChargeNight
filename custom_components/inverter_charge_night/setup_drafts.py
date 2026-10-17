@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -36,11 +37,12 @@ class SetupDrafts:
                     if value.get("scope") == scope}
 
     async def save(self, key: str, scope: str, data: dict[str, Any],
-                   baseline: dict[str, Any]) -> None:
+                   baseline: dict[str, Any], explicit_features: Sequence[str] | None = None) -> None:
         async with self._lock:
             drafts = await self._load()
             drafts[key] = {"scope": scope, "data": data, "baseline": baseline,
-                           "updated": datetime.now(UTC).isoformat()}
+                           "updated": datetime.now(UTC).isoformat(),
+                           "explicit_features": explicit_features or []}
             await self._write(drafts)
 
     async def _write(self, drafts: dict[str, Any]) -> None:
