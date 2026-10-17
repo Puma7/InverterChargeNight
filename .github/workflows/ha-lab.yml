@@ -35,6 +35,8 @@ jobs:
       # The real Kostal REST client uses the inverter's standard port 80.
       - run: sudo -E "$(command -v python)" lab/check_kostal.py
       - run: python lab/install_evcc.py
+        env:
+          GH_TOKEN: ${{ github.token }}
       - run: sudo -E "$(command -v python)" lab/check_grid.py
       - run: python lab/check_recovery.py
       - run: python lab/check_edge_cases.py

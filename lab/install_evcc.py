@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import platform
 import tarfile
@@ -22,8 +23,14 @@ def install(root: Path | None = None) -> Path:
     system = platform.system().lower()
     suffix = "zip" if system == "windows" else "tar.gz"
     name = f"evcc_{VERSION}_{system}-{arch}.{suffix}"
-    release = json.load(urllib.request.urlopen(
-        f"https://api.github.com/repos/evcc-io/evcc/releases/tags/{VERSION}", timeout=30))
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "ICN-lab-evcc-installer"}
+    # CI runners share the unauthenticated API quota. Use the job's read-only
+    # token for this fixed GitHub API endpoint only, never for asset/CDN URLs.
+    if token := os.environ.get("GH_TOKEN"):
+        headers["Authorization"] = "Bearer " + token
+    metadata = urllib.request.Request(
+        f"https://api.github.com/repos/evcc-io/evcc/releases/tags/{VERSION}", headers=headers)
+    release = json.load(urllib.request.urlopen(metadata, timeout=30))
     asset = next(a for a in release["assets"] if a["name"] == name)
     checksum = next(a for a in release["assets"] if a["name"] == "checksums.txt")
     lines = urllib.request.urlopen(checksum["browser_download_url"], timeout=30).read().decode().splitlines()

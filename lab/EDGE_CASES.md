@@ -28,7 +28,7 @@ nicht konfigurierte Anschlussbegrenzung wird durch diese Änderung nicht erfunde
 
 ## Reproduzierbare Nachweise
 
-- Vollständige Suite: **1.171 Tests bestanden**, jeweils mit Python 3.14 / HA
+- Vollständige Suite: **1.173 Tests bestanden**, jeweils mit Python 3.14 / HA
   2026.10.2 und Python 3.13 / HA 2025.2.0. Gesamtabdeckung mindestens **96,3 %**;
   die bestehende 96-%-Schwelle wird beibehalten. Mypy und Pyright jeweils 0 Fehler.
 - **4.096 deterministische Kombinationen** aus Hauslast, tatsächlicher
@@ -90,3 +90,8 @@ Geräteinterne BMS-, Netz-, Temperatur-, Strom- und Spannungsschutzfunktionen
 müssen unabhängig wirksam sein. Modellgrenzen zu Phasenströmen, Schutzzeiten,
 Firmware, weiteren Schreibern und Wallbox-Protokollen stehen in
 [SCENARIOS.md](SCENARIOS.md).
+
+Die CI nutzt für die fest vorgegebene GitHub-Release-Metadatenadresse ihren
+lesenden Job-Token. Prüfsummen- und Archiv-Downloads erhalten diesen Token nicht;
+die SHA256- und Release-Digest-Prüfung bleibt verpflichtend. Zwei Tests prüfen
+beide Anmeldemodi und dass veränderte Downloads kein installiertes Binary ersetzen.
