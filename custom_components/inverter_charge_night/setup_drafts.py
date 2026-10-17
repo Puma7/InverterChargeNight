@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
@@ -21,9 +21,10 @@ class SetupDrafts:
         self._lock = asyncio.Lock()
 
     async def _load(self) -> dict[str, Any]:
-        raw = await self._store.async_load() or {}
-        if not isinstance(raw, dict):
+        loaded = cast(object, await self._store.async_load() or {})
+        if not isinstance(loaded, dict):
             return {}
+        raw = cast(dict[str, Any], loaded)
         cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
         return {key: value for key, value in raw.items()
                 if isinstance(value, dict) and isinstance(value.get("updated"), str)
