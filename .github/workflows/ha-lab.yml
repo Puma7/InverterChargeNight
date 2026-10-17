@@ -1,4 +1,6 @@
 name: Home Assistant laboratory
+permissions:
+  contents: read
 on:
   workflow_dispatch:
   pull_request:
@@ -14,11 +16,14 @@ jobs:
       KOSTAL_REPO_PATH: ${{ github.workspace }}/.kostal-fixture
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: Puma7/KostalKore
-          ref: c26845eab5478b7cdfb4b485c7b602ff8ba2ee4c
+          ref: 4a9100e76fe60e03018a22cc07f9a7f1287e164b
           path: .kostal-fixture
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
