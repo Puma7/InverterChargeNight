@@ -71,7 +71,7 @@ def test_next_night_only_and_persists_through_midnight():
     assert not restored.active_for(DAY + timedelta(days=2))
 
 
-@pytest.mark.parametrize("raw", [None, [], {"day": "oops", "charge_day": "wrong", "status": "unsafe", "expected_kwh": float('nan'), "actual_kwh": True}])
+@pytest.mark.parametrize("raw", [None, [], {"status": []}, {"status": {}}, {"day": "oops", "charge_day": "wrong", "status": "unsafe", "expected_kwh": float('nan'), "actual_kwh": True}])
 def test_restore_rejects_malformed_data(raw):
     monitor = PVYieldMonitor(raw)
     assert monitor.snapshot() == dict(day=None, expected_kwh=None, actual_kwh=None, charge_day=None, status="learning")

@@ -32,8 +32,9 @@ class PVYieldMonitor:
             value = raw.get(key)
             if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
                 setattr(self, key, float(value))
-        if raw.get("status") in {"learning", "normal", "low_yield", "unavailable"}:
-            self.status = str(raw["status"])
+        status = raw.get("status")
+        if isinstance(status, str) and status in {"learning", "normal", "low_yield", "unavailable"}:
+            self.status = status
 
     def snapshot(self) -> dict[str, Any]:
         """Small, JSON-safe state, also used for frontend explanations."""
