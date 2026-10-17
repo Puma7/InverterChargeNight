@@ -186,6 +186,13 @@ async def _async_allow_discharge(call: ServiceCall) -> None:
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
     """Register the integration's actions once per Home Assistant start."""
+    async def communication_diagnostics(call: ServiceCall) -> ServiceResponse:
+        return _coordinator_for(hass, call).communication_diagnostics()
+
+    hass.services.async_register(
+        DOMAIN, "communication_diagnostics", communication_diagnostics,
+        schema=_ENTRY_SCHEMA, supports_response=SupportsResponse.ONLY,
+    )
     hass.services.async_register(
         DOMAIN,
         SERVICE_PLAN_TARGET_SOC,

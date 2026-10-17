@@ -103,7 +103,10 @@ async def test_reset_settings_sets_min_soc_and_turns_off_grid(mock_hass):
         MIN_SOC: min_soc_state,
         GRID: grid_state,
     }.get(entity_id)
-    mock_hass.services.async_call = AsyncMock()
+    async def device(domain, service, data, **kwargs):
+        if service == "turn_off":
+            grid_state.state = "off"
+    mock_hass.services.async_call = AsyncMock(side_effect=device)
 
     coordinator = _make_coordinator(mock_hass, CONFIG)
     coordinator.original_min_soc = 5.0
@@ -146,7 +149,7 @@ async def test_reset_settings_success_clears_originals_and_persists(mock_hass):
     assert ok is True
     assert mock_hass.services.async_call.await_args_list == [
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 5.0}),
-        call("switch", "turn_off", {"entity_id": GRID}),
+        call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
     ]
     assert coordinator.original_min_soc is None
     assert coordinator.override_soc is None
@@ -210,7 +213,7 @@ async def test_window_end_schedules_retry_and_retry_resets_when_entity_returns(m
 
     # Grid charging is off, but the min SOC could not be restored
     mock_hass.services.async_call.assert_awaited_once_with(
-        "switch", "turn_off", {"entity_id": GRID}
+        "switch", "turn_off", {"entity_id": GRID}, blocking=True
     )
     assert coordinator.is_active is False
     assert coordinator._pending_reset is True
@@ -411,7 +414,7 @@ async def test_window_end_restores_ac_charge_limit_set_by_finder(
 
     assert mock_hass.services.async_call.await_args_list == [
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0}),
-        call("switch", "turn_off", {"entity_id": GRID}),
+        call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
         call("number", "set_value", {"entity_id": AC_LIMIT, "value": restored_value}, blocking=True),
     ]
     assert coordinator._original_ac_charge_power is None
@@ -615,8 +618,8 @@ async def test_partial_reset_persists_the_cleared_capture_values(mock_hass):
         assert await coordinator._reset_settings() is False
 
     state = _runtime_state(coordinator)
-    # The absolute limit went back and must not come back after a restart ...
-    assert state["original_absolute_charge_power"] is None
+    # No ceiling is restored until the stop/reset prerequisites are confirmed.
+    assert state["original_absolute_charge_power"] == 9000.0
     # ... while the min SOC is still owed and stays for the retry
     assert state["original_min_soc"] == 5.0
     assert state["pending_reset"] is True
@@ -757,7 +760,7 @@ async def test_reset_still_switches_grid_charging_off_without_a_capture(mock_has
     await coordinator._reset_settings()
 
     assert (
-        call("switch", "turn_off", {"entity_id": GRID})
+        call("switch", "turn_off", {"entity_id": GRID}, blocking=True)
         in mock_hass.services.async_call.await_args_list
     )
 
@@ -797,7 +800,7 @@ async def test_the_reset_action_ends_the_running_window(mock_hass):
     assert coordinator.is_active is False
     awaited = mock_hass.services.async_call.await_args_list
     assert call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0}) in awaited
-    assert call("switch", "turn_off", {"entity_id": GRID}) in awaited
+    assert call("switch", "turn_off", {"entity_id": GRID}, blocking=True) in awaited
 
 
 @pytest.mark.asyncio

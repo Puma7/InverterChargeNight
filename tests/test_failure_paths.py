@@ -581,10 +581,10 @@ async def test_a_clean_reset_reports_success(mock_hass):
     mock_hass.states.async_set(FORCE, "on")
 
     assert await coordinator._reset_settings() is True
-    assert call("switch", "turn_off", {"entity_id": GRID}) in (
+    assert call("switch", "turn_off", {"entity_id": GRID}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
-    assert call("switch", "turn_off", {"entity_id": FORCE}) in (
+    assert call("switch", "turn_off", {"entity_id": FORCE}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
 

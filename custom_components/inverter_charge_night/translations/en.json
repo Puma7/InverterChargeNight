@@ -720,6 +720,16 @@
           "description": "Which configured inverter to reset. Can be left empty when only one is configured."
         }
       }
+    },
+    "communication_diagnostics": {
+      "name": "Communication diagnostics",
+      "description": "Read local communication health and incident history without device requests or writes.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Inverter",
+          "description": "Which configured inverter to reset. Can be left empty when only one is configured."
+        }
+      }
     }
   }
 }

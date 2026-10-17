@@ -91,7 +91,15 @@ def mock_hass() -> HomeAssistant:
         )
     )
     hass.services = MagicMock()
-    hass.services.async_call = AsyncMock()
+    async def complete_service(domain, service, data, **kwargs):
+        # A normal blocking OFF completes with actual feedback. Fault tests
+        # replace this actor to model ignored commands or transport failures.
+        if domain == "switch" and service == "turn_off" and kwargs.get("blocking"):
+            state = states.get(data.get("entity_id"))
+            if state is not None and state.state == "on":
+                state.state = "off"
+
+    hass.services.async_call = AsyncMock(side_effect=complete_service)
     hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
     hass.config_entries = MagicMock()
     # No other entry is configured unless a test says so; the config and options

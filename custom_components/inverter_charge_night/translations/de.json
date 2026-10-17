@@ -720,6 +720,16 @@
           "description": "Welcher eingerichtete Wechselrichter zurückgesetzt werden soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
         }
       }
+    },
+    "communication_diagnostics": {
+      "name": "Kommunikationsdiagnose",
+      "description": "Read local communication health and incident history without device requests or writes.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wechselrichter",
+          "description": "Welcher eingerichtete Wechselrichter zurückgesetzt werden soll. Kann leer bleiben, wenn nur einer eingerichtet ist."
+        }
+      }
     }
   }
 }

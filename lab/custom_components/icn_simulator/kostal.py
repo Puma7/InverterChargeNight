@@ -32,6 +32,10 @@ class KostalEmulator:
         self.runner = None
         self.server = None
         self.clients = set()
+        # Independent virtual links; no host network settings are changed.
+        self.rest_online = True
+        self.modbus_online = True
+        self.modbus_delay_s = 0
 
     async def start(self, http_port=80, modbus_port=1502):
         application = web.Application()
@@ -127,7 +131,7 @@ class KostalEmulator:
         return result
 
     async def rest(self, request):
-        if not self.lab.plant.online:
+        if not self.lab.plant.online or not self.rest_online:
             return web.json_response({"message": "Simulated inverter offline"}, status=503)
         path = request.match_info["path"]
         if path == "info/version":
@@ -289,9 +293,11 @@ class KostalEmulator:
                 if protocol != 0 or not 2 <= length <= 254:
                     break
                 packet = await reader.readexactly(length - 1)
+                if self.modbus_delay_s:
+                    await asyncio.sleep(self.modbus_delay_s)
                 function = packet[0]
                 response = bytes([function | 0x80, 2])
-                if unit != 71 or not self.lab.plant.online:
+                if unit != 71 or not self.lab.plant.online or not self.modbus_online:
                     response = bytes([function | 0x80, 11])
                 elif function == 3 and len(packet) == 5:
                     address, count = struct.unpack(">HH", packet[1:])

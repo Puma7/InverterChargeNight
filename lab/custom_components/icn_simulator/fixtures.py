@@ -3,7 +3,7 @@ import asyncio
 from homeassistant.helpers import entity_registry as er
 
 
-async def configure_kore(hass):
+async def configure_kore(hass, proxy_port=None, proxy_client_timeout_s=0, enable_g3=False):
     entries = [e for e in hass.config_entries.async_entries("kostal_kore") if e.data.get("host") == "127.0.0.1"]
     if entries:
         entry = entries[0]
@@ -27,6 +27,12 @@ async def configure_kore(hass):
     entities = [e for e in registry.entities.values() if e.config_entry_id == entry.entry_id]
     mapping = {}
     changed = False
+    if enable_g3:
+        g3 = next(e for e in entities if e.unique_id.endswith("_modbus_g3_max_charge"))
+        mapping["g3_charge_entity"] = g3.entity_id
+        if g3.disabled_by:
+            registry.async_update_entity(g3.entity_id, disabled_by=None)
+            changed = True
     for key, suffix in {
         "min_soc_entity": ("_devices:local_Battery:MinSocRel", "_devices:local_Battery:MinSoc"),
         "grid_charge_switch": "_devices:local_Battery:ManualCharge",
@@ -39,6 +45,12 @@ async def configure_kore(hass):
         if entity.disabled_by:
             registry.async_update_entity(entity.entity_id, disabled_by=None)
             changed = True
+    if proxy_port is not None:
+        options = {**entry.options, "modbus_proxy_enabled": True,
+                   "modbus_proxy_client_timeout_s": proxy_client_timeout_s,
+                   "modbus_proxy_port": proxy_port, "modbus_proxy_bind": "127.0.0.1"}
+        hass.config_entries.async_update_entry(entry, options=options)
+        changed = True
     if changed:
         await hass.config_entries.async_reload(entry.entry_id)
         await hass.async_block_till_done()

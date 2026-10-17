@@ -18,6 +18,7 @@ from homeassistant.helpers.event import (
     EventStateChangedData,
     async_call_later,
     async_track_state_change_event,
+    async_track_time_interval,
     async_track_time_change,
 )
 from homeassistant.helpers import issue_registry as ir
@@ -172,6 +173,7 @@ from .planner import (
     required_charge_power_w,
 )
 from .util import add_elapsed, elapsed_seconds, parse_time_str, scheduled_window_bounds
+from .communication import CommunicationState
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -256,6 +258,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _window_floor_soc: float | None = None
     _window_started_at: datetime | None = None
     _last_scheduled_end: datetime | None = None
+    _communication: CommunicationState | None = None
     _original_discharge_block: bool | None = None
     _discharge_block_logged: str | None = None
     # True while _on_window_end tears the window down: nothing may re-arm the
@@ -420,6 +423,107 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._discharge_block_logged: str | None = None
         self._restore_state()
 
+    def enable_communication_monitoring(self) -> None:
+        """Enable user-facing incident reporting after real HA entry setup."""
+        raw = self.entry.options.get(CONF_RUNTIME_STATE, {})
+        self._communication = CommunicationState(raw.get("communication") if isinstance(raw, dict) else None)
+
+    def setup_communication_listener(self) -> None:
+        """Wake the coordinator on loss/recovery instead of waiting for its poll."""
+        entities = [self.config[key] for key in (
+            CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH,
+            CONF_CHARGE_POWER_ENTITY, CONF_GRID_IMPORT_ENTITY, CONF_BACKUP_MODE_ENTITY,
+        ) if self.config.get(key)]
+        numeric = {self.config[key] for key in (
+            CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY,
+            CONF_CHARGE_POWER_ENTITY, CONF_GRID_IMPORT_ENTITY,
+        ) if self.config.get(key)}
+
+        def unreadable(state: Any) -> bool:
+            if state is None or state.state in ("unknown", "unavailable"):
+                return True
+            if state.entity_id in numeric:
+                try:
+                    return not math.isfinite(float(state.state))
+                except ValueError:
+                    return True
+            return False
+
+        async def changed(event: Event[EventStateChangedData]) -> None:
+            before, after = event.data.get("old_state"), event.data.get("new_state")
+            if unreadable(before) or unreadable(after):
+                await self.async_request_refresh()
+
+        self.entry.async_on_unload(async_track_state_change_event(self.hass, entities, changed))
+
+        async def check_staleness(now: datetime) -> None:
+            # A silent sensor does not emit an unavailable state. Check the
+            # existing meter freshness policy even with a long planning poll.
+            if self._communication_faults() or self._pending_reset or (
+                self._communication is not None and self._communication.faults
+            ):
+                await self.async_request_refresh()
+
+        self.entry.async_on_unload(async_track_time_interval(
+            self.hass, check_staleness, timedelta(seconds=15),
+        ))
+
+    def communication_diagnostics(self) -> dict[str, Any]:
+        """Return a local snapshot without reading the inverter or exposing IDs."""
+        return self._communication.snapshot() if self._communication is not None else {"state": "starting"}
+
+    def _communication_faults(self) -> list[str]:
+        faults: list[str] = []
+        for role, key in (("battery_soc", CONF_BATTERY_SOC_ENTITY),
+                          ("min_soc", CONF_MIN_SOC_ENTITY),
+                          ("grid_switch", CONF_GRID_CHARGE_SWITCH),
+                          ("charge_limit", CONF_CHARGE_POWER_ENTITY),
+                          ("island_contact", CONF_BACKUP_MODE_ENTITY)):
+            entity_id = self.config.get(key)
+            state = self.hass.states.get(entity_id) if entity_id else None
+            if entity_id and (state is None or state.state in ("unknown", "unavailable")):
+                faults.append(role)
+            elif state is not None:
+                if role == "grid_switch" and state.state not in ("on", "off"):
+                    faults.append(role)
+                if role in ("min_soc", "charge_limit"):
+                    try:
+                        value = float(state.state)
+                        if not math.isfinite(value) or value < 0 or (role == "min_soc" and value > 100):
+                            faults.append(role)
+                    except ValueError:
+                        faults.append(role)
+                if role == "island_contact" and state.state.lower() not in BACKUP_ACTIVE_STATES | BACKUP_INACTIVE_STATES:
+                    faults.append(role)
+        if self.config.get(CONF_BATTERY_SOC_ENTITY) and self._current_battery_soc() is None:
+            faults.append("battery_soc")
+        meter = self.config.get(CONF_GRID_IMPORT_ENTITY)
+        if meter and self._read_grid_import_w(str(meter)) is None:
+            faults.append("grid_meter")
+        return sorted(set(faults))
+
+    def _update_communication_health(self) -> list[str]:
+        """Retain one notification across outages and subsequent recovery."""
+        health = self._communication
+        if health is None:
+            return []
+        faults = self._communication_faults()
+        if self._pending_reset:
+            faults.append("write_unconfirmed")
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        switch = self.hass.states.get(switch_id) if switch_id else None
+        stopped = bool(switch is not None and switch.state == "off") if faults else None
+        if health.observe(faults, dt_util.now(), stopped):
+            from homeassistant.components import persistent_notification
+            persistent_notification.async_create(
+                self.hass, health.message(),
+                title="Inverter Charge Night: " + ("Kommunikation gestört" if faults else "Verbindung wiederhergestellt"),
+                notification_id=f"inverter_charge_night_{self.entry.entry_id}_communication",
+            )
+            _LOGGER.warning("Communication status: %s; HA grid-charge-off feedback: %s", faults or "recovered", stopped)
+            self._persist_state()
+        return [fault for fault in faults if fault != "write_unconfirmed"]
+
     # Persistence ------------------------------------------------------------
     #
     # entry.options["runtime_state"] (CONF_RUNTIME_STATE) is the single place
@@ -431,6 +535,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         options = dict(self.entry.options)
         options[CONF_RUNTIME_STATE] = {
             "is_enabled": self.is_enabled,
+            **({"communication": self._communication.snapshot()} if self._communication is not None else {}),
             "skip_next_until": self._skip_next_until.isoformat() if self._skip_next_until else None,
             "override_soc": self.override_soc,
             "original_min_soc": self.original_min_soc,
@@ -3680,6 +3785,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.skip_next:
             _LOGGER.info("Window start ignored - skip next is active")
             return
+        if self._update_communication_health():
+            _LOGGER.warning("Window start deferred: required communication is unavailable")
+            return
         if self._is_backup_active():
             _LOGGER.info("Window start ignored - backup mode active")
             return
@@ -4479,10 +4587,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "switch",
                             "turn_off",
                             {"entity_id": grid_charge_switch},
+                            blocking=True,
                         )
-                        _LOGGER.info("Turned off the grid charge switch")
+                        feedback = self.hass.states.get(grid_charge_switch)
+                        if feedback is None or feedback.state != "off":
+                            _LOGGER.error("Grid charge stop has no off feedback")
+                            ok = False
                     else:
-                        _LOGGER.debug("Grid charge switch already off")
+                        ok = ok and state.state == "off"
                 else:
                     _LOGGER.error("Cannot reset grid charge - entity state unavailable")
                     ok = False
@@ -4505,8 +4617,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "switch",
                         "turn_off",
                         {"entity_id": force_discharge_switch},
+                        blocking=True,
                     )
-                    _LOGGER.info("Turned off force discharge switch during reset")
+                    feedback = self.hass.states.get(force_discharge_switch)
+                    if feedback is None or feedback.state != "off":
+                        _LOGGER.error("Force discharge stop has no off feedback")
+                        ok = False
+                elif state.state != "off":
+                    ok = False
             except Exception as e:
                 _LOGGER.error("Error turning off force discharge: %s", e, exc_info=True)
                 ok = False
@@ -4514,6 +4632,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # _last_soc_set is log information only; always forget it so the next
         # window starts from what the inverter actually reports.
         self._last_soc_set = None
+        if not ok:
+            # Restoring a higher ceiling while a stop is unconfirmed could
+            # reactivate the last device command. Retain every capture for retry.
+            self._record_reset_outcome(False)
+            return False
         if not await self._reset_ac_charge_limit():
             ok = False
         if not await self._reset_discharge_limit():
@@ -4537,6 +4660,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return ok
 
     async def _async_update_data(self) -> dict[str, Any]:
+        """Observe lost channels before control, retaining independent stop paths."""
+        faults = self._update_communication_health()
+        if faults and self.is_active and not self._ending and not self._unloading:
+            # No raised ceiling may replace a protective zero while the stop
+            # path is missing. Keep captures for the normal recovery/reset.
+            if self._ac_charge_limit_target() is not None:
+                if await self._set_ac_charge_limit_w(0):
+                    self._planned_setpoint_written_w = 0
+            await self._pause_grid_charge("communication interrupted; stop requires feedback")
+            self._update_communication_health()
+            data = dict(self.data or {})
+            data.update(is_active=self.is_active, current_soc=self._current_battery_soc(),
+                        planned_charge_power_w=0, planned_power_is_applied=False)
+            return data
+        data = await self._async_calculate_and_control()
+        self._update_communication_health()
+        return data
+
+    async def _async_calculate_and_control(self) -> dict[str, Any]:
         """Fetch data from entities and update coordinator."""
         inactive_data: dict[str, Any] = {
             "calculated_soc": None,

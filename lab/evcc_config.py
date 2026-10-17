@@ -4,7 +4,7 @@ import subprocess
 import yaml
 
 
-def configuration(device_port=18080, ui_port=7070):
+def configuration(device_port=18080, ui_port=7070, proxy_port=None):
     uri = f"http://127.0.0.1:{device_port}"
 
     def get(path):
@@ -16,6 +16,14 @@ def configuration(device_port=18080, ui_port=7070):
         {"name": "pv", "type": "custom", "power": get(".pv.power")},
         {"name": "battery", "type": "custom", "power": get(".battery.power"),
          "soc": get(".battery.soc"), "capacity": 35.8}]
+    if proxy_port is not None:
+        def register(address, decode="float32"):
+            return {"source": "modbus", "uri": f"127.0.0.1:{proxy_port}", "id": 71,
+                    "timeout": "2s", "register": {"address": address, "type": "holding", "decode": decode}}
+        meters[0].update(power=register(252),
+            currents=[register(222 + 10 * i) for i in range(3)],
+            voltages=[register(230 + 10 * i) for i in range(3)])
+        meters[2]["soc"] = register(514, "uint16")
     chargers, loadpoints = [], []
     for i in range(2):
         box = i + 1

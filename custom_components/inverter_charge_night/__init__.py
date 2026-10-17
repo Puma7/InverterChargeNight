@@ -218,6 +218,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
 
     coordinator = InverterChargeNightCoordinator(hass, entry)
     coordinator.review_discharge_block_risk()
+    coordinator.enable_communication_monitoring()
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
@@ -229,6 +230,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
     coordinator.setup_time_triggers()
     # Set up optional backup mode listener
     coordinator._setup_backup_mode_listener()
+    coordinator.setup_communication_listener()
     # A reset the previous run could not finish is retried from here, not from
     # the constructor: only now is the coordinator reachable and the setup done.
     coordinator.async_start_pending_reset_retry()
