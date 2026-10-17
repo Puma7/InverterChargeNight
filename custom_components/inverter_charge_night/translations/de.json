@@ -19,15 +19,15 @@
           "operation_mode": "Nachtladung füllt den Speicher im günstigen Fenster aus dem Netz, bemessen so, dass der PV-Ertrag von morgen noch hineinpasst. Morgenentladung ist das Gegenteil und experimentell: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, entlädt sie den Speicher in die Morgenspitze - etwa 5 bis 8 Uhr, wenn die Haushalte am meisten ziehen und die Sonne noch nicht liefert. Das bringt die Preisdifferenz eines dynamischen Tarifs und entlastet das Netz in seiner engsten Stunde. Sie braucht einen Zwangsentlade-Schalter und einen Tarif, der sie vergütet. Im Zweifel bei Nachtladung bleiben. Siehe docs/morning-discharge.md.",
           "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
           "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
-          "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
+          "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist. Keine ICN-Ausgabe wie Abendvorschau oder Zielladestand auswählen.",
           "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft. Abendprognose und Abregelungsprognose brauchen sie und bleiben ohne sie leer.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
-          "battery_capacity": "Gesamtkapazität des Speichers in kWh, z. B. 35,8."
+          "battery_capacity": "Kapazität für 0–100 % des angezeigten SoC in kWh, vor Abzug der eingestellten SoC-Reserve. Beispiel: 35,8 kWh und 8 % Untergrenze ergeben 32,936 kWh oberhalb der Reserve. Diese Reserve nicht vorher nochmals abziehen. Eine vom Hersteller bereits auf den nutzbaren Bereich normierte SoC-Anzeige braucht die dazu passende Kapazität."
         }
       },
       "time_soc": {
         "title": "Inverter Charge Night – Zeitfenster und Ladestand",
-        "description": "Schritt 2 von 4: Das Zeitfenster festlegen, in dem die Integration arbeitet, und die Grenzen für den Ladestand. Der berechnete Zielladestand bleibt immer zwischen Minimum und Maximum.",
+        "description": "Schritt 2 von 4: Das Zeitfenster festlegen, in dem die Integration arbeitet, und die Grenzen für den Ladestand. Der berechnete Zielladestand bleibt immer zwischen Minimum und Maximum. Alle Uhrzeiten gelten in der Home-Assistant-Zeitzone, einschließlich Sommer-/Winterzeit. Vor dem Speichern können alle Abschnitte erneut geöffnet werden.",
         "data": {
           "start_time": "Startzeit",
           "end_time": "Endzeit",
@@ -36,8 +36,8 @@
           "default_min_soc": "Min-SOC, der am Fensterende zurückgeschrieben wird",
           "forecast_error_margin": "Sicherheitsabschlag auf die Prognose",
           "planner_mode": "Planer",
-          "high_price_start": "Hochpreiszeit, Beginn (optional)",
-          "high_price_end": "Hochpreiszeit, Ende (optional)",
+          "high_price_start": "Hochpreiszeit, Beginn",
+          "high_price_end": "Hochpreiszeit, Ende",
           "high_price_margin_pct": "Zuschlag auf den Abendverbrauch"
         },
         "data_description": {
@@ -47,7 +47,7 @@
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
           "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
-          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“.",
+          "planner_mode": "Überbrückung: plant zusätzlich Energie vom Ladefensterende bis zu ausreichendem PV-Ertrag ein. Verwendet gelernten Hausverbrauch bzw. den Mittelwert und Sonnenaufgang plus Verzögerung aus Erweitert. PV-Freiraum: reserviert nur Platz für die Prognose; der Verbrauch am Morgen wird dabei nicht zusätzlich gedeckt.",
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
           "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
@@ -55,41 +55,41 @@
       },
       "power": {
         "title": "Inverter Charge Night – Ladeleistung",
-        "description": "Schritt 3 von 4: Grenzen für die Ladeleistung, die Entitäten zum Steuern und Messen des Ladens, die Entladesperre und der Schutz des Hausanschlusses. Optionale Entitäten leer lassen, wenn der Wechselrichter sie nicht anbietet.",
+        "description": "Ladeleistung und optionale Zusatzfunktionen. Ohne Effizienzsuche dürfen die Messsensoren leer bleiben. Mit Effizienzsuche sind Ladegrenze und beide Leistungssensoren Pflicht; bei Fehlern werden diese Felder als Pflichtfelder angezeigt. Die zusätzliche AC/DC-Grenze ist ein unabhängiges Feldpaar und darf komplett leer bleiben.",
         "data": {
           "min_charge_power_w": "Kleinste Ladeleistung",
           "max_charge_power_w": "Größte Ladeleistung",
-          "absolute_max_charge_power_w": "Maximale Ladeleistung AC+DC (optional)",
-          "absolute_max_charge_power_entity": "Entität für die maximale Ladeleistung AC+DC (optional)",
-          "charge_power_entity": "Entität für die maximale AC-Ladeleistung (optional)",
-          "charge_power_sent_entity": "Aufgenommene Ladeleistung (optional)",
-          "charge_power_received_entity": "Im Speicher ankommende Ladeleistung (optional)",
-          "charge_energy_sent_entity": "Energiezähler: aufgenommen (optional)",
-          "charge_energy_received_entity": "Energiezähler: im Speicher angekommen (optional)",
+          "absolute_max_charge_power_w": "Maximale Ladeleistung AC+DC",
+          "absolute_max_charge_power_entity": "Entität für die maximale Ladeleistung AC+DC",
+          "charge_power_entity": "Entität für die maximale AC-Ladeleistung",
+          "charge_power_sent_entity": "Aufgenommene Ladeleistung",
+          "charge_power_received_entity": "Im Speicher ankommende Ladeleistung",
+          "charge_energy_sent_entity": "Energiezähler: aufgenommen",
+          "charge_energy_received_entity": "Energiezähler: im Speicher angekommen",
           "auto_efficient_charge": "Effizienzsuche",
           "force_discharge_switch": "Zwangsentlade-Schalter (für Morgen-Entladung erforderlich)",
-          "discharge_limit_entity": "Entität für die Entladeleistungsgrenze (optional)",
-          "grid_import_entity": "Netzbezug (optional)",
-          "main_fuse_a": "Vorsicherung je Phase (optional)",
+          "discharge_limit_entity": "Entität für die Entladeleistungsgrenze",
+          "grid_import_entity": "Netzbezug",
+          "main_fuse_a": "Vorsicherung je Phase",
           "grid_phases": "Phasen des Hausanschlusses",
           "grid_voltage_v": "Strangspannung",
           "grid_continuous_pct": "Dauerlastanteil",
-          "grid_max_continuous_w": "Maximale Dauerleistung (optional)",
+          "grid_max_continuous_w": "Maximale Dauerleistung",
           "grid_headroom_w": "Sicherheitsabstand",
-          "discharge_block_switch": "Schalter „Entladung sperren“ (optional)",
+          "discharge_block_switch": "Schalter „Entladung sperren“",
           "discharge_block_mode": "Entladesperre"
         },
         "data_description": {
           "min_charge_power_w": "Untere Grenze der geplanten Ladeleistung in W.",
           "max_charge_power_w": "Obere Grenze der geplanten Ladeleistung in W — die Ladeleistung, die Wechselrichter und Speicher zusammen schaffen.",
-          "absolute_max_charge_power_w": "Absolute Obergrenze für AC und DC zusammen. Wird beim Netzladen gesetzt und danach zurückgenommen. Braucht die Entität darunter.",
-          "absolute_max_charge_power_entity": "Optional: Zahl-Entität für die absolute Obergrenze. Braucht den Wert darüber.",
-          "charge_power_entity": "Optional: Zahl-Entität, über die die Ladeleistung aus dem Netz begrenzt wird (W oder kW). Nötig für die geplante Ladeleistung, den Effizienztest und den Schutz des Hausanschlusses.",
-          "charge_power_sent_entity": "Optional: Leistung, die das Ladegerät auf der AC-Seite aufnimmt, in W oder kW. Wird für die Effizienzsuche gebraucht.",
-          "charge_power_received_entity": "Optional: Leistung, die auf der DC-Seite im Speicher ankommt, in W oder kW. Die Differenz zum Wert darüber ist der Verlust, den die Suche sucht — die beiden Sensoren müssen also verschiedene Seiten messen.",
+          "absolute_max_charge_power_w": "Zusätzliche geräteweite AC/DC-Ladegrenze, nur zusammen mit der separaten Stell-Entität darunter. Für normale Leistungsplanung und Effizienzsuche nicht erforderlich. Beide Felder leer lassen, wenn der Wechselrichter keinen separaten Gesamtladeregler besitzt.",
+          "absolute_max_charge_power_entity": "Nur erforderlich, wenn die zusätzliche AC/DC-Ladegrenze darüber gesetzt wird. Separate Ladegrenze in W; weder prozentualer Active Power Setpoint noch dieselbe Entität wie die normale Ladegrenze.",
+          "charge_power_entity": "Schreibbare, rücklesbare Batterie-Ladegrenze in W. Für Effizienzsuche oder Hausanschlussbegrenzung erforderlich. Bei KORE: Battery Max Charge Limit (Modbus). Active Power Setpoint in % ist ungeeignet.",
+          "charge_power_sent_entity": "Bei Effizienzsuche erforderlich: ausschließlich die AC-Leistung, die zur Batterie fließt, positiv beim Laden (KORE: Grid to Battery Power). Gesamte Wechselrichter-AC-Leistung, Hausverbrauch oder Netzbezug sind ungeeignet.",
+          "charge_power_received_entity": "Bei Effizienzsuche erforderlich: DC-Leistung, die im Akku ankommt, positiv beim Laden (KORE: Battery Power, Vorzeichen prüfen). Separate Messung, nicht denselben Sensor wie für den AC-Eingang wählen.",
           "charge_energy_sent_entity": "Optional, aber besser: kWh-Zähler der Energie, die das Ladegerät aufnimmt. Mit beiden Zählern misst die Effizienzsuche die tatsächlich geflossene Energie, statt eine Leistungsmessung zu integrieren.",
           "charge_energy_received_entity": "Optional: der passende kWh-Zähler auf der Speicherseite. Nur zusammen mit dem Zähler darüber sinnvoll.",
-          "auto_efficient_charge": "Sucht die Ladeleistung mit dem kleinsten Verlust zwischen Netz und Speicher und schaltet sich ab, sobald sie das Optimum gefunden hat. Sie misst mehrmals pro Fenster und zählt eine Messung nur, wenn der Wechselrichter wirklich mit der geprüften Leistung geladen hat. Braucht die Entität für die AC-Ladeleistung und beide Leistungssensoren; mit Energiezählern wird es genau. Der Sensor „Effizienzsuche“ zeigt den Fortschritt.",
+          "auto_efficient_charge": "Erprobt zulässige Ladeleistungen und vergleicht AC-Eingangsenergie mit gespeicherter DC-Energie. Benötigt die Ladegrenze in W und zwei passende Leistungssensoren. Erst nach echter Messzeit, ausreichender Energie und plausibler Rückmeldung wird ein Ergebnis übernommen. Lastbegrenzung und Sicherheitsstopps haben Vorrang.",
           "force_discharge_switch": "Schalter-Entität, mit der der Wechselrichter den Akku ins Netz entlädt (z. B. über Modbus). Im Modus Morgen-Entladung erforderlich - nur darüber wird wirklich entladen; im Modus Nachtladung ungenutzt.",
           "discharge_limit_entity": "Optional: Zahl-Entität für die Entladeleistung (W oder kW). Wird am Fensterbeginn auf 0 gesetzt, damit das Haus aus dem Netz läuft und gespeicherte PV liegen bleibt; am Fensterende wird der alte Wert zurückgeschrieben.",
           "grid_import_entity": "Momentaner Bezug aus dem Netz in W oder kW. Ohne diese Entität wird die Ladeleistung nicht gegen den Hausanschluss begrenzt.",
@@ -109,26 +109,26 @@
         "data": {
           "update_interval": "Abfrageintervall",
           "command_delay": "Befehlsverzögerung",
-          "active_start_date": "Beginn des aktiven Zeitraums (optional)",
-          "active_end_date": "Ende des aktiven Zeitraums (optional)",
+          "active_start_date": "Beginn des aktiven Zeitraums",
+          "active_end_date": "Ende des aktiven Zeitraums",
           "active_range_yearly": "Datumsbereich jährlich wiederholen",
-          "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb (optional)",
-          "backup_mode_states": "Zustände für Notstrombetrieb (optional)",
-          "house_load_entity": "Energiezähler des Hausverbrauchs (optional)",
+          "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb",
+          "backup_mode_states": "Zustände für Notstrombetrieb",
+          "house_load_entity": "Energiezähler des Hausverbrauchs",
           "avg_house_load_kw": "Mittlerer Hausverbrauch",
           "pv_crossover_delay_min": "Verzögerung bis PV den Verbrauch deckt",
           "bridge_reserve_kwh": "Reserve für die Überbrückung",
           "charge_efficiency": "Ladewirkungsgrad",
           "discharge_efficiency": "Entladewirkungsgrad",
-          "night_price_ct": "Preis im Fenster (optional)",
-          "day_price_ct": "Preis außerhalb des Fensters (optional)",
-          "feed_in_price_ct": "Einspeisevergütung (optional)",
-          "price_entity": "Strompreis-Entität (optional)",
+          "night_price_ct": "Preis im Fenster",
+          "day_price_ct": "Preis außerhalb des Fensters",
+          "feed_in_price_ct": "Einspeisevergütung",
+          "price_entity": "Strompreis-Entität",
           "price_unit": "Worin die Preise angegeben sind",
           "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
-          "price_surcharge_window_ct": "Zuschlag im Fenster (optional)",
-          "curtailment_limit_w": "Einspeisegrenze (optional)",
-          "curtailment_feed_in_entity": "Einspeiseleistung (optional)"
+          "price_surcharge_window_ct": "Zuschlag im Fenster",
+          "curtailment_limit_w": "Einspeisegrenze",
+          "curtailment_feed_in_entity": "Einspeiseleistung"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -173,15 +173,15 @@
           "operation_mode": "Nachtladung füllt den Speicher im günstigen Fenster aus dem Netz, bemessen so, dass der PV-Ertrag von morgen noch hineinpasst. Morgenentladung ist das Gegenteil und experimentell: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, entlädt sie den Speicher in die Morgenspitze - etwa 5 bis 8 Uhr, wenn die Haushalte am meisten ziehen und die Sonne noch nicht liefert. Das bringt die Preisdifferenz eines dynamischen Tarifs und entlastet das Netz in seiner engsten Stunde. Sie braucht einen Zwangsentlade-Schalter und einen Tarif, der sie vergütet. Im Zweifel bei Nachtladung bleiben. Siehe docs/morning-discharge.md.",
           "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
           "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
-          "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
+          "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist. Keine ICN-Ausgabe wie Abendvorschau oder Zielladestand auswählen.",
           "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft. Abendprognose und Abregelungsprognose brauchen sie und bleiben ohne sie leer.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
-          "battery_capacity": "Gesamtkapazität des Speichers in kWh, z. B. 35,8."
+          "battery_capacity": "Kapazität für 0–100 % des angezeigten SoC in kWh, vor Abzug der eingestellten SoC-Reserve. Beispiel: 35,8 kWh und 8 % Untergrenze ergeben 32,936 kWh oberhalb der Reserve. Diese Reserve nicht vorher nochmals abziehen. Eine vom Hersteller bereits auf den nutzbaren Bereich normierte SoC-Anzeige braucht die dazu passende Kapazität."
         }
       },
       "reconfigure_time_soc": {
         "title": "Neu konfigurieren – Zeitfenster und Ladestand",
-        "description": "Schritt 2 von 4: Zeitfenster und Grenzen für den Ladestand ändern.",
+        "description": "Schritt 2 von 4: Zeitfenster und Grenzen für den Ladestand ändern. Alle Uhrzeiten gelten in der Home-Assistant-Zeitzone, einschließlich Sommer-/Winterzeit. Vor dem Speichern können alle Abschnitte erneut geöffnet werden.",
         "data": {
           "start_time": "Startzeit",
           "end_time": "Endzeit",
@@ -190,8 +190,8 @@
           "default_min_soc": "Min-SOC, der am Fensterende zurückgeschrieben wird",
           "forecast_error_margin": "Sicherheitsabschlag auf die Prognose",
           "planner_mode": "Planer",
-          "high_price_start": "Hochpreiszeit, Beginn (optional)",
-          "high_price_end": "Hochpreiszeit, Ende (optional)",
+          "high_price_start": "Hochpreiszeit, Beginn",
+          "high_price_end": "Hochpreiszeit, Ende",
           "high_price_margin_pct": "Zuschlag auf den Abendverbrauch"
         },
         "data_description": {
@@ -201,7 +201,7 @@
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
           "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
-          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“.",
+          "planner_mode": "Überbrückung: plant zusätzlich Energie vom Ladefensterende bis zu ausreichendem PV-Ertrag ein. Verwendet gelernten Hausverbrauch bzw. den Mittelwert und Sonnenaufgang plus Verzögerung aus Erweitert. PV-Freiraum: reserviert nur Platz für die Prognose; der Verbrauch am Morgen wird dabei nicht zusätzlich gedeckt.",
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
           "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
@@ -209,41 +209,41 @@
       },
       "reconfigure_power": {
         "title": "Neu konfigurieren – Ladeleistung",
-        "description": "Schritt 3 von 4: Ladeleistung, Messentitäten, Entladesperre und Hausanschluss ändern. Eine optionale Entität leeren schaltet die zugehörige Funktion ab.",
+        "description": "Ladeleistung und optionale Zusatzfunktionen. Ohne Effizienzsuche dürfen die Messsensoren leer bleiben. Mit Effizienzsuche sind Ladegrenze und beide Leistungssensoren Pflicht; bei Fehlern werden diese Felder als Pflichtfelder angezeigt. Die zusätzliche AC/DC-Grenze ist ein unabhängiges Feldpaar und darf komplett leer bleiben.",
         "data": {
           "min_charge_power_w": "Kleinste Ladeleistung",
           "max_charge_power_w": "Größte Ladeleistung",
-          "absolute_max_charge_power_w": "Maximale Ladeleistung AC+DC (optional)",
-          "absolute_max_charge_power_entity": "Entität für die maximale Ladeleistung AC+DC (optional)",
-          "charge_power_entity": "Entität für die maximale AC-Ladeleistung (optional)",
-          "charge_power_sent_entity": "Aufgenommene Ladeleistung (optional)",
-          "charge_power_received_entity": "Im Speicher ankommende Ladeleistung (optional)",
-          "charge_energy_sent_entity": "Energiezähler: aufgenommen (optional)",
-          "charge_energy_received_entity": "Energiezähler: im Speicher angekommen (optional)",
+          "absolute_max_charge_power_w": "Maximale Ladeleistung AC+DC",
+          "absolute_max_charge_power_entity": "Entität für die maximale Ladeleistung AC+DC",
+          "charge_power_entity": "Entität für die maximale AC-Ladeleistung",
+          "charge_power_sent_entity": "Aufgenommene Ladeleistung",
+          "charge_power_received_entity": "Im Speicher ankommende Ladeleistung",
+          "charge_energy_sent_entity": "Energiezähler: aufgenommen",
+          "charge_energy_received_entity": "Energiezähler: im Speicher angekommen",
           "auto_efficient_charge": "Effizienzsuche",
           "force_discharge_switch": "Zwangsentlade-Schalter (für Morgen-Entladung erforderlich)",
-          "discharge_limit_entity": "Entität für die Entladeleistungsgrenze (optional)",
-          "grid_import_entity": "Netzbezug (optional)",
-          "main_fuse_a": "Vorsicherung je Phase (optional)",
+          "discharge_limit_entity": "Entität für die Entladeleistungsgrenze",
+          "grid_import_entity": "Netzbezug",
+          "main_fuse_a": "Vorsicherung je Phase",
           "grid_phases": "Phasen des Hausanschlusses",
           "grid_voltage_v": "Strangspannung",
           "grid_continuous_pct": "Dauerlastanteil",
-          "grid_max_continuous_w": "Maximale Dauerleistung (optional)",
+          "grid_max_continuous_w": "Maximale Dauerleistung",
           "grid_headroom_w": "Sicherheitsabstand",
-          "discharge_block_switch": "Schalter „Entladung sperren“ (optional)",
+          "discharge_block_switch": "Schalter „Entladung sperren“",
           "discharge_block_mode": "Entladesperre"
         },
         "data_description": {
           "min_charge_power_w": "Untere Grenze der geplanten Ladeleistung in W.",
           "max_charge_power_w": "Obere Grenze der geplanten Ladeleistung in W — die Ladeleistung, die Wechselrichter und Speicher zusammen schaffen.",
-          "absolute_max_charge_power_w": "Absolute Obergrenze für AC und DC zusammen. Wird beim Netzladen gesetzt und danach zurückgenommen. Braucht die Entität darunter.",
-          "absolute_max_charge_power_entity": "Optional: Zahl-Entität für die absolute Obergrenze. Braucht den Wert darüber.",
-          "charge_power_entity": "Optional: Zahl-Entität, über die die Ladeleistung aus dem Netz begrenzt wird (W oder kW). Nötig für die geplante Ladeleistung, den Effizienztest und den Schutz des Hausanschlusses.",
-          "charge_power_sent_entity": "Optional: Leistung, die das Ladegerät auf der AC-Seite aufnimmt, in W oder kW. Wird für die Effizienzsuche gebraucht.",
-          "charge_power_received_entity": "Optional: Leistung, die auf der DC-Seite im Speicher ankommt, in W oder kW. Die Differenz zum Wert darüber ist der Verlust, den die Suche sucht — die beiden Sensoren müssen also verschiedene Seiten messen.",
+          "absolute_max_charge_power_w": "Zusätzliche geräteweite AC/DC-Ladegrenze, nur zusammen mit der separaten Stell-Entität darunter. Für normale Leistungsplanung und Effizienzsuche nicht erforderlich. Beide Felder leer lassen, wenn der Wechselrichter keinen separaten Gesamtladeregler besitzt.",
+          "absolute_max_charge_power_entity": "Nur erforderlich, wenn die zusätzliche AC/DC-Ladegrenze darüber gesetzt wird. Separate Ladegrenze in W; weder prozentualer Active Power Setpoint noch dieselbe Entität wie die normale Ladegrenze.",
+          "charge_power_entity": "Schreibbare, rücklesbare Batterie-Ladegrenze in W. Für Effizienzsuche oder Hausanschlussbegrenzung erforderlich. Bei KORE: Battery Max Charge Limit (Modbus). Active Power Setpoint in % ist ungeeignet.",
+          "charge_power_sent_entity": "Bei Effizienzsuche erforderlich: ausschließlich die AC-Leistung, die zur Batterie fließt, positiv beim Laden (KORE: Grid to Battery Power). Gesamte Wechselrichter-AC-Leistung, Hausverbrauch oder Netzbezug sind ungeeignet.",
+          "charge_power_received_entity": "Bei Effizienzsuche erforderlich: DC-Leistung, die im Akku ankommt, positiv beim Laden (KORE: Battery Power, Vorzeichen prüfen). Separate Messung, nicht denselben Sensor wie für den AC-Eingang wählen.",
           "charge_energy_sent_entity": "Optional, aber besser: kWh-Zähler der Energie, die das Ladegerät aufnimmt. Mit beiden Zählern misst die Effizienzsuche die tatsächlich geflossene Energie, statt eine Leistungsmessung zu integrieren.",
           "charge_energy_received_entity": "Optional: der passende kWh-Zähler auf der Speicherseite. Nur zusammen mit dem Zähler darüber sinnvoll.",
-          "auto_efficient_charge": "Sucht die Ladeleistung mit dem kleinsten Verlust zwischen Netz und Speicher und schaltet sich ab, sobald sie das Optimum gefunden hat. Sie misst mehrmals pro Fenster und zählt eine Messung nur, wenn der Wechselrichter wirklich mit der geprüften Leistung geladen hat. Braucht die Entität für die AC-Ladeleistung und beide Leistungssensoren; mit Energiezählern wird es genau. Der Sensor „Effizienzsuche“ zeigt den Fortschritt.",
+          "auto_efficient_charge": "Erprobt zulässige Ladeleistungen und vergleicht AC-Eingangsenergie mit gespeicherter DC-Energie. Benötigt die Ladegrenze in W und zwei passende Leistungssensoren. Erst nach echter Messzeit, ausreichender Energie und plausibler Rückmeldung wird ein Ergebnis übernommen. Lastbegrenzung und Sicherheitsstopps haben Vorrang.",
           "force_discharge_switch": "Schalter-Entität, mit der der Wechselrichter den Akku ins Netz entlädt (z. B. über Modbus). Im Modus Morgen-Entladung erforderlich - nur darüber wird wirklich entladen; im Modus Nachtladung ungenutzt.",
           "discharge_limit_entity": "Optional: Zahl-Entität für die Entladeleistung (W oder kW). Wird am Fensterbeginn auf 0 gesetzt, damit das Haus aus dem Netz läuft und gespeicherte PV liegen bleibt; am Fensterende wird der alte Wert zurückgeschrieben.",
           "grid_import_entity": "Momentaner Bezug aus dem Netz in W oder kW. Ohne diese Entität wird die Ladeleistung nicht gegen den Hausanschluss begrenzt.",
@@ -263,26 +263,26 @@
         "data": {
           "update_interval": "Abfrageintervall",
           "command_delay": "Befehlsverzögerung",
-          "active_start_date": "Beginn des aktiven Zeitraums (optional)",
-          "active_end_date": "Ende des aktiven Zeitraums (optional)",
+          "active_start_date": "Beginn des aktiven Zeitraums",
+          "active_end_date": "Ende des aktiven Zeitraums",
           "active_range_yearly": "Datumsbereich jährlich wiederholen",
-          "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb (optional)",
-          "backup_mode_states": "Zustände für Notstrombetrieb (optional)",
-          "house_load_entity": "Energiezähler des Hausverbrauchs (optional)",
+          "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb",
+          "backup_mode_states": "Zustände für Notstrombetrieb",
+          "house_load_entity": "Energiezähler des Hausverbrauchs",
           "avg_house_load_kw": "Mittlerer Hausverbrauch",
           "pv_crossover_delay_min": "Verzögerung bis PV den Verbrauch deckt",
           "bridge_reserve_kwh": "Reserve für die Überbrückung",
           "charge_efficiency": "Ladewirkungsgrad",
           "discharge_efficiency": "Entladewirkungsgrad",
-          "night_price_ct": "Preis im Fenster (optional)",
-          "day_price_ct": "Preis außerhalb des Fensters (optional)",
-          "feed_in_price_ct": "Einspeisevergütung (optional)",
-          "price_entity": "Strompreis-Entität (optional)",
+          "night_price_ct": "Preis im Fenster",
+          "day_price_ct": "Preis außerhalb des Fensters",
+          "feed_in_price_ct": "Einspeisevergütung",
+          "price_entity": "Strompreis-Entität",
           "price_unit": "Worin die Preise angegeben sind",
           "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
-          "price_surcharge_window_ct": "Zuschlag im Fenster (optional)",
-          "curtailment_limit_w": "Einspeisegrenze (optional)",
-          "curtailment_feed_in_entity": "Einspeiseleistung (optional)"
+          "price_surcharge_window_ct": "Zuschlag im Fenster",
+          "curtailment_limit_w": "Einspeisegrenze",
+          "curtailment_feed_in_entity": "Einspeiseleistung"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -308,6 +308,21 @@
           "curtailment_limit_w": "Optional: was deine Anlage höchstens ins Netz geben darf, in Watt — die 60-%- oder 70-%-Begrenzung am Netzverknüpfungspunkt. Trag die Grenze selbst ein, nicht den Prozentsatz: 0,60 × Anlagenleistung in Watt, bei 15 kWp und 60 % also 9000. Leer lassen, wenn du nicht begrenzt bist. Gedrosselt wird davon nichts; es zeigt nur, wie viel Mittagssonne die Grenze wegwirft, weil der Speicher schon voll war.",
           "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch."
         }
+      },
+      "review": {
+        "title": "Einstellungen prüfen",
+        "description": "**{name}**\n\nLadefenster: **{start}–{end}**, Zeitzone **{timezone}** (mit Sommer-/Winterzeit).\n\nKapazität: **{capacity} kWh**, Untergrenze **{floor} %**, darüber rechnerisch **{usable} kWh**.\n\nEntitäten und Messquellen:\n{controls}\n\nJeden Abschnitt zum Korrigieren erneut öffnen. Die anderen Eingaben bleiben erhalten. Erst Speichern übernimmt die Änderungen. Pro Wechselrichter darf nur eine aktive Batteriesteuerung laufen.",
+        "menu_options": {
+          "user": "Entitäten ändern",
+          "reconfigure": "Entitäten ändern",
+          "time_soc": "Zeiten und Ladeziel ändern",
+          "power": "Leistung und Effizienzsuche ändern",
+          "advanced": "Erweiterte Einstellungen ändern",
+          "finish": "Geprüfte Einstellungen speichern",
+          "reconfigure_time_soc": "Zeiten und Ladeziel ändern",
+          "reconfigure_power": "Leistung und Effizienzsuche ändern",
+          "reconfigure_advanced": "Erweiterte Einstellungen ändern"
+        }
       }
     },
     "error": {
@@ -329,7 +344,12 @@
       "required_entity": "Dazu wird eine Entität gebraucht",
       "required_for_discharge_mode": "Der Morgen-Entlademodus braucht den Zwangsentlade-Schalter: ohne ihn wird der Akku nie entladen.",
       "required_value": "Dazu wird ein Wert gebraucht",
-      "start_end_time_must_differ": "Start- und Endzeit müssen sich unterscheiden"
+      "start_end_time_must_differ": "Start- und Endzeit müssen sich unterscheiden",
+      "forecast_is_planner_output": "Eine externe PV-Prognose auswählen, keine Ausgabe von Inverter Charge Night.",
+      "power_control_requires_watts": "Diese Stellgröße muss W oder kW verwenden. Prozent-, Strom- und Spannungsregler sind hier ungeeignet.",
+      "separate_power_measurements": "AC-Eingang und DC-Ausgang brauchen unterschiedliche Messsensoren.",
+      "separate_power_controls": "Zusätzliche AC/DC-Grenze und normale Ladegrenze müssen unterschiedliche Stellgrößen sein.",
+      "requires_charge_input_power": "KORE Grid to Battery Power auswählen; gesamte AC Power misst nicht die Batterie-Netzladung."
     },
     "abort": {
       "already_configured": "Dieser Wechselrichter ist bereits eingerichtet",
@@ -357,15 +377,15 @@
           "operation_mode": "Nachtladung füllt den Speicher im günstigen Fenster aus dem Netz, bemessen so, dass der PV-Ertrag von morgen noch hineinpasst. Morgenentladung ist das Gegenteil und experimentell: an einem Sommertag, dessen Prognose das Haus ohnehin deckt, entlädt sie den Speicher in die Morgenspitze - etwa 5 bis 8 Uhr, wenn die Haushalte am meisten ziehen und die Sonne noch nicht liefert. Das bringt die Preisdifferenz eines dynamischen Tarifs und entlastet das Netz in seiner engsten Stunde. Sie braucht einen Zwangsentlade-Schalter und einen Tarif, der sie vergütet. Im Zweifel bei Nachtladung bleiben. Siehe docs/morning-discharge.md.",
           "min_soc_entity": "Die Zahl-Entität des Wechselrichters, die den Mindestladestand steuert. Sie kennzeichnet zugleich diese Instanz, damit ein Wechselrichter nur einmal eingerichtet werden kann.",
           "grid_charge_switch": "Der Schalter des Wechselrichters, der das Laden aus dem Netz ein- und ausschaltet.",
-          "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist.",
+          "pv_forecast_entity": "Prognose für den NÄCHSTEN TAG, z. B. sensor.solcast_forecast_tomorrow. Wird verwendet, wenn das Fenster vor Mitternacht beginnt, und als Rückfall, wenn die Prognose für heute nicht eingetragen ist. Keine ICN-Ausgabe wie Abendvorschau oder Zielladestand auswählen.",
           "pv_forecast_today_entity": "Optional: Prognose für HEUTE, z. B. sensor.solcast_forecast_today. Wird verwendet, wenn das Fenster nach Mitternacht läuft. Abendprognose und Abregelungsprognose brauchen sie und bleiben ohne sie leer.",
           "battery_soc_entity": "Der Sensor, der den aktuellen Ladestand in Prozent zeigt.",
-          "battery_capacity": "Gesamtkapazität des Speichers in kWh, z. B. 35,8."
+          "battery_capacity": "Kapazität für 0–100 % des angezeigten SoC in kWh, vor Abzug der eingestellten SoC-Reserve. Beispiel: 35,8 kWh und 8 % Untergrenze ergeben 32,936 kWh oberhalb der Reserve. Diese Reserve nicht vorher nochmals abziehen. Eine vom Hersteller bereits auf den nutzbaren Bereich normierte SoC-Anzeige braucht die dazu passende Kapazität."
         }
       },
       "time_soc": {
         "title": "Einstellungen – Zeitfenster und Ladestand",
-        "description": "Schritt 2 von 4: Zeitfenster und Grenzen für den Ladestand ändern.",
+        "description": "Schritt 2 von 4: Zeitfenster und Grenzen für den Ladestand ändern. Alle Uhrzeiten gelten in der Home-Assistant-Zeitzone, einschließlich Sommer-/Winterzeit. Vor dem Speichern können alle Abschnitte erneut geöffnet werden.",
         "data": {
           "start_time": "Startzeit",
           "end_time": "Endzeit",
@@ -374,8 +394,8 @@
           "default_min_soc": "Min-SOC, der am Fensterende zurückgeschrieben wird",
           "forecast_error_margin": "Sicherheitsabschlag auf die Prognose",
           "planner_mode": "Planer",
-          "high_price_start": "Hochpreiszeit, Beginn (optional)",
-          "high_price_end": "Hochpreiszeit, Ende (optional)",
+          "high_price_start": "Hochpreiszeit, Beginn",
+          "high_price_end": "Hochpreiszeit, Ende",
           "high_price_margin_pct": "Zuschlag auf den Abendverbrauch"
         },
         "data_description": {
@@ -385,7 +405,7 @@
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
           "default_min_soc": "Wird nur verwendet, wenn der ursprüngliche Wert nicht gelesen werden konnte (oft 8 %).",
           "forecast_error_margin": "Zuschlag in Prozent für die Unsicherheit der PV-Prognose.",
-          "planner_mode": "Freiraum (Standard): der Zielladestand lässt nur Platz für die PV-Prognose von morgen. Überbrückung: er deckt zusätzlich den Hausverbrauch vom Fensterende bis der PV-Ertrag ihn übersteigt (Sonnenaufgang plus Verzögerung). Die Überbrückung nutzt die Felder im Schritt „Erweitert“.",
+          "planner_mode": "Überbrückung: plant zusätzlich Energie vom Ladefensterende bis zu ausreichendem PV-Ertrag ein. Verwendet gelernten Hausverbrauch bzw. den Mittelwert und Sonnenaufgang plus Verzögerung aus Erweitert. PV-Freiraum: reserviert nur Platz für die Prognose; der Verbrauch am Morgen wird dabei nicht zusätzlich gedeckt.",
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
           "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
@@ -393,41 +413,41 @@
       },
       "power": {
         "title": "Einstellungen – Ladeleistung",
-        "description": "Schritt 3 von 4: Ladeleistung, Messentitäten, Entladesperre und Hausanschluss ändern. Eine optionale Entität leeren schaltet die zugehörige Funktion ab.",
+        "description": "Ladeleistung und optionale Zusatzfunktionen. Ohne Effizienzsuche dürfen die Messsensoren leer bleiben. Mit Effizienzsuche sind Ladegrenze und beide Leistungssensoren Pflicht; bei Fehlern werden diese Felder als Pflichtfelder angezeigt. Die zusätzliche AC/DC-Grenze ist ein unabhängiges Feldpaar und darf komplett leer bleiben.",
         "data": {
           "min_charge_power_w": "Kleinste Ladeleistung",
           "max_charge_power_w": "Größte Ladeleistung",
-          "absolute_max_charge_power_w": "Maximale Ladeleistung AC+DC (optional)",
-          "absolute_max_charge_power_entity": "Entität für die maximale Ladeleistung AC+DC (optional)",
-          "charge_power_entity": "Entität für die maximale AC-Ladeleistung (optional)",
-          "charge_power_sent_entity": "Aufgenommene Ladeleistung (optional)",
-          "charge_power_received_entity": "Im Speicher ankommende Ladeleistung (optional)",
-          "charge_energy_sent_entity": "Energiezähler: aufgenommen (optional)",
-          "charge_energy_received_entity": "Energiezähler: im Speicher angekommen (optional)",
+          "absolute_max_charge_power_w": "Maximale Ladeleistung AC+DC",
+          "absolute_max_charge_power_entity": "Entität für die maximale Ladeleistung AC+DC",
+          "charge_power_entity": "Entität für die maximale AC-Ladeleistung",
+          "charge_power_sent_entity": "Aufgenommene Ladeleistung",
+          "charge_power_received_entity": "Im Speicher ankommende Ladeleistung",
+          "charge_energy_sent_entity": "Energiezähler: aufgenommen",
+          "charge_energy_received_entity": "Energiezähler: im Speicher angekommen",
           "auto_efficient_charge": "Effizienzsuche",
           "force_discharge_switch": "Zwangsentlade-Schalter (für Morgen-Entladung erforderlich)",
-          "discharge_limit_entity": "Entität für die Entladeleistungsgrenze (optional)",
-          "grid_import_entity": "Netzbezug (optional)",
-          "main_fuse_a": "Vorsicherung je Phase (optional)",
+          "discharge_limit_entity": "Entität für die Entladeleistungsgrenze",
+          "grid_import_entity": "Netzbezug",
+          "main_fuse_a": "Vorsicherung je Phase",
           "grid_phases": "Phasen des Hausanschlusses",
           "grid_voltage_v": "Strangspannung",
           "grid_continuous_pct": "Dauerlastanteil",
-          "grid_max_continuous_w": "Maximale Dauerleistung (optional)",
+          "grid_max_continuous_w": "Maximale Dauerleistung",
           "grid_headroom_w": "Sicherheitsabstand",
-          "discharge_block_switch": "Schalter „Entladung sperren“ (optional)",
+          "discharge_block_switch": "Schalter „Entladung sperren“",
           "discharge_block_mode": "Entladesperre"
         },
         "data_description": {
           "min_charge_power_w": "Untere Grenze der geplanten Ladeleistung in W.",
           "max_charge_power_w": "Obere Grenze der geplanten Ladeleistung in W — die Ladeleistung, die Wechselrichter und Speicher zusammen schaffen.",
-          "absolute_max_charge_power_w": "Absolute Obergrenze für AC und DC zusammen. Wird beim Netzladen gesetzt und danach zurückgenommen. Braucht die Entität darunter.",
-          "absolute_max_charge_power_entity": "Optional: Zahl-Entität für die absolute Obergrenze. Braucht den Wert darüber.",
-          "charge_power_entity": "Optional: Zahl-Entität, über die die Ladeleistung aus dem Netz begrenzt wird (W oder kW). Nötig für die geplante Ladeleistung, den Effizienztest und den Schutz des Hausanschlusses.",
-          "charge_power_sent_entity": "Optional: Leistung, die das Ladegerät auf der AC-Seite aufnimmt, in W oder kW. Wird für die Effizienzsuche gebraucht.",
-          "charge_power_received_entity": "Optional: Leistung, die auf der DC-Seite im Speicher ankommt, in W oder kW. Die Differenz zum Wert darüber ist der Verlust, den die Suche sucht — die beiden Sensoren müssen also verschiedene Seiten messen.",
+          "absolute_max_charge_power_w": "Zusätzliche geräteweite AC/DC-Ladegrenze, nur zusammen mit der separaten Stell-Entität darunter. Für normale Leistungsplanung und Effizienzsuche nicht erforderlich. Beide Felder leer lassen, wenn der Wechselrichter keinen separaten Gesamtladeregler besitzt.",
+          "absolute_max_charge_power_entity": "Nur erforderlich, wenn die zusätzliche AC/DC-Ladegrenze darüber gesetzt wird. Separate Ladegrenze in W; weder prozentualer Active Power Setpoint noch dieselbe Entität wie die normale Ladegrenze.",
+          "charge_power_entity": "Schreibbare, rücklesbare Batterie-Ladegrenze in W. Für Effizienzsuche oder Hausanschlussbegrenzung erforderlich. Bei KORE: Battery Max Charge Limit (Modbus). Active Power Setpoint in % ist ungeeignet.",
+          "charge_power_sent_entity": "Bei Effizienzsuche erforderlich: ausschließlich die AC-Leistung, die zur Batterie fließt, positiv beim Laden (KORE: Grid to Battery Power). Gesamte Wechselrichter-AC-Leistung, Hausverbrauch oder Netzbezug sind ungeeignet.",
+          "charge_power_received_entity": "Bei Effizienzsuche erforderlich: DC-Leistung, die im Akku ankommt, positiv beim Laden (KORE: Battery Power, Vorzeichen prüfen). Separate Messung, nicht denselben Sensor wie für den AC-Eingang wählen.",
           "charge_energy_sent_entity": "Optional, aber besser: kWh-Zähler der Energie, die das Ladegerät aufnimmt. Mit beiden Zählern misst die Effizienzsuche die tatsächlich geflossene Energie, statt eine Leistungsmessung zu integrieren.",
           "charge_energy_received_entity": "Optional: der passende kWh-Zähler auf der Speicherseite. Nur zusammen mit dem Zähler darüber sinnvoll.",
-          "auto_efficient_charge": "Sucht die Ladeleistung mit dem kleinsten Verlust zwischen Netz und Speicher und schaltet sich ab, sobald sie das Optimum gefunden hat. Sie misst mehrmals pro Fenster und zählt eine Messung nur, wenn der Wechselrichter wirklich mit der geprüften Leistung geladen hat. Braucht die Entität für die AC-Ladeleistung und beide Leistungssensoren; mit Energiezählern wird es genau. Der Sensor „Effizienzsuche“ zeigt den Fortschritt.",
+          "auto_efficient_charge": "Erprobt zulässige Ladeleistungen und vergleicht AC-Eingangsenergie mit gespeicherter DC-Energie. Benötigt die Ladegrenze in W und zwei passende Leistungssensoren. Erst nach echter Messzeit, ausreichender Energie und plausibler Rückmeldung wird ein Ergebnis übernommen. Lastbegrenzung und Sicherheitsstopps haben Vorrang.",
           "force_discharge_switch": "Schalter-Entität, mit der der Wechselrichter den Akku ins Netz entlädt (z. B. über Modbus). Im Modus Morgen-Entladung erforderlich - nur darüber wird wirklich entladen; im Modus Nachtladung ungenutzt.",
           "discharge_limit_entity": "Optional: Zahl-Entität für die Entladeleistung (W oder kW). Wird am Fensterbeginn auf 0 gesetzt, damit das Haus aus dem Netz läuft und gespeicherte PV liegen bleibt; am Fensterende wird der alte Wert zurückgeschrieben.",
           "grid_import_entity": "Momentaner Bezug aus dem Netz in W oder kW. Ohne diese Entität wird die Ladeleistung nicht gegen den Hausanschluss begrenzt.",
@@ -447,26 +467,26 @@
         "data": {
           "update_interval": "Abfrageintervall",
           "command_delay": "Befehlsverzögerung",
-          "active_start_date": "Beginn des aktiven Zeitraums (optional)",
-          "active_end_date": "Ende des aktiven Zeitraums (optional)",
+          "active_start_date": "Beginn des aktiven Zeitraums",
+          "active_end_date": "Ende des aktiven Zeitraums",
           "active_range_yearly": "Datumsbereich jährlich wiederholen",
-          "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb (optional)",
-          "backup_mode_states": "Zustände für Notstrombetrieb (optional)",
-          "house_load_entity": "Energiezähler des Hausverbrauchs (optional)",
+          "backup_mode_entity": "Entität für Notstrom-/Inselbetrieb",
+          "backup_mode_states": "Zustände für Notstrombetrieb",
+          "house_load_entity": "Energiezähler des Hausverbrauchs",
           "avg_house_load_kw": "Mittlerer Hausverbrauch",
           "pv_crossover_delay_min": "Verzögerung bis PV den Verbrauch deckt",
           "bridge_reserve_kwh": "Reserve für die Überbrückung",
           "charge_efficiency": "Ladewirkungsgrad",
           "discharge_efficiency": "Entladewirkungsgrad",
-          "night_price_ct": "Preis im Fenster (optional)",
-          "day_price_ct": "Preis außerhalb des Fensters (optional)",
-          "feed_in_price_ct": "Einspeisevergütung (optional)",
-          "price_entity": "Strompreis-Entität (optional)",
+          "night_price_ct": "Preis im Fenster",
+          "day_price_ct": "Preis außerhalb des Fensters",
+          "feed_in_price_ct": "Einspeisevergütung",
+          "price_entity": "Strompreis-Entität",
           "price_unit": "Worin die Preise angegeben sind",
           "price_surcharge_ct": "Zuschlag auf den Börsenpreis",
-          "price_surcharge_window_ct": "Zuschlag im Fenster (optional)",
-          "curtailment_limit_w": "Einspeisegrenze (optional)",
-          "curtailment_feed_in_entity": "Einspeiseleistung (optional)"
+          "price_surcharge_window_ct": "Zuschlag im Fenster",
+          "curtailment_limit_w": "Einspeisegrenze",
+          "curtailment_feed_in_entity": "Einspeiseleistung"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -492,6 +512,17 @@
           "curtailment_limit_w": "Optional: was deine Anlage höchstens ins Netz geben darf, in Watt — die 60-%- oder 70-%-Begrenzung am Netzverknüpfungspunkt. Trag die Grenze selbst ein, nicht den Prozentsatz: 0,60 × Anlagenleistung in Watt, bei 15 kWp und 60 % also 9000. Leer lassen, wenn du nicht begrenzt bist. Gedrosselt wird davon nichts; es zeigt nur, wie viel Mittagssonne die Grenze wegwirft, weil der Speicher schon voll war.",
           "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch."
         }
+      },
+      "review": {
+        "title": "Einstellungen prüfen",
+        "description": "**{name}**\n\nLadefenster: **{start}–{end}**, Zeitzone **{timezone}** (mit Sommer-/Winterzeit).\n\nKapazität: **{capacity} kWh**, Untergrenze **{floor} %**, darüber rechnerisch **{usable} kWh**.\n\nEntitäten und Messquellen:\n{controls}\n\nJeden Abschnitt zum Korrigieren erneut öffnen. Die anderen Eingaben bleiben erhalten. Erst Speichern übernimmt die Änderungen. Pro Wechselrichter darf nur eine aktive Batteriesteuerung laufen.",
+        "menu_options": {
+          "init": "Entitäten ändern",
+          "time_soc": "Zeiten und Ladeziel ändern",
+          "power": "Leistung und Effizienzsuche ändern",
+          "advanced": "Erweiterte Einstellungen ändern",
+          "finish": "Geprüfte Einstellungen speichern"
+        }
       }
     },
     "error": {
@@ -513,7 +544,12 @@
       "required_entity": "Dazu wird eine Entität gebraucht",
       "required_for_discharge_mode": "Der Morgen-Entlademodus braucht den Zwangsentlade-Schalter: ohne ihn wird der Akku nie entladen.",
       "required_value": "Dazu wird ein Wert gebraucht",
-      "start_end_time_must_differ": "Start- und Endzeit müssen sich unterscheiden"
+      "start_end_time_must_differ": "Start- und Endzeit müssen sich unterscheiden",
+      "forecast_is_planner_output": "Eine externe PV-Prognose auswählen, keine Ausgabe von Inverter Charge Night.",
+      "power_control_requires_watts": "Diese Stellgröße muss W oder kW verwenden. Prozent-, Strom- und Spannungsregler sind hier ungeeignet.",
+      "separate_power_measurements": "AC-Eingang und DC-Ausgang brauchen unterschiedliche Messsensoren.",
+      "separate_power_controls": "Zusätzliche AC/DC-Grenze und normale Ladegrenze müssen unterschiedliche Stellgrößen sein.",
+      "requires_charge_input_power": "KORE Grid to Battery Power auswählen; gesamte AC Power misst nicht die Batterie-Netzladung."
     }
   },
   "selector": {
@@ -656,6 +692,22 @@
     "active_range_expired": {
       "title": "{name}: Der aktive Datumsbereich endete am {end_date}",
       "description": "Die Integration ist so eingestellt, dass sie nur bis {end_date} läuft, und dieses Datum ist vorbei — sie lädt also nicht mehr und fängt von selbst auch nicht wieder an.\n\nDrei Wege hinaus, je nachdem was passt:\n\n1. **Datumsbereich jährlich wiederholen** in den Optionen einschalten (Schritt 4). Dann zählen nur Tag und Monat, und der Bereich kommt jedes Jahr wieder — genau das ist eine Tarifsaison normalerweise.\n2. Ein neues Enddatum eintragen.\n3. Beide Daten leeren, dann läuft sie ganzjährig.\n\nDiese Meldung verschwindet, sobald eines davon erledigt ist."
+    },
+    "communication_interrupted": {
+      "title": "Inverter Charge Night: Kommunikation gestört",
+      "description": "Kommunikation gestört: {faults}. {feedback}\n\nBisher {incidents} Unterbrechung(en). Lokale Verbindung, Geräteverfügbarkeit und Integrationsdiagnosen prüfen. Erst mit aktuellen Daten wird neu geregelt."
+    },
+    "communication_recovered": {
+      "title": "Inverter Charge Night: Verbindung wiederhergestellt",
+      "description": "Kommunikation wiederhergestellt. Bisher {incidents} Unterbrechung(en). Die Historie bleibt in den Integrationsdiagnosen erhalten."
+    },
+    "communication_stopped": {
+      "title": "Stopp-Rückmeldung",
+      "description": "Home Assistant meldet Netzladen aus."
+    },
+    "communication_unconfirmed": {
+      "title": "Stopp unbestätigt",
+      "description": "Ein Geräte-Stopp ist nicht bestätigt; die letzten Gerätesollwerte können weiterwirken."
     }
   },
   "services": {

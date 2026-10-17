@@ -95,8 +95,7 @@ async def test_setup_entry_registers_two_time_triggers_and_backup_listener(
     unload_hooks = [c.args[0] for c in entry.async_on_unload.call_args_list]
     assert unload_hooks[0] == coordinator.async_shutdown
     assert callable(unload_hooks[1])  # communication listener teardown
-    assert callable(unload_hooks[2])  # independent freshness timer
-    assert unload_hooks[3] == entry.add_update_listener.return_value
+    assert unload_hooks[2] == entry.add_update_listener.return_value
 
     # setup_time_triggers registered window start and end
     assert len(coordinator._time_triggers) == 2

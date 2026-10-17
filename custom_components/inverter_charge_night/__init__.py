@@ -219,6 +219,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
     coordinator = InverterChargeNightCoordinator(hass, entry)
     coordinator.review_discharge_block_risk()
     coordinator.enable_communication_monitoring()
+    await coordinator.async_load_communication_translations()
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
@@ -306,6 +307,7 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     try:
         coordinator.update_time_triggers(previous_soc_entity=old_battery_soc_entity)
         coordinator._setup_backup_mode_listener()
+        coordinator.setup_communication_listener()
     except Exception as e:
         _LOGGER.error("Error updating time triggers: %s", e, exc_info=True)
         # Restore old config if update failed

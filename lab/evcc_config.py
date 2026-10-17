@@ -1,10 +1,13 @@
 """Generate evcc configuration against only the local simulated devices."""
 from pathlib import Path
+import math
 import subprocess
 import yaml
 
 
-def configuration(device_port=18080, ui_port=7070, proxy_port=None):
+def configuration(device_port=18080, ui_port=7070, proxy_port=None, capacity_kwh=35.8):
+    if not math.isfinite(capacity_kwh) or capacity_kwh <= 0:
+        raise ValueError("Battery capacity must be finite and positive")
     uri = f"http://127.0.0.1:{device_port}"
 
     def get(path):
@@ -15,7 +18,7 @@ def configuration(device_port=18080, ui_port=7070, proxy_port=None):
         "voltages": [get(f".grid.voltages[{i}]") for i in range(3)]},
         {"name": "pv", "type": "custom", "power": get(".pv.power")},
         {"name": "battery", "type": "custom", "power": get(".battery.power"),
-         "soc": get(".battery.soc"), "capacity": 35.8}]
+         "soc": get(".battery.soc"), "capacity": capacity_kwh}]
     if proxy_port is not None:
         def register(address, decode="float32"):
             return {"source": "modbus", "uri": f"127.0.0.1:{proxy_port}", "id": 71,
@@ -48,8 +51,12 @@ def configuration(device_port=18080, ui_port=7070, proxy_port=None):
             "feedin": {"type": "fixed", "price": 0.08}}}
 
 
-def write(path: Path, device_port=18080, ui_port=7070):
-    path.write_text(yaml.safe_dump(configuration(device_port, ui_port), sort_keys=False, allow_unicode=True), encoding="utf-8")
+def write(path: Path, device_port=18080, ui_port=7070, capacity_kwh=None):
+    if capacity_kwh is None:
+        ha_config = path.parent.parent / "configuration.yaml"
+        config = yaml.safe_load(ha_config.read_text(encoding="utf-8")) if ha_config.exists() else {}
+        capacity_kwh = float((config or {}).get("icn_simulator", {}).get("capacity_kwh", 35.8))
+    path.write_text(yaml.safe_dump(configuration(device_port, ui_port, capacity_kwh=capacity_kwh), sort_keys=False, allow_unicode=True), encoding="utf-8")
 
 
 def seed(binary: Path, database: Path, config: Path):

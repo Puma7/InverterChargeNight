@@ -259,6 +259,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _window_started_at: datetime | None = None
     _last_scheduled_end: datetime | None = None
     _communication: CommunicationState | None = None
+    _communication_texts: dict[str, str] | None = None
     _original_discharge_block: bool | None = None
     _discharge_block_logged: str | None = None
     # True while _on_window_end tears the window down: nothing may re-arm the
@@ -428,8 +429,24 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         raw = self.entry.options.get(CONF_RUNTIME_STATE, {})
         self._communication = CommunicationState(raw.get("communication") if isinstance(raw, dict) else None)
 
+    async def async_load_communication_translations(self) -> None:
+        from homeassistant.helpers.translation import async_get_translations
+        translations = await async_get_translations(self.hass, self.hass.config.language, "issues", {DOMAIN})
+        prefix = f"component.{DOMAIN}.issues.communication_"
+        self._communication_texts = {
+            key: translations[prefix + key + ".description"]
+            for key in ("stopped", "unconfirmed", "interrupted", "recovered")
+        }
+        self._communication_texts.update({
+            "title_interrupted": translations[prefix + "interrupted.title"],
+            "title_recovered": translations[prefix + "recovered.title"],
+        })
+
     def setup_communication_listener(self) -> None:
         """Wake the coordinator on loss/recovery instead of waiting for its poll."""
+        for unsubscribe in getattr(self, "_communication_unsubscribers", []):
+            unsubscribe()
+        self._communication_unsubscribers: list[CALLBACK_TYPE] = []
         entities = [self.config[key] for key in (
             CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH,
             CONF_CHARGE_POWER_ENTITY, CONF_GRID_IMPORT_ENTITY, CONF_BACKUP_MODE_ENTITY,
@@ -455,7 +472,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if unreadable(before) or unreadable(after):
                 await self.async_request_refresh()
 
-        self.entry.async_on_unload(async_track_state_change_event(self.hass, entities, changed))
+        self._communication_unsubscribers.append(async_track_state_change_event(self.hass, entities, changed))
 
         async def check_staleness(now: datetime) -> None:
             # A silent sensor does not emit an unavailable state. Check the
@@ -465,9 +482,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ):
                 await self.async_request_refresh()
 
-        self.entry.async_on_unload(async_track_time_interval(
+        self._communication_unsubscribers.append(async_track_time_interval(
             self.hass, check_staleness, timedelta(seconds=15),
         ))
+        # Register a single unload callback; reconfiguration replaces its handles.
+        if not getattr(self, "_communication_unload_registered", False):
+            self.entry.async_on_unload(self._unsubscribe_communication)
+            self._communication_unload_registered = True
+
+    def _unsubscribe_communication(self) -> None:
+        for unsubscribe in self._communication_unsubscribers:
+            unsubscribe()
+        self._communication_unsubscribers.clear()
 
     def communication_diagnostics(self) -> dict[str, Any]:
         """Return a local snapshot without reading the inverter or exposing IDs."""
@@ -495,7 +521,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             faults.append(role)
                     except ValueError:
                         faults.append(role)
-                if role == "island_contact" and state.state.lower() not in BACKUP_ACTIVE_STATES | BACKUP_INACTIVE_STATES:
+                if role == "island_contact" and not self._backup_mode_states() and state.state.strip().lower() not in BACKUP_ACTIVE_STATES | BACKUP_INACTIVE_STATES:
                     faults.append(role)
         if self.config.get(CONF_BATTERY_SOC_ENTITY) and self._current_battery_soc() is None:
             faults.append("battery_soc")
@@ -519,14 +545,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if faults and force_id:
             force = self.hass.states.get(force_id)
             stopped = stopped and force is not None and force.state == "off"
-        if health.observe(faults, dt_util.now(), stopped):
+        announce = health.observe(faults, dt_util.now(), stopped)
+        if announce:
             from homeassistant.components import persistent_notification
             persistent_notification.async_create(
-                self.hass, health.message(),
-                title="Inverter Charge Night: " + ("Kommunikation gestört" if faults else "Verbindung wiederhergestellt"),
+                self.hass, health.message(self._communication_texts),
+                title=(self._communication_texts["title_interrupted" if faults else "title_recovered"]
+                       if self._communication_texts else "Inverter Charge Night: " + ("Kommunikation gestört" if faults else "Verbindung wiederhergestellt")),
                 notification_id=f"inverter_charge_night_{self.entry.entry_id}_communication",
             )
             _LOGGER.warning("Communication status: %s; HA grid-charge-off feedback: %s", faults or "recovered", stopped)
+        if announce or faults:
             self._persist_state()
         return [fault for fault in faults if fault != "write_unconfirmed"]
 
@@ -2532,6 +2561,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         value = float(power_w)
         state = self.hass.states.get(entity_id)
         unit = _unit_of(state)
+        if unit and unit not in ("kw", "kilowatt", "kilowatts", "w", "watt", "watts"):
+            _LOGGER.error("Refusing a charge-power command to %s with incompatible unit %s", entity_id, unit)
+            return False
         if unit in ("kw", "kilowatt", "kilowatts"):
             value = value / 1000.0
         elif unit not in ("w", "watt", "watts"):
@@ -2677,6 +2709,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         state = self.hass.states.get(entity_id)
         unit = _unit_of(state)
+        if unit and unit not in ("kw", "kilowatt", "kilowatts", "w", "watt", "watts"):
+            _LOGGER.error("Refusing an absolute charge limit with incompatible unit %s", unit)
+            return
         scale = 1000.0 if unit in ("kw", "kilowatt", "kilowatts") else 1.0
 
         if self._original_absolute_charge_power is None:
@@ -2941,6 +2976,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if await self._set_ac_charge_limit_w(int(allowed)):
             self._planned_setpoint_written_w = allowed
 
+    def _efficiency_now(self) -> datetime:
+        """Measurement wall clock; durations are converted to UTC elapsed time."""
+        return dt_util.now()
+
     async def _start_auto_test(self, power_w: int) -> None:
         """Start auto efficiency test at given power.
 
@@ -2975,7 +3014,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._auto_test_active = True
         self._auto_test_power_w = power_w
-        self._auto_test_start = dt_util.now()
+        self._auto_test_start = self._efficiency_now()
         self._auto_measure_start = None
         self._auto_last_sample_time = None
         self._auto_last_sent_w = None
@@ -3045,7 +3084,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
         if self._auto_measure_start is not None:
             attributes["measuring_for_min"] = round(
-                (dt_util.now() - self._auto_measure_start).total_seconds() / 60.0, 1
+                elapsed_seconds(self._efficiency_now(), self._auto_measure_start) / 60.0, 1
             )
         return attributes
 
@@ -3118,9 +3157,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if not self._auto_test_active or self._auto_test_start is None:
             return
-        now = dt_util.now()
+        now = self._efficiency_now()
         if self._auto_measure_start is None:
-            if (now - self._auto_test_start).total_seconds() < AUTO_TEST_SETTLE_S:
+            if elapsed_seconds(now, self._auto_test_start) < AUTO_TEST_SETTLE_S:
                 return
             self._begin_auto_measurement(now)
             return
@@ -3136,7 +3175,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._auto_last_sent_w = sent_w
             self._auto_last_received_w = received_w
             return
-        delta_h = (now - last_time).total_seconds() / 3600.0
+        delta_h = elapsed_seconds(now, last_time) / 3600.0
         if delta_h <= 0:
             return
         previous_sent = self._auto_last_sent_w
@@ -3181,7 +3220,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """True once the running measurement has enough time and energy behind it."""
         if not self._auto_test_active or self._auto_measure_start is None:
             return False
-        duration = (dt_util.now() - self._auto_measure_start).total_seconds()
+        duration = elapsed_seconds(self._efficiency_now(), self._auto_measure_start)
         if duration < AUTO_TEST_MIN_DURATION_S:
             return False
         measured = self._measured_energy_wh()
@@ -3355,7 +3394,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._discard_auto_test("it never got past the %d s settling time", AUTO_TEST_SETTLE_S)
             return
 
-        duration = (dt_util.now() - self._auto_measure_start).total_seconds()
+        duration = elapsed_seconds(self._efficiency_now(), self._auto_measure_start)
         measured = self._measured_energy_wh()
         if measured is None:
             self._reset_auto_test_state()

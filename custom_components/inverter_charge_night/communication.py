@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from collections.abc import Mapping
 from typing import Any
 
 FAULT_CODES = frozenset({
@@ -30,6 +31,14 @@ class CommunicationState:
             value = saved.get(key)
             if type(value) is int and value >= 0:
                 setattr(self, key, value)
+        stamp = saved.get("last_success_at")
+        if isinstance(stamp, str):
+            try:
+                parsed = datetime.fromisoformat(stamp)
+                if parsed.tzinfo is not None:
+                    self.last_success_at = parsed.isoformat()
+            except ValueError:
+                pass
         history = saved.get("history")
         if isinstance(history, list):
             for item in history[-HISTORY_LIMIT:]:
@@ -86,8 +95,12 @@ class CommunicationState:
             "history": [{**item, "faults": list(item["faults"])} for item in self.history],
         }
 
-    def message(self) -> str:
+    def message(self, texts: Mapping[str, str] | None = None) -> str:
         """Keep recovery visible, and never equate a request with a safe device."""
+        if texts is not None:
+            feedback = texts["stopped"] if self.stop_confirmed is True else texts["unconfirmed"]
+            key = "interrupted" if self.faults else "recovered"
+            return texts[key].format(incidents=self.incidents, faults=", ".join(self.faults), feedback=feedback)
         if not self.faults:
             return (f"Kommunikation wiederhergestellt. Bisher {self.incidents} Unterbrechung(en). "
                     "Die Historie bleibt in den Integrationsdiagnosen erhalten.")

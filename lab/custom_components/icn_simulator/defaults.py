@@ -53,6 +53,8 @@ async def configure_planner(hass, data):
             result["flow_id"], {key: data[key] for key in keys if key in data})
         if result.get("errors"):
             raise RuntimeError(f"Lab wizard validation failed: {result['errors']}")
+    if result.get("step_id") == "review":
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "finish"})
     if result["type"] != "create_entry":
         raise RuntimeError(f"Lab setup did not create an entry: {result}")
     return result["result"]

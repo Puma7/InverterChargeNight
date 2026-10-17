@@ -110,7 +110,24 @@ def mock_hass() -> HomeAssistant:
     # async_track_time_change) need both and then return real unsubscribe callables.
     hass.bus = MagicMock()
     hass.loop = MagicMock()
+    hass.config = MagicMock()
+    hass.config.time_zone = "Europe/Berlin"
+    hass.config.language = "de"
     return hass
+
+
+@pytest.fixture(autouse=True)
+def local_translation_catalog():
+    """Supply HA's translation boundary without a loader in the strict fake."""
+    import json
+    from pathlib import Path
+    strings = json.loads((Path(__file__).parents[1] / "custom_components/inverter_charge_night/strings.json").read_text(encoding="utf-8"))
+    translations = {
+        f"component.inverter_charge_night.issues.{issue}.{key}": value
+        for issue, texts in strings["issues"].items() for key, value in texts.items()
+    }
+    with patch("homeassistant.helpers.translation.async_get_translations", AsyncMock(return_value=translations)):
+        yield
 
 
 @pytest.fixture

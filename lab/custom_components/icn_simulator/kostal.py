@@ -85,7 +85,7 @@ class KostalEmulator:
                   "EnergyDischarge": p.discharged_energy, "Yield": p.pv_energy}
         result = {
             "devices:local": {"Inverter:State": (3, ""), "Dc_P": (p.effective_pv, "W"),
-                "Ac_P": (p.effective_pv - p.battery_power, "W"), "Grid2Bat_P": (p.charge_ac_power, "W"),
+                "Ac_P": (p.effective_pv - (p.battery_power / p.charge_efficiency if p.battery_power >= 0 else p.battery_power * p.discharge_efficiency), "W"), "Grid2Bat_P": (p.charge_ac_power, "W"),
                 "Home_P": (p.total_house_load, "W"), "HomeGrid_P": (max(0, p.grid_power - p.charge_ac_power), "W"),
                 "HomeBat_P": (max(0, -p.battery_power) * p.discharge_efficiency, "W")},
             "devices:local:battery": {"SoC": (p.soc, "%"), "P": (p.battery_power, "W"),

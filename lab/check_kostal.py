@@ -99,7 +99,7 @@ async def main():
             entities = [item for item in er.async_get(hass).entities.values() if item.config_entry_id == entry.entry_id]
             check("KORE creates actual HA entities", len(entities) > 10, len(entities))
             modbus = hass.data["kostal_kore"][entry.entry_id]["modbus_coordinator"]
-            for _ in range(6):
+            for _ in range(1):
                 await modbus.async_refresh()
             check("readable charge limit is polled into KORE coordinator",
                   modbus.data.get(REG_BAT_MAX_CHARGE_LIMIT.name) == lab.plant.charge_limit,
@@ -110,6 +110,8 @@ async def main():
                         "grid_charge_switch": "_devices:local_Battery:ManualCharge",
                         "battery_soc_entity": "_devices:local:battery_SoC",
                         "charge_power_entity": "_modbus_bat_max_charge_limit",
+                        "charge_power_sent_entity": "_devices:local_Grid2Bat_P",
+                        "charge_power_received_entity": "_devices:local:battery_P",
                         "discharge_limit_entity": "_modbus_bat_max_discharge_limit"}
             for key, suffix in suffixes.items():
                 item = next((item for item in entities if item.unique_id.endswith(suffix)), None)
@@ -122,7 +124,7 @@ async def main():
             process_coordinator = hass.data["kostal_kore"][entry.entry_id]["process_coordinator"]
             await process_coordinator.async_refresh()
             modbus = hass.data["kostal_kore"][entry.entry_id]["modbus_coordinator"]
-            for _ in range(6):
+            for _ in range(1):
                 await modbus.async_refresh()
             from homeassistant.helpers.entity_component import DATA_INSTANCES
             for key in ("min_soc_entity", "grid_charge_switch"):
@@ -146,6 +148,8 @@ async def main():
             check("ICN charge command passes through KORE REST to simulated inverter",
                   lab.plant.grid_charge and lab.plant.min_soc >= 70,
                   {"grid_charge": lab.plant.grid_charge, "min_soc": lab.plant.min_soc})
+            from efficiency_campaign import check_efficiency
+            await asyncio.wait_for(check_efficiency(hass, lab, planner, entry, check), 180)
             await hass.config_entries.async_unload(planner.entry_id)
             check("KORE unloads cleanly", await hass.config_entries.async_unload(entry.entry_id))
         finally:

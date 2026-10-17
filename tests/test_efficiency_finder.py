@@ -46,6 +46,23 @@ AC_LIMIT = "number.ac_limit"
 START = datetime(2026, 1, 15, 0, 0)
 NOW = "custom_components.inverter_charge_night.coordinator.dt_util.now"
 
+
+@pytest.mark.parametrize("start", [(2026, 3, 29, 1, 59), (2026, 10, 25, 2, 59)])
+def test_efficiency_energy_and_minimum_duration_use_real_elapsed_time(finder, mock_hass, start):
+    from datetime import UTC
+    from zoneinfo import ZoneInfo
+    begin = datetime(*start, tzinfo=ZoneInfo("Europe/Berlin"))
+    end = (begin.astimezone(UTC) + timedelta(seconds=300)).astimezone(begin.tzinfo)
+    finder._auto_test_active = True
+    finder._auto_test_start = begin
+    finder._auto_measure_start = begin
+    finder._auto_last_sample_time = begin
+    _power(mock_hass, 5000, 4500)
+    with patch.object(finder, "_efficiency_now", return_value=end):
+        finder._accumulate_auto_energy()
+        assert finder._auto_energy_sent_wh == pytest.approx(5000 * 300 / 3600)
+        assert finder._auto_measurement_is_complete() is True
+
 CONFIG = {
     CONF_CHARGE_POWER_ENTITY: AC_LIMIT,
     CONF_CHARGE_POWER_SENT_ENTITY: SENT,
