@@ -19,13 +19,22 @@ from custom_components.inverter_charge_night.const import (
 )
 
 
+@pytest.fixture(autouse=True)
+def active_night_clock():
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now",
+               return_value=datetime(2026, 1, 15, 2)):
+        yield
+
+
 def _make_coordinator(hass, data):
     entry = MagicMock()
     entry.entry_id = "entry_1"
     entry.title = "Test"
     entry.data = data
     entry.options = {}
-    return InverterChargeNightCoordinator(hass, entry)
+    coordinator = InverterChargeNightCoordinator(hass, entry)
+    coordinator.is_active = True
+    return coordinator
 
 
 @pytest.mark.asyncio
@@ -37,7 +46,7 @@ async def test_control_kostal_skips_on_backup(mock_hass, caplog):
 
     await coordinator._control_charge(50.0)
 
-    assert "Backup mode active - skipping inverter control" in caplog.text
+    assert "Backup mode active or unconfirmed - skipping inverter control" in caplog.text
     mock_hass.services.async_call.assert_not_awaited()
 
 

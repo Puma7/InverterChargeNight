@@ -5,6 +5,8 @@ Einrichtungsassistenten, echten Entitäten, Serviceaufrufen, Recorder und Oberfl
 Der Wechselrichter ist ein Energiemodell. Die Integrationen werden aus den beiden
 Checkouts kopiert, einschließlich der lokal geprüften Korrekturen.
 Die [Szenarienmatrix](SCENARIOS.md) nennt Nachweise und Modellgrenzen.
+Die [Kalender- und Fehlerkampagne](EDGE_CASES.md) ergänzt Sommer-/Winterzeit,
+Schaltjahre, Uhrsprünge, Messausfälle und quittierte, ignorierte Ladegrenzen.
 
 ## Schnellstart mit Home Assistant Container
 

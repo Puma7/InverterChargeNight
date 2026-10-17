@@ -54,7 +54,7 @@ class LabNumber(LabEntity, NumberEntity):
 
     async def async_set_native_value(self, value):
         if self.key in CONTROLS:
-            if self.lab.plant.reject_writes:
+            if self.lab.plant.reject_writes or (self.key == "charge_limit" and self.lab.plant.reject_charge_limit):
                 self.lab.audit(self.key, value, accepted=False)
                 return  # Firmware can acknowledge a command but retain the old value.
             if not self.lab.plant.online:

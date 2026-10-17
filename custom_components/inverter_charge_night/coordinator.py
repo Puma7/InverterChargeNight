@@ -171,7 +171,7 @@ from .planner import (
     plan_target_soc,
     required_charge_power_w,
 )
-from .util import parse_time_str
+from .util import add_elapsed, elapsed_seconds, parse_time_str, scheduled_window_bounds
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -255,6 +255,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # already announced in the log for this window.
     _window_floor_soc: float | None = None
     _window_started_at: datetime | None = None
+    _last_scheduled_end: datetime | None = None
     _original_discharge_block: bool | None = None
     _discharge_block_logged: str | None = None
     # True while _on_window_end tears the window down: nothing may re-arm the
@@ -414,6 +415,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # target that belongs to this window from one left behind by a window
         # whose end Home Assistant was not running for.
         self._window_started_at: datetime | None = None
+        self._last_scheduled_end: datetime | None = None
         self._original_discharge_block: bool | None = None
         self._discharge_block_logged: str | None = None
         self._restore_state()
@@ -445,6 +447,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if self.is_active and self._window_started_at is not None
                 else None
             ),
+            **({"last_scheduled_end": self._last_scheduled_end.isoformat()} if self._last_scheduled_end else {}),
             "original_discharge_block": self._original_discharge_block,
             "original_absolute_charge_power": self._original_absolute_charge_power,
             "pending_reset": self._pending_reset,
@@ -496,6 +499,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._window_started_at = datetime.fromisoformat(started_raw)
             except ValueError:
                 self._window_started_at = None
+        completed_raw = state.get("last_scheduled_end")
+        if isinstance(completed_raw, str):
+            try:
+                self._last_scheduled_end = datetime.fromisoformat(completed_raw)
+            except ValueError:
+                self._last_scheduled_end = None
         block_raw = state.get("original_discharge_block")
         if isinstance(block_raw, bool):
             self._original_discharge_block = block_raw
@@ -519,7 +528,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # (they all take a duration and add it to an aware now), but an
                 # unguarded comparison here raises inside __init__ - and that
                 # means the integration does not load at all.
-                if self._align_tz(adhoc_until, now_local) > now_local:
+                if elapsed_seconds(self._align_tz(adhoc_until, now_local), now_local) > 0:
                     adhoc_until = self._align_tz(adhoc_until, now_local)
                     self._adhoc_until = adhoc_until
                     self._adhoc_reason = (
@@ -669,7 +678,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._cancel_skip_next_expiry()
         now = dt_util.now()
         if until is None:
-            until = now + SKIP_NEXT_DURATION
+            until = add_elapsed(now, SKIP_NEXT_DURATION)
         self._skip_next_until = until
 
         async def _expire_skip_next(_now: datetime) -> None:
@@ -686,7 +695,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._persist_state()
             await self._check_current_window()
 
-        remaining = max(0.0, (until - now).total_seconds())
+        remaining = max(0.0, elapsed_seconds(until, now))
         self._skip_next_unsub = async_call_later(self.hass, remaining, _expire_skip_next)
 
     def clear_hands_off(self) -> None:
@@ -792,11 +801,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         planner is given in the same ``PlanInput``. The ad-hoc override is
         deliberately not used: that deadline is not a tariff window.
         """
-        _, end = self._window_times()
-        end_dt = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
-        if (end.hour, end.minute) < (now.hour, now.minute):
-            end_dt += timedelta(days=1)
-        return end_dt - timedelta(seconds=self._window_length_s()), end_dt
+        return scheduled_window_bounds(now, *self._window_times()) or (now, now)
 
     def _window_price_ct(self, series: PriceSeries | None, now: datetime) -> float | None:
         """The mean price over the charge window, with the window's own grid fee.
@@ -867,17 +872,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _window_end_datetime(self, now: datetime) -> datetime:
         """Return the end of the window that is running or comes next, at minute resolution.
 
-        The end minute itself still belongs to the window (``_is_time_between``
-        is inclusive), so an end time equal to the current minute is today's.
+        Queries during the end minute retain today's deadline for planning.
+        Permission to charge is separate and ends at the exact boundary.
 
-        The result carries ``now``'s own tzinfo, so subtracting the two gives
-        the time that will really pass - one hour less across a spring-forward,
-        one hour more across a fall-back - which is what the charge power has
-        to be planned against. What it cannot express is the repeated hour of a
-        fall-back, where the end minute occurs twice; ``_plan_charge_power``
-        guards the resulting near-zero remainder.
+        Boundaries use the first occurrence of an ambiguous wall time. The
+        planner subtracts them in UTC; same-zone datetime subtraction alone
+        would ignore the offset change.
         """
-        if self._adhoc_until is not None and self._adhoc_until > now:
+        if self._adhoc_until is not None and elapsed_seconds(self._adhoc_until, now) > 0:
             # An ad-hoc window ends when it was told to, not when the configured
             # one would. Everything that asks "how long has this window left" -
             # the charge power plan above all - has to get that answer.
@@ -886,11 +888,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # past would answer every planner question with a window that ended
             # long ago, which is worse than having no ad-hoc window at all.
             return self._adhoc_until
-        _, end = self._window_times()
-        end_dt = now.replace(hour=end.hour, minute=end.minute, second=0, microsecond=0)
-        if (end.hour, end.minute) < (now.hour, now.minute):
-            end_dt += timedelta(days=1)
-        return end_dt
+        bounds = scheduled_window_bounds(now, *self._window_times())
+        return bounds[1] if bounds is not None else now
+
+    def _scheduled_window_is_open(self, now: datetime) -> bool:
+        """Membership by real instants; a repeated wall hour cannot reopen it."""
+        bounds = scheduled_window_bounds(now, *self._window_times())
+        if bounds is None:
+            return False
+        if self._last_scheduled_end is not None and elapsed_seconds(
+            bounds[1], self._align_tz(self._last_scheduled_end, now)
+        ) <= 0:
+            return False  # A clock rollback must not reopen a completed window.
+        return elapsed_seconds(now, bounds[0]) >= 0 and elapsed_seconds(bounds[1], now) > 0
 
     def _get_active_forecast_entity(self) -> str | None:
         """Return the forecast entity for the solar day the plan is made for.
@@ -1021,7 +1031,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         state = self.hass.states.get(entity_id)
         if not state or state.state in ("unknown", "unavailable"):
             return None
-        return _as_float(state.state)
+        value = _as_float(state.state)
+        return value if value is not None and 0 <= value <= 100 else None
 
     @staticmethod
     def _align_tz(value: datetime, like: datetime) -> datetime:
@@ -1708,7 +1719,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if current_soc is None:
             return
         now = dt_util.now()
-        hours_remaining = max(0.0, (self._window_end_datetime(now) - now).total_seconds() / 3600.0)
+        hours_remaining = max(0.0, elapsed_seconds(self._window_end_datetime(now), now) / 3600.0)
         if hours_remaining < MIN_PLAN_HOURS_REMAINING:
             # required_charge_power_w would return infinity and the setpoint
             # would collapse to the maximum in the last minute of the window.
@@ -2297,6 +2308,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _is_backup_active(self) -> bool:
         """True while the house runs on the battery instead of the grid.
 
+        A configured contact that is unreadable or unrecognised also inhibits
+        control: uncertainty never grants permission to draw from the grid.
+        Explicit manufacturer state mappings remain a trusted configuration.
+
         Backup (island) operation is the one state in which this integration
         must keep its hands off the inverter entirely. There is no grid to
         charge from, and - far more important - a raised min SOC would stop
@@ -2323,7 +2338,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     backup_entity,
                 )
                 self._backup_unreadable_logged = True
-            return False
+            return True
         self._backup_unreadable_logged = False
         value = str(state.state).strip().lower()
 
@@ -2362,7 +2377,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 backup_entity,
                 state.state,
             )
-        return False
+        return True
 
     def _get_power_w(self, entity_id: str | None) -> float | None:
         """Return power in W for a given entity, or None if unavailable."""
@@ -2437,6 +2452,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 domain,
                 "set_value",
                 {"entity_id": entity_id, "value": value},
+                blocking=True,
             )
         except Exception as e:
             _LOGGER.error("Error writing AC charge limit (%s): %s", what, e, exc_info=True)
@@ -2487,8 +2503,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not await self._write_ac_charge_limit(
             entity_id, domain, power_w, "Set AC charge limit"
         ):
+            if self.is_active and self._grid_limit_configured():
+                await self._pause_grid_charge("protective charge-limit write failed")
             return False
         self._grid_limit_last_write = dt_util.now()
+        if power_w == 0 and self.is_active and self._grid_limit_configured():
+            await self._pause_grid_charge("no confirmed connection headroom")
         return True
 
     async def _reset_ac_charge_limit(self) -> bool:
@@ -3562,10 +3582,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return
 
             now_dt = dt_util.now()
-            start_time_obj, end_time_obj = self._window_times()
-            in_window = self._is_time_between(now_dt.time(), start_time_obj, end_time_obj)
+            in_window = self._scheduled_window_is_open(now_dt)
 
-            if self._adhoc_until is not None and (in_window or now_dt >= self._adhoc_until):
+            if self._adhoc_until is not None and (in_window or elapsed_seconds(now_dt, self._adhoc_until) >= 0):
                 # The configured window wins over an ad-hoc one: it has the
                 # tariff contract behind it. Otherwise the ad-hoc window has
                 # simply reached the end it was given.
@@ -3586,7 +3605,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 not in_window
                 and not self.is_active
                 and self._adhoc_until is not None
-                and self._adhoc_until > now_dt
+                and elapsed_seconds(self._adhoc_until, now_dt) > 0
             ):
                 _LOGGER.info(
                     "Resuming the ad-hoc window (%s) that a restart interrupted, until %s",
@@ -3640,6 +3659,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         deadline and grid-charge setting, and be ended at the ad-hoc deadline
         with nothing to start it again that night.
         """
+        if not self._scheduled_window_is_open(dt_util.now()):
+            _LOGGER.info("Ignoring a scheduled start outside its actual calendar window")
+            return
+        if self.is_active and self._adhoc_until is None:
+            return  # A repeated fall-back trigger must not reinitialise the window.
         if self._adhoc_until is not None:
             _LOGGER.info(
                 "Ending the ad-hoc window (%s): the configured window is starting",
@@ -3983,7 +4007,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         return await self.async_open_adhoc_window(
             target_soc=target_soc,
-            until=dt_util.now() + duration,
+            until=add_elapsed(dt_util.now(), duration),
             reason=ADHOC_REASON_SERVICE,
             allow_grid_charge=True,
         )
@@ -4001,7 +4025,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         return await self.async_open_adhoc_window(
             target_soc=current_soc,
-            until=dt_util.now() + duration,
+            until=add_elapsed(dt_util.now(), duration),
             reason=ADHOC_REASON_SERVICE,
             allow_grid_charge=False,
         )
@@ -4041,7 +4065,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         battery without buying more.
         """
         now = dt_util.now()
-        if until <= now:
+        if elapsed_seconds(until, now) <= 0:
             _LOGGER.warning("Ad-hoc window (%s) refused: %s is not in the future", reason, until)
             return False
         if not self.is_enabled:
@@ -4238,6 +4262,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         mode_label = "Morning discharge" if self.is_discharge_mode else "Night charge"
         _LOGGER.info("%s window ended, resetting settings", mode_label)
+        if self._window_started_at is not None and self._adhoc_until is None:
+            bounds = scheduled_window_bounds(self._window_started_at, *self._window_times())
+            if bounds is not None and elapsed_seconds(now, self._align_tz(bounds[1], now)) >= 0:
+                self._last_scheduled_end = bounds[1]
         # The window is over from this point on, before the first await: a
         # concurrent window check or listener must not see it as active any more
         # and re-arm what is being torn down here (finding B9).
@@ -4540,10 +4568,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # there, and the clock check is inclusive at the end.
             now = dt_util.now()
             start, end = self._window_times()
-            if self._is_time_between(now.time(), start, end) and (now.hour, now.minute) != (
-                end.hour,
-                end.minute,
-            ):
+            if self._scheduled_window_is_open(now):
                 await self._check_current_window()
         if not self.is_enabled or not self.is_active:
             return inactive_data
@@ -4566,14 +4591,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._adhoc_until is not None:
             # An ad-hoc window runs outside the configured times by definition,
             # so the clock check below would end it at once. It ends by its own.
-            if dt_util.now() >= self._adhoc_until:
+            if elapsed_seconds(dt_util.now(), self._adhoc_until) >= 0:
                 _LOGGER.info(
                     "The ad-hoc window (%s) is over; ending it from the polling update",
                     self._adhoc_reason,
                 )
                 await self._on_window_end(dt_util.now())
                 return inactive_data
-        elif not self._is_time_between(dt_util.now().time(), start, end):
+        elif not self._scheduled_window_is_open(dt_util.now()):
             _LOGGER.warning(
                 "Window end was missed (now outside %s-%s); ending window from polling update",
                 start,
@@ -4723,6 +4748,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 except (ValueError, TypeError):
                     pass
 
+        if self._current_battery_soc() is None:
+            _LOGGER.warning("Battery SoC cannot be trusted - pausing inverter control until it reports again")
+            await self._pause_grid_charge("battery SoC cannot be trusted")
+            await self._enforce_grid_limit_now()
+            self.planned_charge_power_w = None
+            self.planned_power_is_applied = False
+            return {**inactive_data, "calculated_soc": self.calculated_soc,
+                    "is_active": self.is_active, "target_reached": self.target_reached}
+
         # Control the inverter entities based on operation mode
         if not self.target_reached:
             if can_check_soc:
@@ -4803,7 +4837,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _control_charge(self, target_soc: float) -> None:
         """Control the inverter entities for night charging, from the calculated SOC."""
         if self._is_backup_active():
-            _LOGGER.info("Backup mode active - skipping inverter control")
+            _LOGGER.info("Backup mode active or unconfirmed - skipping inverter control")
             return
         # CRITICAL: Validate target_soc before applying
         user_min_soc = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
@@ -4816,6 +4850,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 user_min_soc,
                 user_max_soc,
             )
+            return
+
+        if self._current_battery_soc() is None:
+            await self._pause_grid_charge("battery SoC cannot be trusted")
             return
 
         min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
@@ -4849,7 +4887,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         )
                         should_skip_charging = True
                 except (ValueError, TypeError):
-                    pass
+                    should_skip_charging = True
             else:
                 # Battery SOC entity is unavailable - don't turn on grid charge for safety
                 _LOGGER.warning(
@@ -4931,6 +4969,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 command_delay = max(0.0, delay) if delay is not None else DEFAULT_COMMAND_DELAY
                 await asyncio.sleep(command_delay)  # Configurable delay
 
+                if not await self._grid_charge_activation_safe(target_soc):
+                    return
+
                 try:
                     state = self.hass.states.get(grid_charge_switch)
                     if state and state.state == "off":
@@ -4946,6 +4987,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.error("Error turning on grid charge: %s", e, exc_info=True)
         elif grid_charge_switch and not should_skip_charging:
             # Only grid charge needs to be turned on (min SOC already set or not needed)
+            if not await self._grid_charge_activation_safe(target_soc):
+                return
             try:
                 state = self.hass.states.get(grid_charge_switch)
                 if state and state.state == "off":
@@ -4963,6 +5006,73 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Apply absolute AC+DC charge limit during AC charging
         if grid_charge_switch and not should_skip_charging:
             await self._apply_absolute_charge_power_limit()
+
+    async def _pause_grid_charge(self, reason: str) -> None:
+        """Request a stop while retaining captures and protective power limits."""
+        entity_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        state = self.hass.states.get(entity_id) if entity_id else None
+        if entity_id and (state is None or state.state != "off"):
+            try:
+                await self.hass.services.async_call(
+                    "switch", "turn_off", {"entity_id": entity_id},
+                )
+                _LOGGER.warning("Requested grid-charge pause: %s", reason)
+            except Exception:
+                _LOGGER.exception("Cannot pause grid charging (%s); inverter stop is unconfirmed", reason)
+
+    def _charge_permission_current(self) -> bool:
+        """Check live lifecycle and the absolute deadline at the command sink."""
+        if not self.is_active or not self.is_enabled or self._ending or self._reconfiguring:
+            return False
+        now = dt_util.now()
+        if self._adhoc_until is not None:
+            return elapsed_seconds(self._adhoc_until, now) > 0
+        return self._scheduled_window_is_open(now)
+
+    async def _grid_charge_activation_safe(self, target_soc: float) -> bool:
+        """Revalidate permission after awaited writes/delays, at the activation sink."""
+        if not self._charge_permission_current():
+            await self._pause_grid_charge("window ended or charging permission was withdrawn")
+            return False
+        if self._is_backup_active():
+            await self._pause_grid_charge("island status changed or is unconfirmed")
+            if self.is_active:
+                await self._check_current_window()  # Release the raised floor as well.
+            return False
+        soc = self._current_battery_soc()
+        if soc is None or soc >= target_soc:
+            await self._pause_grid_charge("battery SoC changed or cannot be trusted")
+            return False
+        if self._grid_limit_configured():
+            target = self._ac_charge_limit_target()
+            current = self._get_power_w(target[0]) if target is not None else None
+            requested = self.planned_charge_power_w
+            if requested is None:
+                requested = current if current is not None else 0.0
+            allowed = float(int(self._grid_limited_setpoint(requested)))
+            if target is None or current is None or allowed <= 0:
+                await self._pause_grid_charge("connection headroom or charge limit cannot be confirmed")
+                return False
+            if current > allowed:
+                if not await self._set_ac_charge_limit_w(int(allowed)):
+                    await self._pause_grid_charge("protective charge-limit write failed")
+                    return False
+                self._planned_setpoint_written_w = allowed
+            readback = self._get_power_w(target[0])
+            if readback is None or readback > allowed:
+                await self._pause_grid_charge("protective charge limit is not confirmed by readback")
+                return False
+            # State may have changed while the protective write was awaited.
+            if self._grid_limited_setpoint(allowed) < allowed:
+                await self._pause_grid_charge("connection headroom changed during activation")
+                return False
+        # No await separates this final permission check from the switch call.
+        soc = self._current_battery_soc()
+        permitted = (self._charge_permission_current() and not self._is_backup_active()
+                     and soc is not None and soc < target_soc)
+        if not permitted:
+            await self._pause_grid_charge("charging permission changed during activation")
+        return permitted
 
     async def _control_discharge(self, target_soc: float) -> None:
         """Control the inverter entities for morning discharge mode.
@@ -5368,6 +5478,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             actual_w,
             written,
         )
+        if self._grid_limit_configured():
+            await self._pause_grid_charge("inverter readback exceeds the protective charge limit")
         await self._set_ac_charge_limit_w(int(written))
 
     async def _verify_and_restore_min_soc(self) -> None:
@@ -5506,6 +5618,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _grid_budget(self) -> float | None:
         """The configured continuous grid budget in W, or None when unconfigured."""
+        for key in (CONF_MAIN_FUSE_A, CONF_GRID_MAX_CONTINUOUS_W):
+            raw = self.config.get(key)
+            if raw is not None and raw != "":
+                value = _as_float(raw)
+                if value is None or value <= 0:
+                    self._grid_budget_cache_w = 0.0
+                    return 0.0  # Corruption must not turn an opted-in guard off.
         phases_raw = _as_float(self.config.get(CONF_GRID_PHASES, DEFAULT_GRID_PHASES))
         voltage = _as_float(self.config.get(CONF_GRID_VOLTAGE_V, DEFAULT_GRID_VOLTAGE_V))
         pct = _as_float(self.config.get(CONF_GRID_CONTINUOUS_PCT, DEFAULT_GRID_CONTINUOUS_PCT))
@@ -5534,7 +5653,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             stamp = getattr(state, attribute, None)
             if isinstance(stamp, datetime):
                 try:
-                    return (now - stamp).total_seconds()
+                    return elapsed_seconds(now, stamp)
                 except (TypeError, ValueError):
                     return None
         return None
@@ -5568,8 +5687,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_import_w = None
             return None
         age_s = self._state_age_s(state, dt_util.now())
-        if age_s is not None and age_s > GRID_LIMIT_STALE_AFTER_S:
-            _LOGGER.debug("Grid import %s is %.0f s old - treating it as unknown", entity_id, age_s)
+        if age_s is None or not 0 <= age_s <= GRID_LIMIT_STALE_AFTER_S:
+            _LOGGER.debug("Grid import %s has untrusted age %s - treating it as unknown", entity_id, age_s)
             self._grid_import_w = None
             return None
         # Feeding in is not "negative import": treated as a number it would
@@ -5587,10 +5706,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         above the real draw, and every watt overstated here is a watt of other
         load that goes unnoticed. When the measured charge power is configured
         and fresh, the smaller of the two is used - that never overstates our
-        own share, so the limit errs towards charging less. Without that
-        measurement the setpoint stands in for the draw only while a charge is
-        still being ordered: once the target is reached the limit caps a battery
-        that draws nothing, and subtracting it would hide that much house load.
+        own share, so the limit errs towards charging less. Without a fresh,
+        correctly dimensioned measurement no own draw is credited: a setpoint
+        is a ceiling, not evidence of actual consumption.
         """
         written = self._planned_setpoint_written_w
         measured: float | None = None
@@ -5598,14 +5716,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if sent_entity:
             state = self.hass.states.get(str(sent_entity))
             age_s = self._state_age_s(state, dt_util.now()) if state else None
-            if age_s is None or age_s <= GRID_LIMIT_STALE_AFTER_S:
+            if (age_s is not None and 0 <= age_s <= GRID_LIMIT_STALE_AFTER_S
+                    and _unit_of(state) in ("w", "watt", "watts", "kw", "kilowatt", "kilowatts")):
                 value = self._get_power_w(sent_entity)
                 if value is not None and value >= 0:
                     measured = value
         if measured is None:
-            if self.target_reached:
-                return 0.0
-            return float(written or 0.0)
+            return 0.0
         if written is None:
             return measured
         return min(measured, float(written))
@@ -5657,7 +5774,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         last_write = self._grid_limit_last_write
         if last_write is None:
             return False
-        if (dt_util.now() - last_write).total_seconds() >= GRID_LIMIT_MIN_WRITE_INTERVAL_S:
+        age_s = elapsed_seconds(dt_util.now(), last_write)
+        if not 0 <= age_s < GRID_LIMIT_MIN_WRITE_INTERVAL_S:
             return False
         _LOGGER.debug("House connection limit changed again within the debounce - waiting")
         return True
@@ -5690,31 +5808,27 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         min_w = float(self.config.get(CONF_MIN_CHARGE_POWER_W, DEFAULT_MIN_CHARGE_POWER_W))
         import_w = self._read_grid_import_w(str(entity_id))
         if import_w is None:
-            # Blind: the connection may already be at its limit. Fall back to
-            # the minimum charge power instead of carrying on at full power.
+            # Blind: even minimum charging could overload an occupied connection.
             if not self._grid_stale_logged:
                 _LOGGER.warning(
-                    "Grid import %s is unavailable or stale - limiting the charge power to "
-                    "%.0f W until it reports again",
+                    "Grid import %s is untrusted - pausing grid charging at "
+                    "0 W until a fresh measurement reports again",
                     entity_id,
-                    min_w,
                 )
                 self._grid_stale_logged = True
             self._grid_allowed_w = None
             self._grid_other_load_w = None
             self._grid_limited = True
-            return min(planned_w, min_w)
+            return 0.0
 
         self._grid_stale_logged = False
         headroom = _as_float(self.config.get(CONF_GRID_HEADROOM_W, DEFAULT_GRID_HEADROOM_W))
         own_w = min(self._own_charge_draw_w(), max(0.0, import_w))
         if not self.config.get(CONF_CHARGE_POWER_SENT_ENTITY) and not self._grid_own_draw_logged:
-            # Without a measurement the written setpoint stands in for the draw.
-            # It is an upper bound, so a battery that does not follow it makes
-            # the foreign load look smaller than it is.
+            # Treat all import as foreign load until actual own draw is measured.
             _LOGGER.info(
-                "House connection limit is working from the written setpoint: configure the "
-                "charge power sensor to measure what the battery really draws"
+                "No measured charge-power sensor: all grid import counts as foreign load. "
+                "Configure the charge power sensor to measure the battery's actual draw"
             )
             self._grid_own_draw_logged = True
         allowed = allowed_charge_power_w(

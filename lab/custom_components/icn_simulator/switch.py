@@ -7,6 +7,9 @@ SWITCHES = [
     ("grid_charge", "Grid Charge"), ("block_discharge", "Block Discharge"),
     ("backup", "Backup"), ("online", "Online"),
     ("forecast_available", "Forecast Available"), ("reject_writes", "Reject Writes"),
+    ("reject_charge_limit", "Ignore Charge Limit Only"),
+    ("soc_sensor_online", "Lab SoC Sensor Online"),
+    ("backup_sensor_online", "Grid Contact Online"),
 ] + [(key, label) for key, label in [
     ("grid_available", "Public Grid Available"), ("transfer_island", "Manual Transfer Island"),
     ("protection_trip", "Simulated Protection Trip"), ("meter_online", "Grid Meter Online"),

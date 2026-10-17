@@ -35,6 +35,11 @@ und regelt zwei HTTP-Wallboxen. evcc erhält keinen schreibenden Batteriezugriff
 
 ## Modellgrenzen
 
+Die ergänzende [Kalender- und Fehlerkampagne](EDGE_CASES.md) dokumentiert
+16 vollständige Zeitläufe, deterministische Last-/Telemetrie-Gegenproben und
+die daraus bestätigten Korrekturen. `check_edge_cases.py` läuft auch in der
+Linux-Labor-CI; die Uhr des interaktiven Labors bleibt davon unabhängig.
+
 - 3 × 63 A und 80 % Dauerlast sind Beispielwerte, keine erhobenen Anlagendaten.
   evcc begrenzt auf 50,4 A je Phase und 34.776 W. ICN lässt zusätzlich 500 W Reserve.
 - `Grid Power` zeigt die tatsächliche Wirkleistung. `Grid Guard Power` ist ein

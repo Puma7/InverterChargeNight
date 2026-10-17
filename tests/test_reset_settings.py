@@ -403,7 +403,7 @@ async def test_window_end_restores_ac_charge_limit_set_by_finder(
     assert coordinator._original_ac_charge_power == 6000.0
     assert _runtime_state(coordinator)["original_ac_charge_power"] == 6000.0
     mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": AC_LIMIT, "value": test_value}
+        "number", "set_value", {"entity_id": AC_LIMIT, "value": test_value}, blocking=True
     )
     mock_hass.services.async_call.reset_mock()
 
@@ -412,7 +412,7 @@ async def test_window_end_restores_ac_charge_limit_set_by_finder(
     assert mock_hass.services.async_call.await_args_list == [
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0}),
         call("switch", "turn_off", {"entity_id": GRID}),
-        call("number", "set_value", {"entity_id": AC_LIMIT, "value": restored_value}),
+        call("number", "set_value", {"entity_id": AC_LIMIT, "value": restored_value}, blocking=True),
     ]
     assert coordinator._original_ac_charge_power is None
     assert coordinator._pending_reset is False
@@ -435,7 +435,7 @@ async def test_finder_switch_off_restores_ac_charge_limit(mock_hass):
     assert coordinator.auto_efficient_charge is False
     assert coordinator._auto_test_active is False
     mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": AC_LIMIT, "value": 6000.0}
+        "number", "set_value", {"entity_id": AC_LIMIT, "value": 6000.0}, blocking=True
     )
     assert coordinator._original_ac_charge_power is None
 
@@ -508,7 +508,7 @@ async def test_finder_completion_writes_the_best_power_and_keeps_the_original(mo
     await coordinator._handle_auto_charge()
 
     mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": AC_LIMIT, "value": 6000.0}
+        "number", "set_value", {"entity_id": AC_LIMIT, "value": 6000.0}, blocking=True
     )
     assert coordinator.auto_efficient_charge is False
     assert coordinator._original_ac_charge_power == 8000.0, "the user's value is still known"
@@ -817,7 +817,7 @@ async def test_the_reset_action_keeps_the_window_down_until_its_end(mock_hass):
         await coordinator._check_current_window()
         assert coordinator.is_active is False
 
-    # Past the deadline the next window runs as usual
+    # The exact deadline ends the current window; it cannot restart that window.
     with patch(CALL_LATER, return_value=MagicMock()), patch(
         "custom_components.inverter_charge_night.coordinator.dt_util.now",
         return_value=WINDOW_END,
@@ -826,6 +826,12 @@ async def test_the_reset_action_keeps_the_window_down_until_its_end(mock_hass):
         await coordinator._check_current_window()
 
     assert coordinator._hands_off_until is None
+    coordinator._on_window_start.assert_not_awaited()
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        "custom_components.inverter_charge_night.coordinator.dt_util.now",
+        return_value=datetime(2026, 1, 16, 0, 0),
+    ):
+        await coordinator._check_current_window()
     coordinator._on_window_start.assert_awaited_once()
 
 

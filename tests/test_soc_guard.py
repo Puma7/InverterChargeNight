@@ -1,10 +1,18 @@
 """Test SOC guard logic for charging."""
 
+from datetime import datetime
 import pytest
-from unittest.mock import Mock, AsyncMock
+from unittest.mock import Mock, AsyncMock, patch
 from custom_components.inverter_charge_night.coordinator import (
     InverterChargeNightCoordinator,
 )
+
+
+@pytest.fixture(autouse=True)
+def active_night_clock():
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now",
+               return_value=datetime(2026, 1, 15, 2)):
+        yield
 
 
 @pytest.mark.asyncio
@@ -203,7 +211,7 @@ async def test_start_charging_when_current_soc_less_than_target():
 
 @pytest.mark.asyncio
 async def test_soc_guard_handles_unavailable_battery_soc():
-    """Test that charging proceeds normally when battery SOC entity is unavailable."""
+    """Unknown battery state must pause charging without raising its floor."""
     # Setup
     hass = Mock()
     entry = Mock()
@@ -227,9 +235,9 @@ async def test_soc_guard_handles_unavailable_battery_soc():
     battery_soc_state = Mock()
     battery_soc_state.state = "unavailable"
 
-    # Mock grid charge switch state (off)
+    # A running charge must be actively paused, not merely left without a new ON.
     grid_charge_state = Mock()
-    grid_charge_state.state = "off"
+    grid_charge_state.state = "on"
 
     # Mock min SOC state
     min_soc_state = Mock()
@@ -244,7 +252,7 @@ async def test_soc_guard_handles_unavailable_battery_soc():
     # Mock service calls
     hass.services.async_call = AsyncMock()
 
-    # Test: unavailable SOC should proceed with charging
+    # Test: unknown state must not authorise new control.
     target_soc = 75.0
     await coordinator._control_charge(target_soc)
 
@@ -257,5 +265,8 @@ async def test_soc_guard_handles_unavailable_battery_soc():
         call for call in hass.services.async_call.call_args_list
         if call.args and call.args[0] == "switch" and call.args[1] == "turn_on"
     ]
-    assert len(min_soc_calls) == 1, "Min SOC should be set when SOC is unavailable"
+    assert len(min_soc_calls) == 0, "An unknown battery must not get a raised floor"
     assert len(grid_charge_calls) == 0, "Grid charge should be skipped when SOC is unavailable"
+    hass.services.async_call.assert_awaited_once_with(
+        "switch", "turn_off", {"entity_id": "switch.grid_charge"},
+    )

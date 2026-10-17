@@ -311,8 +311,9 @@ class KostalEmulator:
                         value = struct.unpack(">H" if count == 1 else ">f", packet[6:])[0]
                         maximum = 100 if key == "min_soc" else 20000
                         if 0 <= value <= maximum:
-                            self.lab.audit(key, value, accepted=not self.lab.plant.reject_writes)
-                            if not self.lab.plant.reject_writes:
+                            refused = self.lab.plant.reject_writes or (key == "charge_limit" and self.lab.plant.reject_charge_limit)
+                            self.lab.audit(key, value, accepted=not refused)
+                            if not refused:
                                 setattr(self.lab.plant, key, float(value))
                             self.lab.publish()
                             response = struct.pack(">BHH", 16, address, count)

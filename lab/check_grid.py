@@ -141,6 +141,36 @@ async def main():
                 lab.publish()
                 check("evcc responds to cooking and heat-pump load step",
                     await until(lambda: max(p.phase_currents) <= 50.4), list(p.phase_currents))
+                # A device may acknowledge Modbus without applying the ceiling.
+                # Keep REST grid-charge stop functional as an independent path.
+                p.reject_charge_limit = True
+                p.charge_limit = 5000
+                p.grid_charge = True
+                p.house_load = 35000
+                p.advance(0.001)
+                lab.publish()
+                # KORE rotates register groups; one entity update is not a
+                # guarantee that this register has been polled. Read all groups
+                # through the actual coordinator, then the independent REST path.
+                modbus = hass.data["kostal_kore"][kore_entry.entry_id]["modbus_coordinator"]
+                for _ in range(6):
+                    await modbus.async_refresh()
+                from homeassistant.helpers.entity_component import DATA_INSTANCES
+                switch = hass.data[DATA_INSTANCES]["switch"].get_entity(data["grid_charge_switch"])
+                await switch.coordinator.async_refresh()
+                await hass.async_block_till_done()
+                check("the actual KORE entities observe the externally changed controls",
+                    float(hass.states.get(data["charge_power_entity"]).state) == 5000 and
+                    hass.states.get(data["grid_charge_switch"]).state == "on")
+                await coordinator._verify_ac_charge_limit()
+                check("KORE readback detects an acknowledged but ignored protective cap",
+                    any(c["key"] == "charge_limit" and not c["accepted"] for c in lab.commands),
+                    list(lab.commands))
+                check("independent REST grid-charge stop survives ignored Modbus cap",
+                    await until(lambda: not p.grid_charge) and p.charge_limit == 5000,
+                    {"grid_charge": p.grid_charge, "cap": p.charge_limit})
+                p.reject_charge_limit = False
+                p.house_load = 600
                 p.transfer_island = True
                 p.advance(0.001)
                 lab.publish()

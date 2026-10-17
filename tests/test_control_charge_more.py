@@ -1,5 +1,6 @@
 """More tests for control and stop behavior."""
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -19,13 +20,22 @@ from custom_components.inverter_charge_night.const import (
 )
 
 
+@pytest.fixture(autouse=True)
+def active_night_clock():
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now",
+               return_value=datetime(2026, 1, 15, 2)):
+        yield
+
+
 def _make_coordinator(hass, data):
     entry = MagicMock()
     entry.entry_id = "entry_1"
     entry.title = "Test"
     entry.data = data
     entry.options = {}
-    return InverterChargeNightCoordinator(hass, entry)
+    coordinator = InverterChargeNightCoordinator(hass, entry)
+    coordinator.is_active = True
+    return coordinator
 
 
 @pytest.mark.asyncio

@@ -1219,7 +1219,7 @@ async def test_planned_power_two_kwh_in_four_hours_writes_556_w(mock_hass, power
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 40.0}),
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}),
         call("switch", "turn_on", {"entity_id": GRID}),
-        call("number", "set_value", {"entity_id": AC_LIMIT, "value": 556.0}),
+        call("number", "set_value", {"entity_id": AC_LIMIT, "value": 556.0}, blocking=True),
     ]
     assert powered._original_ac_charge_power == 6000.0
     assert powered._planned_setpoint_written_w == 556.0
@@ -1233,7 +1233,7 @@ async def test_planned_power_thirty_minutes_left_writes_max(mock_hass, powered):
         await powered._async_update_data()
 
     assert powered.planned_charge_power_w == 10000.0
-    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 10000.0}) in (
+    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 10000.0}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
 
@@ -1257,7 +1257,7 @@ async def test_planned_power_small_change_is_not_written(mock_hass, powered):
     with patch(NOW, return_value=datetime(2026, 1, 15, 3, 59)):
         await powered._async_update_data()
     mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": AC_LIMIT, "value": 1056.0}
+        "number", "set_value", {"entity_id": AC_LIMIT, "value": 1056.0}, blocking=True
     )
 
 
@@ -1274,7 +1274,7 @@ async def test_planned_power_above_optimum_follows_deadline(mock_hass, powered):
         powered.initial_calculated_soc = 90.0  # 5 kWh in 1 h -> 5556 W > 3000
         await powered._async_update_data()
     assert powered.planned_charge_power_w == 5556.0
-    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 5556.0}) in (
+    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 5556.0}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
 
@@ -1339,7 +1339,7 @@ async def test_window_end_restores_ac_limit_after_planned_writes(mock_hass, powe
 
     await powered._on_window_end(WINDOW_END)
 
-    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 6000.0}) in (
+    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 6000.0}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
     assert powered._planned_setpoint_written_w is None

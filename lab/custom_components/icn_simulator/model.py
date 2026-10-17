@@ -43,6 +43,8 @@ class Plant:
     transfer_island: bool = False
     protection_trip: bool = False
     meter_online: bool = True
+    soc_sensor_online: bool = True
+    backup_sensor_online: bool = True
     wallbox1_connected: bool = False
     wallbox2_connected: bool = False
     wallbox1_enabled: bool = False
@@ -62,6 +64,7 @@ class Plant:
     online: bool = True
     forecast_available: bool = True
     reject_writes: bool = False
+    reject_charge_limit: bool = False
     battery_power: float = 0.0
     charge_ac_power: float = 0.0
     grid_power: float = 600.0
