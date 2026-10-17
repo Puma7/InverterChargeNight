@@ -83,7 +83,7 @@ async def async_setup(hass, config):
 
     async def refresh_planner():
         for entry in hass.config_entries.async_entries("inverter_charge_night"):
-            if entry.title == "ICN Lab":
+            if entry.title == "ICN Lab" or entry.entry_id == getattr(lab, "controller_entry_id", None):
                 coordinator = getattr(entry, "runtime_data", None)
                 if coordinator is not None:
                     await coordinator.async_refresh()
@@ -156,9 +156,10 @@ async def async_setup(hass, config):
             if settings["auto_configure_kore"]:
                 from .fixtures import configure_kore
                 _, mapping = await configure_kore(hass)
-                user_controller = any(entry.title != "ICN Lab" and
-                    entry.data.get("min_soc_entity") == mapping["min_soc_entity"]
-                    for entry in hass.config_entries.async_entries("inverter_charge_night"))
+                owners = [entry for entry in hass.config_entries.async_entries("inverter_charge_night")
+                          if entry.title != "ICN Lab" and entry.data.get("min_soc_entity") == mapping["min_soc_entity"]]
+                user_controller = bool(owners)
+                lab.controller_entry_id = owners[0].entry_id if owners else None
                 if not user_controller:
                     defaults.update(mapping)
             # Migrate only entries owned by this lab fixture, through HA's API.
