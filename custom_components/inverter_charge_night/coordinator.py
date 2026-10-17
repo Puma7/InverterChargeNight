@@ -2797,7 +2797,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         allowed = self._grid_limited_setpoint(reference)
         if allowed >= reference - PLANNED_POWER_WRITE_THRESHOLD_W:
             return
-        if self._grid_write_is_debounced():
+        if allowed > 0 and self._grid_write_is_debounced():
             return
         if self._auto_test_active:
             _LOGGER.info(
@@ -5632,7 +5632,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         allowed = self._grid_limited_setpoint(reference)
         if allowed >= reference - PLANNED_POWER_WRITE_THRESHOLD_W:
             return
-        if self._grid_write_is_debounced():
+        if allowed > 0 and self._grid_write_is_debounced():
             return
         _LOGGER.info(
             "House connection limit: holding the charge limit at %d W after the target was reached",
@@ -5834,7 +5834,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         limited = self._grid_limited_setpoint(planned)
         if limited > written - PLANNED_POWER_WRITE_THRESHOLD_W:
             return
-        if self._grid_write_is_debounced():
+        # Releasing the battery cannot wait behind a recent nonzero setpoint.
+        if limited > 0 and self._grid_write_is_debounced():
             return
         _LOGGER.info(
             "House connection limit: lowering the charge power from %.0f W to %.0f W",
