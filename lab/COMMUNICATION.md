@@ -24,6 +24,10 @@ ICN watches required entity loss/recovery, including non-finite numeric states,
 and requests an immediate refresh instead of waiting for the normal poll. An
 active window requests zero AC charging power and grid-charge OFF through the
 remaining paths. Failed writes do not become successful setpoint records.
+Configured forced export is stopped as well; loss of that control is explicit
+in the incident state. The house/backup discharge ceiling is not zeroed by this
+export-stop path. Unknown REST switch values remain unknown, and non-finite
+numeric commands/readbacks cannot count as successful control or confirmation.
 Window cleanup requires HA OFF feedback before restoring higher limits, retaining
 the captured settings and retry state until cleanup can complete.
 

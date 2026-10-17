@@ -433,6 +433,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         entities = [self.config[key] for key in (
             CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH,
             CONF_CHARGE_POWER_ENTITY, CONF_GRID_IMPORT_ENTITY, CONF_BACKUP_MODE_ENTITY,
+            CONF_FORCE_DISCHARGE_SWITCH,
         ) if self.config.get(key)]
         numeric = {self.config[key] for key in (
             CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY,
@@ -478,13 +479,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                           ("min_soc", CONF_MIN_SOC_ENTITY),
                           ("grid_switch", CONF_GRID_CHARGE_SWITCH),
                           ("charge_limit", CONF_CHARGE_POWER_ENTITY),
+                          ("discharge_switch", CONF_FORCE_DISCHARGE_SWITCH),
                           ("island_contact", CONF_BACKUP_MODE_ENTITY)):
             entity_id = self.config.get(key)
             state = self.hass.states.get(entity_id) if entity_id else None
             if entity_id and (state is None or state.state in ("unknown", "unavailable")):
                 faults.append(role)
             elif state is not None:
-                if role == "grid_switch" and state.state not in ("on", "off"):
+                if role in ("grid_switch", "discharge_switch") and state.state not in ("on", "off"):
                     faults.append(role)
                 if role in ("min_soc", "charge_limit"):
                     try:
@@ -513,6 +515,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         switch = self.hass.states.get(switch_id) if switch_id else None
         stopped = bool(switch is not None and switch.state == "off") if faults else None
+        force_id = self.config.get(CONF_FORCE_DISCHARGE_SWITCH)
+        if faults and force_id:
+            force = self.hass.states.get(force_id)
+            stopped = stopped and force is not None and force.state == "off"
         if health.observe(faults, dt_util.now(), stopped):
             from homeassistant.components import persistent_notification
             persistent_notification.async_create(
@@ -4669,6 +4675,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if await self._set_ac_charge_limit_w(0):
                     self._planned_setpoint_written_w = 0
             await self._pause_grid_charge("communication interrupted; stop requires feedback")
+            # The same guard also runs in export mode. Do not leave forced
+            # discharge active, or change the house/backup discharge ceiling.
+            force_id = self.config.get(CONF_FORCE_DISCHARGE_SWITCH)
+            force = self.hass.states.get(force_id) if force_id else None
+            if force_id and (force is None or force.state != "off"):
+                try:
+                    await self.hass.services.async_call(
+                        "switch", "turn_off", {"entity_id": force_id}, blocking=True,
+                    )
+                except Exception:
+                    _LOGGER.exception("Cannot stop forced discharge; device stop is unconfirmed")
             self._update_communication_health()
             data = dict(self.data or {})
             data.update(is_active=self.is_active, current_soc=self._current_battery_soc(),

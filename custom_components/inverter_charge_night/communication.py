@@ -7,7 +7,7 @@ from typing import Any
 FAULT_CODES = frozenset({
     "battery_soc", "min_soc", "grid_switch", "charge_limit", "grid_meter",
     "island_contact", "modbus", "modbus_partial", "rest", "proxy",
-    "write_unconfirmed",
+    "write_unconfirmed", "discharge_switch",
 })
 HISTORY_LIMIT = 32
 

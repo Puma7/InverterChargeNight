@@ -6,7 +6,7 @@ import pytest
 
 from tests.test_calendar_fault_campaign import rig
 from tests.test_grid_limit import AC_LIMIT, BATTERY, GRID, GRID_IMPORT, BACKUP, MIN_SOC
-from custom_components.inverter_charge_night.const import CONF_BACKUP_MODE_ENTITY
+from custom_components.inverter_charge_night.const import CONF_BACKUP_MODE_ENTITY, CONF_FORCE_DISCHARGE_SWITCH, CONF_DISCHARGE_LIMIT_ENTITY
 
 
 @pytest.mark.asyncio
@@ -157,3 +157,37 @@ async def test_silent_meter_staleness_is_checked_independently_of_the_planner_po
     hass.states.get(GRID_IMPORT).last_reported = clock.now - timedelta(seconds=301)
     await callback(clock.now)
     co.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("force_unreachable", [False, True])
+async def test_telemetry_loss_also_stops_forced_export_without_disabling_house_supply(rig, force_unreachable):
+    hass, co, _ = rig
+    force = "switch.force_export"
+    house_limit = "number.house_discharge_limit"
+    co.config[CONF_FORCE_DISCHARGE_SWITCH] = force
+    co.config[CONF_DISCHARGE_LIMIT_ENTITY] = house_limit
+    hass.states.async_set(house_limit, "6000", {"unit_of_measurement": "W"})
+    co.operation_mode = "morning_discharge"
+    co.enable_communication_monitoring()
+    co.is_active, co.data = True, {}
+    hass.states.async_set(force, "unavailable" if force_unreachable else "on")
+    hass.states.get(BATTERY).state = "unavailable"
+    co._async_calculate_and_control = AsyncMock()
+
+    async def device(domain, service, data, **kwargs):
+        if data["entity_id"] == force and force_unreachable:
+            raise TimeoutError("export control unreachable")
+        state = hass.states.get(data["entity_id"])
+        state.state = "off" if domain == "switch" else str(data["value"])
+
+    hass.services.async_call.side_effect = device
+    with patch("homeassistant.components.persistent_notification.async_create"):
+        await co._async_update_data()
+    calls = hass.services.async_call.await_args_list
+    assert any(c.args[:2] == ("switch", "turn_off") and c.args[2]["entity_id"] == force for c in calls)
+    assert not any(c.args[1] == "turn_on" for c in calls)
+    assert not any(c.args[2]["entity_id"] == house_limit for c in calls)
+    assert hass.states.get(house_limit).state == "6000"
+    assert co.communication_diagnostics()["stop_confirmed"] is (not force_unreachable)
+    co._async_calculate_and_control.assert_not_awaited()
