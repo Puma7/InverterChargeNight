@@ -57,6 +57,7 @@ async def async_get_config_entry_diagnostics(
                 (dt_util.now() - coordinator._auto_test_start).total_seconds()
             )
         data["state"] = {
+            "communication": coordinator.communication_diagnostics(),
             "is_active": coordinator.is_active,
             "is_enabled": coordinator.is_enabled,
             "operation_mode": coordinator.operation_mode,

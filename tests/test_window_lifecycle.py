@@ -234,7 +234,7 @@ async def test_window_end_restores_original_min_soc_and_clears_state(
 
     assert mock_hass.services.async_call.await_args_list == [
         call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
-        call("switch", "turn_off", {"entity_id": GRID}),
+        call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
     ]
     assert coordinator.is_active is False
     assert coordinator.target_reached is False
@@ -314,7 +314,7 @@ async def test_restart_in_window_continues_persisted_target_and_restores_origina
 
         assert mock_hass.services.async_call.await_args_list == [
             call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
-            call("switch", "turn_off", {"entity_id": GRID}),
+            call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
         ]
         assert coordinator._pending_reset is False
     finally:
@@ -462,8 +462,10 @@ async def test_window_end_waits_for_running_verification_before_reset(mock_hass)
 
     coordinator._verify_and_restore_min_soc = _slow_verify
 
-    async def _record(domain: str, service: str, data: dict) -> None:
+    async def _record(domain: str, service: str, data: dict, **kwargs) -> None:
         events.append((service, data.get("value", data["entity_id"])))
+        if service == "turn_off" and kwargs.get("blocking"):
+            mock_hass.states.get(data["entity_id"]).state = "off"
 
     mock_hass.services.async_call = AsyncMock(side_effect=_record)
 
@@ -978,7 +980,7 @@ async def test_window_end_restores_discharge_limit(mock_hass, blocking):
 
     assert mock_hass.services.async_call.await_args_list == [
         call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
-        call("switch", "turn_off", {"entity_id": GRID}),
+        call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
         call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 5000.0}),
     ]
     assert blocking._original_discharge_limit is None
@@ -1219,7 +1221,7 @@ async def test_planned_power_two_kwh_in_four_hours_writes_556_w(mock_hass, power
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 40.0}),
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}),
         call("switch", "turn_on", {"entity_id": GRID}),
-        call("number", "set_value", {"entity_id": AC_LIMIT, "value": 556.0}),
+        call("number", "set_value", {"entity_id": AC_LIMIT, "value": 556.0}, blocking=True),
     ]
     assert powered._original_ac_charge_power == 6000.0
     assert powered._planned_setpoint_written_w == 556.0
@@ -1233,7 +1235,7 @@ async def test_planned_power_thirty_minutes_left_writes_max(mock_hass, powered):
         await powered._async_update_data()
 
     assert powered.planned_charge_power_w == 10000.0
-    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 10000.0}) in (
+    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 10000.0}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
 
@@ -1257,7 +1259,7 @@ async def test_planned_power_small_change_is_not_written(mock_hass, powered):
     with patch(NOW, return_value=datetime(2026, 1, 15, 3, 59)):
         await powered._async_update_data()
     mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": AC_LIMIT, "value": 1056.0}
+        "number", "set_value", {"entity_id": AC_LIMIT, "value": 1056.0}, blocking=True
     )
 
 
@@ -1274,7 +1276,7 @@ async def test_planned_power_above_optimum_follows_deadline(mock_hass, powered):
         powered.initial_calculated_soc = 90.0  # 5 kWh in 1 h -> 5556 W > 3000
         await powered._async_update_data()
     assert powered.planned_charge_power_w == 5556.0
-    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 5556.0}) in (
+    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 5556.0}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
 
@@ -1339,7 +1341,7 @@ async def test_window_end_restores_ac_limit_after_planned_writes(mock_hass, powe
 
     await powered._on_window_end(WINDOW_END)
 
-    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 6000.0}) in (
+    assert call("number", "set_value", {"entity_id": AC_LIMIT, "value": 6000.0}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
     assert powered._planned_setpoint_written_w is None
@@ -1576,7 +1578,7 @@ async def test_window_check_during_the_end_does_not_re_arm_the_window(mock_hass,
     # The check did not write the night target back over the restored min SOC
     assert mock_hass.services.async_call.await_args_list[-2:] == [
         call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
-        call("switch", "turn_off", {"entity_id": GRID}),
+        call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
     ]
 
 
@@ -1679,7 +1681,7 @@ async def test_options_flow_mode_change_ends_the_running_window(mock_hass):
         # The night settings are off before the discharge mode takes over
         assert mock_hass.services.async_call.await_args_list == [
             call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
-            call("switch", "turn_off", {"entity_id": GRID}),
+            call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
         ]
     finally:
         await coordinator._stop_periodic_verification()
@@ -1778,7 +1780,7 @@ async def test_options_entity_change_restores_the_entities_the_window_wrote_to(m
         # The old entities are given back before the new ones take over
         assert mock_hass.services.async_call.await_args_list[:2] == [
             call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
-            call("switch", "turn_off", {"entity_id": GRID}),
+            call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
         ]
         assert coordinator.original_min_soc is None
     finally:

@@ -39,6 +39,8 @@ class LabSensor(LabEntity, SensorEntity):
 
     @property
     def available(self):
+        if self.key == "soc" and not self.lab.plant.soc_sensor_online:
+            return False
         if self.key in ("grid_power", "grid_guard_power"):
             return self.lab.plant.meter_online
         if self.key.startswith("forecast_"):

@@ -13,7 +13,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 class BackupSensor(LabEntity, BinarySensorEntity):
     @property
     def available(self):
-        return True
+        return self.lab.plant.backup_sensor_online if self.key in ("backup", "charge_inhibit") else True
 
     @property
     def is_on(self):

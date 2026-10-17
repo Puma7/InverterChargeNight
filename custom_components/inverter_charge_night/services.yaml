@@ -57,3 +57,10 @@ allow_discharge:
       selector:
         config_entry:
           integration: inverter_charge_night
+communication_diagnostics:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: inverter_charge_night

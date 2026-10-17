@@ -1,4 +1,5 @@
 """Tests for window flow behavior."""
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -7,6 +8,13 @@ from custom_components.inverter_charge_night.coordinator import (
     InverterChargeNightCoordinator,
 )
 from custom_components.inverter_charge_night.const import CONF_END_TIME, CONF_START_TIME
+
+
+@pytest.fixture(autouse=True)
+def _real_window_clock():
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now",
+               return_value=datetime(2026, 1, 15, 2)):
+        yield
 
 
 def _make_coordinator(hass, data):
@@ -54,8 +62,6 @@ async def test_check_current_window_starts_when_in_window(mock_hass):
     coordinator.is_active = False
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=True)
-    coordinator._parse_time = MagicMock(side_effect=[(0, 0), (5, 59)])
-    coordinator._is_time_between = MagicMock(return_value=True)
     coordinator._on_window_start = AsyncMock()
 
     await coordinator._check_current_window()
@@ -71,11 +77,11 @@ async def test_check_current_window_ends_when_outside_window(mock_hass):
     coordinator.is_active = True
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=True)
-    coordinator._parse_time = MagicMock(side_effect=[(0, 0), (5, 59)])
-    coordinator._is_time_between = MagicMock(return_value=False)
     coordinator._on_window_end = AsyncMock()
 
-    await coordinator._check_current_window()
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now",
+               return_value=datetime(2026, 1, 15, 12)):
+        await coordinator._check_current_window()
 
     coordinator._on_window_end.assert_awaited()
 
@@ -91,8 +97,6 @@ async def test_check_current_window_active_sets_listeners(mock_hass):
     coordinator._verification_task = None
     coordinator._is_backup_active = MagicMock(return_value=False)
     coordinator._is_within_date_range = MagicMock(return_value=True)
-    coordinator._parse_time = MagicMock(side_effect=[(0, 0), (5, 59)])
-    coordinator._is_time_between = MagicMock(return_value=True)
     coordinator._setup_battery_soc_listener = MagicMock()
     coordinator._setup_inverter_min_soc_listener = MagicMock()
     coordinator._start_periodic_verification = AsyncMock()

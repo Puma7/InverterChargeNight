@@ -453,6 +453,32 @@ def _validate_user_input(
                 if not hass.states.get(entity_id):
                     errors[entity_key] = "invalid_entity"
 
+    for key in (CONF_PV_FORECAST_ENTITY, CONF_PV_FORECAST_TODAY_ENTITY):
+        entity_id = user_input.get(key)
+        entity = entity_registry.async_get(entity_id) if entity_id else None
+        if entity is not None and entity.platform == DOMAIN:
+            errors[key] = "forecast_is_planner_output"
+
+    # A percent-based active-power command is not a battery watt ceiling.
+    for key in (CONF_CHARGE_POWER_ENTITY, CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY, CONF_DISCHARGE_LIMIT_ENTITY):
+        entity_id = user_input.get(key)
+        state = hass.states.get(entity_id) if entity_id else None
+        if state is not None:
+            unit = state.attributes.get("unit_of_measurement")
+            allowed = {"W", "kW"}
+            if unit and unit not in allowed:
+                errors[key] = "power_control_requires_watts"
+    sent = user_input.get(CONF_CHARGE_POWER_SENT_ENTITY)
+    received = user_input.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
+    if sent and sent == received:
+        errors[CONF_CHARGE_POWER_RECEIVED_ENTITY] = "separate_power_measurements"
+    if abs_max_entity and abs_max_entity == user_input.get(CONF_CHARGE_POWER_ENTITY):
+        errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY] = "separate_power_controls"
+    if sent:
+        entity = entity_registry.async_get(sent)
+        if entity is not None and entity.platform == "kostal_kore" and entity.unique_id.endswith(("_devices:local:ac_P", "_devices:local_Ac_P")):
+            errors[CONF_CHARGE_POWER_SENT_ENTITY] = "requires_charge_input_power"
+
     return errors
 
 
@@ -683,43 +709,32 @@ def _schema_time_soc(defaults: Mapping[str, Any]) -> vol.Schema:
 
 def _schema_power(defaults: Mapping[str, Any]) -> vol.Schema:
     """Step 3: charge power limits and the optional power entities."""
+    def dependent(key: str, needed: bool) -> vol.Required | vol.Optional:
+        return _required(key, defaults) if needed else _optional(key, defaults.get(key))
+
+    efficiency = bool(defaults.get(CONF_AUTO_EFFICIENT_CHARGE))
+    control_needed = efficiency or bool(defaults.get(CONF_GRID_IMPORT_ENTITY))
     return vol.Schema(
         {
+            vol.Required(CONF_AUTO_EFFICIENT_CHARGE, default=efficiency): _bool_selector(),
             _required(
                 CONF_MIN_CHARGE_POWER_W, defaults, DEFAULT_MIN_CHARGE_POWER_W
             ): _number_selector(**_WATTS),
             _required(
                 CONF_MAX_CHARGE_POWER_W, defaults, DEFAULT_MAX_CHARGE_POWER_W
             ): _number_selector(**_WATTS),
-            _optional(
-                CONF_ABSOLUTE_MAX_CHARGE_POWER_W, defaults.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_W)
-            ): _number_selector(**_WATTS),
-            _optional(
-                CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
-                defaults.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY),
-            ): _entity_selector(_CONTROL_DOMAINS),
-            _optional(
-                CONF_CHARGE_POWER_ENTITY, defaults.get(CONF_CHARGE_POWER_ENTITY)
-            ): _entity_selector(_CONTROL_DOMAINS),
-            _optional(
-                CONF_CHARGE_POWER_SENT_ENTITY, defaults.get(CONF_CHARGE_POWER_SENT_ENTITY)
-            ): _entity_selector("sensor", "power"),
-            _optional(
-                CONF_CHARGE_POWER_RECEIVED_ENTITY, defaults.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
-            ): _entity_selector("sensor", "power"),
+            _optional(CONF_ABSOLUTE_MAX_CHARGE_POWER_W, defaults.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_W)): _number_selector(**_WATTS),
+            _optional(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY, defaults.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY)): _entity_selector(_CONTROL_DOMAINS),
+            dependent(CONF_CHARGE_POWER_ENTITY, control_needed): _entity_selector(_CONTROL_DOMAINS),
+            dependent(CONF_CHARGE_POWER_SENT_ENTITY, efficiency): _entity_selector("sensor", "power"),
+            dependent(CONF_CHARGE_POWER_RECEIVED_ENTITY, efficiency): _entity_selector("sensor", "power"),
             _optional(
                 CONF_CHARGE_ENERGY_SENT_ENTITY, defaults.get(CONF_CHARGE_ENERGY_SENT_ENTITY)
             ): _entity_selector("sensor", "energy"),
             _optional(
                 CONF_CHARGE_ENERGY_RECEIVED_ENTITY, defaults.get(CONF_CHARGE_ENERGY_RECEIVED_ENTITY)
             ): _entity_selector("sensor", "energy"),
-            vol.Required(
-                CONF_AUTO_EFFICIENT_CHARGE,
-                default=bool(defaults.get(CONF_AUTO_EFFICIENT_CHARGE, False)),
-            ): _bool_selector(),
-            _optional(
-                CONF_FORCE_DISCHARGE_SWITCH, defaults.get(CONF_FORCE_DISCHARGE_SWITCH)
-            ): _entity_selector("switch"),
+            dependent(CONF_FORCE_DISCHARGE_SWITCH, defaults.get(CONF_OPERATION_MODE) == MODE_MORNING_DISCHARGE): _entity_selector("switch"),
             _optional(
                 CONF_DISCHARGE_LIMIT_ENTITY, defaults.get(CONF_DISCHARGE_LIMIT_ENTITY)
             ): _entity_selector(_CONTROL_DOMAINS),
@@ -830,6 +845,39 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
 # ---------------------------------------------------------------------------
 
 
+def _review_placeholders(hass: HomeAssistant, data: Mapping[str, Any]) -> dict[str, str]:
+    capacity = float(data.get(CONF_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY))
+    floor = float(data.get(CONF_DEFAULT_MIN_SOC, DEFAULT_MIN_SOC))
+    return {
+        "name": str(data.get(CONF_NAME, DEFAULT_NAME)),
+        "timezone": str(hass.config.time_zone),
+        "start": str(data.get(CONF_START_TIME, DEFAULT_START_TIME)),
+        "end": str(data.get(CONF_END_TIME, DEFAULT_END_TIME)),
+        "capacity": f"{capacity:g}",
+        "floor": f"{floor:g}",
+        "usable": f"{capacity * (100 - floor) / 100:.3f}",
+        "controls": "\n".join(f"- `{data[key]}`" for key in (
+            CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH, CONF_CHARGE_POWER_ENTITY,
+            CONF_CHARGE_POWER_SENT_ENTITY, CONF_CHARGE_POWER_RECEIVED_ENTITY,
+            CONF_PV_FORECAST_ENTITY, CONF_PV_FORECAST_TODAY_ENTITY,
+        ) if data.get(key)),
+    }
+
+
+def _review_errors(hass: HomeAssistant, data: dict[str, Any]) -> tuple[str, SchemaBuilder, dict[str, str]] | None:
+    errors = _validate_user_input(data, hass)
+    for step, keys, schema in (
+        ("user", STEP_USER_KEYS, _schema_entities),
+        ("time_soc", STEP_TIME_SOC_KEYS, _schema_time_soc),
+        ("power", STEP_POWER_KEYS, _schema_power),
+        ("advanced", STEP_ADVANCED_KEYS, _schema_advanced),
+    ):
+        relevant = _errors_for(keys, errors)
+        if relevant:
+            return step, schema, relevant
+    return None
+
+
 def _entry_using_min_soc_entity(
     hass: HomeAssistant, entity_id: str, except_entry_id: str | None = None
 ) -> ConfigEntry | None:
@@ -850,6 +898,7 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the flow."""
         self._data: dict[str, Any] = {}
+        self._reviewing = False
 
     async def _async_wizard_step(
         self,
@@ -864,6 +913,8 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             errors = _process_step(self.hass, self._data, step_keys, user_input)
             if not errors:
+                if self._reviewing:
+                    return await self.async_step_review()
                 return await next_step()
         return self.async_show_form(
             step_id=step_id,
@@ -902,8 +953,29 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Step 4 of 4: advanced options, then create the entry."""
         return await self._async_wizard_step(
-            "advanced", STEP_ADVANCED_KEYS, _schema_advanced, user_input, self._async_create
+            "advanced", STEP_ADVANCED_KEYS, _schema_advanced, user_input, self.async_step_review
         )
+
+    async def async_step_review(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Review everything and revisit a section without losing other edits."""
+        self._reviewing = True
+        prefix = "reconfigure_" if self.source == config_entries.SOURCE_RECONFIGURE else ""
+        first = "reconfigure" if prefix else "user"
+        return self.async_show_menu(step_id="review", menu_options=[
+            first, prefix + "time_soc", prefix + "power", prefix + "advanced", "finish",
+        ], description_placeholders=_review_placeholders(self.hass, self._data))
+
+    async def async_step_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Only commit after the user has reviewed the collected settings."""
+        invalid = _review_errors(self.hass, self._data)
+        if invalid is not None:
+            step_id, schema, errors = invalid
+            if self.source == config_entries.SOURCE_RECONFIGURE:
+                step_id = "reconfigure" if step_id == "user" else "reconfigure_" + step_id
+            return self.async_show_form(step_id=step_id, data_schema=schema(self._data), errors=errors)
+        if self.source == config_entries.SOURCE_RECONFIGURE:
+            return await self._async_reconfigure_finish()
+        return await self._async_create()
 
     async def _async_create(self) -> ConfigFlowResult:
         data = _finalize_data(self._data)
@@ -960,7 +1032,7 @@ class InverterChargeNightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             STEP_ADVANCED_KEYS,
             _schema_advanced,
             user_input,
-            self._async_reconfigure_finish,
+            self.async_step_review,
         )
 
     async def _async_reconfigure_finish(self) -> ConfigFlowResult:
@@ -1008,6 +1080,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         # against it to tell a field the user edited from one they only passed
         # through, so that a runtime write does not get reverted on save.
         self._opened_with: dict[str, Any] = dict(config_entry.data)
+        self._reviewing = False
 
     async def _async_wizard_step(
         self,
@@ -1022,6 +1095,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             errors = _process_step(self.hass, self._data, step_keys, user_input)
             if not errors:
+                if self._reviewing:
+                    return await self.async_step_review()
                 return await next_step()
         return self.async_show_form(
             step_id=step_id,
@@ -1058,8 +1133,22 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     ) -> ConfigFlowResult:
         """Options step 4 of 4: advanced options, then save."""
         return await self._async_wizard_step(
-            "advanced", STEP_ADVANCED_KEYS, _schema_advanced, user_input, self._async_save
+            "advanced", STEP_ADVANCED_KEYS, _schema_advanced, user_input, self.async_step_review
         )
+
+    async def async_step_review(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        self._reviewing = True
+        return self.async_show_menu(step_id="review", menu_options=[
+            "init", "time_soc", "power", "advanced", "finish",
+        ], description_placeholders=_review_placeholders(self.hass, self._data))
+
+    async def async_step_finish(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        invalid = _review_errors(self.hass, self._merged_data())
+        if invalid is not None:
+            step_id, schema, errors = invalid
+            return self.async_show_form(step_id="init" if step_id == "user" else step_id,
+                                        data_schema=schema(self._data), errors=errors)
+        return await self._async_save()
 
     def _merged_data(self) -> dict[str, Any]:
         """Merge the collected values over the *current* entry.data.

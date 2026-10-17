@@ -37,6 +37,7 @@ def _register_required_entities(mock_hass, mock_config_entry, skip: str | None =
 async def test_async_setup_entry_registers_coordinator(mock_hass, mock_config_entry):
     coordinator = MagicMock()
     coordinator.async_config_entry_first_refresh = AsyncMock()
+    coordinator.async_load_communication_translations = AsyncMock()
     coordinator.setup_time_triggers = MagicMock()
     coordinator._setup_backup_mode_listener = MagicMock()
 
@@ -157,6 +158,7 @@ async def test_async_setup_entry_all_entities_present_clears_issues(mock_hass, m
     _register_required_entities(mock_hass, mock_config_entry)
     coordinator = MagicMock()
     coordinator.async_config_entry_first_refresh = AsyncMock()
+    coordinator.async_load_communication_translations = AsyncMock()
     mock_config_entry.add_update_listener = MagicMock(return_value=lambda: None)
     mock_config_entry.async_on_unload = MagicMock()
     mock_hass.config_entries.async_forward_entry_setups = AsyncMock()

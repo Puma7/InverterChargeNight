@@ -202,8 +202,8 @@ def test_an_unreadable_backup_entity_warns_once(mock_hass, caplog):
     mock_hass.states.async_set(BACKUP, "unavailable")
 
     with caplog.at_level("WARNING"):
-        assert coordinator._is_backup_active() is False
-        assert coordinator._is_backup_active() is False
+        assert coordinator._is_backup_active() is True
+        assert coordinator._is_backup_active() is True
 
     assert sum("is unavailable" in r.getMessage() for r in caplog.records) == 1
 
@@ -494,7 +494,7 @@ async def test_a_plan_with_a_charge_limit_entity_is_written_and_marked_applied(m
         assert planned is not None
         assert coordinator.planned_power_is_applied is True
         assert (
-            call("number", "set_value", {"entity_id": ac_limit, "value": int(planned)})
+            call("number", "set_value", {"entity_id": ac_limit, "value": int(planned)}, blocking=True)
             in mock_hass.services.async_call.await_args_list
         )
     finally:
@@ -581,10 +581,10 @@ async def test_a_clean_reset_reports_success(mock_hass):
     mock_hass.states.async_set(FORCE, "on")
 
     assert await coordinator._reset_settings() is True
-    assert call("switch", "turn_off", {"entity_id": GRID}) in (
+    assert call("switch", "turn_off", {"entity_id": GRID}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
-    assert call("switch", "turn_off", {"entity_id": FORCE}) in (
+    assert call("switch", "turn_off", {"entity_id": FORCE}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
 
@@ -714,7 +714,7 @@ async def test_a_charge_limit_entity_without_unit_or_maximum_is_written_as_watts
 
     assert await coordinator._write_ac_charge_limit("number.ac_limit", "number", 4000.0, "test")
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": "number.ac_limit", "value": 4000.0})
+        call("number", "set_value", {"entity_id": "number.ac_limit", "value": 4000.0}, blocking=True)
     ]
 
 

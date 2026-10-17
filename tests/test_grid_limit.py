@@ -386,6 +386,8 @@ async def test_the_own_charge_power_is_not_counted_twice(mock_hass, limited):
     assert first is not None
 
     # The inverter now really draws that much on top of the wallboxes
+    limited.config[CONF_CHARGE_POWER_SENT_ENTITY] = SENT
+    _set_sent(mock_hass, str(first))
     _set_import(mock_hass, str(33000 + first))
     await limited._async_update_data()
 
@@ -467,8 +469,8 @@ async def test_a_draw_above_the_setpoint_is_taken_at_face_value(mock_hass, measu
 
 
 @pytest.mark.asyncio
-async def test_a_stale_measurement_falls_back_to_the_setpoint(mock_hass, measured):
-    """An old reading says nothing about now; the request is the better guess."""
+async def test_a_stale_measurement_credits_no_own_draw(mock_hass, measured):
+    """An old reading cannot establish that the commanded limit is being drawn."""
     _set_import(mock_hass, "33000")
     await _start_with_target(measured, 100.0)
     await measured._async_update_data()
@@ -476,10 +478,10 @@ async def test_a_stale_measurement_falls_back_to_the_setpoint(mock_hass, measure
     assert written is not None
 
     _set_sent(mock_hass, "0", age_s=GRID_LIMIT_STALE_AFTER_S + 60)
-    assert measured._own_charge_draw_w() == pytest.approx(written)
+    assert measured._own_charge_draw_w() == 0.0
 
     mock_hass.states.async_set(SENT, "unavailable")
-    assert measured._own_charge_draw_w() == pytest.approx(written)
+    assert measured._own_charge_draw_w() == 0.0
 
 
 @pytest.mark.asyncio
@@ -520,39 +522,39 @@ async def test_kilowatt_units_are_understood(mock_hass, limited):
 
 
 @pytest.mark.asyncio
-async def test_an_unusable_unit_falls_back_to_the_minimum(mock_hass, limited, caplog):
+async def test_an_unusable_unit_pauses_charging(mock_hass, limited, caplog):
     """Reading megawatts as watts would remove the limit entirely."""
     _set_import(mock_hass, "0.033", unit="MW")
     await _start_with_target(limited, 100.0)
     await limited._async_update_data()
 
-    assert limited.planned_charge_power_w == 500.0
-    assert _ac_writes(mock_hass) == [500.0]
-    assert "unavailable or stale" in caplog.text
+    assert limited.planned_charge_power_w == 0.0
+    assert _ac_writes(mock_hass) == [0.0]
+    assert "untrusted - pausing" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_an_unavailable_sensor_falls_back_to_the_minimum(mock_hass, limited, caplog):
+async def test_an_unavailable_sensor_pauses_charging(mock_hass, limited, caplog):
     _set_import(mock_hass, "unavailable")
     await _start_with_target(limited, 100.0)
     await limited._async_update_data()
 
-    assert limited.planned_charge_power_w == 500.0
+    assert limited.planned_charge_power_w == 0.0
     assert limited.grid_limit_attributes()["grid_import_w"] is None
-    assert "unavailable or stale" in caplog.text
+    assert "untrusted - pausing" in caplog.text
     # Warned once per window, not on every poll
     caplog.clear()
     await limited._async_update_data()
-    assert "unavailable or stale" not in caplog.text
+    assert "untrusted - pausing" not in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_a_stale_reading_falls_back_to_the_minimum(mock_hass, limited):
+async def test_a_stale_reading_pauses_charging(mock_hass, limited):
     _set_import(mock_hass, "500", age_s=GRID_LIMIT_STALE_AFTER_S + 60)
     await _start_with_target(limited, 100.0)
     await limited._async_update_data()
 
-    assert limited.planned_charge_power_w == 500.0
+    assert limited.planned_charge_power_w == 0.0
 
 
 @pytest.mark.asyncio
@@ -571,28 +573,26 @@ async def test_a_missing_reading_never_raises_the_setpoint(mock_hass, limited):
 
 
 @pytest.mark.asyncio
-async def test_an_unreadable_value_falls_back_to_the_minimum(mock_hass, limited):
+async def test_an_unreadable_value_pauses_charging(mock_hass, limited):
     _set_import(mock_hass, "n/a")
     await _start_with_target(limited, 100.0)
     await limited._async_update_data()
 
-    assert limited.planned_charge_power_w == 500.0
+    assert limited.planned_charge_power_w == 0.0
 
 
 @pytest.mark.asyncio
 async def test_a_sensor_without_a_unit_is_not_trusted(mock_hass, limited):
     """A kW template sensor without a unit would read 33 as 33 W and lift the cap.
 
-    Every unusable unit, including none at all, falls back to the minimum charge
-    power instead of charging at whatever the missing information would allow.
+    Every unusable unit, including none at all, pauses charging instead of
+    inventing connection headroom from the missing information.
     """
     _set_import(mock_hass, "33", unit=None)
     await _start_with_target(limited, 100.0)
     await limited._async_update_data()
 
-    assert limited.planned_charge_power_w == pytest.approx(
-        float(limited.config[CONF_MIN_CHARGE_POWER_W])
-    )
+    assert limited.planned_charge_power_w == 0.0
     assert limited._grid_import_w is None
 
 
@@ -694,7 +694,7 @@ async def test_the_efficiency_finder_cannot_exceed_the_connection(mock_hass, cap
         written = _ac_writes(mock_hass)
         assert written, "the connection limit must still reach the inverter"
         assert written[-1] <= BUDGET_W - 500 - 33000
-        assert "Not testing the efficiency" in caplog.text
+        assert not coordinator.get_auto_efficiency_data().get("history"), "No fictitious efficiency sample"
     finally:
         await coordinator._stop_periodic_verification()
 
@@ -825,6 +825,8 @@ async def test_a_rising_house_load_lowers_the_setpoint_immediately(mock_hass, li
     mock_hass.services.async_call.reset_mock()
 
     # A wallbox starts: 34.5 kW on the meter, our own charge included
+    limited.config[CONF_CHARGE_POWER_SENT_ENTITY] = SENT
+    _set_sent(mock_hass, str(PLANNED_W))
     _set_import(mock_hass, "34500")
     with patch(NOW, return_value=LATER):
         await limited._react_to_grid_import()
@@ -901,6 +903,8 @@ async def test_zero_headroom_bypasses_debounce_without_repeated_writes(mock_hass
 async def test_the_debounce_expires(mock_hass, limited):
     await _start_with_target(limited, 100.0)
     await limited._async_update_data()
+    limited.config[CONF_CHARGE_POWER_SENT_ENTITY] = SENT
+    _set_sent(mock_hass, str(PLANNED_W))
     _set_import(mock_hass, "34500")
     with patch(NOW, return_value=LATER):
         await limited._react_to_grid_import()

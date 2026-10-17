@@ -81,18 +81,22 @@ async def async_setup(hass, config):
     for platform in ("number", "switch", "sensor", "binary_sensor"):
         await discovery.async_load_platform(hass, platform, DOMAIN, {}, config)
 
+    def selected_controller(entry):
+        target = getattr(lab, "controller_entry_id", None)
+        return entry.entry_id == target if target else entry.title == "ICN Lab"
+
     async def refresh_planner():
         for entry in hass.config_entries.async_entries("inverter_charge_night"):
-            if entry.title == "ICN Lab":
+            if selected_controller(entry):
                 coordinator = getattr(entry, "runtime_data", None)
                 if coordinator is not None:
                     await coordinator.async_refresh()
 
     async def load_scenario(call):
         # Restore a running controller before replacing plant state.
-        if not lab.plant.charge_inhibit and hass.services.has_service("inverter_charge_night", "reset_inverter"):
+        if lab.plant.online and not lab.plant.charge_inhibit and hass.services.has_service("inverter_charge_night", "reset_inverter"):
             for entry in hass.config_entries.async_entries("inverter_charge_night"):
-                if entry.title == "ICN Lab":
+                if selected_controller(entry):
                     await hass.services.async_call("inverter_charge_night", "reset_inverter",
                         {"config_entry_id": entry.entry_id}, blocking=True)
         capacity = lab.plant.capacity
@@ -152,19 +156,28 @@ async def async_setup(hass, config):
     async def started(event):
         if settings["auto_configure"]:
             defaults = planner_defaults(lab.plant.capacity)
+            user_controller = False
             if settings["auto_configure_kore"]:
                 from .fixtures import configure_kore
                 _, mapping = await configure_kore(hass)
-                defaults.update(mapping)
+                owners = [entry for entry in hass.config_entries.async_entries("inverter_charge_night")
+                          if entry.title != "ICN Lab" and entry.data.get("min_soc_entity") == mapping["min_soc_entity"]]
+                user_controller = bool(owners)
+                lab.controller_entry_id = owners[0].entry_id if owners else None
+                if not user_controller:
+                    defaults.update(mapping)
             # Migrate only entries owned by this lab fixture, through HA's API.
             for entry in hass.config_entries.async_entries("inverter_charge_night"):
                 if entry.title == "ICN Lab":
+                    if user_controller and getattr(entry, "runtime_data", None) is not None:
+                        await entry.runtime_data.async_disable()
                     data = dict(entry.data)
                     for key in ("grid_import_entity", "backup_mode_entity", "min_soc_entity", "grid_charge_switch",
-                                "battery_soc_entity", "charge_power_entity", "discharge_limit_entity"):
+                                "battery_soc_entity", "charge_power_entity", "discharge_limit_entity",
+                                "charge_power_sent_entity", "charge_power_received_entity"):
                         data[key] = defaults[key]
                     if data != entry.data:
-                        hass.config_entries.async_update_entry(entry, data=data)
+                        hass.config_entries.async_update_entry(entry, data=data, unique_id=defaults["min_soc_entity"])
             await configure_planner(hass, defaults)
             LOGGER.info("ICN laboratory configured; open /icn-lab")
 

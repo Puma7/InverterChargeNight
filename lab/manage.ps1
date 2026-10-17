@@ -64,6 +64,8 @@ switch ($Action) {
         & $Python -X utf8 (Join-Path $labPath 'check_grid.py')
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         & $Python -X utf8 (Join-Path $labPath 'check_recovery.py')
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        & $Python -X utf8 (Join-Path $labPath 'check_edge_cases.py')
         exit $LASTEXITCODE
     }
 }

@@ -231,6 +231,8 @@ views:
     - switch.icn_lab_backup
     - switch.icn_lab_simulated_protection_trip
     - switch.icn_lab_grid_meter_online
+    - switch.icn_lab_grid_contact_online
+    - switch.icn_lab_ignore_charge_limit_only
     - number.icn_lab_voltage_l1
     - number.icn_lab_voltage_l2
     - number.icn_lab_voltage_l3

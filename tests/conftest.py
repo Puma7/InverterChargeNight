@@ -91,7 +91,15 @@ def mock_hass() -> HomeAssistant:
         )
     )
     hass.services = MagicMock()
-    hass.services.async_call = AsyncMock()
+    async def complete_service(domain, service, data, **kwargs):
+        # A normal blocking OFF completes with actual feedback. Fault tests
+        # replace this actor to model ignored commands or transport failures.
+        if domain == "switch" and service == "turn_off" and kwargs.get("blocking"):
+            state = states.get(data.get("entity_id"))
+            if state is not None and state.state == "on":
+                state.state = "off"
+
+    hass.services.async_call = AsyncMock(side_effect=complete_service)
     hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
     hass.config_entries = MagicMock()
     # No other entry is configured unless a test says so; the config and options
@@ -102,7 +110,24 @@ def mock_hass() -> HomeAssistant:
     # async_track_time_change) need both and then return real unsubscribe callables.
     hass.bus = MagicMock()
     hass.loop = MagicMock()
+    hass.config = MagicMock()
+    hass.config.time_zone = "Europe/Berlin"
+    hass.config.language = "de"
     return hass
+
+
+@pytest.fixture(autouse=True)
+def local_translation_catalog():
+    """Supply HA's translation boundary without a loader in the strict fake."""
+    import json
+    from pathlib import Path
+    strings = json.loads((Path(__file__).parents[1] / "custom_components/inverter_charge_night/strings.json").read_text(encoding="utf-8"))
+    translations = {
+        f"component.inverter_charge_night.issues.{issue}.{key}": value
+        for issue, texts in strings["issues"].items() for key, value in texts.items()
+    }
+    with patch("homeassistant.helpers.translation.async_get_translations", AsyncMock(return_value=translations)):
+        yield
 
 
 @pytest.fixture

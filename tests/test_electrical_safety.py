@@ -399,7 +399,9 @@ async def test_backup_mode_stops_the_limit_from_writing_after_the_target(mock_ha
 async def test_our_own_share_can_never_exceed_the_whole_import(mock_hass):
     """Crediting more than flows would make the foreign load look negative."""
     _register(mock_hass)
-    coordinator = _make(mock_hass)
+    coordinator = _make(mock_hass, {**CONFIG, "charge_power_sent_entity": "sensor.measured_charge"})
+    mock_hass.states.async_set("sensor.measured_charge", "10000", {"unit_of_measurement": "W"})
+    mock_hass.states.get("sensor.measured_charge").last_reported = INSIDE
     coordinator.is_active = True
     coordinator._planned_setpoint_written_w = 10000.0
     mock_hass.states.async_set(GRID_IMPORT, "800", {"unit_of_measurement": "W"})
@@ -410,7 +412,7 @@ async def test_our_own_share_can_never_exceed_the_whole_import(mock_hass):
 
     coordinator._grid_limited_setpoint(20000.0)
 
-    # 800 W import, at most all of it ours: no foreign load, full budget free
+    # 800 W import, at most all of it credited to the fresh measured own draw.
     assert coordinator.grid_charge_headroom_w == pytest.approx(BUDGET_W - 500)
     assert coordinator.grid_limit_attributes()["other_load_w"] == 0.0
     await coordinator._stop_periodic_verification()
@@ -480,10 +482,10 @@ def test_an_unknown_sensor_state_is_reported_once(mock_hass, caplog):
     _register(mock_hass)
     coordinator = _backup(mock_hass, "Wintermodus", entity="sensor.inverter_state")
 
-    assert coordinator._is_backup_active() is False
+    assert coordinator._is_backup_active() is True
     assert "add it to 'Backup mode states'" in caplog.text
     caplog.clear()
-    assert coordinator._is_backup_active() is False
+    assert coordinator._is_backup_active() is True
     assert caplog.text == ""
 
 

@@ -56,6 +56,8 @@ def main() -> None:
     parser.add_argument("--hacs", action="store_true", help="Download official HACS release files")
     parser.add_argument("--refresh-config", action="store_true", help="Replace YAML from lab templates")
     args = parser.parse_args()
+    if not (args.kostal_repo / "custom_components/kostal_kore/manifest.json").is_file():
+        parser.error("KostalKore checkout missing. Clone Puma7/KostalKore alongside this repository or pass --kostal-repo PATH.")
     runtime = LAB / "runtime"
     components = runtime / "custom_components"
     components.mkdir(parents=True, exist_ok=True)

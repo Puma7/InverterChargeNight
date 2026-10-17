@@ -1,6 +1,7 @@
 """Tests for the four-step config, reconfigure and options flows."""
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -98,6 +99,7 @@ def entity_registry():
 
 def _config_flow(mock_hass, source=config_entries.SOURCE_USER, **context):
     flow = InverterChargeNightConfigFlow()
+    mock_hass.config = SimpleNamespace(time_zone="Europe/Berlin")
     flow.hass = mock_hass
     flow.context = {"source": source, **context}
     mock_hass.config_entries.flow.async_progress_by_handler.return_value = []
@@ -162,6 +164,7 @@ async def test_config_flow_user_success(mock_hass, entity_registry):
     assert result["step_id"] == "advanced"
 
     result = await flow.async_step_advanced(ADVANCED_INPUT)
+    result = await flow.async_step_finish()
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["title"] == "Test"
@@ -188,6 +191,7 @@ async def test_config_flow_aborts_when_inverter_already_configured(mock_hass, en
     await flow.async_step_power(POWER_INPUT)
     with pytest.raises(AbortFlow) as abort:
         await flow.async_step_advanced(ADVANCED_INPUT)
+        result = await flow.async_step_finish()
 
     assert abort.value.reason == "already_configured"
     mock_hass.config_entries.async_entry_for_domain_unique_id.assert_called_with(
@@ -282,6 +286,7 @@ async def test_reconfigure_flow_updates_entry(mock_hass, mock_config_entry, enti
 
     # the user clears the backup entity and the start date
     result = await flow.async_step_reconfigure_advanced(ADVANCED_INPUT)
+    result = await flow.async_step_finish()
 
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
@@ -317,6 +322,7 @@ async def test_reconfigure_flow_rejects_an_inverter_another_entry_drives(
     await flow.async_step_reconfigure_time_soc(TIME_SOC_INPUT)
     await flow.async_step_reconfigure_power(POWER_INPUT)
     result = await flow.async_step_reconfigure_advanced(ADVANCED_INPUT)
+    result = await flow.async_step_finish()
 
     assert result["type"] == FlowResultType.FORM
     assert result["errors"] == {CONF_MIN_SOC_ENTITY: "entity_used_by_other_entry"}
@@ -342,6 +348,7 @@ async def test_reconfigure_flow_accepts_a_free_inverter(
     await flow.async_step_reconfigure_time_soc(TIME_SOC_INPUT)
     await flow.async_step_reconfigure_power(POWER_INPUT)
     result = await flow.async_step_reconfigure_advanced(ADVANCED_INPUT)
+    result = await flow.async_step_finish()
 
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
@@ -359,6 +366,7 @@ async def test_reconfigure_flow_accepts_a_free_inverter(
 @pytest.mark.asyncio
 async def test_options_flow_requires_auto_entities(mock_hass, mock_config_entry, entity_registry):
     flow = OptionsFlowHandler(mock_config_entry)
+    mock_hass.config = SimpleNamespace(time_zone="Europe/Berlin")
     flow.hass = mock_hass
 
     user_input = {
@@ -383,6 +391,7 @@ async def test_options_flow_requires_auto_entities(mock_hass, mock_config_entry,
 async def test_options_flow_success_keeps_options(mock_hass, mock_config_entry, entity_registry):
     mock_config_entry.options = {CONF_AUTO_EFFICIENCY_DATA: {"history": [1, 2]}}
     flow = OptionsFlowHandler(mock_config_entry)
+    mock_hass.config = SimpleNamespace(time_zone="Europe/Berlin")
     flow.hass = mock_hass
 
     result = await flow.async_step_init()
@@ -397,6 +406,7 @@ async def test_options_flow_success_keeps_options(mock_hass, mock_config_entry, 
     result = await flow.async_step_power(POWER_INPUT)
     assert result["step_id"] == "advanced"
     result = await flow.async_step_advanced(ADVANCED_INPUT)
+    result = await flow.async_step_finish()
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["title"] == ""
@@ -422,12 +432,14 @@ async def test_options_flow_rejects_entity_of_another_entry(
     other.data = {CONF_MIN_SOC_ENTITY: "number.min_soc"}
     mock_hass.config_entries.async_entries.return_value = [mock_config_entry, other]
     flow = OptionsFlowHandler(mock_config_entry)
+    mock_hass.config = SimpleNamespace(time_zone="Europe/Berlin")
     flow.hass = mock_hass
 
     await flow.async_step_init(ENTITIES_INPUT)  # the other entry's min SOC entity
     await flow.async_step_time_soc(TIME_SOC_INPUT)
     await flow.async_step_power(POWER_INPUT)
     result = await flow.async_step_advanced(ADVANCED_INPUT)
+    result = await flow.async_step_finish()
 
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "init"
@@ -449,6 +461,7 @@ async def test_options_flow_keeps_runtime_changes(mock_hass, mock_config_entry, 
         CONF_AUTO_EFFICIENT_CHARGE: True,
     }
     flow = OptionsFlowHandler(mock_config_entry)
+    mock_hass.config = SimpleNamespace(time_zone="Europe/Berlin")
     flow.hass = mock_hass
 
     await flow.async_step_init({**ENTITIES_INPUT, CONF_OPERATION_MODE: MODE_NIGHT_CHARGE})
@@ -460,8 +473,13 @@ async def test_options_flow_keeps_runtime_changes(mock_hass, mock_config_entry, 
         CONF_OPERATION_MODE: MODE_MORNING_DISCHARGE,
         CONF_AUTO_EFFICIENT_CHARGE: False,
     }
-    await flow.async_step_power({**POWER_INPUT, CONF_AUTO_EFFICIENT_CHARGE: True})
+    await flow.async_step_power({**POWER_INPUT, CONF_AUTO_EFFICIENT_CHARGE: True,
+                                CONF_CHARGE_POWER_ENTITY: "number.charge_limit",
+                                CONF_CHARGE_POWER_SENT_ENTITY: "sensor.charge_ac",
+                                CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.charge_dc",
+                                const.CONF_FORCE_DISCHARGE_SWITCH: "switch.force_discharge"})
     await flow.async_step_advanced({**ADVANCED_INPUT, CONF_COMMAND_DELAY: 0.5})
+    result = await flow.async_step_finish()
 
     stored = mock_hass.config_entries.async_update_entry.call_args.kwargs["data"]
     assert stored[CONF_OPERATION_MODE] == MODE_MORNING_DISCHARGE
@@ -576,8 +594,8 @@ def test_every_step_labels_exactly_its_fields():
         assert set(step["data"]) == expected, (section, step_id)
         assert set(step["data_description"]) == expected, (section, step_id)
         assert step["title"] and step["description"], (section, step_id)
-    assert set(strings["config"]["step"]) == {step for section, step in STEP_SCHEMAS if section == "config"}
-    assert set(strings["options"]["step"]) == {step for section, step in STEP_SCHEMAS if section == "options"}
+    assert set(strings["config"]["step"]) == {step for section, step in STEP_SCHEMAS if section == "config"} | {"review"}
+    assert set(strings["options"]["step"]) == {step for section, step in STEP_SCHEMAS if section == "options"} | {"review"}
 
 
 def test_every_config_key_is_collected_by_exactly_one_step():

@@ -32,6 +32,10 @@ class KostalEmulator:
         self.runner = None
         self.server = None
         self.clients = set()
+        # Independent virtual links; no host network settings are changed.
+        self.rest_online = True
+        self.modbus_online = True
+        self.modbus_delay_s = 0
 
     async def start(self, http_port=80, modbus_port=1502):
         application = web.Application()
@@ -81,7 +85,7 @@ class KostalEmulator:
                   "EnergyDischarge": p.discharged_energy, "Yield": p.pv_energy}
         result = {
             "devices:local": {"Inverter:State": (3, ""), "Dc_P": (p.effective_pv, "W"),
-                "Ac_P": (p.effective_pv - p.battery_power, "W"), "Grid2Bat_P": (p.charge_ac_power, "W"),
+                "Ac_P": (p.effective_pv - (p.battery_power / p.charge_efficiency if p.battery_power >= 0 else p.battery_power * p.discharge_efficiency), "W"), "Grid2Bat_P": (p.charge_ac_power, "W"),
                 "Home_P": (p.total_house_load, "W"), "HomeGrid_P": (max(0, p.grid_power - p.charge_ac_power), "W"),
                 "HomeBat_P": (max(0, -p.battery_power) * p.discharge_efficiency, "W")},
             "devices:local:battery": {"SoC": (p.soc, "%"), "P": (p.battery_power, "W"),
@@ -127,7 +131,7 @@ class KostalEmulator:
         return result
 
     async def rest(self, request):
-        if not self.lab.plant.online:
+        if not self.lab.plant.online or not self.rest_online:
             return web.json_response({"message": "Simulated inverter offline"}, status=503)
         path = request.match_info["path"]
         if path == "info/version":
@@ -289,9 +293,11 @@ class KostalEmulator:
                 if protocol != 0 or not 2 <= length <= 254:
                     break
                 packet = await reader.readexactly(length - 1)
+                if self.modbus_delay_s:
+                    await asyncio.sleep(self.modbus_delay_s)
                 function = packet[0]
                 response = bytes([function | 0x80, 2])
-                if unit != 71 or not self.lab.plant.online:
+                if unit != 71 or not self.lab.plant.online or not self.modbus_online:
                     response = bytes([function | 0x80, 11])
                 elif function == 3 and len(packet) == 5:
                     address, count = struct.unpack(">HH", packet[1:])
@@ -311,8 +317,9 @@ class KostalEmulator:
                         value = struct.unpack(">H" if count == 1 else ">f", packet[6:])[0]
                         maximum = 100 if key == "min_soc" else 20000
                         if 0 <= value <= maximum:
-                            self.lab.audit(key, value, accepted=not self.lab.plant.reject_writes)
-                            if not self.lab.plant.reject_writes:
+                            refused = self.lab.plant.reject_writes or (key == "charge_limit" and self.lab.plant.reject_charge_limit)
+                            self.lab.audit(key, value, accepted=not refused)
+                            if not refused:
                                 setattr(self.lab.plant, key, float(value))
                             self.lab.publish()
                             response = struct.pack(">BHH", 16, address, count)
