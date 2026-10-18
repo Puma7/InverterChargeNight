@@ -35,6 +35,17 @@ async def test_verification_preserves_confirmed_trial_above_old_planner_setpoint
 
 
 @pytest.mark.asyncio
+async def test_downward_trial_drift_discards_measurement_without_recording_loss(mock_hass, active_trial):
+    mock_hass.states.async_set(AC_LIMIT, "7500", {"unit_of_measurement": "W"})
+    await active_trial._verify_ac_charge_limit()
+    assert not active_trial._auto_test_active
+    assert active_trial._auto_test_power_w is None
+    assert "fell below" in active_trial._auto_last_result["discarded"]
+    assert active_trial._auto_last_result["loss"] is None
+    assert _ac_writes(mock_hass) == []
+
+
+@pytest.mark.asyncio
 async def test_verification_stops_and_corrects_drift_above_live_trial(mock_hass, active_trial):
     mock_hass.states.async_set(AC_LIMIT, "10000", {"unit_of_measurement": "W"})
     await active_trial._verify_ac_charge_limit()

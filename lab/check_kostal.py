@@ -156,6 +156,9 @@ async def main():
                 await entity.coordinator.async_refresh()
             await asyncio.sleep(0.6)  # KORE registers its first REST reads after 0.5s.
             await hass.async_block_till_done()
+            from kore_readiness import wait_for_kore_feedback
+            feedback = await wait_for_kore_feedback(hass, mapping)
+            check("all KORE control and measurement bindings have observed feedback", True, feedback)
             check("KORE battery sensor has live telemetry",
                   hass.states.get(mapping["battery_soc_entity"]).state not in ("unknown", "unavailable"),
                   {key: hass.states.get(entity_id).state if hass.states.get(entity_id) else None for key, entity_id in mapping.items()})

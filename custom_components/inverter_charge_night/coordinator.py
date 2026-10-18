@@ -364,6 +364,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._inverter_min_soc_listener: CALLBACK_TYPE | None = None
         self._verification_task: asyncio.Task[None] | None = None
         self._verifying_min_soc = False
+        self._min_soc_write_lock = asyncio.Lock()
         self._backup_mode_listener: CALLBACK_TYPE | None = None
         self.auto_efficient_charge = entry.data.get(CONF_AUTO_EFFICIENT_CHARGE, False)
         self._auto_test_active = False
@@ -4664,6 +4665,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _reset_settings(self) -> bool:
+        """Serialize restoration after any already-running floor verification."""
+        async with self._min_soc_write_lock:
+            return await self._reset_settings_locked()
+
+    async def _reset_settings_locked(self) -> bool:
         """Reset the inverter to its original settings.
 
         Returns True when every target was reached: min SOC restored, grid
@@ -4696,6 +4702,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 state = self.hass.states.get(min_soc_entity)
                 if state and state.state not in ("unknown", "unavailable"):
+                    before_value = state.state
+                    before_reported = state.last_reported
                     await self.hass.services.async_call(
                         "number",
                         "set_value",
@@ -4707,7 +4715,24 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # floor while the restore is still queued or unconfirmed.
                     feedback = self.hass.states.get(min_soc_entity)
                     restored_soc = _as_float(feedback.state) if feedback is not None else None
-                    if restored_soc is None or abs(restored_soc - reset_min_soc) > 0.5:
+                    fresh = feedback is not None and (
+                        feedback is not state or feedback.state != before_value
+                        or feedback.last_reported != before_reported
+                    )
+                    if restored_soc is not None and abs(restored_soc - reset_min_soc) <= 0.5 and not fresh:
+                        # A cached original value may predate a successfully
+                        # raised floor and an ignored restore. Ask the owning
+                        # integration for a new observation before clearing it.
+                        await self.hass.services.async_call(
+                            "homeassistant", "update_entity", {"entity_id": min_soc_entity}, blocking=True
+                        )
+                        feedback = self.hass.states.get(min_soc_entity)
+                        restored_soc = _as_float(feedback.state) if feedback is not None else None
+                        fresh = feedback is not None and (
+                            feedback is not state or feedback.state != before_value
+                            or feedback.last_reported != before_reported
+                        )
+                    if not fresh or restored_soc is None or abs(restored_soc - reset_min_soc) > 0.5:
                         _LOGGER.error("Min SOC restore to %.1f%% has no matching feedback", reset_min_soc)
                         ok = False
                     else:
@@ -5779,6 +5804,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if abs(actual_w - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
             return
         if actual_w < written:
+            if self._auto_test_active:
+                self._discard_auto_test("inverter limit fell below the efficiency trial setpoint")
+                return
             # Someone or something is charging less than we asked for. That is
             # never a danger, so it is noted and left alone.
             _LOGGER.debug(
@@ -5799,8 +5827,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._set_ac_charge_limit_w(int(written))
 
     async def _verify_and_restore_min_soc(self) -> None:
+        """Finish in-flight writes before a reset and reject unloading callbacks."""
+        async with self._min_soc_write_lock:
+            await self._verify_and_restore_min_soc_locked()
+
+    async def _verify_and_restore_min_soc_locked(self) -> None:
         """Verify inverter min SOC matches our target and restore if needed."""
-        if not self.is_active or not self.is_enabled or self._ending:
+        if not self.is_active or not self.is_enabled or self._ending or self._unloading:
             return
         if self._is_backup_active():
             _LOGGER.debug("Backup mode active - skipping min SOC verification")
@@ -5850,7 +5883,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     floor_soc
                 )
                 # The window may have ended while this run was waiting
-                if not self.is_active:
+                if not self.is_active or self._unloading:
                     return
                 # First write of the window (entity was unavailable at window
                 # start): remember what to restore before overwriting it
@@ -5860,6 +5893,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "number",
                     "set_value",
                     {"entity_id": min_soc_entity, "value": floor_soc},
+                    blocking=True,
                 )
                 self._last_soc_set = floor_soc
                 _LOGGER.info("Restored inverter min SOC to %.1f%%", floor_soc)

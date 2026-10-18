@@ -109,7 +109,7 @@ $env:ICN_LAB_INVERTER_HOST = '127.0.0.2'
 ```
 
 Die komplette ICN-Suite bestand nach der vertieften Nachprüfung lokal mit
-1.373 Tests und 96,62 % Coverage (vorher 1.352 / 96,64 %).
+1.380 Tests und 96,64 % Coverage (vorher 1.373 / 96,62 %).
 Mypy und Pyright: jeweils 0 Fehler mit dem expliziten Python-3.14-Interpreter.
 Der echte HA-Test bestand 21 Prüfungen, einschließlich der Diensteliste des
 Frontends. Alle zusätzlichen Kampagnen wurden abgeschlossen:
@@ -117,7 +117,7 @@ Frontends. Alle zusätzlichen Kampagnen wurden abgeschlossen:
 | Kampagne | Ergebnis |
 |---|---|
 | Echter HA-Konfigurationsfluss, Dienste und Energiemodell | 21/21 bestanden |
-| KORE REST/Modbus, Min-SOC-Übergabe und Effizienzsuche | 46/46 bestanden |
+| KORE REST/Modbus, Min-SOC-Übergabe und Effizienzsuche | 48/48 bestanden |
 | evcc und gemeinsamer Anschluss unter Last/Netzfehlern | 19/19 bestanden |
 | REST-/Modbus-/Proxy-Ausfälle und Wiederverbindung | 28/28 bestanden |
 | HA-Neustart, Prozessabbruch, Ausfallnachrechnung, Inselstart | 7/7 bestanden |
@@ -191,6 +191,39 @@ HA neu starten. Es ersetzt weder `.storage` noch vorhandene YAML ohne
 
 ## Grenzen und nächste Arbeit
 
+Die PRs [ICN #17](https://github.com/Puma7/InverterChargeNight/pull/17) und
+[KostalKore #66](https://github.com/Puma7/KostalKore/pull/66) sind offen und
+direkt zur Prüfung freigegeben. Codex lieferte in der ersten Runde fünf
+ICN- und zwei KORE-Befunde; beide Security-Reviews waren ohne Befund.
+Die sieben Code-Befunde wurden mit Regressionen nachgearbeitet:
+
+- Min-SOC benötigt frische Rückmeldung; ein alter passender Wert reicht nicht.
+  Ein expliziter Entity-Refresh kann die Rücksetzung bestätigen.
+- Vor dem Unload-Reset werden Listener und periodische Verifikation gestoppt.
+  Ein Lock ordnet eine bereits laufende blockierende Verifikation vor dem Reset;
+  wartende Verifikationen dürfen beim Unload nicht erneut schreiben.
+- Eine abgesenkte Leistung verwirft einen laufenden Effizienz-Messpunkt.
+- Ein fremder ausstehender Reset wird nicht als fehlgeschlagene Reservefreigabe
+  gemeldet. Der Test erzwingt verzögerte HA-Publikation und erwartet den Fehler.
+- KORE speichert auch nach einem während des vorigen Schreibens eingetroffenen
+  Update den letzten Snapshot. Gleichzeitiges Stoppen und Entladen ist serialisiert.
+- KORE bereinigt SoH vor möglicherweise fehlschlagendem Plattform-Rollback.
+
+Die ICN-Issues #18–#22 und KORE-Issue #65 dokumentieren diese Arbeit.
+KOREs erste CI-Runde bestand auf Python 3.12 und 3.14 einschließlich des
+100%-Coverage-Gates. Nach den Review-Korrekturen bestanden lokal 1.108 Tests;
+das SoH-Modul erreicht 100% Branch-Coverage. Der Windows-Gesamtwert ist 99,87%,
+weil zwei bestehende POSIX-Pfadvergleiche im Stack-Logger dort nicht durchlaufen.
+Der Gesamt-Typcheck gegen aktuelles HA hat bekannte fremde API-Typabweichungen;
+der CI-Gate prüft ihn gemäß KOREs Workflow auf Python 3.12.
+
+Der gemeinsame Lauf mit beiden nachgearbeiteten Codebäumen bestand 48/48
+Prüfungen einschließlich 168 Effizienz-Verifikationen. Der schnellere KORE-Start
+benötigt im Labor jetzt ausdrücklich beobachtete Rückmeldungen aller Bindungen;
+der frühere SoH-Debounce hatte diese Startbedingung nur zufällig überbrückt.
+Neue Commits benötigen erneut GitHub-CI und Codex Review. Nichts wurde gemergt
+oder als Release veröffentlicht.
+
 - Windows nutzt den vorhandenen Entwicklungsstarter. Docker Engine lief hier
   nicht; ein unterstützter Linux-/Containerlauf wurde lokal nicht behauptet.
 - Multimedia gehört nicht zur Prüfung. Der Windows-Selector-Loop kann bei
@@ -210,6 +243,6 @@ HA neu starten. Es ersetzt weder `.storage` noch vorhandene YAML ohne
   weiterhin reale Hardwareprüfung; siehe KostalKores `HARDWARE_VALIDATION_TODO.md`.
 - Der KostalKore-Checkout meldet unter Windows einen fehlenden Linux-Symlink
   `tests -> Tests` wegen der Groß-/Kleinschreibung. Produktivdateien wurden dort
-  nicht bearbeitet.
+  außer dem SoH-Lifecycle-Fix aus PR #66 nicht bearbeitet.
 - Vor einem Release: vollständige gekoppelte Laborkampagne prüfen, Änderungen
   reviewen, GitHub-Labor-CI erneut ausführen und erst dann PR #17 abschließen.

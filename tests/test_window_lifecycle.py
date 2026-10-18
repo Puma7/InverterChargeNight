@@ -389,7 +389,7 @@ async def test_verification_restores_override_not_lowest_target(mock_hass, coord
     await coordinator._verify_and_restore_min_soc()
 
     mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": MIN_SOC, "value": 70.0}
+        "number", "set_value", {"entity_id": MIN_SOC, "value": 70.0}, blocking=True
     )
     assert coordinator._last_soc_set == 70.0
     assert coordinator.target_reached is False
@@ -462,8 +462,11 @@ async def test_window_end_waits_for_running_verification_before_reset(mock_hass)
 
     coordinator._verify_and_restore_min_soc = _slow_verify
 
+    complete_service = mock_hass.services.async_call.side_effect
+
     async def _record(domain: str, service: str, data: dict, **kwargs) -> None:
         events.append((service, data.get("value", data["entity_id"])))
+        await complete_service(domain, service, data, **kwargs)
         if service == "turn_off" and kwargs.get("blocking"):
             mock_hass.states.get(data["entity_id"]).state = "off"
 

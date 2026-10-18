@@ -1,4 +1,5 @@
 """Real HA/KostalKore restore, immediate reserve and final discharge release."""
+from unittest.mock import patch
 
 
 async def check_window_handoff(hass, lab, planner, kore_entry, check):
@@ -32,13 +33,22 @@ async def check_window_handoff(hass, lab, planner, kore_entry, check):
           co.is_active and co.original_min_soc == 8 and lab.plant.min_soc == 16,
           {"original_min_soc": co.original_min_soc, "physical_min_soc": lab.plant.min_soc})
 
+    await minimum.coordinator.async_refresh()
+    await hass.async_block_till_done()
+    check("raised reserve floor is observed before delayed release",
+          float(hass.states.get(planner.data["min_soc_entity"]).state) == 16)
     try:
-        await hass.services.async_call("inverter_charge_night", "allow_discharge",
-            {"config_entry_id": planner.entry_id}, blocking=True)
+        # Hold back only this entity's HA publication to reproduce delayed
+        # feedback deterministically; KORE still writes the actual inverter.
+        with patch.object(minimum, "async_write_ha_state"):
+            await hass.services.async_call("inverter_charge_night", "allow_discharge",
+                {"config_entry_id": planner.entry_id}, blocking=True)
     except HomeAssistantError as err:
         check("delayed release feedback reports a pending reset, not a missing hold",
               err.translation_key == "reset_failed" and co._pending_reset and not co.is_active,
               {"translation_key": err.translation_key, "pending_reset": co._pending_reset})
+    else:
+        check("delayed release must report its unconfirmed reset", False)
     await hass.async_block_till_done()
     # KORE can debounce feedback past the service handler. Complete a real
     # poll, then invoke the same retry that its scheduled backoff would call.

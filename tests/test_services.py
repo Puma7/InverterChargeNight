@@ -445,3 +445,15 @@ async def test_release_with_unconfirmed_feedback_reports_the_pending_reset():
 
     entry.runtime_data.async_allow_discharge.assert_awaited_once_with()
     assert err.value.translation_key == "reset_failed"
+
+
+@pytest.mark.asyncio
+async def test_release_without_hold_keeps_unrelated_pending_reset_distinct():
+    entry = _adhoc_entry()
+    entry.runtime_data.async_allow_discharge.return_value = False
+    entry.runtime_data._adhoc_until = None
+    entry.runtime_data._pending_reset = True
+    with pytest.raises(HomeAssistantError) as err:
+        await services._async_allow_discharge(_call(_hass_with([entry])))
+    assert err.value.translation_key == "nothing_to_release"
+    entry.runtime_data.async_allow_discharge.assert_awaited_once_with()

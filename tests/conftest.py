@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import time
+from datetime import UTC, datetime, time
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -102,6 +102,7 @@ def mock_hass() -> HomeAssistant:
             state = states.get(data.get("entity_id"))
             if state is not None:
                 state.state = str(data["value"])
+                state.last_reported = datetime.now(UTC)
 
     hass.services.async_call = AsyncMock(side_effect=complete_service)
     hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())

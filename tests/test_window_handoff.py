@@ -1,5 +1,6 @@
 """Night charging must hand the inverter's original floor to the next hold."""
 from datetime import datetime, timedelta
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, call, patch
 
@@ -8,6 +9,71 @@ import pytest
 from custom_components.inverter_charge_night.sensor import CalculatedSOCSensor
 from custom_components.inverter_charge_night.coordinator import InverterChargeNightCoordinator
 from tests.test_evening_rescue import COORDINATOR, _make_coordinator, _rescue, _short
+
+
+@pytest.mark.asyncio
+async def test_stale_matching_original_is_not_restore_confirmation(mock_hass):
+    coordinator = _make_coordinator(mock_hass)
+    coordinator.original_min_soc = 8
+    mock_hass.states.async_set("number.min_soc", "8")
+    mock_hass.services.async_call = AsyncMock()  # The physical floor is still raised.
+    with patch(f"{COORDINATOR}.async_call_later"):
+        assert not await coordinator._reset_settings()
+    assert coordinator.original_min_soc == 8
+    assert coordinator._pending_reset
+    mock_hass.services.async_call.assert_any_await(
+        "homeassistant", "update_entity", {"entity_id": "number.min_soc"}, blocking=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_explicit_refresh_can_confirm_an_unchanged_original_value(mock_hass):
+    coordinator = _make_coordinator(mock_hass)
+    coordinator.original_min_soc = 8
+    mock_hass.states.async_set("number.min_soc", "8")
+
+    async def refresh_only(domain, service, data, **kwargs):
+        if domain == "homeassistant" and service == "update_entity":
+            mock_hass.states.async_set("number.min_soc", "8")
+
+    mock_hass.services.async_call = AsyncMock(side_effect=refresh_only)
+    assert await coordinator._reset_settings()
+    assert coordinator.original_min_soc is None
+    assert not coordinator._pending_reset
+
+
+@pytest.mark.asyncio
+async def test_unload_reset_waits_for_inflight_floor_writer(mock_hass):
+    coordinator = _make_coordinator(mock_hass)
+    coordinator.is_active = True
+    coordinator.initial_calculated_soc = 16
+    coordinator.original_min_soc = 8
+    mock_hass.states.async_set("number.min_soc", "8")
+    mock_hass.states.async_set("sensor.soc", "15")
+    entered, finish = asyncio.Event(), asyncio.Event()
+    complete = mock_hass.services.async_call.side_effect
+
+    async def delayed_write(domain, service, data, **kwargs):
+        if domain == "number" and data.get("value") == 16:
+            assert kwargs.get("blocking") is True
+            entered.set()
+            await finish.wait()
+        await complete(domain, service, data, **kwargs)
+
+    mock_hass.services.async_call = AsyncMock(side_effect=delayed_write)
+    writer = asyncio.create_task(coordinator._verify_and_restore_min_soc())
+    await asyncio.wait_for(entered.wait(), 1)
+    coordinator._unloading = True
+    reset = asyncio.create_task(coordinator._reset_settings())
+    await asyncio.sleep(0)
+    assert not reset.done()
+    finish.set()
+    await asyncio.wait_for(asyncio.gather(writer, reset), 1)
+    assert mock_hass.states.get("number.min_soc").state == "8"
+    assert coordinator.original_min_soc is None
+    before = mock_hass.services.async_call.await_count
+    await coordinator._verify_and_restore_min_soc()
+    assert mock_hass.services.async_call.await_count == before
 
 
 @pytest.mark.asyncio
