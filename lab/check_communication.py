@@ -100,6 +100,12 @@ async def main():
             p = lab.plant
             p.speed = 0
             p.soc, p.house_load, p.pv_power = 20, 600, 0
+            # A prior physics tick may already have supplied the house from
+            # the battery. Establish the explicit 600 W grid-import fixture
+            # before freezing time and reading it through the real proxy.
+            p.block_discharge = True
+            p.advance(0.001)
+            lab.publish()
             from custom_components.icn_simulator.fixtures import configure_kore
             from custom_components.icn_simulator.defaults import configure_planner, planner_defaults
             kore, mapping = await configure_kore(hass, proxy_port=15502, proxy_client_timeout_s=10, enable_g3=True)

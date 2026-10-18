@@ -5,6 +5,25 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.2] - 2026-10-18
+
+### Fixed
+- Keep an efficiency trial alive while its initial HA charge-limit feedback
+  catches up within the existing settling interval. Reject unresolved feedback
+  at the deadline and discard subsequent downward drift immediately. Excess
+  power and house-connection protection remain immediate.
+  Measurement start independently confirms matching setpoint feedback, and
+  finalization rejects unconfirmed results even with a long verifier interval.
+  Read unitless kW controls with the same scale as writes, including protective
+  activation and restoration. Finalize valid trials before restoring their
+  setpoint at window end.
+- Wait for observed control feedback in every KORE laboratory setup without
+  draining unrelated HA background work; package the helper for Container use.
+- Give parallel evcc laboratories distinct EEBUS/OCPP ports while preserving
+  their certificates and pairing data, avoiding configured device/proxy ports.
+  Initialize the proxy campaign's physical
+  grid-import fixture explicitly instead of relying on startup timing.
+
 ## [3.10.1] - 2026-10-18
 
 ### Fixed

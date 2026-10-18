@@ -20,10 +20,13 @@ switch ($Action) {
         if ($managedProcess) { Write-Output ('evcc already running: ' + $evccUrl); exit 0 }
         $binary = Join-Path $evccPath 'evcc.exe'
         if (-not (Test-Path -LiteralPath $binary)) { throw 'Run python lab/install_evcc.py and python lab/evcc_config.py first.' }
-        foreach ($box in @(1, 2)) {
-            & $binary settings set --force --config (Join-Path $evccPath 'evcc.yaml') --database (Join-Path $evccPath 'evcc.db') ('lp' + $box + '.maxCurrent') '32'
-            if ($LASTEXITCODE -ne 0) { throw 'evcc fixture settings failed.' }
+        $repoPath = Split-Path $PSScriptRoot -Parent
+        $seedPython = Join-Path $repoPath '.venv-lab\Scripts\python.exe'
+        if (-not (Test-Path -LiteralPath $seedPython)) {
+            $seedPython = Join-Path (Split-Path $repoPath -Parent) 'ha-venv\Scripts\python.exe'
         }
+        & $seedPython -X utf8 (Join-Path $PSScriptRoot 'evcc_config.py') --seed-only
+        if ($LASTEXITCODE -ne 0) { throw 'evcc fixture settings failed.' }
         $processArgs = @('--config', ('"' + (Join-Path $evccPath 'evcc.yaml') + '"'),
             '--database', ('"' + (Join-Path $evccPath 'evcc.db') + '"'))
         # evcc binds all interfaces. Keep its standard administrator authentication.

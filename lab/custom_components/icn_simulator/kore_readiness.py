@@ -1,4 +1,4 @@
-"""Wait for observed KORE entities rather than an unrelated background timer."""
+"""Wait for observed KORE entities in every lab setup, including Container."""
 import asyncio
 
 from homeassistant.helpers.entity_component import DATA_INSTANCES
@@ -20,7 +20,9 @@ async def wait_for_kore_feedback(hass, mapping, timeout=30):
                         coordinators[id(coordinator)] = coordinator
                 for coordinator in coordinators.values():
                     await coordinator.async_refresh()
-                await hass.async_block_till_done()
+                # Let queued entity publications run without draining unrelated
+                # HA tasks (for example an older KORE's sleeping SoH debounce).
+                await asyncio.sleep(0)
                 values = {key: (state.state if (state := hass.states.get(entity_id)) else None)
                           for key, entity_id in mapping.items()}
                 if all(value not in (None, "unknown", "unavailable") for value in values.values()):

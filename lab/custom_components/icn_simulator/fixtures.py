@@ -1,8 +1,8 @@
 """Configure the real KORE integration against the loopback-only emulator."""
-import asyncio
 from homeassistant.helpers import entity_registry as er
 
 from .endpoints import inverter_host
+from .kore_readiness import wait_for_kore_feedback
 
 
 async def configure_kore(hass, proxy_port=None, proxy_client_timeout_s=0, enable_g3=False):
@@ -57,15 +57,8 @@ async def configure_kore(hass, proxy_port=None, proxy_client_timeout_s=0, enable
     if changed:
         await hass.config_entries.async_reload(entry.entry_id)
         await hass.async_block_till_done()
-    coordinators = hass.data["kostal_kore"][entry.entry_id]
-    await coordinators["process_coordinator"].async_refresh()
-    for _ in range(6):
-        await coordinators["modbus_coordinator"].async_refresh()
-    from homeassistant.helpers.entity_component import DATA_INSTANCES
-    for key in ("min_soc_entity", "grid_charge_switch"):
-        entity_id = mapping[key]
-        entity = hass.data[DATA_INSTANCES][entity_id.split(".")[0]].get_entity(entity_id)
-        await entity.coordinator.async_refresh()
-    await asyncio.sleep(0.6)
-    await hass.async_block_till_done()
+    # Setup completion does not guarantee that newly enabled/reloaded control
+    # entities have published their first values. Observe the actual bindings
+    # before returning them to ICN or starting a charging campaign.
+    await wait_for_kore_feedback(hass, mapping)
     return entry, mapping

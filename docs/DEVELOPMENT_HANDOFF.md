@@ -1,5 +1,42 @@
 # Entwicklungsstand und Wiederaufnahme – 18.10.2026
 
+## Nachtrag: Pruefung der veroeffentlichten Versionen am 18.10.2026
+
+Dieser Nachtrag ersetzt die weiter unten dokumentierten historischen PR- und
+Branch-Zustaende. ICN PR #17 und KORE PR #66 sind gemergt. Die neuen Releases
+`v3.8.3` (ICN, Commit `ad7ea56`, Manifest 3.10.1) und `v3.0.3` (KORE, Commit
+`e499590`, Manifest 3.0.5) wurden lokal installiert und gemeinsam geprueft.
+Die abweichenden Release-/Manifest-Versionen stehen in ICN Issue #23 und KORE
+Issue #67; veroeffentlichte Tags wurden nicht verschoben.
+
+ICN [PR #25](https://github.com/Puma7/InverterChargeNight/pull/25) enthaelt
+Version **3.10.2** und schliesst Issues #24, #26 und #27. Er behebt verzoegerte
+Ladegrenzen-Rueckmeldung bei Effizienzmessungen, bestaetigt den Messpunkt auch
+ohne periodischen Verifikationslauf, behandelt einheitenlose kW-Regler auf
+allen AC-Grenzen-Lesepfaden konsistent und wertet den letzten Messpunkt vor
+der eigenen Ruecksetzung am Fensterende aus. Die Laborreparaturen warten auf
+beobachtete KORE-Werte, umgehen fremde HA-Hintergrundtasks und isolieren die
+EEBUS-/OCPP-Ports einschliesslich konfigurierter Geraete-/Proxy-Endpunkte.
+Den verbindlichen Review-/Merge-Status direkt im PR pruefen. Ein Merge erstellt
+kein Release: 3.10.2 muss danach separat veroeffentlicht werden.
+
+Nach den Reviewkorrekturen: 1.401 lokale ICN-Tests, 96,66 % Gesamt-Coverage,
+mypy und pyright ohne Fehler. Zusaetzlich wurden sechs Abnahmekampagnen mit
+echtem HA, KORE, evcc und Simulatoren sowie 16 Problemfaelle mit 2.306
+Einzelpruefungen ausgefuehrt. Eine fuenfminuetige stationaere Beobachtung
+beider zuletzt geprueften Codebaeume lieferte je 93 erfolgreiche HTTP-Abfragen
+und keine neuen WARN-/ERROR-/CRITICAL-Meldungen. Die laengere gekoppelte
+Effizienzkampagne verlangt auch die bestaetigte Rueckgabe der urspruenglichen
+Grenzen (Min-SOC 8 %, AC-Limit 5.000 W, Netzladen aus).
+
+Nachweise sind privat/generiert unter `lab/reports/release-audit-20261018`.
+Startmeldungen bleiben getrennt sichtbar: Windows-FFmpeg-Probe, nicht emulierte
+KORE-Schattenmanagement-API, Custom-Integration-Hinweise und evccs einmalige
+Cache-Warnung. Ein externer HA-Analytics-DNS-Fehler wurde ebenfalls beobachtet.
+Dies sind keine Nachweise fuer Hardwarefehler oder vollstaendige Firmware-
+Unterstuetzung. Das interaktive Labor weiterhin nur auf HA 8124, evcc 7071,
+Geraete-API 18082 und Inverter 127.0.0.2 starten; die andere Instanz nicht stoppen.
+
 ## Ziel
 
 Inverter Charge Night (ICN) plant die Netzladung des Hausakkus anhand von

@@ -4,6 +4,7 @@ The known conversion curve is a test fixture, not a measured inverter curve.
 Neither HA timers nor the host clock are accelerated. No real device is used.
 """
 from datetime import timedelta
+import asyncio
 from unittest.mock import patch
 
 
@@ -99,7 +100,20 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
     # Exercise the normal update after completion, not just the search itself.
     # The target needs much less power than the measured best in the remaining
     # ad-hoc window, so this distinguishes preference from an ineffective cap.
-    await co.async_refresh()
+    # Finishing the finder updates the public config entry asynchronously.
+    # Await that transition and observed KORE feedback before asserting the
+    # normal planner's final actuator value, rather than a transient old poll.
+    for _ in range(20):
+        await hass.async_block_till_done()
+        await modbus.async_refresh()
+        await grid_switch.coordinator.async_refresh()
+        await process.async_refresh()
+        await co.async_refresh()
+        await hass.async_block_till_done()
+        if (co.planned_charge_power_w == data.get("best_power_w")
+                and lab.plant.charge_limit == data.get("best_power_w")):
+            break
+        await asyncio.sleep(.1)
     check("normal planner actually applies the measured optimum through KORE",
           co.planned_charge_power_w == data.get("best_power_w") and
           lab.plant.charge_limit == data.get("best_power_w"),
@@ -108,5 +122,25 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
     commands = [item["value"] for item in lab.commands if item["key"] == "charge_limit" and item["accepted"]]
     check("search actually writes multiple permitted device setpoints",
           len(set(commands)) >= 3 and all(0 <= value <= 15000 for value in commands), commands)
-    await hass.services.async_call("inverter_charge_night", "reset_inverter", blocking=True)
+    from homeassistant.exceptions import HomeAssistantError
+    original_floor, original_limit = co.original_min_soc, co._original_ac_charge_power
+    for _ in range(20):
+        try:
+            await hass.services.async_call("inverter_charge_night", "reset_inverter", blocking=True)
+        except HomeAssistantError as err:
+            if err.translation_key != "reset_failed":
+                raise
+            # A physical OFF can precede the HA switch update. Require fresh
+            # device observations and a successful public reset, never ignore
+            # an unrelated failure or leave pending cleanup behind.
+            await grid_switch.coordinator.async_refresh()
+            await modbus.async_refresh()
+            await process.async_refresh()
+            await asyncio.sleep(.1)
+        else:
+            break
+    check("efficiency cleanup confirms original settings and grid-charge OFF",
+          not co._pending_reset and not lab.plant.grid_charge
+          and lab.plant.min_soc == original_floor and lab.plant.charge_limit == original_limit,
+          {"floor": lab.plant.min_soc, "limit": lab.plant.charge_limit, "pending": co._pending_reset})
     lab.plant.charge_efficiency = .90
