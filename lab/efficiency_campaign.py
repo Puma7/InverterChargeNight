@@ -4,6 +4,7 @@ The known conversion curve is a test fixture, not a measured inverter curve.
 Neither HA timers nor the host clock are accelerated. No real device is used.
 """
 from datetime import timedelta
+import asyncio
 from unittest.mock import patch
 
 
@@ -99,7 +100,20 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
     # Exercise the normal update after completion, not just the search itself.
     # The target needs much less power than the measured best in the remaining
     # ad-hoc window, so this distinguishes preference from an ineffective cap.
-    await co.async_refresh()
+    # Finishing the finder updates the public config entry asynchronously.
+    # Await that transition and observed KORE feedback before asserting the
+    # normal planner's final actuator value, rather than a transient old poll.
+    for _ in range(20):
+        await hass.async_block_till_done()
+        await modbus.async_refresh()
+        await grid_switch.coordinator.async_refresh()
+        await process.async_refresh()
+        await co.async_refresh()
+        await hass.async_block_till_done()
+        if (co.planned_charge_power_w == data.get("best_power_w")
+                and lab.plant.charge_limit == data.get("best_power_w")):
+            break
+        await asyncio.sleep(.1)
     check("normal planner actually applies the measured optimum through KORE",
           co.planned_charge_power_w == data.get("best_power_w") and
           lab.plant.charge_limit == data.get("best_power_w"),
