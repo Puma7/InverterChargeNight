@@ -116,6 +116,11 @@ Konfiguration in diesem Checkout. Für spätere Starts dieselben HA-Parameter
 verwenden. `status` zeigt die tatsächlich gestartete HA-Adresse aus dem
 Prozessnachweis; `stop` betrifft nur den von diesem Checkout gestarteten Prozess.
 
+Der evcc-Start setzt auch getrennte Protokollports: Bei UI-Port 7071 verwendet
+EEBUS Port 17071 und OCPP Port 27071. Bestehende EEBUS-Zertifikate und
+Kopplungsdaten bleiben erhalten. Die Grid-/Proxy-Kampagnen verwenden dieselbe
+Initialisierung für ihre eigenen UI-Ports.
+
 Vor den gekoppelten Tests das interaktive Labor dieses Checkouts stoppen und
 warten, bis `status` keinen Prozess mehr meldet. Tests auf der getrennten
 Wechselrichteradresse starten:
