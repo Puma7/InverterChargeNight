@@ -626,7 +626,7 @@ async def test_window_end_restores_the_original_min_soc_from_a_raised_floor(
     await coordinator._on_window_end(WINDOW_END)
 
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}, blocking=True),
         call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
     ]
     assert coordinator._window_floor_soc is None
@@ -660,7 +660,7 @@ async def test_restart_in_the_window_keeps_the_floor(mock_hass):
 
         await made._on_window_end(WINDOW_END)
 
-        assert call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}) in (
+        assert call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}, blocking=True) in (
             mock_hass.services.async_call.await_args_list
         )
         assert made._window_floor_soc is None

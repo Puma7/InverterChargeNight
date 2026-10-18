@@ -5,6 +5,14 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.1] - 2026-10-18
+
+### Fixed
+- Wait for the min-SOC restore and confirm its feedback before forgetting the original floor. An evening reserve opened immediately after night charging can no longer capture the previous night target as its permanent restore value. Unconfirmed restores retain the original value and use the existing retry mechanism.
+
+### Added
+- Expose the ad-hoc window reason, release time, original min-SOC and pending reset on the target SOC sensor, making an automatic evening reserve distinguishable from a failed night-window reset.
+
 ## [3.10.0] - 2026-10-17
 
 ### Changed

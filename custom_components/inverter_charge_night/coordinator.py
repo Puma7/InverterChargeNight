@@ -4700,12 +4700,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "number",
                         "set_value",
                         {"entity_id": min_soc_entity, "value": reset_min_soc},
+                        blocking=True,
                     )
-                    _LOGGER.info(
-                        "Reset the inverter min SOC to %.1f%% (original: %s)",
-                        reset_min_soc,
-                        "stored" if self.original_min_soc is not None else "configured default",
-                    )
+                    # A following window may start in this reset's refresh.
+                    # Never let it capture the previous target as its original
+                    # floor while the restore is still queued or unconfirmed.
+                    feedback = self.hass.states.get(min_soc_entity)
+                    restored_soc = _as_float(feedback.state) if feedback is not None else None
+                    if restored_soc is None or abs(restored_soc - reset_min_soc) > 0.5:
+                        _LOGGER.error("Min SOC restore to %.1f%% has no matching feedback", reset_min_soc)
+                        ok = False
+                    else:
+                        _LOGGER.info("Reset the inverter min SOC to %.1f%% (original: stored)", reset_min_soc)
                 else:
                     _LOGGER.error("Cannot reset min SOC - entity state unavailable")
                     ok = False

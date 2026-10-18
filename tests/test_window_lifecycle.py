@@ -233,7 +233,7 @@ async def test_window_end_restores_original_min_soc_and_clears_state(
     await coordinator._on_window_end(WINDOW_END)
 
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}, blocking=True),
         call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
     ]
     assert coordinator.is_active is False
@@ -313,7 +313,7 @@ async def test_restart_in_window_continues_persisted_target_and_restores_origina
         await coordinator._on_window_end(WINDOW_END)
 
         assert mock_hass.services.async_call.await_args_list == [
-            call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
+            call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}, blocking=True),
             call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
         ]
         assert coordinator._pending_reset is False
@@ -979,7 +979,7 @@ async def test_window_end_restores_discharge_limit(mock_hass, blocking):
     await blocking._on_window_end(WINDOW_END)
 
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}, blocking=True),
         call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
         call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 5000.0}),
     ]
@@ -1574,7 +1574,7 @@ async def test_window_check_during_the_end_does_not_re_arm_the_window(mock_hass,
     assert coordinator._inverter_min_soc_listener is None
     # The check did not write the night target back over the restored min SOC
     assert mock_hass.services.async_call.await_args_list[-2:] == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}, blocking=True),
         call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
     ]
 
@@ -1677,7 +1677,7 @@ async def test_options_flow_mode_change_ends_the_running_window(mock_hass):
         assert coordinator._battery_soc_listener is None
         # The night settings are off before the discharge mode takes over
         assert mock_hass.services.async_call.await_args_list == [
-            call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
+            call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}, blocking=True),
             call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
         ]
     finally:
@@ -1776,7 +1776,7 @@ async def test_options_entity_change_restores_the_entities_the_window_wrote_to(m
 
         # The old entities are given back before the new ones take over
         assert mock_hass.services.async_call.await_args_list[:2] == [
-            call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}),
+            call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}, blocking=True),
             call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
         ]
         assert coordinator.original_min_soc is None
@@ -1815,7 +1815,7 @@ async def test_options_teardown_is_not_overtaken_by_its_own_persist(mock_hass):
 
     assert seen == [MIN_SOC], "the reset ran on the new configuration"
     assert call(
-        "number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}
+        "number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}, blocking=True
     ) in mock_hass.services.async_call.await_args_list
     assert coordinator.config[CONF_MIN_SOC_ENTITY] == "number.new_min_soc"
 

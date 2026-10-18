@@ -106,6 +106,8 @@ async def test_reset_settings_sets_min_soc_and_turns_off_grid(mock_hass):
     async def device(domain, service, data, **kwargs):
         if service == "turn_off":
             grid_state.state = "off"
+        elif service == "set_value":
+            min_soc_state.state = str(data["value"])
     mock_hass.services.async_call = AsyncMock(side_effect=device)
 
     coordinator = _make_coordinator(mock_hass, CONFIG)
@@ -148,7 +150,7 @@ async def test_reset_settings_success_clears_originals_and_persists(mock_hass):
 
     assert ok is True
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": 5.0}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 5.0}, blocking=True),
         call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
     ]
     assert coordinator.original_min_soc is None
@@ -190,7 +192,7 @@ async def test_reset_settings_fails_when_force_discharge_unavailable(mock_hass):
     assert ok is False
     # The reachable part is still done
     mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": MIN_SOC, "value": 5.0}
+        "number", "set_value", {"entity_id": MIN_SOC, "value": 5.0}, blocking=True
     )
     assert coordinator.original_min_soc == 5.0
 
@@ -233,7 +235,7 @@ async def test_window_end_schedules_retry_and_retry_resets_when_entity_returns(m
         await retry(WINDOW_END)
 
     mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": MIN_SOC, "value": 5.0}
+        "number", "set_value", {"entity_id": MIN_SOC, "value": 5.0}, blocking=True
     )
     later.assert_not_called()
     assert coordinator._pending_reset is False
@@ -413,7 +415,7 @@ async def test_window_end_restores_ac_charge_limit_set_by_finder(
     await coordinator._on_window_end(WINDOW_END)
 
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0}, blocking=True),
         call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
         call("number", "set_value", {"entity_id": AC_LIMIT, "value": restored_value}, blocking=True),
     ]
@@ -800,7 +802,7 @@ async def test_the_reset_action_ends_the_running_window(mock_hass):
     assert ok is True
     assert coordinator.is_active is False
     awaited = mock_hass.services.async_call.await_args_list
-    assert call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0}) in awaited
+    assert call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0}, blocking=True) in awaited
     assert call("switch", "turn_off", {"entity_id": GRID}, blocking=True) in awaited
 
 
@@ -905,7 +907,7 @@ async def test_the_reset_action_without_a_window_just_resets(mock_hass):
     assert ok is True
     assert coordinator._hands_off_until is None
     assert (
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0})
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0}, blocking=True)
         in mock_hass.services.async_call.await_args_list
     )
 

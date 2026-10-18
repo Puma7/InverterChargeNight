@@ -11,6 +11,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import socket
 import sys
 import tempfile
 
@@ -18,6 +19,16 @@ LAB = Path(__file__).resolve().parent
 
 
 async def main():
+    # Refuse before any client connects. A failed emulator bind must never
+    # leave this campaign writing test values to a different running lab.
+    for port in (80, 1502):
+        with socket.socket() as probe:
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError as err:
+                raise RuntimeError(f"Lab port {port} is occupied; stop the running lab first") from err
     from windows_support import install
     install()
     from homeassistant import bootstrap, core, loader
@@ -50,6 +61,8 @@ async def main():
         try:
             await bootstrap.async_from_config_dict({"homeassistant": {"time_zone": "Europe/Berlin", "latitude": 52.52, "longitude": 13.405}, "sun": {},
                 "icn_simulator": {"auto_configure": False, "kostal_emulator": True}}, hass)
+            if "icn_simulator" not in hass.config.components:
+                raise RuntimeError("Own simulator did not start; refusing all inverter client calls")
             await hass.async_start()
             await hass.async_block_till_done()
             lab = hass.data["icn_simulator"]
@@ -137,9 +150,21 @@ async def main():
             check("KORE battery sensor has live telemetry",
                   hass.states.get(mapping["battery_soc_entity"]).state not in ("unknown", "unavailable"),
                   {key: hass.states.get(entity_id).state if hass.states.get(entity_id) else None for key, entity_id in mapping.items()})
+            # The REST smoke check above deliberately set 65%. Establish the
+            # actual pre-night floor before ICN captures any inverter settings.
+            await hass.services.async_call("number", "set_value",
+                {"entity_id": mapping["min_soc_entity"], "value": 8}, blocking=True)
+            minimum = hass.data[DATA_INSTANCES]["number"].get_entity(mapping["min_soc_entity"])
+            await minimum.coordinator.async_refresh()
+            await hass.services.async_call("switch", "turn_off",
+                {"entity_id": mapping["grid_charge_switch"]}, blocking=True)
+            await hass.async_block_till_done()
             from custom_components.icn_simulator.defaults import configure_planner, planner_defaults
             defaults = planner_defaults()
             defaults.update(mapping)
+            # Exercise the same min-SOC based hold as the persistent ICN2 lab.
+            defaults.pop("discharge_block_switch", None)
+            defaults.pop("discharge_limit_entity", None)
             # This campaign tests ad-hoc charging, which correctly refuses to
             # interrupt an already-running scheduled night window.
             from homeassistant.util import dt as dt_util
@@ -155,6 +180,8 @@ async def main():
             check("ICN charge command passes through KORE REST to simulated inverter",
                   lab.plant.grid_charge and lab.plant.min_soc >= 70,
                   {"grid_charge": lab.plant.grid_charge, "min_soc": lab.plant.min_soc})
+            from window_handoff_campaign import check_window_handoff
+            await check_window_handoff(hass, lab, planner, entry, check)
             from efficiency_campaign import check_efficiency
             await asyncio.wait_for(check_efficiency(hass, lab, planner, entry, check), 180)
             await hass.config_entries.async_unload(planner.entry_id)
