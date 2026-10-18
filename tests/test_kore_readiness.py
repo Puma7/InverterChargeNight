@@ -1,4 +1,5 @@
 """The coupled campaign must await real entity feedback before charging."""
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -33,6 +34,16 @@ async def test_missing_feedback_times_out_instead_of_allowing_charge(mock_hass):
     mock_hass.data[DATA_INSTANCES] = {}
     with pytest.raises(RuntimeError, match="KORE feedback did not become ready"):
         await wait_for_kore_feedback(mock_hass, {"limit": "number.missing"}, timeout=.01)
+
+
+@pytest.mark.asyncio
+async def test_ready_feedback_does_not_wait_for_unrelated_ha_background_work(mock_hass):
+    mock_hass.data[DATA_INSTANCES] = {}
+    mock_hass.states.async_set("number.limit", "5000")
+    unrelated_save_finished = asyncio.Event()
+    mock_hass.async_block_till_done.side_effect = unrelated_save_finished.wait
+    result = await wait_for_kore_feedback(mock_hass, {"limit": "number.limit"}, timeout=.05)
+    assert result == {"limit": "5000"}
 
 
 @pytest.mark.asyncio
