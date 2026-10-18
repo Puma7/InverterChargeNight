@@ -378,6 +378,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_sample_listener: CALLBACK_TYPE | None = None
         self._auto_last_result: dict[str, Any] | None = None
         self._auto_test_start: datetime | None = None
+        self._auto_test_limit_confirmed = False
         self._auto_last_sample_time: datetime | None = None
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
@@ -3012,6 +3013,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_test_active = False
         self._auto_test_power_w = None
         self._auto_test_start = None
+        self._auto_test_limit_confirmed = False
         self._auto_measure_start = None
         self._auto_last_sample_time = None
         self._auto_last_sent_w = None
@@ -3095,6 +3097,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_test_active = True
         self._auto_test_power_w = power_w
         self._auto_test_start = self._efficiency_now()
+        self._auto_test_limit_confirmed = False
         self._auto_measure_start = None
         self._auto_last_sample_time = None
         self._auto_last_sent_w = None
@@ -5802,9 +5805,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if actual_w is None:
             return
         if abs(actual_w - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
+            if self._auto_test_active:
+                self._auto_test_limit_confirmed = True
             return
         if actual_w < written:
             if self._auto_test_active:
+                # Hardware I/O can finish before the HA number publishes the
+                # new setpoint. Give initial feedback the existing settling
+                # interval, then reject it; never record an unconfirmed trial.
+                # Once matched, a lower value is real drift and ends it now.
+                if not self._auto_test_limit_confirmed and self._auto_test_start is not None:
+                    pending_s = elapsed_seconds(self._efficiency_now(), self._auto_test_start)
+                    if 0 <= pending_s < AUTO_TEST_SETTLE_S:
+                        return
                 self._discard_auto_test("inverter limit fell below the efficiency trial setpoint")
                 return
             # Someone or something is charging less than we asked for. That is

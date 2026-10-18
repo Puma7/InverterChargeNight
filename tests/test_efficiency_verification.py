@@ -1,5 +1,6 @@
 """Periodic verification must check the live trial and retain connection protection."""
 from unittest.mock import patch
+from datetime import timedelta
 
 import pytest
 
@@ -20,6 +21,7 @@ def active_trial(mock_hass):
         coordinator._auto_test_active = True
         coordinator._auto_test_power_w = 9000
         coordinator._auto_test_start = INSIDE
+        coordinator._auto_test_limit_confirmed = True
         yield coordinator
 
 
@@ -84,3 +86,45 @@ async def test_activation_gate_refuses_trial_when_budget_is_tight_or_unreadable(
     assert not await active_trial._grid_charge_activation_safe(100)
     assert ("switch", "turn_off", GRID) in _service_calls(mock_hass)
     assert not any(value > 0 for value in _ac_writes(mock_hass))
+
+
+@pytest.mark.asyncio
+async def test_new_trial_waits_for_first_matching_ha_limit_then_rejects_downward_drift(mock_hass, active_trial):
+    active_trial._auto_test_limit_confirmed = False
+    mock_hass.states.async_set(AC_LIMIT, "8000", {"unit_of_measurement": "W"})
+    await active_trial._verify_ac_charge_limit()
+    assert active_trial._auto_test_active
+    assert _ac_writes(mock_hass) == []
+    mock_hass.states.async_set(AC_LIMIT, "9000", {"unit_of_measurement": "W"})
+    await active_trial._verify_ac_charge_limit()
+    assert active_trial._auto_test_limit_confirmed
+    mock_hass.states.async_set(AC_LIMIT, "8000", {"unit_of_measurement": "W"})
+    await active_trial._verify_ac_charge_limit()
+    assert not active_trial._auto_test_active
+    assert active_trial._auto_last_result["loss"] is None
+
+
+@pytest.mark.asyncio
+async def test_missing_initial_limit_feedback_discards_trial_at_settling_deadline(mock_hass, active_trial):
+    active_trial._auto_test_limit_confirmed = False
+    mock_hass.states.async_set(AC_LIMIT, "8000", {"unit_of_measurement": "W"})
+    with patch.object(active_trial, "_efficiency_now", return_value=INSIDE + timedelta(seconds=120)):
+        await active_trial._verify_ac_charge_limit()
+    assert not active_trial._auto_test_active
+    assert active_trial._auto_last_result["loss"] is None
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_trial_still_protects_against_excess_power(mock_hass, active_trial):
+    active_trial._auto_test_limit_confirmed = False
+    mock_hass.states.async_set(AC_LIMIT, "10000", {"unit_of_measurement": "W"})
+    await active_trial._verify_ac_charge_limit()
+    assert _ac_writes(mock_hass) == [9000]
+    assert ("switch", "turn_off", GRID) in _service_calls(mock_hass)
+
+
+@pytest.mark.asyncio
+async def test_starting_next_trial_clears_previous_limit_confirmation(mock_hass, active_trial):
+    with patch.object(active_trial, "_set_ac_charge_limit_w", return_value=True):
+        await active_trial._start_auto_test(8200)
+    assert not active_trial._auto_test_limit_confirmed
