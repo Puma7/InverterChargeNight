@@ -3206,8 +3206,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("Energy meter %s reports the unusable unit %r", entity_id, unit or "(none)")
         return None
 
+    def _auto_limit_matches_feedback(self) -> bool:
+        """A measurement belongs only to its currently observed setpoint."""
+        actual_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_ENTITY))
+        requested_w = self._auto_test_power_w
+        return (actual_w is not None and requested_w is not None
+                and abs(actual_w - requested_w) <= PLANNED_POWER_WRITE_THRESHOLD_W)
+
     def _begin_auto_measurement(self, now: datetime) -> None:
         """Start counting: the inverter has had its settling time."""
+        if not self._auto_limit_matches_feedback():
+            self._discard_auto_test("charge limit has no matching feedback after settling")
+            return
+        self._auto_test_limit_confirmed = True
         self._auto_measure_start = now
         # Where on the battery this measurement is taken. A loss measured from
         # a third full is not the loss measured near the top, and until now
@@ -3255,6 +3266,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if elapsed_seconds(now, self._auto_test_start) < AUTO_TEST_SETTLE_S:
                 return
             self._begin_auto_measurement(now)
+            return
+        if not self._auto_test_limit_confirmed or not self._auto_limit_matches_feedback():
+            self._discard_auto_test("charge limit changed or became unavailable during measurement")
             return
         sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
         received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
@@ -3482,6 +3496,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._discard_auto_test("daylight or unknown sun state can contaminate the AC/DC comparison")
             return
         power_w = self._auto_test_power_w
+        if not self._auto_test_limit_confirmed or not self._auto_limit_matches_feedback():
+            self._discard_auto_test("charge limit was never confirmed for this measurement")
+            return
         if self._auto_measure_start is None:
             self._discard_auto_test("it never got past the %d s settling time", AUTO_TEST_SETTLE_S)
             return

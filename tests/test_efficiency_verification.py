@@ -128,3 +128,59 @@ async def test_starting_next_trial_clears_previous_limit_confirmation(mock_hass,
     with patch.object(active_trial, "_set_ac_charge_limit_w", return_value=True):
         await active_trial._start_auto_test(8200)
     assert not active_trial._auto_test_limit_confirmed
+
+
+def _measurement_inputs(hass, coordinator):
+    coordinator.config.update(charge_power_sent_entity="sensor.sent", charge_power_received_entity="sensor.received")
+    hass.states.async_set("sun.sun", "below_horizon")
+    hass.states.async_set("sensor.sent", "8000", {"unit_of_measurement": "W"})
+    hass.states.async_set("sensor.received", "7200", {"unit_of_measurement": "W"})
+
+
+def test_unconfirmed_limit_cannot_begin_measurement_without_periodic_verifier(mock_hass, active_trial):
+    _measurement_inputs(mock_hass, active_trial)
+    active_trial._auto_test_limit_confirmed = False
+    mock_hass.states.async_set(AC_LIMIT, "8000", {"unit_of_measurement": "W"})
+    with patch.object(active_trial, "_efficiency_now", return_value=INSIDE + timedelta(seconds=120)):
+        active_trial._accumulate_auto_energy()
+    assert not active_trial._auto_test_active
+    assert active_trial._auto_measure_start is None
+
+
+def test_measurement_confirms_matching_feedback_without_periodic_verifier(mock_hass, active_trial):
+    _measurement_inputs(mock_hass, active_trial)
+    active_trial._auto_test_limit_confirmed = False
+    with patch.object(active_trial, "_efficiency_now", return_value=INSIDE + timedelta(seconds=120)):
+        active_trial._accumulate_auto_energy()
+    assert active_trial._auto_test_active
+    assert active_trial._auto_test_limit_confirmed
+    assert active_trial._auto_measure_start is not None
+
+
+def test_unconfirmed_limit_cannot_record_plausible_efficiency_history(mock_hass, active_trial):
+    mock_hass.states.async_set("sun.sun", "below_horizon")
+    active_trial._auto_test_limit_confirmed = False
+    active_trial._auto_measure_start = INSIDE
+    active_trial._auto_energy_sent_wh = 1500
+    active_trial._auto_energy_received_wh = 1350
+    with patch.object(active_trial, "_efficiency_now", return_value=INSIDE + timedelta(seconds=600)):
+        active_trial._finalize_auto_test()
+    assert not active_trial.get_auto_efficiency_data().get("history")
+    assert active_trial._auto_last_result["loss"] is None
+
+
+@pytest.mark.parametrize("finalize", [False, True], ids=["sample", "finalize"])
+def test_fresh_drift_cannot_record_even_after_initial_confirmation(mock_hass, active_trial, finalize):
+    _measurement_inputs(mock_hass, active_trial)
+    mock_hass.states.async_set(AC_LIMIT, "8000", {"unit_of_measurement": "W"})
+    active_trial._auto_measure_start = INSIDE
+    active_trial._auto_last_sample_time = INSIDE
+    active_trial._auto_last_sent_w, active_trial._auto_last_received_w = 8000, 7200
+    active_trial._auto_energy_sent_wh, active_trial._auto_energy_received_wh = 1500, 1350
+    with patch.object(active_trial, "_efficiency_now", return_value=INSIDE + timedelta(seconds=600 if finalize else 30)):
+        if finalize:
+            active_trial._finalize_auto_test()
+        else:
+            active_trial._accumulate_auto_energy()
+    assert not active_trial._auto_test_active
+    assert not active_trial.get_auto_efficiency_data().get("history")

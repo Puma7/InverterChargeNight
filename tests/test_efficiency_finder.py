@@ -55,6 +55,9 @@ def test_efficiency_energy_and_minimum_duration_use_real_elapsed_time(finder, mo
     end = (begin.astimezone(UTC) + timedelta(seconds=300)).astimezone(begin.tzinfo)
     finder._auto_test_active = True
     finder._auto_test_start = begin
+    finder._auto_test_power_w = 5000
+    finder._auto_test_limit_confirmed = True
+    mock_hass.states.async_set(AC_LIMIT, "5000", {"unit_of_measurement": "W"})
     finder._auto_measure_start = begin
     finder._auto_last_sample_time = begin
     _power(mock_hass, 5000, 4500)
@@ -119,6 +122,8 @@ async def finder(mock_hass):
 
 def _measure(coordinator, hass, *, power_w, samples, minutes, settle=True):
     """Run a measurement: start the test, wait out the settling, feed samples."""
+    hass.states.async_set(AC_LIMIT, str(power_w), {"unit_of_measurement": "W"})
+    coordinator._auto_test_limit_confirmed = False
     now = START
     with patch(NOW, return_value=now):
         coordinator._auto_test_active = True
@@ -168,6 +173,7 @@ def test_the_ramp_to_the_setpoint_is_not_part_of_the_measurement(mock_hass, find
     assert finder._auto_measure_start is None
     assert finder._auto_energy_sent_wh == 0.0
 
+    mock_hass.states.async_set(AC_LIMIT, "10000", {"unit_of_measurement": "W"})
     with patch(NOW, return_value=START + timedelta(seconds=AUTO_TEST_SETTLE_S + 1)):
         finder._accumulate_auto_energy()
 
@@ -280,9 +286,11 @@ def test_a_measurement_that_is_too_short_is_refused(mock_hass, finder):
 
 
 def test_a_test_that_never_settled_is_refused(mock_hass, finder):
+    mock_hass.states.async_set(AC_LIMIT, "10000", {"unit_of_measurement": "W"})
     with patch(NOW, return_value=START):
         finder._auto_test_active = True
         finder._auto_test_power_w = 10000
+        finder._auto_test_limit_confirmed = True
         finder._auto_test_start = START
     with patch(NOW, return_value=START + timedelta(seconds=30)):
         finder._finalize_auto_test()
@@ -588,6 +596,7 @@ async def test_an_unfinished_measurement_keeps_running(mock_hass, finder):
 
 @pytest.mark.parametrize("fault", ["unavailable", "stale", "gap", "backwards"])
 def test_interrupted_power_measurement_never_bridges_missing_energy(finder, mock_hass, fault):
+    mock_hass.states.async_set(AC_LIMIT, "5000", {"unit_of_measurement": "W"})
     _power(mock_hass, 5000, 4500)
     finder._auto_test_active = True
     finder._auto_test_power_w = 5000
@@ -677,6 +686,7 @@ def test_sunrise_at_target_stop_cannot_commit_contaminated_sample(finder, mock_h
 
 
 def test_missing_configured_counter_never_falls_back_to_guessed_power_energy(metered, mock_hass):
+    mock_hass.states.async_set(AC_LIMIT, "5000", {"unit_of_measurement": "W"})
     mock_hass.states.async_set(METER_SENT, "unavailable")
     _power(mock_hass, 5000, 4500)
     metered._auto_test_active = True

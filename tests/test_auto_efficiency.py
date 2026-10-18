@@ -275,6 +275,7 @@ def test_a_finished_measurement_lands_in_its_band_and_battery_wide(mock_hass):
         mock_hass,
         {
             CONF_BATTERY_SOC_ENTITY: "sensor.soc",
+            "charge_power_entity": "number.ac_limit",
             "charge_power_sent_entity": "sensor.sent",
             "charge_power_received_entity": "sensor.received",
             CONF_MIN_CHARGE_POWER_W: 1000,
@@ -283,11 +284,15 @@ def test_a_finished_measurement_lands_in_its_band_and_battery_wide(mock_hass):
     )
     mock_hass.states.async_set("sensor.sent", "5000", {"unit_of_measurement": "W"})
     mock_hass.states.async_set("sensor.received", "4600", {"unit_of_measurement": "W"})
+    mock_hass.states.async_set("number.ac_limit", "5000", {"unit_of_measurement": "W"})
     saved: dict = {}
     coordinator.get_auto_efficiency_data = MagicMock(return_value=saved)
     coordinator._save_auto_efficiency_data = MagicMock()
 
     now = datetime(2026, 1, 15, 2, 0, tzinfo=timezone.utc)
+    coordinator._auto_test_active = True
+    coordinator._auto_test_power_w = 5000
+    coordinator._auto_test_start = now - timedelta(hours=2)
     with patch(
         "custom_components.inverter_charge_night.coordinator.dt_util.now",
         return_value=now - timedelta(hours=1),

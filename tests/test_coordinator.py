@@ -88,15 +88,20 @@ def test_is_backup_active(mock_hass):
 
 def test_accumulate_auto_energy_updates_totals(mock_hass):
     mock_hass.states.async_set("sun.sun", "below_horizon")
+    for entity, value in (("sensor.sent", "1000"), ("sensor.received", "900"), ("number.ac_limit", "1000")):
+        mock_hass.states.async_set(entity, value, {"unit_of_measurement": "W"})
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     coordinator = _make_coordinator(
         mock_hass,
         {
             CONF_CHARGE_POWER_SENT_ENTITY: "sensor.sent",
             CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.received",
+            "charge_power_entity": "number.ac_limit",
         },
     )
     coordinator._auto_test_active = True
+    coordinator._auto_test_power_w = 1000
+    coordinator._auto_test_limit_confirmed = True
     coordinator._auto_test_start = now - timedelta(hours=2)
     coordinator._auto_measure_start = now - timedelta(hours=1)
     coordinator._auto_last_sample_time = now - timedelta(hours=1)
@@ -104,7 +109,6 @@ def test_accumulate_auto_energy_updates_totals(mock_hass):
     coordinator._auto_last_received_w = 900.0
     coordinator._auto_energy_sent_wh = 0.0
     coordinator._auto_energy_received_wh = 0.0
-    coordinator._get_power_w = lambda entity: 1000 if entity == "sensor.sent" else 900
 
     for seconds in range(30, 3601, 30):
         with patch("custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=now - timedelta(hours=1) + timedelta(seconds=seconds)):
@@ -116,8 +120,10 @@ def test_accumulate_auto_energy_updates_totals(mock_hass):
 
 def test_finalize_auto_test_records_best(mock_hass):
     mock_hass.states.async_set("sun.sun", "below_horizon")
+    mock_hass.states.async_set("number.ac_limit", "5000", {"unit_of_measurement": "W"})
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
-    coordinator = _make_coordinator(mock_hass, {})
+    coordinator = _make_coordinator(mock_hass, {"charge_power_entity": "number.ac_limit"})
+    coordinator._auto_test_limit_confirmed = True
     coordinator._auto_test_active = True
     coordinator._auto_test_start = now - timedelta(hours=2)
     coordinator._auto_measure_start = now - timedelta(hours=1)
