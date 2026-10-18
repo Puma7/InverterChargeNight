@@ -122,5 +122,25 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
     commands = [item["value"] for item in lab.commands if item["key"] == "charge_limit" and item["accepted"]]
     check("search actually writes multiple permitted device setpoints",
           len(set(commands)) >= 3 and all(0 <= value <= 15000 for value in commands), commands)
-    await hass.services.async_call("inverter_charge_night", "reset_inverter", blocking=True)
+    from homeassistant.exceptions import HomeAssistantError
+    original_floor, original_limit = co.original_min_soc, co._original_ac_charge_power
+    for _ in range(20):
+        try:
+            await hass.services.async_call("inverter_charge_night", "reset_inverter", blocking=True)
+        except HomeAssistantError as err:
+            if err.translation_key != "reset_failed":
+                raise
+            # A physical OFF can precede the HA switch update. Require fresh
+            # device observations and a successful public reset, never ignore
+            # an unrelated failure or leave pending cleanup behind.
+            await grid_switch.coordinator.async_refresh()
+            await modbus.async_refresh()
+            await process.async_refresh()
+            await asyncio.sleep(.1)
+        else:
+            break
+    check("efficiency cleanup confirms original settings and grid-charge OFF",
+          not co._pending_reset and not lab.plant.grid_charge
+          and lab.plant.min_soc == original_floor and lab.plant.charge_limit == original_limit,
+          {"floor": lab.plant.min_soc, "limit": lab.plant.charge_limit, "pending": co._pending_reset})
     lab.plant.charge_efficiency = .90
