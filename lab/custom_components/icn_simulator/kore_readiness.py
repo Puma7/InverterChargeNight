@@ -1,4 +1,4 @@
-"""Wait for observed KORE entities rather than an unrelated background timer."""
+"""Wait for observed KORE entities in every lab setup, including Container."""
 import asyncio
 
 from homeassistant.helpers.entity_component import DATA_INSTANCES

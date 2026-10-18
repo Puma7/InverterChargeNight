@@ -156,7 +156,7 @@ async def main():
                 await entity.coordinator.async_refresh()
             await asyncio.sleep(0.6)  # KORE registers its first REST reads after 0.5s.
             await hass.async_block_till_done()
-            from kore_readiness import wait_for_kore_feedback
+            from custom_components.icn_simulator.kore_readiness import wait_for_kore_feedback
             feedback = await wait_for_kore_feedback(hass, mapping)
             check("all KORE control and measurement bindings have observed feedback", True, feedback)
             check("KORE battery sensor has live telemetry",
