@@ -184,3 +184,52 @@ def test_fresh_drift_cannot_record_even_after_initial_confirmation(mock_hass, ac
             active_trial._accumulate_auto_energy()
     assert not active_trial._auto_test_active
     assert not active_trial.get_auto_efficiency_data().get("history")
+
+
+@pytest.mark.asyncio
+async def test_unitless_kw_feedback_confirms_trial_and_starts_measurement(mock_hass, active_trial):
+    _measurement_inputs(mock_hass, active_trial)
+    mock_hass.states.async_set(AC_LIMIT, "9", {"max": 20})
+    active_trial._auto_test_limit_confirmed = False
+    await active_trial._verify_ac_charge_limit()
+    assert active_trial._auto_test_active
+    assert active_trial._auto_test_limit_confirmed
+    active_trial._begin_auto_measurement(INSIDE + timedelta(seconds=120))
+    assert active_trial._auto_measure_start is not None
+
+
+@pytest.mark.asyncio
+async def test_unitless_kw_original_limit_survives_write_restore_roundtrip(mock_hass, active_trial):
+    mock_hass.states.async_set(AC_LIMIT, "6", {"max": 20})
+    assert await active_trial._set_ac_charge_limit_w(9000)
+    assert active_trial._original_ac_charge_power == 6000
+    assert await active_trial._reset_ac_charge_limit()
+    assert _ac_writes(mock_hass) == [9, 6]
+    assert float(mock_hass.states.get(AC_LIMIT).state) == 6
+
+
+@pytest.mark.asyncio
+async def test_activation_corrects_unitless_kw_limit_above_trial(mock_hass, active_trial):
+    mock_hass.states.async_set(AC_LIMIT, "12", {"max": 20})
+    assert await active_trial._grid_charge_activation_safe(100)
+    assert _ac_writes(mock_hass) == [9]
+    assert float(mock_hass.states.get(AC_LIMIT).state) == 9
+
+
+@pytest.mark.asyncio
+async def test_window_end_records_valid_trial_before_restoring_limit(mock_hass, active_trial):
+    mock_hass.states.async_set("sun.sun", "below_horizon")
+    active_trial._auto_measure_start = INSIDE
+    active_trial._auto_energy_sent_wh, active_trial._auto_energy_received_wh = 1500, 1350
+    active_trial._original_ac_charge_power = 5000
+
+    async def restore():
+        assert await active_trial._reset_ac_charge_limit()
+
+    with patch.object(active_trial, "_reset_settings", side_effect=restore), \
+         patch.object(active_trial, "_efficiency_now", return_value=INSIDE + timedelta(seconds=600)):
+        await active_trial._on_window_end(INSIDE + timedelta(seconds=600))
+    assert _ac_writes(mock_hass) == [5000]
+    assert float(mock_hass.states.get(AC_LIMIT).state) == 5000
+    assert active_trial.get_auto_efficiency_data()["history"]["9000"] == pytest.approx(.1)
+    assert not active_trial.is_active

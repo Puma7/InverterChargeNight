@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import math
 import subprocess
+from urllib.parse import urlsplit
 import yaml
 
 
@@ -60,11 +61,29 @@ def write(path: Path, device_port=18080, ui_port=7070, capacity_kwh=None):
     path.write_text(yaml.safe_dump(configuration(device_port, ui_port, capacity_kwh=capacity_kwh), sort_keys=False, allow_unicode=True), encoding="utf-8")
 
 
+def _endpoint_ports(settings):
+    """Collect device/proxy listeners referenced by the generated configuration."""
+    ports = set()
+    if isinstance(settings, dict):
+        uri = settings.get("uri")
+        if isinstance(uri, str):
+            endpoint = urlsplit(uri if "://" in uri else "//" + uri)
+            if endpoint.port is not None:
+                ports.add(endpoint.port)
+        for value in settings.values():
+            ports.update(_endpoint_ports(value))
+    elif isinstance(settings, list):
+        for value in settings:
+            ports.update(_endpoint_ports(value))
+    return ports
+
+
 def seed(binary: Path, database: Path, config: Path):
     settings = yaml.safe_load(config.read_text(encoding="utf-8"))
     ui_port = int(settings["network"]["port"])
     if not 1 <= ui_port <= 65535:
         raise ValueError("Invalid evcc UI port")
+    reserved = {ui_port, *_endpoint_ports(settings)}
     # Each nearby UI endpoint gets distinct protocol servers too. Merge the
     # existing database objects so certificates and pairing identities survive.
     for key, offset in (("eebus", 10000), ("ocpp", 20000)):
@@ -78,7 +97,11 @@ def seed(binary: Path, database: Path, config: Path):
         current = json.loads(value)
         if not isinstance(current, dict):
             raise ValueError(f"Invalid evcc {key} settings object")
-        current["port"] = (ui_port + offset - 1) % 65535 + 1
+        protocol_port = (ui_port + offset - 1) % 65535 + 1
+        while protocol_port in reserved:
+            protocol_port = protocol_port % 65535 + 1
+        reserved.add(protocol_port)
+        current["port"] = protocol_port
         # Do not let CalledProcessError expose certificate material in argv.
         write_result = subprocess.run([str(binary), "settings", "set", "--force", *common,
                                        key, json.dumps(current)], capture_output=True)

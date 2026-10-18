@@ -14,10 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   power and house-connection protection remain immediate.
   Measurement start independently confirms matching setpoint feedback, and
   finalization rejects unconfirmed results even with a long verifier interval.
+  Read unitless kW controls with the same scale as writes, including protective
+  activation and restoration. Finalize valid trials before restoring their
+  setpoint at window end.
 - Wait for observed control feedback in every KORE laboratory setup without
   draining unrelated HA background work; package the helper for Container use.
 - Give parallel evcc laboratories distinct EEBUS/OCPP ports while preserving
-  their certificates and pairing data. Initialize the proxy campaign's physical
+  their certificates and pairing data, avoiding configured device/proxy ports.
+  Initialize the proxy campaign's physical
   grid-import fixture explicitly instead of relying on startup timing.
 
 ## [3.10.1] - 2026-10-18

@@ -120,6 +120,8 @@ Der evcc-Start setzt auch getrennte Protokollports: Bei UI-Port 7071 verwendet
 EEBUS Port 17071 und OCPP Port 27071. Bestehende EEBUS-Zertifikate und
 Kopplungsdaten bleiben erhalten. Die Grid-/Proxy-Kampagnen verwenden dieselbe
 Initialisierung für ihre eigenen UI-Ports.
+Bei benutzerdefinierten Ports werden die konfigurierten Geräte- und
+Proxy-Endpunkte bei der Auswahl der Protokollports ausgespart.
 
 Vor den gekoppelten Tests das interaktive Labor dieses Checkouts stoppen und
 warten, bis `status` keinen Prozess mehr meldet. Tests auf der getrennten

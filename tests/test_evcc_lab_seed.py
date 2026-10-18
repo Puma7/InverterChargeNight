@@ -5,8 +5,9 @@ from subprocess import CompletedProcess
 from unittest.mock import patch
 
 import pytest
+import yaml
 
-from lab.evcc_config import seed
+from lab.evcc_config import configuration, seed
 
 
 @pytest.mark.parametrize("ui_port", [7070, 7071, 65535])
@@ -46,3 +47,22 @@ def test_seed_failure_does_not_expose_certificate_in_exception(tmp_path):
          pytest.raises(RuntimeError, match="evcc eebus settings write failed") as error:
         seed(Path("evcc"), tmp_path / "evcc.db", config)
     assert "fake-private" not in str(error.value)
+
+
+@pytest.mark.parametrize("ui_port,device_port,proxy_port", [(8080, 18080, 15502), (5502, 18080, 15502)])
+def test_protocol_ports_avoid_configured_device_and_proxy_endpoints(tmp_path, ui_port, device_port, proxy_port):
+    config = tmp_path / "evcc.yaml"
+    config.write_text(yaml.safe_dump(configuration(device_port, ui_port, proxy_port)), encoding="utf-8")
+    saved = {}
+
+    def run(args, **kwargs):
+        if args[1:3] == ["settings", "get"]:
+            return CompletedProcess(args, 0, stdout="", stderr="")
+        if args[-2] in ("eebus", "ocpp"):
+            saved[args[-2]] = json.loads(args[-1])
+        return CompletedProcess(args, 0, stdout="", stderr="")
+
+    with patch("lab.evcc_config.subprocess.run", side_effect=run):
+        seed(Path("evcc"), tmp_path / "evcc.db", config)
+    ports = {ui_port, device_port, proxy_port, saved["eebus"]["port"], saved["ocpp"]["port"]}
+    assert len(ports) == 5

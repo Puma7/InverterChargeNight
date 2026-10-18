@@ -2605,6 +2605,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return value
         return value
 
+    def _get_ac_charge_limit_w(self, entity_id: str | None) -> float | None:
+        """Read the charge control with the same unit inference used for writes."""
+        value = self._get_power_w(entity_id)
+        if value is None or not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if not _unit_of(state):
+            entity_max = _as_float(getattr(state, "attributes", {}).get("max"))
+            if entity_max is not None and 0 < entity_max < 1000:
+                return value * 1000.0
+        return value
+
     def _ac_charge_limit_target(self) -> tuple[str, str] | None:
         """Return (entity_id, domain) of the AC charge limit entity, or None if unusable."""
         entity_id = self.config.get(CONF_CHARGE_POWER_ENTITY)
@@ -2700,7 +2712,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             power_w = limited_w
         if self._original_ac_charge_power is None:
-            current_w = self._get_power_w(entity_id)
+            current_w = self._get_ac_charge_limit_w(entity_id)
             if current_w is None:
                 _LOGGER.warning(
                     "Cannot read the current AC charge limit from %s - not writing a "
@@ -3208,7 +3220,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _auto_limit_matches_feedback(self) -> bool:
         """A measurement belongs only to its currently observed setpoint."""
-        actual_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_ENTITY))
+        actual_w = self._get_ac_charge_limit_w(self.config.get(CONF_CHARGE_POWER_ENTITY))
         requested_w = self._auto_test_power_w
         return (actual_w is not None and requested_w is not None
                 and abs(actual_w - requested_w) <= PLANNED_POWER_WRITE_THRESHOLD_W)
@@ -4550,19 +4562,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._remove_grid_import_listener()
             await self._stop_periodic_verification()
             try:
-                await self._reset_settings()
-            except Exception as e:
-                _LOGGER.error("Error resetting settings at window end: %s", e, exc_info=True)
-                # Continue to reset state flags even if reset fails; the reset
-                # did not get far enough to mark itself pending.
-                self._record_reset_outcome(False)
+                # Read the trial's feedback before our own restore changes it.
+                self._finalize_auto_test()
+            finally:
+                try:
+                    await self._reset_settings()
+                except Exception as e:
+                    _LOGGER.error("Error resetting settings at window end: %s", e, exc_info=True)
+                    # Continue to reset state flags even if reset fails; the reset
+                    # did not get far enough to mark itself pending.
+                    self._record_reset_outcome(False)
         finally:
             # First, so a failure in the rest of this block cannot leave the
             # coordinator permanently ending: every window check and every
             # verification would become a no-op for the life of the entry.
             self._ending = False
             # CRITICAL: Always reset state flags, even if reset operation failed
-            self._finalize_auto_test()
+            self._reset_auto_test_state()
             self.target_reached = False
             self.initial_calculated_soc = None  # Reset initial SOC for next charging period
             self.minimum_calculated_soc = None  # Reset minimum SOC for next charging period
@@ -5391,7 +5407,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         if self._grid_limit_configured():
             target = self._ac_charge_limit_target()
-            current = self._get_power_w(target[0]) if target is not None else None
+            current = self._get_ac_charge_limit_w(target[0]) if target is not None else None
             requested = (
                 float(self._auto_test_power_w)
                 if self._auto_test_active and self._auto_test_power_w is not None
@@ -5408,7 +5424,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     await self._pause_grid_charge("protective charge-limit write failed")
                     return False
                 self._planned_setpoint_written_w = allowed
-            readback = self._get_power_w(target[0])
+            readback = self._get_ac_charge_limit_w(target[0])
             if readback is None or readback > allowed:
                 await self._pause_grid_charge("protective charge limit is not confirmed by readback")
                 return False
@@ -5818,7 +5834,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         target = self._ac_charge_limit_target()
         if target is None:
             return
-        actual_w = self._get_power_w(target[0])
+        actual_w = self._get_ac_charge_limit_w(target[0])
         if actual_w is None:
             return
         if abs(actual_w - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
