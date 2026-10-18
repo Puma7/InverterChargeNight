@@ -1385,7 +1385,7 @@
       "message": "The planner could not produce a target. The log says which setting it stumbled over."
     },
     "reset_failed": {
-      "message": "The inverter did not accept the reset. It is retried automatically; the log names the setting that failed."
+      "message": "The reset is not fully confirmed yet. It is retried automatically; the log names the setting awaiting confirmation."
     }
   },
   "issues": {

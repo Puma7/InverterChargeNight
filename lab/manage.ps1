@@ -1,7 +1,10 @@
 param(
     [ValidateSet('start', 'stop', 'status', 'test')][string]$Action = 'start',
     [ValidateSet('native', 'container')][string]$Mode = 'native',
-    [string]$Python = ''
+    [string]$Python = '',
+    [ValidateRange(1, 65535)][int]$Port = 8123,
+    [string]$InverterHost = '127.0.0.1',
+    [ValidateRange(1, 65535)][int]$DeviceApiPort = 18080
 )
 $ErrorActionPreference = 'Stop'
 $labPath = $PSScriptRoot
@@ -24,26 +27,32 @@ if (-not $Python) {
     }
 }
 if (-not $Python) { throw 'Python environment missing. Follow lab/README.md (Windows setup).' }
+$labUrl = 'http://127.0.0.1:' + $Port
+$env:ICN_LAB_HA_PORT = [string]$Port
+$env:ICN_LAB_INVERTER_HOST = $InverterHost
+$env:ICN_LAB_DEVICE_PORT = [string]$DeviceApiPort
 $managedProcess = $null
 if (Test-Path -LiteralPath $recordPath) {
     $record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
     $candidateProcess = Get-Process -Id $record.pid -ErrorAction SilentlyContinue
     if ($candidateProcess -and $candidateProcess.StartTime.ToUniversalTime().Ticks -eq ([datetime]$record.started).ToUniversalTime().Ticks) {
         $managedProcess = $candidateProcess
+        if ($record.url) { $labUrl = $record.url }
     }
 }
 switch ($Action) {
     'start' {
-        if ($managedProcess) { Write-Output 'Already running: http://127.0.0.1:8123'; exit 0 }
+        if ($managedProcess) { Write-Output ('Already running: ' + $labUrl); exit 0 }
         & $Python -X utf8 (Join-Path $labPath 'prepare.py')
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $processArgs = @('-X', 'utf8', ('"' + (Join-Path $labPath 'run_native.py') + '"'))
         $startedProcess = Start-Process -FilePath $Python -ArgumentList $processArgs -WorkingDirectory $repoPath -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput (Join-Path $runtimePath 'native.stdout.log') `
             -RedirectStandardError (Join-Path $runtimePath 'native.stderr.log')
-        @{pid=$startedProcess.Id; started=$startedProcess.StartTime.ToUniversalTime().ToString('o')} |
+        @{pid=$startedProcess.Id; started=$startedProcess.StartTime.ToUniversalTime().ToString('o'); url=$labUrl;
+          inverter_host=$InverterHost; device_api_port=$DeviceApiPort} |
             ConvertTo-Json | Set-Content -LiteralPath $recordPath -Encoding utf8
-        Write-Output 'Starting Home Assistant: http://127.0.0.1:8123'
+        Write-Output ('Starting Home Assistant: ' + $labUrl)
     }
     'stop' {
         if ($managedProcess) {
@@ -53,7 +62,7 @@ switch ($Action) {
         } else { Write-Output 'No managed lab process is running.' }
     }
     'status' {
-        if ($managedProcess) { Write-Output ('Running, PID ' + $managedProcess.Id + ': http://127.0.0.1:8123') }
+        if ($managedProcess) { Write-Output ('Running, PID ' + $managedProcess.Id + ': ' + $labUrl) }
         else { Write-Output 'No managed lab process is running.' }
     }
     'test' {

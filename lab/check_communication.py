@@ -13,6 +13,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -84,8 +85,12 @@ async def main():
         loader.async_setup(hass)
         log = log_path.open("w", encoding="utf-8")
         try:
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                http_port = listener.getsockname()[1]
             await bootstrap.async_from_config_dict({
                 "homeassistant": {"time_zone": "Europe/Berlin"}, "sun": {},
+                "http": {"server_host": "127.0.0.1", "server_port": http_port},
                 "icn_simulator": {"auto_configure": False, "api_port": 18082, "kostal_emulator": True},
             }, hass)
             await hass.async_start()

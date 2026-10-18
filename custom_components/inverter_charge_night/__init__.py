@@ -342,14 +342,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConf
         # scheduled during the unload would fire on a dead coordinator. A failed
         # reset is still persisted, so the next setup retries it.
         coordinator._unloading = True
-        # CRITICAL: Reset settings before unloading to prevent leaving inverter in bad state
-        if coordinator.is_active:
-            _LOGGER.warning("Integration unloading during active window - resetting settings")
-            try:
-                await coordinator._reset_settings()
-            except Exception as e:
-                _LOGGER.error("Error resetting settings during unload: %s", e, exc_info=True)
-                # Continue with unload even if reset fails - we tried our best
         coordinator.remove_time_triggers()
         coordinator._cancel_window_check()
         coordinator._remove_battery_soc_listener()
@@ -358,6 +350,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConf
         coordinator._remove_auto_sample_listener()
         coordinator._remove_backup_mode_listener()
         await coordinator._stop_periodic_verification()
+        # CRITICAL: Reset settings before unloading to prevent leaving inverter in bad state
+        if coordinator.is_active:
+            _LOGGER.warning("Integration unloading during active window - resetting settings")
+            try:
+                await coordinator._reset_settings()
+            except Exception as e:
+                _LOGGER.error("Error resetting settings during unload: %s", e, exc_info=True)
+                # Continue with unload even if reset fails - we tried our best
         coordinator._cancel_skip_next_expiry()
         # A pending reset stays persisted and is retried after the next setup
         coordinator._cancel_reset_retry()

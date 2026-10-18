@@ -216,6 +216,7 @@ async def test_accepted_but_ignored_limit_cannot_authorise_grid_activation(rig):
     coordinator.is_active = True
     hass.states.get(GRID_IMPORT).state = "33000"
     # The service returns successfully; its device state retains the old 6 kW.
+    hass.services.async_call = AsyncMock()
     await coordinator._control_charge(80)
     calls = hass.services.async_call.await_args_list
     assert any(call.args[0] == "number" and call.args[2].get("entity_id") == AC_LIMIT for call in calls)

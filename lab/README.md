@@ -1,5 +1,8 @@
 # Home-Assistant-Labor für Inverter Charge Night
 
+Der rekonstruierte Entwicklungsstand vom 18.10.2026 steht in
+[docs/DEVELOPMENT_HANDOFF.md](../docs/DEVELOPMENT_HANDOFF.md).
+
 Eine eigene Home-Assistant-Instanz zum Ausprobieren der Nachtladung, mit echtem
 Einrichtungsassistenten, echten Entitäten, Serviceaufrufen, Recorder und Oberfläche.
 Der Wechselrichter ist ein Energiemodell. Die Integrationen werden aus den beiden
@@ -94,6 +97,39 @@ pwsh -File lab/manage_evcc.ps1 start
 `manage.ps1` findet `.venv-lab` oder die bereits eingerichtete benachbarte
 `ha-venv`. Ein anderer Interpreter kann mit `-Python C:\Pfad\python.exe`
 angegeben werden. Dieser muss HA 2026.10.2 und die Labor-Abhängigkeiten enthalten.
+
+### Zweites Labor neben einer bereits laufenden Instanz
+
+Die frühere Instanz kann die Standardports weiter belegen. Dafür unterstützt
+das Labor eine getrennte IPv4-Loopback-Adresse für den Wechselrichter sowie
+eigene Ports für HA, evcc und die simulierten Wallboxen:
+
+```powershell
+.venv-lab/Scripts/python.exe -X utf8 lab/evcc_config.py --device-port 18082 --ui-port 7071
+pwsh -File lab/manage.ps1 start -Port 8124 -InverterHost 127.0.0.2 -DeviceApiPort 18082
+pwsh -File lab/manage_evcc.ps1 start
+```
+
+Danach HA unter <http://127.0.0.1:8124> und evcc unter
+<http://127.0.0.1:7071> öffnen. Beide verwenden ausschließlich die neue
+Konfiguration in diesem Checkout. Für spätere Starts dieselben HA-Parameter
+verwenden. `status` zeigt die tatsächlich gestartete HA-Adresse aus dem
+Prozessnachweis; `stop` betrifft nur den von diesem Checkout gestarteten Prozess.
+
+Vor den gekoppelten Tests das interaktive Labor dieses Checkouts stoppen und
+warten, bis `status` keinen Prozess mehr meldet. Tests auf der getrennten
+Wechselrichteradresse starten:
+
+```powershell
+$env:ICN_LAB_INVERTER_HOST = '127.0.0.2'
+.venv-lab/Scripts/python.exe -X utf8 lab/check_kostal.py
+.venv-lab/Scripts/python.exe -X utf8 lab/check_grid.py
+.venv-lab/Scripts/python.exe -X utf8 lab/check_communication.py
+```
+
+Der Standard bleibt `127.0.0.1`; andere IPv4-Loopback-Adressen sind erlaubt.
+LAN-Adressen werden abgelehnt. Die Portsperre des KORE-Tests prüft dieselbe
+Adresse, zu der sich seine Clients anschließend verbinden.
 
 Der Audio-Build benötigt Visual Studio C++ Build Tools. Der Helfer lädt die
 festgelegten offiziellen PyPI-Quellen, prüft ihre SHA256-Werte und ändert nur die

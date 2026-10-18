@@ -214,7 +214,7 @@ async def test_verification_applies_target_once_min_soc_entity_appears(mock_hass
         await coordinator._verify_and_restore_min_soc()
 
         mock_hass.services.async_call.assert_awaited_once_with(
-            "number", "set_value", {"entity_id": MIN_SOC, "value": 45.0}
+            "number", "set_value", {"entity_id": MIN_SOC, "value": 45.0}, blocking=True
         )
         assert coordinator.original_min_soc == 8.0
         assert coordinator._last_soc_set == 45.0

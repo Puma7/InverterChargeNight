@@ -78,6 +78,12 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
             "current_soc": data.get("current_soc"),
             "operation_mode": data.get("operation_mode"),
             "skip_next": data.get("skip_next", False),
+            "adhoc_reason": self.coordinator._adhoc_reason,
+            "adhoc_until": (
+                self.coordinator._adhoc_until.isoformat() if self.coordinator._adhoc_until else None
+            ),
+            "original_min_soc": self.coordinator.original_min_soc,
+            "pending_reset": self.coordinator._pending_reset,
             # Planner v2 (plan 006): only present while a bridge plan exists
             "plan_reason": data.get("plan_reason"),
             "bridge_kwh": data.get("bridge_kwh"),

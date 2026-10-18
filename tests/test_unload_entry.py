@@ -18,6 +18,13 @@ async def test_async_unload_entry_active_resets(mock_hass, mock_config_entry):
     coordinator._remove_inverter_min_soc_listener = MagicMock()
     coordinator._stop_periodic_verification = AsyncMock()
 
+    async def assert_writers_stopped_before_reset():
+        assert coordinator._unloading
+        coordinator._remove_inverter_min_soc_listener.assert_called_once()
+        coordinator._stop_periodic_verification.assert_awaited_once()
+
+    coordinator._reset_settings.side_effect = assert_writers_stopped_before_reset
+
     mock_config_entry.runtime_data = coordinator
     mock_hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
 

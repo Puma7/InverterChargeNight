@@ -1,5 +1,7 @@
 # Experimental Windows development runtime, pinned to the tested HA release.
 homeassistant==2026.10.2
+aiohasupervisor==0.6.0
+infrared-protocols==10.1.0
 time-machine==2.19.0
 gTTS==2.5.4
 home-assistant-frontend==20260930.4

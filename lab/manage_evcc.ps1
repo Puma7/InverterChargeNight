@@ -2,6 +2,11 @@ param([ValidateSet('start', 'stop', 'status')][string]$Action = 'start')
 $ErrorActionPreference = 'Stop'
 $evccPath = Join-Path $PSScriptRoot 'runtime\evcc'
 $recordPath = Join-Path $evccPath 'process.json'
+$evccUrl = 'http://127.0.0.1:7070'
+$endpointPath = Join-Path $evccPath 'endpoint.json'
+if (Test-Path -LiteralPath $endpointPath) {
+    $evccUrl = (Get-Content -LiteralPath $endpointPath -Raw | ConvertFrom-Json).url
+}
 $managedProcess = $null
 if (Test-Path -LiteralPath $recordPath) {
     $record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
@@ -12,7 +17,7 @@ if (Test-Path -LiteralPath $recordPath) {
 }
 switch ($Action) {
     'start' {
-        if ($managedProcess) { Write-Output 'evcc already running: http://127.0.0.1:7070'; exit 0 }
+        if ($managedProcess) { Write-Output ('evcc already running: ' + $evccUrl); exit 0 }
         $binary = Join-Path $evccPath 'evcc.exe'
         if (-not (Test-Path -LiteralPath $binary)) { throw 'Run python lab/install_evcc.py and python lab/evcc_config.py first.' }
         foreach ($box in @(1, 2)) {
@@ -27,14 +32,14 @@ switch ($Action) {
             -RedirectStandardError (Join-Path $evccPath 'stderr.log')
         @{pid=$startedProcess.Id; started=$startedProcess.StartTime.ToUniversalTime().ToString('o')} |
             ConvertTo-Json | Set-Content -LiteralPath $recordPath -Encoding utf8
-        Write-Output 'Starting evcc: http://127.0.0.1:7070'
+        Write-Output ('Starting evcc: ' + $evccUrl)
     }
     'stop' {
         if ($managedProcess) { Stop-Process -Id $managedProcess.Id; Write-Output 'evcc stopped.' }
         else { Write-Output 'No managed evcc process is running.' }
     }
     'status' {
-        if ($managedProcess) { Write-Output ('evcc running, PID ' + $managedProcess.Id + ': http://127.0.0.1:7070') }
+        if ($managedProcess) { Write-Output ('evcc running, PID ' + $managedProcess.Id + ': ' + $evccUrl) }
         else { Write-Output 'No managed evcc process is running.' }
     }
 }

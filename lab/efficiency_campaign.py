@@ -11,6 +11,11 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
     from homeassistant.util import dt as dt_util
 
     sun = hass.states.get("sun.sun")
+    # This measurement fixture requires darkness. Stop the temporary HA sun
+    # entry before publishing it, otherwise its next real daytime update can
+    # overwrite the fixture halfway through the measurement campaign.
+    for sun_entry in hass.config_entries.async_entries("sun"):
+        await hass.config_entries.async_unload(sun_entry.entry_id)
     hass.states.async_set("sun.sun", "below_horizon", dict(sun.attributes) if sun else {})
     co = planner.runtime_data
     import logging
@@ -55,6 +60,7 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
 
     clock = [dt_util.now()]
     actual_hours = 0
+    verification_steps = 0
     with patch.object(co, "_efficiency_now", side_effect=lambda: clock[0]):
         for iteration in range(480):
             # Independent, smooth reference fixture with a unique optimum at
@@ -69,12 +75,21 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
             await grid_switch.coordinator.async_refresh()
             await process.async_refresh()
             await hass.async_block_till_done()
+            trial = co._auto_test_power_w if co._auto_test_active else None
+            await co._verify_ac_charge_limit()
+            if trial is not None:
+                verification_steps += 1
+                if not co._auto_test_active or lab.plant.charge_limit != trial:
+                    check("periodic verification preserves the confirmed efficiency trial", False,
+                          {"trial": trial, "physical": lab.plant.charge_limit})
             await co._handle_auto_charge()
             if iteration % 60 == 0:
                 print(f"Finder sample {iteration}: state={co.auto_test_state}, enabled={co.auto_efficient_charge}, grid={lab.plant.grid_charge}, target_reached={co.target_reached}, SOC={lab.plant.soc:.1f}, results={co.get_auto_efficiency_data()}", flush=True)
             if not co.auto_efficient_charge:
                 break
     data = co.get_auto_efficiency_data()
+    check("periodic verification preserves each confirmed efficiency trial", verification_steps > 0,
+          verification_steps)
     check("efficiency search finishes using real KORE power sensors", not co.auto_efficient_charge,
           {"hours": round(actual_hours, 2), "state": co.auto_test_state, "data": data})
     check("efficiency search locates the known 8 kW fixture optimum",

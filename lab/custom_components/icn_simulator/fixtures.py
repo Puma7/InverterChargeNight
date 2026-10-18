@@ -2,16 +2,19 @@
 import asyncio
 from homeassistant.helpers import entity_registry as er
 
+from .endpoints import inverter_host
+
 
 async def configure_kore(hass, proxy_port=None, proxy_client_timeout_s=0, enable_g3=False):
-    entries = [e for e in hass.config_entries.async_entries("kostal_kore") if e.data.get("host") == "127.0.0.1"]
+    host = inverter_host()
+    entries = [e for e in hass.config_entries.async_entries("kostal_kore") if e.data.get("host") == host]
     if entries:
         entry = entries[0]
         if entry.state.value != "loaded":
             await hass.config_entries.async_setup(entry.entry_id)
     else:
         result = await hass.config_entries.flow.async_init("kostal_kore", context={"source": "user"},
-            data={"host": "127.0.0.1", "password": "lab-only", "service_code": "123456"})
+            data={"host": host, "password": "lab-only", "service_code": "123456"})
         if result.get("step_id") != "setup_options":
             raise RuntimeError(f"KORE loopback login failed: {result.get('errors')}")
         result = await hass.config_entries.flow.async_configure(result["flow_id"],

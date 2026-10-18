@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timedelta
+import asyncio
 
 import pytest
 
@@ -42,6 +43,7 @@ def _make_coordinator(mock_hass, mock_config_entry, mode=MODE_MORNING_DISCHARGE,
     with patch.object(InverterChargeNightCoordinator, "__init__", lambda self, *a, **kw: None):
         coord = InverterChargeNightCoordinator.__new__(InverterChargeNightCoordinator)
         coord.hass = mock_hass
+        coord._min_soc_write_lock = asyncio.Lock()
         coord.entry = mock_config_entry
         coord.config = data
         coord.operation_mode = mode

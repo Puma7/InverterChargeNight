@@ -5,6 +5,19 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.1] - 2026-10-18
+
+### Fixed
+- Wait for the min-SOC restore and confirm its feedback before forgetting the original floor. An evening reserve opened immediately after night charging can no longer capture the previous night target as its permanent restore value. Unconfirmed restores retain the original value and use the existing retry mechanism.
+- Report an unconfirmed discharge release as a pending reset instead of claiming that no hold existed. The coupled laboratory check verifies the delayed feedback and the subsequent reset retry before checking physical discharge.
+- Verify a running efficiency trial and its charge activation against the current test power instead of an older planner setpoint. Connection-budget checks still interrupt the trial and reduce charging when headroom is exhausted or the meter is unreadable.
+- Close simulator Modbus clients before awaiting server shutdown, preventing connected or partial-request clients from blocking the laboratory's clean shutdown.
+- Require fresh min-SOC restore feedback, refresh an unchanged cached original, and stop/serialize floor verification before unload restoration. Discard efficiency trials after downward setpoint drift and distinguish an unrelated pending reset from a released hold.
+- Wait for observed KORE control entities in the coupled lab and explicitly require its deliberately delayed release to report a pending reset.
+
+### Added
+- Expose the ad-hoc window reason, release time, original min-SOC and pending reset on the target SOC sensor, making an automatic evening reserve distinguishable from a failed night-window reset.
+
 ## [3.10.0] - 2026-10-17
 
 ### Changed

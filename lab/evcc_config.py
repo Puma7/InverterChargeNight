@@ -66,7 +66,16 @@ def seed(binary: Path, database: Path, config: Path):
 
 
 if __name__ == "__main__":
+    import argparse
+    import json
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--device-port", type=int, default=18080)
+    parser.add_argument("--ui-port", type=int, default=7070)
+    args = parser.parse_args()
+    if not all(1 <= port <= 65535 for port in (args.device_port, args.ui_port)):
+        parser.error("Ports must be between 1 and 65535")
     target = Path(__file__).resolve().parent / "runtime/evcc/evcc.yaml"
     target.parent.mkdir(parents=True, exist_ok=True)
-    write(target)
+    write(target, device_port=args.device_port, ui_port=args.ui_port)
+    target.with_name("endpoint.json").write_text(json.dumps({"url": f"http://127.0.0.1:{args.ui_port}"}) + "\n", encoding="utf-8")
     print(target)

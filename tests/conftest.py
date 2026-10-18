@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import time
+from datetime import UTC, datetime, time
 
 import pytest
 from homeassistant.core import HomeAssistant
@@ -92,12 +92,17 @@ def mock_hass() -> HomeAssistant:
     )
     hass.services = MagicMock()
     async def complete_service(domain, service, data, **kwargs):
-        # A normal blocking OFF completes with actual feedback. Fault tests
+        # A normal blocking write completes with actual feedback. Fault tests
         # replace this actor to model ignored commands or transport failures.
         if domain == "switch" and service == "turn_off" and kwargs.get("blocking"):
             state = states.get(data.get("entity_id"))
             if state is not None and state.state == "on":
                 state.state = "off"
+        if domain == "number" and service == "set_value" and kwargs.get("blocking"):
+            state = states.get(data.get("entity_id"))
+            if state is not None:
+                state.state = str(data["value"])
+                state.last_reported = datetime.now(UTC)
 
     hass.services.async_call = AsyncMock(side_effect=complete_service)
     hass.async_create_task = MagicMock(side_effect=lambda coro, **kwargs: coro.close())
