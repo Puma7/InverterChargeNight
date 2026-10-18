@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 import json
+from ipaddress import IPv4Address
 import logging
 import os
 from pathlib import Path
@@ -19,6 +20,9 @@ LAB = Path(__file__).resolve().parent
 
 
 async def main():
+    host = os.environ.get("ICN_LAB_INVERTER_HOST", "127.0.0.1")
+    if not IPv4Address(host).is_loopback:
+        raise ValueError("ICN_LAB_INVERTER_HOST must be an IPv4 loopback address")
     # Refuse before any client connects. A failed emulator bind must never
     # leave this campaign writing test values to a different running lab.
     for port in (80, 1502):
@@ -26,7 +30,7 @@ async def main():
             if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
                 probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
             try:
-                probe.bind(("127.0.0.1", port))
+                probe.bind((host, port))
             except OSError as err:
                 raise RuntimeError(f"Lab port {port} is occupied; stop the running lab first") from err
     from windows_support import install
@@ -59,16 +63,21 @@ async def main():
         hass.config.skip_pip_packages = []
         loader.async_setup(hass)
         try:
-            await bootstrap.async_from_config_dict({"homeassistant": {"time_zone": "Europe/Berlin", "latitude": 52.52, "longitude": 13.405}, "sun": {},
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                http_port = listener.getsockname()[1]
+            await bootstrap.async_from_config_dict({"homeassistant": {"time_zone": "Europe/Berlin", "latitude": 52.52, "longitude": 13.405},
+                "http": {"server_host": "127.0.0.1", "server_port": http_port}, "sun": {},
                 "icn_simulator": {"auto_configure": False, "kostal_emulator": True}}, hass)
             if "icn_simulator" not in hass.config.components:
                 raise RuntimeError("Own simulator did not start; refusing all inverter client calls")
             await hass.async_start()
             await hass.async_block_till_done()
+            check("isolated HA HTTP starts without using the interactive lab port", "http" in hass.config.components, http_port)
             lab = hass.data["icn_simulator"]
             lab.plant.speed = 0
             async with ClientSession() as session:
-                async with ApiClient(session, "127.0.0.1") as client:
+                async with ApiClient(session, host) as client:
                     await client.login("lab-only", service_code="123456")
                     me = await client.get_me()
                     check("real SCRAM/AES client logs in as installer", me.role == "INSTALLER")
@@ -77,7 +86,7 @@ async def main():
                     lab.plant.advance(60)
                     values = await client.get_process_data_values("devices:local:battery", "SoC")
                     check("real REST client reads physical SoC", values["devices:local:battery"]["SoC"].value > 25)
-                bad = ApiClient(session, "127.0.0.1")
+                bad = ApiClient(session, host)
                 try:
                     await bad.login("wrong")
                 except AuthenticationException:
@@ -87,7 +96,7 @@ async def main():
 
             from custom_components.kostal_kore.modbus_client import KostalModbusClient
             from custom_components.kostal_kore.modbus_registers import REG_BAT_MAX_CHARGE_LIMIT, REG_BATTERY_STATE_OF_CHARGE
-            client = KostalModbusClient("127.0.0.1", port=1502, unit_id=71)
+            client = KostalModbusClient(host, port=1502, unit_id=71)
             try:
                 await client.connect()
                 await client.detect_endianness()
@@ -100,7 +109,7 @@ async def main():
                 await client.disconnect()
 
             result = await hass.config_entries.flow.async_init("kostal_kore", context={"source": "user"},
-                data={"host": "127.0.0.1", "password": "lab-only", "service_code": "123456"})
+                data={"host": host, "password": "lab-only", "service_code": "123456"})
             check("KORE setup authenticates against emulator", result.get("step_id") == "setup_options", result.get("errors"))
             result = await hass.config_entries.flow.async_configure(result["flow_id"],
                 {"modbus_enabled": True, "modbus_port": 1502, "modbus_unit_id": 71})
@@ -182,6 +191,8 @@ async def main():
                   {"grid_charge": lab.plant.grid_charge, "min_soc": lab.plant.min_soc})
             from window_handoff_campaign import check_window_handoff
             await check_window_handoff(hass, lab, planner, entry, check)
+            from min_soc_recovery_campaign import check_min_soc_recovery
+            await asyncio.wait_for(check_min_soc_recovery(hass, lab, planner, entry, check), 180)
             from efficiency_campaign import check_efficiency
             await asyncio.wait_for(check_efficiency(hass, lab, planner, entry, check), 180)
             await hass.config_entries.async_unload(planner.entry_id)

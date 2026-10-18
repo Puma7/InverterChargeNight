@@ -16,6 +16,8 @@ import struct
 from aiohttp import web
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from .endpoints import inverter_host
+
 PASSWORD = "lab-only"
 SERVICE_CODE = "123456"
 
@@ -38,13 +40,14 @@ class KostalEmulator:
         self.modbus_delay_s = 0
 
     async def start(self, http_port=80, modbus_port=1502):
+        host = inverter_host()
         application = web.Application()
         application.router.add_route("*", "/api/v1/{path:.*}", self.rest)
         self.runner = web.AppRunner(application)
         await self.runner.setup()
         try:
-            await web.TCPSite(self.runner, "127.0.0.1", http_port).start()
-            self.server = await asyncio.start_server(self.modbus, "127.0.0.1", modbus_port)
+            await web.TCPSite(self.runner, host, http_port).start()
+            self.server = await asyncio.start_server(self.modbus, host, modbus_port)
         except Exception:
             await self.stop()
             raise
@@ -52,10 +55,14 @@ class KostalEmulator:
     async def stop(self):
         if self.server:
             self.server.close()
-            await self.server.wait_closed()
-        for client in tuple(self.clients):
+        # Server.wait_closed() also waits for active connections. Close those
+        # first; a connected KORE client would otherwise deadlock HA shutdown.
+        clients = tuple(self.clients)
+        for client in clients:
             client.close()
-            await client.wait_closed()
+        await asyncio.gather(*(client.wait_closed() for client in clients), return_exceptions=True)
+        if self.server:
+            await self.server.wait_closed()
         if self.runner:
             await self.runner.cleanup()
 

@@ -180,6 +180,10 @@ async def _async_allow_discharge(call: ServiceCall) -> None:
     """Release a hold or a charge before its time is up."""
     coordinator = _coordinator_for(call.hass, call)
     if not await coordinator.async_allow_discharge():
+        # A real inverter may acknowledge the restore before its next poll
+        # confirms it. The window has ended, but its reset is still retried.
+        if coordinator._pending_reset:
+            raise HomeAssistantError(translation_domain=DOMAIN, translation_key="reset_failed")
         raise HomeAssistantError(translation_domain=DOMAIN, translation_key="nothing_to_release")
 
 

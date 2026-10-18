@@ -343,6 +343,7 @@ def test_every_exception_carries_a_message_object():
 
 def _adhoc_entry():
     entry = _entry(None)
+    entry.runtime_data._pending_reset = False
     entry.runtime_data.async_charge_to = AsyncMock(return_value=True)
     entry.runtime_data.async_block_discharge = AsyncMock(return_value=True)
     entry.runtime_data.async_allow_discharge = AsyncMock(return_value=True)
@@ -430,3 +431,17 @@ async def test_releasing_nothing_says_so():
     with pytest.raises(HomeAssistantError) as err:
         await services._async_allow_discharge(_call(hass))
     assert err.value.translation_key == "nothing_to_release"
+
+
+@pytest.mark.asyncio
+async def test_release_with_unconfirmed_feedback_reports_the_pending_reset():
+    entry = _adhoc_entry()
+    entry.runtime_data.async_allow_discharge.return_value = False
+    entry.runtime_data._pending_reset = True
+    hass = _hass_with([entry])
+
+    with pytest.raises(HomeAssistantError) as err:
+        await services._async_allow_discharge(_call(hass))
+
+    entry.runtime_data.async_allow_discharge.assert_awaited_once_with()
+    assert err.value.translation_key == "reset_failed"

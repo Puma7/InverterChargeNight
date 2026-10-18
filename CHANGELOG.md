@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Wait for the min-SOC restore and confirm its feedback before forgetting the original floor. An evening reserve opened immediately after night charging can no longer capture the previous night target as its permanent restore value. Unconfirmed restores retain the original value and use the existing retry mechanism.
+- Report an unconfirmed discharge release as a pending reset instead of claiming that no hold existed. The coupled laboratory check verifies the delayed feedback and the subsequent reset retry before checking physical discharge.
+- Verify a running efficiency trial and its charge activation against the current test power instead of an older planner setpoint. Connection-budget checks still interrupt the trial and reduce charging when headroom is exhausted or the meter is unreadable.
+- Close simulator Modbus clients before awaiting server shutdown, preventing connected or partial-request clients from blocking the laboratory's clean shutdown.
 
 ### Added
 - Expose the ad-hoc window reason, release time, original min-SOC and pending reset on the target SOC sensor, making an automatic evening reserve distinguishable from a failed night-window reset.

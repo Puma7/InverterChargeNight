@@ -2,6 +2,7 @@
 
 
 async def check_window_handoff(hass, lab, planner, kore_entry, check):
+    from homeassistant.exceptions import HomeAssistantError
     from homeassistant.util import dt as dt_util
 
     co = planner.runtime_data
@@ -31,8 +32,13 @@ async def check_window_handoff(hass, lab, planner, kore_entry, check):
           co.is_active and co.original_min_soc == 8 and lab.plant.min_soc == 16,
           {"original_min_soc": co.original_min_soc, "physical_min_soc": lab.plant.min_soc})
 
-    await hass.services.async_call("inverter_charge_night", "allow_discharge",
-        {"config_entry_id": planner.entry_id}, blocking=True)
+    try:
+        await hass.services.async_call("inverter_charge_night", "allow_discharge",
+            {"config_entry_id": planner.entry_id}, blocking=True)
+    except HomeAssistantError as err:
+        check("delayed release feedback reports a pending reset, not a missing hold",
+              err.translation_key == "reset_failed" and co._pending_reset and not co.is_active,
+              {"translation_key": err.translation_key, "pending_reset": co._pending_reset})
     await hass.async_block_till_done()
     # KORE can debounce feedback past the service handler. Complete a real
     # poll, then invoke the same retry that its scheduled backoff would call.

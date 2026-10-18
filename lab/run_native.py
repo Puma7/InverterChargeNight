@@ -27,6 +27,8 @@ async def main() -> None:
     hass.config.skip_pip_packages = []
     config = await ha_config.async_hass_config_yaml(hass)
     config["http"]["server_host"] = "127.0.0.1"
+    config["http"]["server_port"] = int(os.environ.get("ICN_LAB_HA_PORT", config["http"].get("server_port", 8123)))
+    config["icn_simulator"]["api_port"] = int(os.environ.get("ICN_LAB_DEVICE_PORT", config["icn_simulator"].get("api_port", 18080)))
     stopped = asyncio.Event()
     stop_file = directory / "native.stop"
     stop_file.unlink(missing_ok=True)
@@ -39,7 +41,7 @@ async def main() -> None:
         # Report dependency/schema failures before claiming the UI is ready.
         from homeassistant.helpers.service import async_get_all_descriptions
         await async_get_all_descriptions(hass)
-        print("Home Assistant lab: http://127.0.0.1:8123/icn-lab", flush=True)
+        print(f"Home Assistant lab: http://127.0.0.1:{config['http']['server_port']}/icn-lab", flush=True)
         while not stopped.is_set():
             if stop_file.exists():
                 stop_file.unlink()

@@ -5347,7 +5347,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._grid_limit_configured():
             target = self._ac_charge_limit_target()
             current = self._get_power_w(target[0]) if target is not None else None
-            requested = self.planned_charge_power_w
+            requested = (
+                float(self._auto_test_power_w)
+                if self._auto_test_active and self._auto_test_power_w is not None
+                else self.planned_charge_power_w
+            )
             if requested is None:
                 requested = current if current is not None else 0.0
             allowed = float(int(self._grid_limited_setpoint(requested)))
@@ -5752,8 +5756,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         house connection protection must not have, so the value is read back
         and rewritten when it has drifted.
         """
-        written = self._planned_setpoint_written_w
-        if written is None or self._is_backup_active():
+        if self._is_backup_active():
+            return
+        if self._auto_test_active:
+            # The live trial owns its setpoint. Comparing it to the older
+            # charging plan cancels valid measurements at every verification.
+            # Connection protection still outranks the trial and may end it.
+            await self._limit_the_efficiency_finder()
+        written = (
+            float(self._auto_test_power_w)
+            if self._auto_test_active and self._auto_test_power_w is not None
+            else self._planned_setpoint_written_w
+        )
+        if written is None:
             return
         target = self._ac_charge_limit_target()
         if target is None:

@@ -1385,7 +1385,7 @@
       "message": "Der Planer konnte kein Ziel berechnen. Im Protokoll steht, welche Einstellung ihm im Weg stand."
     },
     "reset_failed": {
-      "message": "Der Wechselrichter hat den Reset nicht angenommen. Er wird automatisch wiederholt; im Protokoll steht, welche Einstellung fehlgeschlagen ist."
+      "message": "Die Rücksetzung ist noch nicht vollständig bestätigt. Sie wird automatisch wiederholt; im Protokoll steht, welche Einstellung noch nicht bestätigt wurde."
     }
   },
   "issues": {
