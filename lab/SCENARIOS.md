@@ -9,6 +9,9 @@ und regelt zwei HTTP-Wallboxen. evcc erhält keinen schreibenden Batteriezugriff
 
 | Fall | Anregung | Beobachtete Anforderung | Nachweis |
 |---|---|---|---|
+| Nacht mit vollem Akku | 100% Start, 30% Ziel, 2 kW Hauslast | Sechs Stunden Hausversorgung aus dem Akku, keine Vollsperre; morgens Min-SOC wieder 8% | `check_kostal.py`, `night_floor_campaign.py` |
+| Akku erreicht nachts die Untergrenze | 35% Start, 30% Ziel | Erst Akkuversorgung, ab 30% Netzbezug; nach Freigabe auf 8% wieder Akkuversorgung | `night_floor_campaign.py` |
+| Akku unter Nachtziel | 15% Start, 30% Ziel | Nur bis 30% laden, danach Netzladen aus; morgens Ausgangswert wiederherstellen | `night_floor_campaign.py` |
 | Ein Auto | 22-kW-Last | Haus, Auto und Akku erscheinen in derselben Netzbilanz | Modelltests, Dashboard |
 | Zwei Autos | 2 × 22 kW, zusätzlich Akku | ICN setzt Ladegrenze auf 0 W; evcc begrenzt beide Ladepunkte | `check_grid.py` |
 | Kochen und Wärmepumpe | 6 kW Wärmepumpe, 7 kW Herd, 3 kW Ofen | evcc reduziert weiter, jede Phase bleibt im Dauerbudget | `check_grid.py` |

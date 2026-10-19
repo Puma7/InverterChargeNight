@@ -258,7 +258,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # may run on an instance whose constructor did not (test doubles built with
     # __new__).
     _original_discharge_limit: float | None = None
-    # Plan 009: the raised min SOC floor of the running window, the state the
+    # Explicit reservations may keep a raised min SOC floor, the state the
     # discharge block switch had before this window turned it on, and the way
     # already announced in the log for this window.
     _window_floor_soc: float | None = None
@@ -877,19 +877,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._representable_min_soc(floor, round_up=(soc < target_soc and not self.target_reached))
 
     def inverter_floor_soc(self, target_soc: float | None = None) -> float | None:
-        """The value written to the inverter's min SOC entity (plan 009).
+        """The minimum SOC written to the inverter.
 
-        Charge target and written floor are two different things. They are equal
-        unless the discharge block runs over the min SOC: a battery does not
-        discharge below its min SOC, so raising the floor to the charge level the
-        window started at keeps stored PV in the battery while grid energy is
-        cheap. The floor only ever rises within a window and always stays inside
-        ``[user_min_soc, user_max_soc]``.
-
-        Everything that compares or restores the *written* min SOC must use this,
-        not :meth:`current_target_soc` - otherwise the verification writes the
-        raised floor straight back down. "Target reached" keeps using the charge
-        target.
+        Scheduled nights use the planned charge target, so energy above it can
+        supply the house. Only an explicit ad-hoc reservation may preserve a
+        higher initial/rising SOC. Target completion always uses the charge
+        target, while verification and restoration use this written floor.
         """
         if target_soc is None:
             target_soc = self.current_target_soc()
@@ -897,7 +890,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         if not self.is_active or self._ending:
             return target_soc
-        if self._discharge_block_method() != DISCHARGE_BLOCK_VIA_MIN_SOC:
+        if self._adhoc_until is None or self._discharge_block_method() != DISCHARGE_BLOCK_VIA_MIN_SOC:
             return target_soc
         floor = self._window_floor_soc
         if floor is None or floor <= target_soc:
@@ -2059,16 +2052,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return True
 
     def _discharge_block_method(self) -> str | None:
-        """Which of the three ways blocks the discharge this window (plan 009).
+        """Return the floor or explicit reservation mechanism in use.
 
-        Checked against the configuration in this order: a switch of the
-        inverter, the discharge power limit, and finally the min SOC - which
-        needs no vendor feature at all. ``None`` means the battery is left free
-        to discharge: the mode is off, or this is a morning discharge window,
-        where a block would be pointless.
+        Scheduled nights always use only their target min SOC. For an explicit
+        reservation, auto chooses a switch, then a discharge limit, then a
+        raised min-SOC floor. Off disables these additional reservation blocks.
+        Morning discharge never applies a discharge block.
         """
         if self.is_discharge_mode:
             return None
+        if self._adhoc_until is None:
+            # A scheduled night only preserves the planned minimum. Existing
+            # energy above that floor must remain available to the house.
+            return DISCHARGE_BLOCK_VIA_MIN_SOC
         mode = str(self.config.get(CONF_DISCHARGE_BLOCK_MODE, DEFAULT_DISCHARGE_BLOCK_MODE))
         if mode == DISCHARGE_BLOCK_OFF:
             return None
@@ -2083,20 +2079,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._discharge_block_method() or DISCHARGE_BLOCK_OFF
 
     def _update_window_floor(self) -> None:
-        """Raise the window's min SOC floor to the current battery SOC.
+        """Preserve initial/rising energy only for an explicit reservation.
 
-        Monotone on purpose: if the charge level falls anyway (the block did not
-        take), the floor stays up and the inverter recharges from the grid -
-        which is exactly right inside the window, where grid energy is cheap.
-
-        The floor does not follow our own grid charging. It would otherwise feed
-        back on itself: the floor is written to the min SOC, the inverter buys
-        energy up to it, overshoots it a little, the floor follows the new charge
-        level, and the battery ratchets to the user maximum night after night -
-        past the planned target, at full price, and with no room left for the
-        next day's PV.
+        The reservation floor never follows our own grid charging, which could
+        otherwise ratchet the battery beyond its charge target. Scheduled
+        nights never raise their floor to the current battery SOC.
         """
-        if not self.is_active or self._ending:
+        if not self.is_active or self._ending or self._adhoc_until is None:
             return
         if self._discharge_block_method() != DISCHARGE_BLOCK_VIA_MIN_SOC:
             return
@@ -2241,26 +2230,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return True
 
     async def _write_raised_min_soc_floor(self) -> None:
-        """Write the window's floor to the min SOC entity at the window start.
+        """Apply the floor immediately when the charge target is already met.
 
-        Above the charge target it always has to go now. Equal to the target it
-        is normally left to _control_charge on the next update - but that update
-        returns early when the battery is already at the target and never gets
-        there, and the periodic verification sleeps a whole update interval
-        before its first round. A hold is always that case: its target *is* the
-        level it finds. So the battery went on running the house for up to an
-        hour after the evening rescue said to hold it.
-
-        Only where the min SOC is what holds the battery. A block over the
-        discharge switch or limit already holds from _apply_discharge_block, and
-        a configured window with the block switched off keeps doing exactly what
-        it did before plan 009 - that one is the user's choice. An ad-hoc hold
-        with the block switched off is not: holding is the whole of what it was
-        opened for, and the min SOC is the only lever it has.
-
-        When the target is not reached yet, _control_charge still writes it -
-        writing it here as well would start the charge a step early, and on an
-        inverter that buys up to its min SOC that is not this function's call.
+        The normal update returns early in this case, so it cannot be left to
+        _control_charge. A scheduled night writes its planned target, whereas
+        an explicit reservation may hold a higher SOC. Below the charge target,
+        _control_charge still owns the write and its charging safety checks.
         """
         target_soc = self.current_target_soc()
         floor_soc = self.inverter_floor_soc(target_soc)
@@ -2312,15 +2287,30 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def _apply_discharge_block(self, announce: bool = False) -> None:
-        """Keep the battery from running the house while the window is open.
+        """Apply an explicit reservation or release a legacy night block.
 
-        Three ways, chosen by :meth:`_discharge_block_method`: the inverter's
-        own switch, the discharge power limit set to 0, or - on an inverter that
-        offers neither - raising the min SOC floor, which every battery honours.
-        Never applied in discharge mode or in backup mode. ``announce`` logs the
-        chosen way once per window.
+        Scheduled nights never enable the block switch or zero the discharge
+        limit. Explicit reservations retain their configured mechanism.
+        Backup operation and morning discharge do not apply blocks.
         """
         if self.is_discharge_mode or self._is_backup_active():
+            return
+        if self._adhoc_until is None:
+            # Older versions captured these settings before blocking an entire
+            # night. Restore only values that release that ICN-owned block;
+            # never turn a pre-existing block on or write a zero limit here.
+            before = (self._original_discharge_block, self._original_discharge_limit,
+                      self._window_floor_soc)
+            if self._original_discharge_block is False:
+                await self._reset_discharge_block_switch()
+            if self._original_discharge_limit is not None and self._original_discharge_limit > 0:
+                await self._reset_discharge_limit()
+            self._window_floor_soc = None
+            if before != (self._original_discharge_block, self._original_discharge_limit,
+                          self._window_floor_soc):
+                self._persist_state()
+            if announce:
+                _LOGGER.info("Night window uses only the target min SOC; stored energy above it may supply the house")
             return
         method = self._discharge_block_method()
         if method is None:
@@ -2332,20 +2322,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if announce and self._discharge_block_logged != method:
             _LOGGER.info("Blocking battery discharge for this window via: %s", method)
-            if (
-                method == DISCHARGE_BLOCK_VIA_MIN_SOC
-                and self.config.get(CONF_DISCHARGE_BLOCK_MODE) is None
-            ):
-                # An entry configured before plan 009 never chose this; say so
-                # once, because the inverter now shows a min SOC above the
-                # charge target until the window ends.
-                _LOGGER.info(
-                    "No discharge block was configured, so the min SOC is raised to the "
-                    "charge level for the window and reset at its end. The inverter "
-                    "therefore shows a higher min SOC than the charge target while the "
-                    "window runs. Set the discharge block to 'off' in the options to keep "
-                    "the previous behaviour"
-                )
             self._discharge_block_logged = method
         if method == DISCHARGE_BLOCK_VIA_SWITCH:
             await self._apply_discharge_block_switch()
@@ -4089,10 +4065,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Calculate and store initial SOC for this charging period
         await self._calculate_initial_soc()
 
-        # Night charge: keep stored PV in the battery while grid energy is cheap
+        # Scheduled nights preserve only the target, not the initial battery SOC.
         if not self.is_discharge_mode:
             await self._apply_discharge_block(announce=True)
-            # A floor above the charge target has to reach the inverter now:
+            # The floor has to reach the inverter now when already above target:
             # with the battery already above the target the update below returns
             # early ("target reached") and _control_charge never runs - which is
             # exactly the case this block exists for.

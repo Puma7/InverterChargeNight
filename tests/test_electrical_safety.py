@@ -501,6 +501,8 @@ async def test_island_operation_gives_the_battery_back_to_the_house(mock_hass, c
     _register(mock_hass, battery="70")
     mock_hass.states.async_set(BACKUP, "off")
     coordinator = _make(mock_hass, {**CONFIG, CONF_BACKUP_MODE_ENTITY: BACKUP})
+    coordinator._adhoc_until = datetime(2026, 1, 15, 5, 59)
+    coordinator._adhoc_allow_grid_charge = True
     await coordinator._on_window_start(WINDOW_START)
     assert coordinator.is_active is True
     assert coordinator.original_min_soc == 8.0
@@ -626,6 +628,8 @@ async def test_disable_tears_the_window_down(mock_hass):
             "charge_power_received_entity": RECEIVED,
         },
     )
+    coordinator._adhoc_until = datetime(2026, 1, 15, 5, 59)
+    coordinator._adhoc_allow_grid_charge = True
     await coordinator._on_window_start(WINDOW_START)
     coordinator.initial_calculated_soc = 60.0
     await coordinator._start_auto_test(5000)

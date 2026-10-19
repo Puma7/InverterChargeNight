@@ -79,9 +79,9 @@ day will do.
   is held so the total import stays inside a continuous-load budget. Wallboxes and a battery on
   one 63 A connection is exactly the situation this exists for. See
   [House connection](#house-connection).
-- **Discharge block** — keeps the battery from running the house while energy is cheap, so stored
-  solar is still there when it is expensive. Uses the inverter's own switch if it has one,
-  otherwise a discharge power limit, otherwise the minimum SOC, which every battery honours. See
+- **Night floor and reservations** - scheduled nights let the battery supply the house down to
+  the planned min SOC. Explicit reservations can hold more energy using a switch, discharge
+  power limit or raised min SOC. See
   [Discharge in the Window](#discharge-in-the-window).
 - **Efficiency search** — measures at which charge power the least energy is lost between the grid
   and the battery, and then keeps to it. See [Efficiency search](#efficiency-search).
@@ -576,53 +576,34 @@ start is abandoned rather than continued at a power it was not measuring.
 
 ### Discharge in the Window
 
-Inside the cheap window the house should run from the grid, not from the battery. A kWh taken
-out of the battery at night is a kWh that has to be bought at the day tariff tomorrow, so
-discharging during the window trades expensive energy for cheap energy the wrong way round.
+A **scheduled night** sets only the planned target min SOC. Battery energy above that
+floor remains available to the house. ICN never turns on the discharge-block switch,
+sets the discharge limit to zero, or raises this floor to the initial battery SOC.
 
-There are three ways to stop it, and the integration picks the first one your configuration
-offers:
+For example, a 23:00-05:00 night starts at 100% with a planned target of 30% and an
+original min SOC of 8%. The inverter may supply the house down to 30%. If the battery
+lasts all night above that floor, no grid charging is needed. If it reaches 30%, it
+holds there. A battery starting below 30% is charged only to the planned target.
+At 05:00 ICN restores the original 8% floor. **Restoring the floor does not drain the
+battery to 8%**; it lets the house use the remaining energy normally.
 
-1. **Block Discharge Switch** - a switch of the inverter that locks the battery discharge
-   (Kostal calls it "battery discharge lock"). Cleanest way, but not every manufacturer has one.
-2. **Discharge Power Limit Entity** - a number entity for the discharge power, set to 0 for the
-   window. Also vendor-specific.
-3. **Min SOC** - the fallback that always works. **No inverter guarantees either of the two
-   entities above, but every battery honours its min SOC**: a battery does not discharge below
-   it, and the min SOC entity is the one this integration controls anyway. Raising it to the
-   charge level the window started at leaves the stored energy where it is.
+An **explicit ad-hoc reservation**, including evening rescue, can intentionally hold
+existing energy for a later period. Only these reservations use **Discharge block for
+reservations** (`Automatic` / `Off`) and its switch, zero discharge limit or raised
+min-SOC fallback. Their settings are restored at the end of the reservation.
 
-**Discharge Block** (under optional evening-reserve settings) chooses between `Automatic` (the order above,
-default) and `Off` (the battery may discharge, as it did before this feature).
+The target sensor attributes `inverter_floor_soc` and `discharge_block`
+(`switch` / `limit` / `min_soc` / `off`) expose the mechanism. For scheduled nights,
+`min_soc` means the planned partial floor, not a complete discharge lock. A higher
+floor than the charge target belongs only to an explicit reservation. The inverter's
+number step may require a rounded floor; the semantic charge target stays unchanged.
 
-#### Why the inverter may show a higher min SOC than the charge target
+When resuming an older ICN night, a captured ICN-owned block is released (a previously
+off switch or positive discharge limit), and a saved higher floor is replaced by the
+planned target. Failed releases retain their originals for retry. ICN does not cancel
+an independent user/third-party discharge lock without captured ownership.
 
-With the min SOC fallback in use, the charge target and the value written to the inverter are
-**two different numbers**, on purpose:
-
-| Value | Meaning |
-|---|---|
-| charge target (`sensor.inverter_charge_night_calculated_soc`) | how far the battery is charged from the grid |
-| inverter floor (attribute `inverter_floor_soc`) | what is written to the min SOC entity |
-
-Example: the plan wants 45 %, the battery starts the window at 70 %. The integration writes
-**70 %** to the min SOC entity so the 70 % stay put, while grid charging still stops at the
-45 % target (it is already reached). The inverter therefore displays a min SOC of 70 % during
-the window -- **this is intended**, and the value captured before the window is written back at
-the window end, like every other setting the integration touches.
-
-The floor only ever rises within a window, never falls (a jittering measurement must not cause
-writes), always stays inside your minimum and maximum SOC, survives a Home Assistant restart,
-and is cleared at the window end. It does **not** follow the integration's own grid charging:
-otherwise the raised floor would make the inverter buy up to it, overshoot it a little, and the
-floor would follow - walking the battery to your maximum SOC at full price and leaving no room
-for the next day's PV. Charge that arrives from anywhere else is protected as before.
-
-The `sensor.inverter_charge_night_calculated_soc` attributes
-`inverter_floor_soc` and `discharge_block` (`switch` / `limit` / `min_soc` / `off`) say which
-way is in use and what the floor currently is.
-
-Morning Discharge windows are never blocked -- there the point is to empty the battery.
+Morning Discharge windows do not apply a discharge block.
 
 ### Operation Flow
 
@@ -632,16 +613,14 @@ Morning Discharge windows are never blocked -- there the point is to empty the b
 2. The planner derives the target SOC in the configured planner mode
 3. The current minimum SOC, the AC charge limit and the discharge limit are stored so they
    can be restored later, and the values are persisted so they also survive a restart
-4. In Night Charge mode the discharge block is applied so the house runs from the grid and
-   the energy just bought stays in the battery: the block switch is turned on, or the discharge
-   limit is set to 0, or the min SOC floor is raised to the current charge level (see
-   "Discharge in the Window")
+4. In a scheduled Night Charge window only the target min SOC is applied. Existing
+   battery energy above it may supply the house (see "Discharge in the Window").
 
 **During Active Window (e.g., 00:00 - 05:59):**
 
 1. Target SOC is validated against the user limits
 2. The inverter's minimum SOC is set to the floor -- the charge target, or the raised
-   discharge-block floor if that is higher (only when it differs from the current value)
+   explicit reservation floor if that is higher (only when it differs from the current value)
 3. Grid charging is switched on (only when it is off), after the configured command delay
 4. The charge power needed for the remaining window time is planned, capped at what the house
    connection still carries, and published as
@@ -751,8 +730,8 @@ as "Inverter Charge Night <name>". The entity ids are stable; the display names 
   - Attributes: `is_active`, `target_reached`, `current_soc`, `operation_mode`, `skip_next`,
     `snow_nights`, `inverter_floor_soc`, `discharge_block`, and in Bridge mode `plan_reason`,
     `bridge_kwh`, `surplus_kwh`, `lower_bound_soc`, `upper_bound_soc`, `pv_crossover`
-  - `inverter_floor_soc` is what is written to the inverter's min SOC entity. It is higher than
-    the target while the discharge block runs over the min SOC (see
+  - `inverter_floor_soc` is the semantic floor for the inverter's min SOC entity. It can be higher
+    than the target during an explicit reservation using a raised min SOC (see
     [Discharge in the Window](#discharge-in-the-window)); `discharge_block` names the way in use
     (`switch` / `limit` / `min_soc` / `off`)
 
@@ -1232,7 +1211,8 @@ Step 3 -- charge power:
   efficiency finder
 - `auto_efficient_charge` - Efficiency finder enabled (also written at runtime by the switch)
 - `force_discharge_switch` - Optional switch that forces discharge to the grid
-- `discharge_limit_entity` - Optional number entity blocked to 0 during the window
+- `discharge_limit_entity` - Optional limit for explicit reservations or morning discharge;
+  scheduled night charging never sets it to zero
 - `grid_import_entity` - Optional sensor with the current grid import in W or kW; without it
   the charge power is not limited against the house connection
 - `main_fuse_a` - Main fuse of the house connection, per phase
@@ -1241,8 +1221,9 @@ Step 3 -- charge power:
 - `grid_continuous_pct` - Share of the nominal power allowed as continuous load
 - `grid_max_continuous_w` - The budget in W directly; takes precedence over the fuse size
 - `grid_headroom_w` - Safety margin kept below the budget
-- `discharge_block_switch` - Optional switch of the inverter that locks the battery discharge
-- `discharge_block_mode` - `auto` (default: switch, else power limit, else min SOC) or `off`
+- `discharge_block_switch` - Optional discharge lock used only for explicit reservations
+- `discharge_block_mode` - For explicit reservations: `auto` (switch, else power limit,
+  else raised min SOC) or `off`; scheduled nights always use only their target floor
 
 Step 4 -- advanced:
 - `update_interval` - Coordinator refresh interval in seconds (default 900)

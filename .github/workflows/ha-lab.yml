@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Puma7/KostalKore
-          ref: 053daefbdce777bde8abf37319679954b079401a
+          ref: 59ccb626ab460d5aabb27595562fe9e42a7fba81
           path: .kostal-fixture
           persist-credentials: false
       - uses: actions/setup-python@v5

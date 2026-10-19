@@ -1266,7 +1266,7 @@ def _min_soc_writes(hass) -> list[float]:
 
 @pytest.mark.asyncio
 async def test_the_connection_limit_and_the_discharge_block_run_together(mock_hass):
-    """The combination this integration is actually installed for.
+    """An explicit reservation still shares connection capacity with wallboxes.
 
     The battery starts the window fuller than the plan needs, so the discharge
     block raises the min SOC to keep that charge - and a raised floor is exactly
@@ -1278,6 +1278,8 @@ async def test_the_connection_limit_and_the_discharge_block_run_together(mock_ha
     _register(mock_hass, import_w="33000")
     mock_hass.states.async_set(BATTERY, "70")  # more than the plan asks for
     coordinator = _make_coordinator(mock_hass, LIMITED_CONFIG)
+    coordinator._adhoc_until = WINDOW_END
+    coordinator._adhoc_allow_grid_charge = True
     try:
         await coordinator._on_window_start(WINDOW_START)
         coordinator.initial_calculated_soc = 60.0

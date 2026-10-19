@@ -71,14 +71,20 @@ def test_charge_and_hold_rounding_leave_semantic_target_and_discharge_unchanged(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("soc", [20, 40])
-async def test_rounding_does_not_bypass_disabled_discharge_block(mock_hass, soc):
+async def test_night_floor_does_not_require_an_enabled_discharge_block(mock_hass, soc):
     c = make(mock_hass, discharge_block_mode="off")
     c.initial_calculated_soc = 32.5
     mock_hass.states.async_set("sensor.synthetic_soc", str(soc))
     mock_hass.services.async_call = AsyncMock()
     await c._write_raised_min_soc_floor()
-    mock_hass.services.async_call.assert_not_awaited()
-    assert c.original_min_soc is None
+    if soc < 32.5:
+        mock_hass.services.async_call.assert_not_awaited()
+        assert c.original_min_soc is None
+    else:
+        mock_hass.services.async_call.assert_awaited_once_with(
+            "number", "set_value", {"entity_id": "number.synthetic_floor", "value": 32}, blocking=True,
+        )
+        assert c.original_min_soc == 10
 
 
 @pytest.mark.asyncio
