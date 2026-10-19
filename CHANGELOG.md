@@ -5,6 +5,13 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.4] - 2026-10-19
+
+### Added
+- Include live minimum-SoC and grid-charge feedback, the captured original floor
+  and pending-reset state in diagnostics. Unavailable feedback is null, not a
+  misleading zero or off value. Configuration and measurement history are retained.
+
 ## [3.10.3] - 2026-10-19
 
 ### Fixed

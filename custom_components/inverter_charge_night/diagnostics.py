@@ -7,7 +7,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .coordinator import InverterChargeNightConfigEntry, InverterChargeNightCoordinator
+from .coordinator import InverterChargeNightConfigEntry, InverterChargeNightCoordinator, _as_float
 
 # Every config key that names an entity of the user's system. The test
 # ``test_every_entity_config_key_is_redacted`` derives the expected set from
@@ -51,6 +51,13 @@ async def async_get_config_entry_diagnostics(
         "options": async_redact_data(dict(entry.options), REDACT_KEYS),
     }
     if coordinator:
+        min_soc_entity = coordinator.config.get("min_soc_entity")
+        grid_entity = coordinator.config.get("grid_charge_switch")
+        min_soc_state = hass.states.get(min_soc_entity) if min_soc_entity else None
+        grid_state = hass.states.get(grid_entity) if grid_entity else None
+        min_soc_feedback = _as_float(min_soc_state.state) if min_soc_state else None
+        if min_soc_feedback is not None and not 0 <= min_soc_feedback <= 100:
+            min_soc_feedback = None
         auto_data = coordinator.get_auto_efficiency_data()
         auto_test_duration_s: int | None = None
         if coordinator._auto_test_active and coordinator._auto_test_start:
@@ -116,6 +123,12 @@ async def async_get_config_entry_diagnostics(
                 **coordinator.auto_test_attributes(),
             },
             "charge_control": {
+                "min_soc_feedback_pct": min_soc_feedback,
+                "grid_charge_feedback": (
+                    grid_state.state if grid_state and grid_state.state in ("on", "off") else None
+                ),
+                "original_min_soc_pct": coordinator.original_min_soc,
+                "reset_pending": coordinator._pending_reset,
                 "planned_power_w": coordinator.planned_charge_power_w,
                 "planned_power_is_applied": coordinator.planned_power_is_applied,
                 "last_commanded_power_w": coordinator._planned_setpoint_written_w,
