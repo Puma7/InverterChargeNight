@@ -12,9 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enabling charging. A rejected charging floor pauses grid charging and preserves
   the original settings for reset. Related discharge floor/stop calls also await
   their service result.
-- Round charging floors upwards to the configured number's advertised step,
-  without exceeding device or user limits. Keep the calculated charge target
-  separate; restore the original floor unchanged at window end.
+- Respect the number's advertised step and bounds for night-charge floors.
+  Round upwards only while charging is needed and downwards while holding;
+  preserve semantic discharge-block decisions and morning-discharge targets.
+  Keep the calculated charge target separate and restore the original unchanged.
 - Expose efficiency waiting reasons and a redacted control snapshot with planned,
   commanded and observed power values. Log a changed waiting reason once.
 - Serialize charge-limit writes and reset, and update the accepted command when

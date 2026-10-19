@@ -840,8 +840,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return self.override_soc
         return self.initial_calculated_soc if self.initial_calculated_soc is not None else self.calculated_soc
 
-    def _representable_min_soc(self, value: float) -> float | None:
-        """Round a floor upwards to the number's advertised step and bounds."""
+    def _representable_min_soc(self, value: float, *, round_up: bool = True) -> float | None:
+        """Select a representable floor without exceeding device/user bounds."""
         entity_id = self.config.get(CONF_MIN_SOC_ENTITY)
         state = self.hass.states.get(entity_id) if entity_id else None
         attributes: Any = state.attributes if state is not None else {}
@@ -854,11 +854,27 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         upper = _as_float(attributes.get("max"))
         upper = min(upper if upper is not None else 100.0,
                     float(self.config.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC)))
-        result = lower + math.ceil((max(value, lower) - lower) / step - 1e-9) * step
-        if result > upper + 1e-9:
-            _LOGGER.error("No representable min SOC at or above %.3f%% within %.3f%%", value, upper)
+        if round_up:
+            result = lower + math.ceil((max(value, lower) - lower) / step - 1e-9) * step
+        else:
+            result = lower + math.floor((min(value, upper) - lower) / step + 1e-9) * step
+        user_min = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
+        if result > upper + 1e-9 or result < max(lower, user_min) - 1e-9:
+            _LOGGER.error("No representable min SOC for %.3f%% within the configured bounds", value)
             return None
         return round(result, 9)
+
+    def _charging_floor_soc(self, target_soc: float) -> float | None:
+        """Keep semantic reserve decisions separate from actuator rounding."""
+        floor = self.inverter_floor_soc(target_soc)
+        if floor is None or self.is_discharge_mode:
+            return floor
+        soc = self._current_battery_soc()
+        if soc is None:
+            return None
+        # Only an actual charging request may round upwards. A hold must not
+        # create a new grid-energy demand just to reach the next input step.
+        return self._representable_min_soc(floor, round_up=(soc < target_soc and not self.target_reached))
 
     def inverter_floor_soc(self, target_soc: float | None = None) -> float | None:
         """The value written to the inverter's min SOC entity (plan 009).
@@ -880,19 +896,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if target_soc is None:
             return None
         if not self.is_active or self._ending:
-            return self._representable_min_soc(target_soc)
+            return target_soc
         if self._discharge_block_method() != DISCHARGE_BLOCK_VIA_MIN_SOC:
-            return self._representable_min_soc(target_soc)
+            return target_soc
         floor = self._window_floor_soc
         if floor is None or floor <= target_soc:
-            return self._representable_min_soc(target_soc)
+            return target_soc
         user_min_soc = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
         user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC))
         if not user_min_soc <= target_soc <= user_max_soc:
             # The target itself is out of bounds; _control_charge refuses it and
             # logs why. Raising it here would paper over that.
             return target_soc
-        return self._representable_min_soc(max(user_min_soc, min(user_max_soc, floor)))
+        return max(user_min_soc, min(user_max_soc, floor))
 
     @property
     def is_discharge_mode(self) -> bool:
@@ -2268,6 +2284,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Cannot raise the min SOC floor yet - entity unavailable")
             return
         current = _as_float(state.state)
+        floor_soc = self._charging_floor_soc(target_soc)
+        if floor_soc is None:
+            return
         self._capture_original_min_soc(current)
         if current is not None and abs(current - floor_soc) <= 0.5:
             self._last_soc_set = floor_soc
@@ -5315,7 +5334,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # What goes on the min SOC entity: the charge target, or the raised
         # discharge-block floor (plan 009), already clamped into the user bounds.
-        floor_soc = self.inverter_floor_soc(target_soc)
+        floor_soc = self._charging_floor_soc(target_soc)
         if floor_soc is None:
             await self._pause_grid_charge("no representable minimum SoC within the configured bounds")
             return
@@ -5976,7 +5995,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if target_soc is None:
                 return
 
-            floor_soc = self.inverter_floor_soc(target_soc)
+            floor_soc = self._charging_floor_soc(target_soc)
             if floor_soc is None:
                 return
 

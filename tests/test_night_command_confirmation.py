@@ -53,7 +53,31 @@ def make(hass, **overrides):
 def test_advertised_floor_step_preserves_bounds(mock_hass, value, attrs, maximum, expected):
     c = make(mock_hass, user_max_soc=maximum)
     mock_hass.states.async_set("number.synthetic_floor", "10", attrs)
-    assert c.inverter_floor_soc(value) == expected
+    assert c._representable_min_soc(value) == expected
+
+
+def test_charge_and_hold_rounding_leave_semantic_target_and_discharge_unchanged(mock_hass):
+    c = make(mock_hass, discharge_block_mode="off")
+    assert c.inverter_floor_soc(32.5) == 32.5
+    assert c._charging_floor_soc(32.5) == 33
+    mock_hass.states.async_set("sensor.synthetic_soc", "32.8")
+    assert c._charging_floor_soc(32.5) == 32
+    c.entry.data = {**c.entry.data, "operation_mode": "morning_discharge"}
+    c.operation_mode = "morning_discharge"
+    assert c.inverter_floor_soc(32.5) == 32.5
+    assert c._charging_floor_soc(32.5) == 32.5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("soc", [20, 40])
+async def test_rounding_does_not_bypass_disabled_discharge_block(mock_hass, soc):
+    c = make(mock_hass, discharge_block_mode="off")
+    c.initial_calculated_soc = 32.5
+    mock_hass.states.async_set("sensor.synthetic_soc", str(soc))
+    mock_hass.services.async_call = AsyncMock()
+    await c._write_raised_min_soc_floor()
+    mock_hass.services.async_call.assert_not_awaited()
+    assert c.original_min_soc is None
 
 
 @pytest.mark.asyncio
