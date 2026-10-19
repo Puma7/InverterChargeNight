@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   separate; restore the original floor unchanged at window end.
 - Expose efficiency waiting reasons and a redacted control snapshot with planned,
   commanded and observed power values. Log a changed waiting reason once.
+- Serialize charge-limit writes and reset, and update the accepted command when
+  an efficiency setpoint arrives. Verification cannot restore an older plan
+  during a new write or after control ownership changes while it pauses charging.
 
 ## [3.10.2] - 2026-10-18
 

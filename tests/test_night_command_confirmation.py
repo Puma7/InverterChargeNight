@@ -128,3 +128,38 @@ async def test_unconfirmed_limit_never_starts_trial(mock_hass):
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": "number.synthetic_limit", "value": 3000.0}, blocking=True
     )
+
+
+@pytest.mark.asyncio
+async def test_verifier_does_not_restore_an_old_plan_during_a_new_write(mock_hass):
+    c = make(mock_hass)
+    c._planned_setpoint_written_w = 1000
+
+    async def accept(domain, service, data, **kwargs):
+        mock_hass.states.async_set("number.synthetic_limit", str(data["value"]),
+                                   {"unit_of_measurement": "W"})
+        await c._verify_ac_charge_limit()
+
+    mock_hass.services.async_call = AsyncMock(side_effect=accept)
+    assert await c._set_ac_charge_limit_w(3000) is True
+    assert c._planned_setpoint_written_w == 3000
+    assert c._get_ac_charge_limit_w("number.synthetic_limit") == 3000
+    mock_hass.services.async_call.assert_awaited_once_with(
+        "number", "set_value", {"entity_id": "number.synthetic_limit", "value": 3000.0}, blocking=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_verification_rechecks_ownership_after_awaiting_pause(mock_hass):
+    c = make(mock_hass)
+    c._planned_setpoint_written_w = 1000
+    c._grid_limit_configured = MagicMock(return_value=True)
+
+    async def new_owner(_reason):
+        c._planned_setpoint_written_w = 3000
+
+    c._pause_grid_charge = AsyncMock(side_effect=new_owner)
+    c._set_ac_charge_limit_w = AsyncMock()
+    await c._verify_ac_charge_limit()
+    c._pause_grid_charge.assert_awaited_once()
+    c._set_ac_charge_limit_w.assert_not_awaited()

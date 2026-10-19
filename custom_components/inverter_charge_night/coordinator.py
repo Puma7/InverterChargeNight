@@ -365,6 +365,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._verification_task: asyncio.Task[None] | None = None
         self._verifying_min_soc = False
         self._min_soc_write_lock = asyncio.Lock()
+        self._ac_charge_limit_write_lock = asyncio.Lock()
         self._backup_mode_listener: CALLBACK_TYPE | None = None
         self.auto_efficient_charge = entry.data.get(CONF_AUTO_EFFICIENT_CHARGE, False)
         self._auto_test_active = False
@@ -2707,6 +2708,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return True
 
     async def _set_ac_charge_limit_w(self, power_w: int) -> bool:
+        """Serialize actuator writes and keep verification out of an in-flight command."""
+        async with self._ac_charge_limit_write_lock:
+            return await self._set_ac_charge_limit_w_locked(power_w)
+
+    async def _set_ac_charge_limit_w_locked(self, power_w: int) -> bool:
         """Set max AC charge limit if entity is configured.
 
         The value found on the entity before the first write is remembered so
@@ -2753,11 +2759,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self._pause_grid_charge("protective charge-limit write failed")
             return False
         self._grid_limit_last_write = dt_util.now()
+        self._planned_setpoint_written_w = float(power_w)
         if power_w == 0 and self.is_active and self._grid_limit_configured():
             await self._pause_grid_charge("no confirmed connection headroom")
         return True
 
     async def _reset_ac_charge_limit(self) -> bool:
+        """Restore only after an already-started limit command has finished."""
+        async with self._ac_charge_limit_write_lock:
+            return await self._reset_ac_charge_limit_locked()
+
+    async def _reset_ac_charge_limit_locked(self) -> bool:
         """Restore the AC charge limit captured before the finder's first write.
 
         Returns True when nothing is left to restore; on failure the original
@@ -5873,7 +5885,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         house connection protection must not have, so the value is read back
         and rewritten when it has drifted.
         """
-        if self._is_backup_active():
+        if self._ac_charge_limit_write_lock.locked() or self._is_backup_active():
             return
         if self._auto_test_active:
             # The live trial owns its setpoint. Comparing it to the older
@@ -5926,6 +5938,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         if self._grid_limit_configured():
             await self._pause_grid_charge("inverter readback exceeds the protective charge limit")
+        latest = (float(self._auto_test_power_w)
+                  if self._auto_test_active and self._auto_test_power_w is not None
+                  else self._planned_setpoint_written_w)
+        if self._ac_charge_limit_write_lock.locked() or latest != written:
+            return
         await self._set_ac_charge_limit_w(int(written))
 
     async def _verify_and_restore_min_soc(self) -> None:
