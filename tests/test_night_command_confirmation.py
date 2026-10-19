@@ -139,8 +139,32 @@ async def test_wait_reason_and_redacted_live_control_snapshot(mock_hass):
     assert report["state"]["charge_control"]["ac_charge_power_w"] == 3000
     assert report["state"]["charge_control"]["dc_charge_power_w"] == 2800
     assert report["state"]["charge_control"]["planned_power_is_applied"] is False
+    assert report["state"]["charge_control"]["min_soc_feedback_pct"] == 10
+    assert report["state"]["charge_control"]["grid_charge_feedback"] == "off"
     assert "number.synthetic_floor" not in json.dumps(report)
     assert "number.synthetic_limit" not in json.dumps(report)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("floor,grid", [
+    ("unknown", "unknown"), ("unavailable", "unavailable"),
+    ("invalid", "invalid"), ("nan", "unknown"),
+])
+async def test_unusable_control_feedback_is_not_reported_as_zero_or_off(mock_hass, floor, grid):
+    c = make(mock_hass)
+    c.original_min_soc = 10
+    c._pending_reset = True
+    mock_hass.states.async_set("number.synthetic_floor", floor)
+    mock_hass.states.async_set("switch.synthetic_grid", grid)
+    before = json.dumps({"data": c.entry.data, "options": c.entry.options}, sort_keys=True)
+    report = await async_get_config_entry_diagnostics(mock_hass, c.entry)
+    control = report["state"]["charge_control"]
+    assert control["min_soc_feedback_pct"] is None
+    assert control["grid_charge_feedback"] is None
+    assert control["original_min_soc_pct"] == 10
+    assert control["reset_pending"] is True
+    assert json.dumps({"data": c.entry.data, "options": c.entry.options}, sort_keys=True) == before
+    assert "number.synthetic_floor" not in json.dumps(report)
 
 
 @pytest.mark.asyncio

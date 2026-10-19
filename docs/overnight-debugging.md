@@ -53,3 +53,24 @@ Zu prüfen sind die Reihenfolge der Befehle, API-/Modbus-Fehler, die tatsächlic
 Leistung, das Erreichen des Ladeziels und die bestätigte Rückgabe aller zuvor
 gespeicherten Einstellungen. Eine neue Abendreserve kann den Min-SoC danach
 erneut anheben; dafür müssen Grund und Ende der Reserve berücksichtigt werden.
+
+## Update und Rueckmeldungen ab 3.10.4
+
+Ein normales HACS-Update von 3.10.2/3.10.3 auf 3.10.4 uebernimmt die vorhandene
+Einrichtung, Entitaetszuordnungen und zur Messstrecke passende Effizienzdaten.
+Die Integration muss dafuer nicht entfernt oder neu hinzugefuegt werden.
+Beide Integrationen vor dem Nachtlauf aktualisieren, HA neu starten und erst
+danach die Debug-Protokollierung einschalten.
+
+`charge_control.min_soc_feedback_pct` und `grid_charge_feedback` enthalten
+die aktuellen HA-Rueckmeldungen. Nicht nutzbare Werte bleiben `null`; das ist
+weder 0 Prozent noch ausgeschaltetes Netzladen. `original_min_soc_pct` und
+`reset_pending` zeigen den gespeicherten Ausgangswert und eine ausstehende
+Ruecksetzung. Die Konfiguration wird beim Download nicht veraendert.
+
+Fuer die Auswertung werden gemeinsam benoetigt: beide Debug-Logdateien, beide
+Integrationsdiagnosen und das KORE-Debugpaket. Fuer die tatsaechliche Leistung
+zusaetzlich den aufgezeichneten HA-Verlauf der genannten Entitaeten sichern.
+Ein Export morgens liefert keine vollstaendige Zeitreihe der Nacht; insbesondere
+koennen die letzten 100 KORE-Schreibereignisse den Fensterstart bereits verdraengt
+haben. Bei einer sichtbaren Abweichung auch waehrenddessen einen Export erstellen.
