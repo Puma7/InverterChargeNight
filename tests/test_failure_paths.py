@@ -224,6 +224,7 @@ DISCHARGE_CONFIG = dict(CONFIG) | {
 
 def _discharge_coordinator(mock_hass, *, min_soc_state="8"):
     coordinator = _make_coordinator(mock_hass, DISCHARGE_CONFIG)
+    coordinator.is_active = True
     mock_hass.states.async_set(MIN_SOC, min_soc_state)
     mock_hass.states.async_set(GRID, "off")
     mock_hass.states.async_set(BATTERY, "80")

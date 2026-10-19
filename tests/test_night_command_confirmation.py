@@ -1,5 +1,6 @@
 """Regressions for acknowledged night commands and actionable diagnostics."""
 from datetime import datetime
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -187,3 +188,67 @@ async def test_verification_rechecks_ownership_after_awaiting_pause(mock_hass):
     await c._verify_ac_charge_limit()
     c._pause_grid_charge.assert_awaited_once()
     c._set_ac_charge_limit_w.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reset_finishes_after_an_inflight_charging_floor(mock_hass):
+    c = make(mock_hass)
+    started, release = asyncio.Event(), asyncio.Event()
+    writes = []
+
+    async def service(domain, action, data, **kwargs):
+        if domain == "number":
+            writes.append(data["value"])
+            if data["value"] == 33:
+                started.set()
+                await release.wait()
+            mock_hass.states.async_set(data["entity_id"], str(data["value"]), {"step": 1})
+
+    mock_hass.services.async_call = AsyncMock(side_effect=service)
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now",
+               return_value=datetime(2026, 1, 15, 2)):
+        charge = asyncio.create_task(c._control_charge(32.5))
+        await asyncio.wait_for(started.wait(), 2)
+        c.is_active = False
+        c._ending = True
+        reset = asyncio.create_task(c._reset_settings())
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait_for(asyncio.gather(charge, reset), 2)
+    assert float(mock_hass.states.get("number.synthetic_floor").state) == 10
+    assert writes == [33, 10]
+    assert not c._pending_reset
+    assert all(call.args[:2] != ("switch", "turn_on") for call in mock_hass.services.async_call.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_queued_power_command_cannot_outlive_its_window(mock_hass):
+    c = make(mock_hass)
+    await c._ac_charge_limit_write_lock.acquire()
+    mock_hass.services.async_call = AsyncMock()
+    task = asyncio.create_task(c._set_ac_charge_limit_w(3000))
+    await asyncio.sleep(0)
+    c.is_active = False
+    c._ac_charge_limit_write_lock.release()
+    assert await task is False
+    mock_hass.services.async_call.assert_not_awaited()
+    assert c._planned_setpoint_written_w is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["night_charge", "morning_discharge"])
+async def test_queued_floor_cannot_write_into_a_new_window(mock_hass, mode):
+    c = make(mock_hass, operation_mode=mode)
+    c._window_started_at = datetime(2026, 1, 15, 2)
+    await c._min_soc_write_lock.acquire()
+    mock_hass.services.async_call = AsyncMock()
+    method = c._control_charge if mode == "night_charge" else c._control_discharge
+    mock_hass.states.async_set("sensor.synthetic_soc", "40" if mode == "morning_discharge" else "20")
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now",
+               return_value=datetime(2026, 1, 15, 2)):
+        task = asyncio.create_task(method(32.5))
+        await asyncio.sleep(0)
+        c._window_started_at = datetime(2026, 1, 15, 3)
+        c._min_soc_write_lock.release()
+        await task
+    mock_hass.services.async_call.assert_not_awaited()

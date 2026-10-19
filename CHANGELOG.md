@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an efficiency setpoint arrives. Verification cannot restore an older plan
   during a new write or after control ownership changes while it pauses charging.
 
+- Serialize charging, discharge and raised-floor Min-SoC writes with reset.
+  An in-flight floor command must finish before the original value is restored;
+  an ended or unloading window cannot issue a queued floor command.
+
 ## [3.10.2] - 2026-10-18
 
 ### Fixed

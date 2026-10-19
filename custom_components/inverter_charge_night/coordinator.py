@@ -2291,11 +2291,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if current is not None and abs(current - floor_soc) <= 0.5:
             self._last_soc_set = floor_soc
             return
+        window_started_at = self._window_started_at
         try:
-            await self.hass.services.async_call(
-                "number", "set_value", {"entity_id": entity_id, "value": floor_soc},
-                blocking=True,
-            )
+            async with self._min_soc_write_lock:
+                if (not self.is_active or self._ending or self._unloading
+                        or self._window_started_at != window_started_at):
+                    return
+                await self.hass.services.async_call(
+                    "number", "set_value", {"entity_id": entity_id, "value": floor_soc},
+                    blocking=True,
+                )
         except Exception as e:  # pylint: disable=broad-except
             _LOGGER.error("Error raising the min SOC floor: %s", e, exc_info=True)
             return
@@ -2728,7 +2733,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _set_ac_charge_limit_w(self, power_w: int) -> bool:
         """Serialize actuator writes and keep verification out of an in-flight command."""
+        was_active, window_started_at = self.is_active, self._window_started_at
         async with self._ac_charge_limit_write_lock:
+            if self._unloading or (was_active and (
+                not self.is_active or self._ending or self._window_started_at != window_started_at
+            )):
+                return False
             return await self._set_ac_charge_limit_w_locked(power_w)
 
     async def _set_ac_charge_limit_w_locked(self, power_w: int) -> bool:
@@ -5271,6 +5281,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _control_charge(self, target_soc: float) -> None:
         """Control the inverter entities for night charging, from the calculated SOC."""
+        if not self.is_active or self._ending or self._unloading:
+            return
         if self._is_backup_active():
             _LOGGER.info("Backup mode active or unconfirmed - skipping inverter control")
             return
@@ -5379,13 +5391,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if need_to_set_min_soc and min_soc_entity:
             # Set min SOC first
             min_soc_set = False
+            window_started_at = self._window_started_at
             try:
-                await self.hass.services.async_call(
-                    "number",
-                    "set_value",
-                    {"entity_id": min_soc_entity, "value": floor_soc},
-                    blocking=True,
-                )
+                async with self._min_soc_write_lock:
+                    if (not self.is_active or self._ending or self._unloading
+                            or self._window_started_at != window_started_at):
+                        return
+                    await self.hass.services.async_call(
+                        "number",
+                        "set_value",
+                        {"entity_id": min_soc_entity, "value": floor_soc},
+                        blocking=True,
+                    )
                 self._last_soc_set = floor_soc
                 min_soc_set = True
                 _LOGGER.info(
@@ -5622,13 +5639,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 min_soc_available = False
 
         if need_to_set_min_soc and min_soc_entity:
+            window_started_at = self._window_started_at
             try:
-                await self.hass.services.async_call(
-                    "number",
-                    "set_value",
-                    {"entity_id": min_soc_entity, "value": target_soc},
-                    blocking=True,
-                )
+                async with self._min_soc_write_lock:
+                    if (not self.is_active or self._ending or self._unloading
+                            or self._window_started_at != window_started_at):
+                        return
+                    await self.hass.services.async_call(
+                        "number",
+                        "set_value",
+                        {"entity_id": min_soc_entity, "value": target_soc},
+                        blocking=True,
+                    )
             except Exception as e:
                 # Every other call in this method is wrapped; this one was not,
                 # so a failed write took the two blocks below with it - and one
