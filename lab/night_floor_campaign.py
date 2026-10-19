@@ -39,6 +39,29 @@ async def check_night_floor(hass, lab, planner, kore_entry, check):
         await grid.coordinator.async_refresh()
         await hass.async_block_till_done()
 
+    # Legacy cleanup must survive a command whose new HA feedback is delayed.
+    # The real REST/Modbus services still actuate the isolated inverter.
+    co = planner.runtime_data
+    block = hass.data[DATA_INSTANCES]["switch"].get_entity(data["discharge_block_switch"])
+    limit_entity = hass.data[DATA_INSTANCES]["number"].get_entity(limit)
+    lab.plant.block_discharge, lab.plant.discharge_limit = True, 0
+    await feedback()
+    co._original_discharge_block, co._original_discharge_limit = False, 5000
+    # HA's forced entity update also uses the private publication boundary.
+    with patch.object(block, "_async_write_ha_state"), patch.object(limit_entity, "_async_write_ha_state"):
+        await co._apply_discharge_block()
+    check("legacy release actuates real switch and Modbus limit without discarding delayed captures",
+          not lab.plant.block_discharge and lab.plant.discharge_limit == 5000
+          and co._original_discharge_block is False and co._original_discharge_limit == 5000,
+          {"physical_block": lab.plant.block_discharge, "physical_limit": lab.plant.discharge_limit,
+           "capture_block": co._original_discharge_block, "capture_limit": co._original_discharge_limit})
+    block.async_write_ha_state()
+    limit_entity.async_write_ha_state()
+    await feedback()
+    await co._apply_discharge_block()
+    check("legacy release clears both captures after fresh matching HA feedback",
+          co._original_discharge_block is None and co._original_discharge_limit is None)
+
     with patch("custom_components.inverter_charge_night.coordinator.dt_util.now",
                side_effect=lambda: clock[0]):
         for initial in (100, 35, 15):

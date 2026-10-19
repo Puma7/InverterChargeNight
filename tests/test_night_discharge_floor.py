@@ -115,3 +115,99 @@ async def test_legacy_cleanup_does_not_activate_a_preexisting_block(mock_hass):
     c._original_discharge_limit = 0
     await c._apply_discharge_block()
     mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("binding", ["switch", "limit"])
+@pytest.mark.parametrize("cached_match", [False, True])
+async def test_ignored_release_retains_capture_even_when_cached_value_matches(mock_hass, binding, cached_match):
+    c = night(mock_hass, binding)
+    entity_id = "switch.synthetic_block" if binding == "switch" else "number.synthetic_discharge"
+    original = False if binding == "switch" else 8000
+    attribute = "_original_discharge_block" if binding == "switch" else "_original_discharge_limit"
+    setattr(c, attribute, original)
+    mock_hass.states.async_set(entity_id, ("off" if binding == "switch" else "8000") if cached_match
+                               else ("on" if binding == "switch" else "0"))
+    mock_hass.services.async_call = AsyncMock()  # Command and refresh are acknowledged, never observed.
+    await c._apply_discharge_block()
+    assert getattr(c, attribute) == original
+    mock_hass.services.async_call.assert_any_await(
+        "homeassistant", "update_entity", {"entity_id": entity_id}, blocking=True,
+    )
+    c._persist_state()
+    assert c.entry.options["runtime_state"][attribute.removeprefix("_")] == original
+    # The next verification observes a real device update and can finish.
+    async def observed(domain, service, data, **kwargs):
+        mock_hass.states.async_set(entity_id, "off" if binding == "switch" else "8000")
+    mock_hass.services.async_call = AsyncMock(side_effect=observed)
+    await c._apply_discharge_block()
+    assert getattr(c, attribute) is None
+    mock_hass.services.async_call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("binding", ["switch", "limit"])
+async def test_release_can_be_confirmed_by_an_explicit_feedback_refresh(mock_hass, binding):
+    c = night(mock_hass, binding)
+    entity_id = "switch.synthetic_block" if binding == "switch" else "number.synthetic_discharge"
+    attribute = "_original_discharge_block" if binding == "switch" else "_original_discharge_limit"
+    setattr(c, attribute, False if binding == "switch" else 8000)
+    mock_hass.states.async_set(entity_id, "on" if binding == "switch" else "0")
+    async def delayed(domain, service, data, **kwargs):
+        if domain == "homeassistant":
+            mock_hass.states.async_set(entity_id, "off" if binding == "switch" else "8000")
+    mock_hass.services.async_call = AsyncMock(side_effect=delayed)
+    await c._apply_discharge_block()
+    assert getattr(c, attribute) is None
+    mock_hass.services.async_call.assert_any_await(
+        "homeassistant", "update_entity", {"entity_id": entity_id}, blocking=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_feedback_refresh_failure_retains_capture_and_failed_end_is_pending(mock_hass):
+    c = night(mock_hass, "limit")
+    c._original_discharge_limit = 8000
+    mock_hass.states.async_set("number.synthetic_discharge", "0")
+    async def failed_refresh(domain, service, data, **kwargs):
+        if domain == "homeassistant":
+            raise RuntimeError("Synthetic feedback failure")
+    mock_hass.services.async_call = AsyncMock(side_effect=failed_refresh)
+    await c._on_window_end(datetime(2026, 1, 15, 5))
+    assert c._original_discharge_limit == 8000 and c._pending_reset
+    assert c.entry.options["runtime_state"]["original_discharge_limit"] == 8000
+    mock_hass.services.async_call.assert_any_await(
+        "number", "set_value", {"entity_id": "number.synthetic_discharge", "value": 8000}, blocking=True,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("binding", ["switch", "limit"])
+async def test_a_new_capture_is_not_cleared_by_an_older_restore(mock_hass, binding):
+    c = night(mock_hass, binding)
+    switch = binding == "switch"
+    entity_id = "switch.synthetic_block" if switch else "number.synthetic_discharge"
+    attribute = "_original_discharge_block" if switch else "_original_discharge_limit"
+    setattr(c, attribute, False if switch else 8000)
+    async def new_capture(domain, service, data, **kwargs):
+        setattr(c, attribute, True if switch else 6000)
+        mock_hass.states.async_set(entity_id, "off" if switch else "8000")
+    mock_hass.services.async_call = AsyncMock(side_effect=new_capture)
+    reset = c._reset_discharge_block_switch if switch else c._reset_discharge_limit
+    assert await reset() is False
+    assert getattr(c, attribute) == (True if switch else 6000)
+    mock_hass.services.async_call.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_disappearing_feedback_cannot_confirm_a_release(mock_hass):
+    c = night(mock_hass, "switch")
+    c._original_discharge_block = False
+    async def disappears(domain, service, data, **kwargs):
+        mock_hass.states.get.side_effect = lambda entity_id: None
+    mock_hass.services.async_call = AsyncMock(side_effect=disappears)
+    assert await c._reset_discharge_block_switch() is False
+    assert c._original_discharge_block is False
+    mock_hass.services.async_call.assert_any_await(
+        "homeassistant", "update_entity", {"entity_id": "switch.synthetic_block"}, blocking=True,
+    )

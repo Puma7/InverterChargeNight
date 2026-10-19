@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   above it may supply the house; no discharge-block switch, zero discharge limit or
   floor at the initial battery SOC is applied. The original min SOC is restored at
   the end. Explicit reservations and evening rescue retain their holding behavior.
+- Confirm fresh switch/limit feedback before discarding captured discharge restores.
+  Delayed, missing, stale or ignored feedback retains the original for retry, including
+  at the window end; a newer capture is not cleared by an older restore.
 - Release captured legacy night restrictions on resume without losing originals on
   failure or overriding independent discharge locks. Document the distinction in
   setup descriptions, diagnostics guidance and the backup-detection warning.

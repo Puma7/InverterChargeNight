@@ -2207,7 +2207,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _reset_discharge_block_switch(self) -> bool:
         """Put the discharge block switch back to the state captured at window start."""
-        if self._original_discharge_block is None:
+        original = self._original_discharge_block
+        if original is None:
             return True
         target = self._discharge_block_switch_target()
         if target is None:
@@ -2219,13 +2220,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not state or state.state in ("unknown", "unavailable"):
             _LOGGER.error("Cannot reset discharge block - entity %s unavailable", entity_id)
             return False
-        service = "turn_on" if self._original_discharge_block else "turn_off"
+        service = "turn_on" if original else "turn_off"
+        before_value, before_reported = state.state, state.last_reported
         try:
             await self.hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=True)
         except Exception as e:  # pylint: disable=broad-except
             _LOGGER.error("Error resetting discharge block switch: %s", e, exc_info=True)
             return False
+        if not await self._confirm_discharge_restore(
+            entity_id, before_value, before_reported,
+            "on" if original else "off",
+        ):
+            _LOGGER.error("Discharge block restore has no fresh matching feedback: %s", entity_id)
+            return False
         _LOGGER.info("Reset discharge block switch %s to %s", entity_id, service)
+        if self._original_discharge_block != original:
+            return False
         self._original_discharge_block = None
         return True
 
@@ -2362,7 +2372,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Returns True when nothing is left to restore; on failure the original
         value is kept for a retry.
         """
-        if self._original_discharge_limit is None:
+        original = self._original_discharge_limit
+        if original is None:
             return True
         target = self._discharge_limit_target()
         if target is None:
@@ -2374,12 +2385,51 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not state or state.state in ("unknown", "unavailable"):
             _LOGGER.error("Cannot reset discharge limit - entity %s unavailable", entity_id)
             return False
+        before_value, before_reported = state.state, state.last_reported
         if not await self._write_number(
-            entity_id, domain, self._original_discharge_limit, "Reset discharge limit"
+            entity_id, domain, original, "Reset discharge limit"
         ):
+            return False
+        if not await self._confirm_discharge_restore(
+            entity_id, before_value, before_reported, original,
+        ):
+            _LOGGER.error("Discharge limit restore has no fresh matching feedback: %s", entity_id)
+            return False
+        if self._original_discharge_limit != original:
             return False
         self._original_discharge_limit = None
         return True
+
+    async def _confirm_discharge_restore(
+        self, entity_id: str, before_value: str, before_reported: datetime,
+        expected: str | float,
+    ) -> bool:
+        """Retain captures until a fresh observation confirms their restoration."""
+        def confirmed() -> bool:
+            feedback = self.hass.states.get(entity_id)
+            if feedback is None:
+                return False
+            if isinstance(expected, str):
+                matches = feedback.state == expected
+            else:
+                value = _as_float(feedback.state)
+                matches = value is not None and math.isclose(
+                    value, expected, rel_tol=1e-6, abs_tol=1e-6,
+                )
+            return matches and (
+                feedback.state != before_value or feedback.last_reported != before_reported
+            )
+
+        if confirmed():
+            return True
+        try:
+            await self.hass.services.async_call(
+                "homeassistant", "update_entity", {"entity_id": entity_id}, blocking=True,
+            )
+        except Exception:
+            _LOGGER.exception("Cannot refresh discharge restore feedback: %s", entity_id)
+            return False
+        return confirmed()
 
     def _parse_time(self, time_str: str | None, default: str) -> tuple[int, int]:
         """Parse an HH:MM string, falling back to ``default`` (then 00:00) when invalid."""

@@ -94,10 +94,11 @@ def mock_hass() -> HomeAssistant:
     async def complete_service(domain, service, data, **kwargs):
         # A normal blocking write completes with actual feedback. Fault tests
         # replace this actor to model ignored commands or transport failures.
-        if domain == "switch" and service == "turn_off" and kwargs.get("blocking"):
+        if domain in ("switch", "input_boolean") and service in ("turn_on", "turn_off") and kwargs.get("blocking"):
             state = states.get(data.get("entity_id"))
-            if state is not None and state.state == "on":
-                state.state = "off"
+            if state is not None:
+                state.state = "on" if service == "turn_on" else "off"
+                state.last_reported = datetime.now(UTC)
         if domain == "number" and service == "set_value" and kwargs.get("blocking"):
             state = states.get(data.get("entity_id"))
             if state is not None:
