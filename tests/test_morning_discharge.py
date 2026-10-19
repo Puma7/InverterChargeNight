@@ -1,6 +1,7 @@
 """Tests for morning discharge mode."""
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import timedelta
 
@@ -54,6 +55,11 @@ def _make_coordinator(mock_hass, mock_config_entry, mode=MODE_MORNING_DISCHARGE)
         coord.evening_rescue_charge = False
         coord.original_min_soc = None
         coord.is_active = True
+        coord._ending = False
+        coord._unloading = False
+        coord._min_soc_write_lock = asyncio.Lock()
+        coord._ac_charge_limit_write_lock = asyncio.Lock()
+        coord._window_started_at = None
         coord.is_enabled = True
         coord.calculated_soc = None
         coord.initial_calculated_soc = 35.0

@@ -365,6 +365,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._verification_task: asyncio.Task[None] | None = None
         self._verifying_min_soc = False
         self._min_soc_write_lock = asyncio.Lock()
+        self._ac_charge_limit_write_lock = asyncio.Lock()
         self._backup_mode_listener: CALLBACK_TYPE | None = None
         self.auto_efficient_charge = entry.data.get(CONF_AUTO_EFFICIENT_CHARGE, False)
         self._auto_test_active = False
@@ -386,6 +387,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # can be filed under the part of the battery it was measured in.
         self._auto_start_soc: float | None = None
         self._auto_missing_entities_logged = False
+        self._auto_wait_reason: str | None = "not_evaluated"
         # Planner v2 (plan 006)
         self.last_plan: PlanResult | None = None  # result of the last bridge plan this window
         # The evening outlook belongs to the day, not to a window, so it is
@@ -837,6 +839,42 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.override_soc is not None:
             return self.override_soc
         return self.initial_calculated_soc if self.initial_calculated_soc is not None else self.calculated_soc
+
+    def _representable_min_soc(self, value: float, *, round_up: bool = True) -> float | None:
+        """Select a representable floor without exceeding device/user bounds."""
+        entity_id = self.config.get(CONF_MIN_SOC_ENTITY)
+        state = self.hass.states.get(entity_id) if entity_id else None
+        attributes: Any = state.attributes if state is not None else {}
+        if not isinstance(attributes, Mapping):
+            return value
+        step = _as_float(attributes.get("step"))
+        if step is None or step <= 0:
+            return value
+        lower = _as_float(attributes.get("min")) or 0.0
+        upper = _as_float(attributes.get("max"))
+        upper = min(upper if upper is not None else 100.0,
+                    float(self.config.get(CONF_USER_MAX_SOC, DEFAULT_MAX_SOC)))
+        if round_up:
+            result = lower + math.ceil((max(value, lower) - lower) / step - 1e-9) * step
+        else:
+            result = lower + math.floor((min(value, upper) - lower) / step + 1e-9) * step
+        user_min = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
+        if result > upper + 1e-9 or result < max(lower, user_min) - 1e-9:
+            _LOGGER.error("No representable min SOC for %.3f%% within the configured bounds", value)
+            return None
+        return round(result, 9)
+
+    def _charging_floor_soc(self, target_soc: float) -> float | None:
+        """Keep semantic reserve decisions separate from actuator rounding."""
+        floor = self.inverter_floor_soc(target_soc)
+        if floor is None or self.is_discharge_mode:
+            return floor
+        soc = self._current_battery_soc()
+        if soc is None:
+            return None
+        # Only an actual charging request may round upwards. A hold must not
+        # create a new grid-energy demand just to reach the next input step.
+        return self._representable_min_soc(floor, round_up=(soc < target_soc and not self.target_reached))
 
     def inverter_floor_soc(self, target_soc: float | None = None) -> float | None:
         """The value written to the inverter's min SOC entity (plan 009).
@@ -2012,6 +2050,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 domain,
                 "set_value",
                 {"entity_id": entity_id, "value": value},
+                blocking=True,
             )
         except Exception as e:  # pylint: disable=broad-except
             _LOGGER.error("Error writing %s: %s", what, e, exc_info=True)
@@ -2171,7 +2210,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Discharge already blocked (%s is on)", entity_id)
             return
         try:
-            await self.hass.services.async_call(domain, "turn_on", {"entity_id": entity_id})
+            await self.hass.services.async_call(domain, "turn_on", {"entity_id": entity_id}, blocking=True)
         except Exception as e:  # pylint: disable=broad-except
             _LOGGER.error("Error blocking discharge via %s: %s", entity_id, e, exc_info=True)
             return
@@ -2193,7 +2232,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         service = "turn_on" if self._original_discharge_block else "turn_off"
         try:
-            await self.hass.services.async_call(domain, service, {"entity_id": entity_id})
+            await self.hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=True)
         except Exception as e:  # pylint: disable=broad-except
             _LOGGER.error("Error resetting discharge block switch: %s", e, exc_info=True)
             return False
@@ -2245,14 +2284,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Cannot raise the min SOC floor yet - entity unavailable")
             return
         current = _as_float(state.state)
+        floor_soc = self._charging_floor_soc(target_soc)
+        if floor_soc is None:
+            return
         self._capture_original_min_soc(current)
         if current is not None and abs(current - floor_soc) <= 0.5:
             self._last_soc_set = floor_soc
             return
+        window_started_at = self._window_started_at
         try:
-            await self.hass.services.async_call(
-                "number", "set_value", {"entity_id": entity_id, "value": floor_soc}
-            )
+            async with self._min_soc_write_lock:
+                if (not self.is_active or self._ending or self._unloading
+                        or self._window_started_at != window_started_at):
+                    return
+                await self.hass.services.async_call(
+                    "number", "set_value", {"entity_id": entity_id, "value": floor_soc},
+                    blocking=True,
+                )
         except Exception as e:  # pylint: disable=broad-except
             _LOGGER.error("Error raising the min SOC floor: %s", e, exc_info=True)
             return
@@ -2684,6 +2732,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return True
 
     async def _set_ac_charge_limit_w(self, power_w: int) -> bool:
+        """Serialize actuator writes and keep verification out of an in-flight command."""
+        was_active, window_started_at = self.is_active, self._window_started_at
+        async with self._ac_charge_limit_write_lock:
+            if self._unloading or (was_active and (
+                not self.is_active or self._ending or self._window_started_at != window_started_at
+            )):
+                return False
+            return await self._set_ac_charge_limit_w_locked(power_w)
+
+    async def _set_ac_charge_limit_w_locked(self, power_w: int) -> bool:
         """Set max AC charge limit if entity is configured.
 
         The value found on the entity before the first write is remembered so
@@ -2730,11 +2788,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await self._pause_grid_charge("protective charge-limit write failed")
             return False
         self._grid_limit_last_write = dt_util.now()
+        self._planned_setpoint_written_w = float(power_w)
         if power_w == 0 and self.is_active and self._grid_limit_configured():
             await self._pause_grid_charge("no confirmed connection headroom")
         return True
 
     async def _reset_ac_charge_limit(self) -> bool:
+        """Restore only after an already-started limit command has finished."""
+        async with self._ac_charge_limit_write_lock:
+            return await self._reset_ac_charge_limit_locked()
+
+    async def _reset_ac_charge_limit_locked(self) -> bool:
         """Restore the AC charge limit captured before the finder's first write.
 
         Returns True when nothing is left to restore; on failure the original
@@ -2832,6 +2896,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 domain,
                 service,
                 {"entity_id": entity_id, "value": value},
+                blocking=True,
             )
             self._absolute_charge_power_written_w = max_power
             _LOGGER.info("Set absolute charge power to %.3f (%s)", value, unit or "unitless")
@@ -2870,6 +2935,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 domain,
                 "set_value",
                 {"entity_id": entity_id, "value": value},
+                blocking=True,
             )
         except Exception as e:
             _LOGGER.error("Error resetting absolute charge power: %s", e, exc_info=True)
@@ -3085,6 +3151,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._grid_limit_configured():
             allowed = self._grid_limited_setpoint(float(power_w))
             if allowed < power_w - PLANNED_POWER_WRITE_THRESHOLD_W:
+                self._set_auto_wait_reason("connection_headroom")
                 written = self._planned_setpoint_written_w
                 if written is not None and abs(written - allowed) <= PLANNED_POWER_WRITE_THRESHOLD_W:
                     # Already capped at this value: writing it again every poll
@@ -3105,7 +3172,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # does not catch - and the sample would be filed under this power.
             # The next poll offers the candidate again.
             _LOGGER.debug("Efficiency test at %d W not started: the setpoint did not arrive", power_w)
+            self._set_auto_wait_reason("charge_limit_write_failed")
             return
+        self._auto_wait_reason = None
         self._auto_test_active = True
         self._auto_test_power_w = power_w
         self._auto_test_start = self._efficiency_now()
@@ -3147,6 +3216,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data = self.get_auto_efficiency_data()
         history = {k: round(float(v) * 100.0, 2) for k, v in dict(data.get("history", {})).items()}
         attributes: dict[str, Any] = {
+            "waiting_reason": self._auto_wait_reason if self.auto_test_state == AUTO_TEST_STATE_WAITING else None,
             "test_power_w": self._auto_test_power_w,
             "best_power_w": data.get("best_power_w"),
             "best_loss_pct": (
@@ -3601,9 +3671,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._save_auto_efficiency_data(data)
         self._reset_auto_test_state()
 
+    def _set_auto_wait_reason(self, reason: str) -> None:
+        """Retain why a trial did not start and log changes once."""
+        if self._auto_wait_reason != reason:
+            _LOGGER.info("Efficiency search waiting: %s", reason)
+            self._auto_wait_reason = reason
+
     async def _handle_auto_charge(self) -> None:
         """Handle auto efficient charging logic."""
         if not self.auto_efficient_charge:
+            self._auto_wait_reason = None
             if self._auto_test_active:
                 # Finder switched off during a test: record it and take the
                 # test value off the inverter
@@ -3612,11 +3689,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         sun = self.hass.states.get("sun.sun")
         if sun is None or sun.state != "below_horizon":
+            self._set_auto_wait_reason("night_not_confirmed")
             if self._auto_test_active:
                 self._discard_auto_test("daylight or unknown sun state can contaminate the AC/DC comparison")
             return
         if self._is_backup_active():
             # No inverter writes in backup mode; the window end restores the limit
+            self._set_auto_wait_reason("backup_active_or_unknown")
             if self._auto_test_active:
                 self._reset_auto_test_state()
             return
@@ -3625,6 +3704,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
         received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
         if not charge_entity or not sent_entity or not received_entity:
+            self._set_auto_wait_reason("missing_configuration")
             if not self._auto_missing_entities_logged:
                 _LOGGER.warning(
                     "Auto efficient charge enabled but required entities are missing "
@@ -3640,6 +3720,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             grid_on = state is not None and state.state == "on"
 
         if not grid_on or self.target_reached:
+            self._set_auto_wait_reason("target_reached" if self.target_reached else "grid_charge_not_confirmed")
             if self._auto_test_active:
                 self._finalize_auto_test()
             return
@@ -3656,8 +3737,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         candidate = self._select_next_auto_test_power_w()
         if self._auto_search_deferred:
+            self._set_auto_wait_reason("deferred_after_failed_trials")
             return
         if candidate is None:
+            self._set_auto_wait_reason("no_test_candidate")
             data = self.get_auto_efficiency_data()
             best_power = data.get("best_power_w")
             if isinstance(best_power, int):
@@ -3667,6 +3750,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # the window end restores it. What carries the result forward is
                 # best_power_w: the planner prefers it in subsequent windows.
                 await self._set_ac_charge_limit_w(best_power)
+                self._auto_wait_reason = None
                 self._persist_state()
                 if self.auto_efficient_charge:
                     self.auto_efficient_charge = False
@@ -5197,6 +5281,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _control_charge(self, target_soc: float) -> None:
         """Control the inverter entities for night charging, from the calculated SOC."""
+        if not self.is_active or self._ending or self._unloading:
+            return
         if self._is_backup_active():
             _LOGGER.info("Backup mode active or unconfirmed - skipping inverter control")
             return
@@ -5260,9 +5346,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # What goes on the min SOC entity: the charge target, or the raised
         # discharge-block floor (plan 009), already clamped into the user bounds.
-        floor_soc = self.inverter_floor_soc(target_soc)
+        floor_soc = self._charging_floor_soc(target_soc)
         if floor_soc is None:
-            floor_soc = target_soc
+            await self._pause_grid_charge("no representable minimum SoC within the configured bounds")
+            return
 
         # Track if we need to set min SOC
         need_to_set_min_soc = False
@@ -5304,12 +5391,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if need_to_set_min_soc and min_soc_entity:
             # Set min SOC first
             min_soc_set = False
+            window_started_at = self._window_started_at
             try:
-                await self.hass.services.async_call(
-                    "number",
-                    "set_value",
-                    {"entity_id": min_soc_entity, "value": floor_soc},
-                )
+                async with self._min_soc_write_lock:
+                    if (not self.is_active or self._ending or self._unloading
+                            or self._window_started_at != window_started_at):
+                        return
+                    await self.hass.services.async_call(
+                        "number",
+                        "set_value",
+                        {"entity_id": min_soc_entity, "value": floor_soc},
+                        blocking=True,
+                    )
                 self._last_soc_set = floor_soc
                 min_soc_set = True
                 _LOGGER.info(
@@ -5321,6 +5414,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Without the new floor the inverter would charge against the wrong
                 # min SOC, so grid charging is not switched on; the next poll retries.
                 _LOGGER.error("Error setting min SOC: %s", e, exc_info=True)
+                should_skip_charging = True
+                await self._pause_grid_charge("minimum SoC command failed")
 
             # Immediately send grid charge command (configurable delay) so inverter processes both together
             if min_soc_set and grid_charge_switch and not should_skip_charging:
@@ -5340,6 +5435,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             "switch",
                             "turn_on",
                             {"entity_id": grid_charge_switch},
+                            blocking=True,
                         )
                         _LOGGER.info("Turned on the grid charge switch (immediately after min SOC)")
                     elif state and state.state == "on":
@@ -5357,6 +5453,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "switch",
                         "turn_on",
                         {"entity_id": grid_charge_switch},
+                        blocking=True,
                     )
                     _LOGGER.info("Turned on the grid charge switch")
                 elif state and state.state == "on":
@@ -5376,6 +5473,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 await self.hass.services.async_call(
                     "switch", "turn_off", {"entity_id": entity_id},
+                    blocking=True,
                 )
                 _LOGGER.warning("Requested grid-charge pause: %s", reason)
             except Exception:
@@ -5500,6 +5598,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         await self.hass.services.async_call(
                             "switch", "turn_off",
                             {"entity_id": force_discharge_switch},
+                            blocking=True,
                         )
                         _LOGGER.info("Turned off force discharge - target already reached")
                 except Exception as e:
@@ -5540,12 +5639,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 min_soc_available = False
 
         if need_to_set_min_soc and min_soc_entity:
+            window_started_at = self._window_started_at
             try:
-                await self.hass.services.async_call(
-                    "number",
-                    "set_value",
-                    {"entity_id": min_soc_entity, "value": target_soc},
-                )
+                async with self._min_soc_write_lock:
+                    if (not self.is_active or self._ending or self._unloading
+                            or self._window_started_at != window_started_at):
+                        return
+                    await self.hass.services.async_call(
+                        "number",
+                        "set_value",
+                        {"entity_id": min_soc_entity, "value": target_soc},
+                        blocking=True,
+                    )
             except Exception as e:
                 # Every other call in this method is wrapped; this one was not,
                 # so a failed write took the two blocks below with it - and one
@@ -5567,6 +5672,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "switch",
                         "turn_off",
                         {"entity_id": grid_charge_switch},
+                        blocking=True,
                     )
                     _LOGGER.info("Turned off grid charge for discharge mode")
             except Exception as e:
@@ -5581,6 +5687,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "switch",
                         "turn_on",
                         {"entity_id": force_discharge_switch},
+                        blocking=True,
                     )
                     _LOGGER.info("Turned on force discharge switch")
                 elif state and state.state == "on":
@@ -5599,6 +5706,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "switch",
                         "turn_off",
                         {"entity_id": force_discharge_switch},
+                        blocking=True,
                     )
                     _LOGGER.info("Stopped force discharge - target SOC reached")
             except Exception as e:
@@ -5615,6 +5723,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "switch",
                         "turn_off",
                         {"entity_id": grid_charge_switch},
+                        blocking=True,
                     )
                     _LOGGER.info("Stopped grid charging - target SOC reached")
                 elif state and state.state == "off":
@@ -5817,7 +5926,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         house connection protection must not have, so the value is read back
         and rewritten when it has drifted.
         """
-        if self._is_backup_active():
+        if self._ac_charge_limit_write_lock.locked() or self._is_backup_active():
             return
         if self._auto_test_active:
             # The live trial owns its setpoint. Comparing it to the older
@@ -5870,6 +5979,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         if self._grid_limit_configured():
             await self._pause_grid_charge("inverter readback exceeds the protective charge limit")
+        latest = (float(self._auto_test_power_w)
+                  if self._auto_test_active and self._auto_test_power_w is not None
+                  else self._planned_setpoint_written_w)
+        if self._ac_charge_limit_write_lock.locked() or latest != written:
+            return
         await self._set_ac_charge_limit_w(int(written))
 
     async def _verify_and_restore_min_soc(self) -> None:
@@ -5903,7 +6017,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if target_soc is None:
                 return
 
-            floor_soc = self.inverter_floor_soc(target_soc)
+            floor_soc = self._charging_floor_soc(target_soc)
             if floor_soc is None:
                 return
 

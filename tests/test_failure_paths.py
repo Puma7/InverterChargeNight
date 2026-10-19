@@ -132,7 +132,7 @@ async def test_reaching_the_target_stops_grid_charging_once(mock_hass, coordinat
 
     assert coordinator.target_reached is True
     assert data["target_reached"] is True
-    assert call("switch", "turn_off", {"entity_id": GRID}) in (
+    assert call("switch", "turn_off", {"entity_id": GRID}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
 
@@ -224,6 +224,7 @@ DISCHARGE_CONFIG = dict(CONFIG) | {
 
 def _discharge_coordinator(mock_hass, *, min_soc_state="8"):
     coordinator = _make_coordinator(mock_hass, DISCHARGE_CONFIG)
+    coordinator.is_active = True
     mock_hass.states.async_set(MIN_SOC, min_soc_state)
     mock_hass.states.async_set(GRID, "off")
     mock_hass.states.async_set(BATTERY, "80")
@@ -239,8 +240,8 @@ async def test_discharge_with_a_usable_floor_starts_the_force_discharge(mock_has
     await coordinator._control_discharge(35.0)
 
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": 35.0}),
-        call("switch", "turn_on", {"entity_id": FORCE}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 35.0}, blocking=True),
+        call("switch", "turn_on", {"entity_id": FORCE}, blocking=True),
     ]
 
 
@@ -270,7 +271,7 @@ async def test_discharge_waits_when_the_floor_cannot_be_written(mock_hass):
 
     # The floor write was attempted and failed, so the discharge does not start
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": 35.0}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 35.0}, blocking=True),
     ]
 
 
@@ -300,7 +301,7 @@ async def test_a_target_crossed_during_the_update_stops_charging(mock_hass, coor
 
     assert coordinator.target_reached is True
     assert data["target_reached"] is True
-    assert call("switch", "turn_off", {"entity_id": GRID}) in (
+    assert call("switch", "turn_off", {"entity_id": GRID}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
 
@@ -476,7 +477,7 @@ async def test_a_plan_without_a_charge_limit_entity_is_not_marked_applied(mock_h
         # Nothing was written to a number entity: only the min SOC and the switch
         assert [
             c for c in mock_hass.services.async_call.await_args_list if c.args[0] == "number"
-        ] == [call("number", "set_value", {"entity_id": MIN_SOC, "value": ANY})]
+        ] == [call("number", "set_value", {"entity_id": MIN_SOC, "value": ANY}, blocking=True)]
     finally:
         await coordinator._stop_periodic_verification()
 
@@ -904,7 +905,7 @@ async def test_an_unparsable_battery_soc_does_not_stop_the_discharge_control(moc
     await coordinator._control_discharge(35.0)
 
     # Unreadable is not "already at target": the floor is still written
-    assert call("number", "set_value", {"entity_id": MIN_SOC, "value": 35.0}) in (
+    assert call("number", "set_value", {"entity_id": MIN_SOC, "value": 35.0}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
 
@@ -929,7 +930,7 @@ async def test_a_failing_min_soc_preparation_is_survived(mock_hass):
 
     # The floor could not be prepared, so the discharge does not start
     assert (
-        call("switch", "turn_on", {"entity_id": FORCE})
+        call("switch", "turn_on", {"entity_id": FORCE}, blocking=True)
         not in mock_hass.services.async_call.await_args_list
     )
 
@@ -947,7 +948,7 @@ async def test_a_failing_grid_charge_turn_off_does_not_stop_the_discharge(mock_h
 
     await coordinator._control_discharge(35.0)
 
-    assert call("switch", "turn_on", {"entity_id": FORCE}) in (
+    assert call("switch", "turn_on", {"entity_id": FORCE}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
 
