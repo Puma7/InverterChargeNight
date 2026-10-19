@@ -74,3 +74,19 @@ zusaetzlich den aufgezeichneten HA-Verlauf der genannten Entitaeten sichern.
 Ein Export morgens liefert keine vollstaendige Zeitreihe der Nacht; insbesondere
 koennen die letzten 100 KORE-Schreibereignisse den Fensterstart bereits verdraengt
 haben. Bei einer sichtbaren Abweichung auch waehrenddessen einen Export erstellen.
+
+## Nachtentladung ab 3.10.5
+
+Das regulaere Nachtfenster setzt nur den geplanten Ziel-Min-SOC. Beispiel:
+100% Akkustand, Ziel 30%, urspruenglicher Min-SOC 8%. Nachts darf der Akku
+bis 30% das Haus versorgen. Um 05:00 wird die Untergrenze wieder auf 8%
+gesetzt; der tatsaechliche Akkustand wird dadurch nicht auf 8% abgesenkt.
+Ein anfangs unter dem Ziel liegender Akku wird bis zum Ziel geladen.
+
+Im Verlauf pruefen: Ziel-Min-SOC statt anfaenglichem Akkustand, keine durch
+ICN eingeschaltete Entladesperre, keine auf null gesetzte Entladeleistung,
+Hausversorgung aus dem Akku oberhalb der Untergrenze und Ruecksetzung auf
+den gespeicherten Originalwert am Morgen. Ausdrueckliche Reservierungen und
+die Abendrettung koennen weiterhin Energie halten; Grund und Ende stehen
+in den Diagnoseattributen. Eine unabhaengig gesetzte Sperre wird nicht
+pauschal aufgehoben. Beim Update bleiben Zuordnungen und Einstellungen erhalten.

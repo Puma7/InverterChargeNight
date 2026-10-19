@@ -10,10 +10,12 @@ async def check_window_handoff(hass, lab, planner, kore_entry, check):
     process = hass.data["kostal_kore"][kore_entry.entry_id]["process_coordinator"]
     from homeassistant.helpers.entity_component import DATA_INSTANCES
     minimum = hass.data[DATA_INSTANCES]["number"].get_entity(planner.data["min_soc_entity"])
+    grid_switch = hass.data[DATA_INSTANCES]["switch"].get_entity(planner.data["grid_charge_switch"])
     # A night that already reached its target has grid charging off. This
     # eliminates an unrelated switch command that could hide a queued reset.
     await hass.services.async_call("switch", "turn_off",
         {"entity_id": planner.data["grid_charge_switch"]}, blocking=True)
+    await grid_switch.coordinator.async_refresh()
     await co._on_window_end(dt_util.now(), scheduled=True)
     check("completed window restores min SOC without losing an unconfirmed original",
           lab.plant.min_soc == 8 and co.original_min_soc in (None, 8),
@@ -53,6 +55,7 @@ async def check_window_handoff(hass, lab, planner, kore_entry, check):
     # KORE can debounce feedback past the service handler. Complete a real
     # poll, then invoke the same retry that its scheduled backoff would call.
     await minimum.coordinator.async_refresh()
+    await grid_switch.coordinator.async_refresh()
     if co._pending_reset:
         await co._retry_reset()
     check("reserve release restores 8 percent and clears pending reset",

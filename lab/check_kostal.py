@@ -186,8 +186,12 @@ async def main():
             planner = await configure_planner(hass, defaults)
             await hass.async_block_till_done()
             check("ICN configures against real KORE entities", planner.state.value == "loaded", mapping)
+            from night_floor_campaign import check_night_floor
+            await asyncio.wait_for(check_night_floor(hass, lab, planner, entry, check), 180)
             await hass.services.async_call("inverter_charge_night", "charge_to",
                 {"target_soc": 70, "duration": {"hours": 2}}, blocking=True)
+            # A preceding configuration update can occupy HA's refresh debounce.
+            await planner.runtime_data.async_refresh()
             await hass.async_block_till_done()
             check("ICN charge command passes through KORE REST to simulated inverter",
                   lab.plant.grid_charge and lab.plant.min_soc >= 70,

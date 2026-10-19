@@ -76,7 +76,11 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
             await grid_switch.coordinator.async_refresh()
             await process.async_refresh()
             await hass.async_block_till_done()
-            trial = co._auto_test_power_w if co._auto_test_active else None
+            # A new trial can still be awaiting its device feedback while HA
+            # finishes another update. Only an observed, confirmed trial owns
+            # the setpoint that this assertion promises to preserve.
+            trial = (co._auto_test_power_w if co._auto_test_active
+                     and co._auto_test_limit_confirmed and co._auto_limit_matches_feedback() else None)
             await co._verify_ac_charge_limit()
             if trial is not None:
                 verification_steps += 1
@@ -103,6 +107,15 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
     # Finishing the finder updates the public config entry asynchronously.
     # Await that transition and observed KORE feedback before asserting the
     # normal planner's final actuator value, rather than a transient old poll.
+    def optimum_applied():
+        # The normal planner deliberately avoids rewrites within its 100 W
+        # dead band. Require a real accepted device command near the optimum,
+        # rather than exact equality that depends on the last search sample.
+        return (co.planned_charge_power_w == data.get("best_power_w")
+                and abs(lab.plant.charge_limit - data.get("best_power_w", 0)) <= 100
+                and co._planned_setpoint_written_w == lab.plant.charge_limit
+                and co.planned_power_is_applied)
+
     for _ in range(20):
         await hass.async_block_till_done()
         await modbus.async_refresh()
@@ -110,13 +123,11 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
         await process.async_refresh()
         await co.async_refresh()
         await hass.async_block_till_done()
-        if (co.planned_charge_power_w == data.get("best_power_w")
-                and lab.plant.charge_limit == data.get("best_power_w")):
+        if optimum_applied():
             break
         await asyncio.sleep(.1)
     check("normal planner actually applies the measured optimum through KORE",
-          co.planned_charge_power_w == data.get("best_power_w") and
-          lab.plant.charge_limit == data.get("best_power_w"),
+          optimum_applied(),
           {"planned": co.planned_charge_power_w, "device": lab.plant.charge_limit,
            "best": data.get("best_power_w")})
     commands = [item["value"] for item in lab.commands if item["key"] == "charge_limit" and item["accepted"]]

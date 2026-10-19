@@ -1,11 +1,8 @@
-"""Plan 009: blocking the battery discharge during the window.
+"""Explicit ad-hoc reservations can hold existing battery energy.
 
-Inside the window grid energy is cheap and stored PV is not: a battery that
-runs the house at night replaces cheap energy with expensive energy the next
-day. Plan 006 added an optional discharge power limit, but no inverter
-guarantees such an entity. Raising the inverter's **min SOC** works everywhere,
-because a battery does not discharge below its min SOC - and that entity is the
-one this integration controls anyway.
+These tests exercise an explicitly requested reservation, including its switch,
+power-limit and min-SOC implementations. Regular scheduled nights only preserve
+the planned target; their discharge behavior is covered in test_night_discharge_floor.
 
 The value written to the min SOC entity (``inverter_floor_soc``) and the charge
 target (``current_target_soc``) are therefore two different things. These tests
@@ -119,6 +116,8 @@ def _make(hass, config=None, options=None) -> InverterChargeNightCoordinator:
 
     hass.config_entries.async_update_entry = MagicMock(side_effect=_store)
     coordinator = InverterChargeNightCoordinator(hass, entry)
+    coordinator._adhoc_until = WINDOW_END
+    coordinator._adhoc_allow_grid_charge = True
     coordinator.async_request_refresh = AsyncMock()
     return coordinator
 
@@ -405,31 +404,31 @@ async def test_floor_follows_the_charge_level_upwards(mock_hass, coordinator):
 
 
 @pytest.mark.asyncio
-async def test_an_entry_from_before_the_block_is_told_what_changed(mock_hass, caplog):
-    """The default is 'auto', so an upgrade starts raising the min SOC by itself."""
+async def test_reservation_announces_its_chosen_block_once(mock_hass, caplog):
+    """An explicit reservation announces its configured mechanism once."""
     caplog.set_level(logging.INFO)
     _register(mock_hass, battery=str(ABOVE_TARGET))
     made = _make(mock_hass, {k: v for k, v in CONFIG.items() if k != CONF_DISCHARGE_BLOCK_MODE})
     try:
         await made._on_window_start(WINDOW_START)
 
-        assert "shows a higher min SOC than the charge target" in caplog.text
+        assert "Blocking battery discharge for this window via: min_soc" in caplog.text
         # Once per window, not on every poll
         caplog.clear()
         await made._apply_discharge_block(announce=True)
-        assert "shows a higher min SOC" not in caplog.text
+        assert "Blocking battery discharge" not in caplog.text
     finally:
         await made._stop_periodic_verification()
 
 
 @pytest.mark.asyncio
-async def test_a_configured_mode_says_nothing_about_an_upgrade(mock_hass, caplog):
+async def test_configured_reservation_announces_its_mechanism(mock_hass, caplog):
     caplog.set_level(logging.INFO)
     _register(mock_hass, battery=str(ABOVE_TARGET))
     made = _make(mock_hass, {**CONFIG, CONF_DISCHARGE_BLOCK_MODE: DISCHARGE_BLOCK_AUTO})
     try:
         await made._on_window_start(WINDOW_START)
-        assert "shows a higher min SOC" not in caplog.text
+        assert "Blocking battery discharge for this window via: min_soc" in caplog.text
     finally:
         await made._stop_periodic_verification()
 
@@ -699,13 +698,15 @@ async def unblocked(mock_hass):
 
 
 @pytest.mark.asyncio
-async def test_mode_off_leaves_the_window_exactly_as_it_was(mock_hass, unblocked, caplog):
+async def test_reservation_with_mode_off_writes_only_its_target_floor(mock_hass, unblocked, caplog):
     with caplog.at_level("INFO"):
         await unblocked._on_window_start(WINDOW_START)
 
     assert "Discharge block is off" in caplog.text
-    # Nothing is written at the window start, and nothing is captured for a reset
-    mock_hass.services.async_call.assert_not_awaited()
+    mock_hass.services.async_call.assert_awaited_once_with(
+        "number", "set_value", {"entity_id": MIN_SOC, "value": TARGET}, blocking=True,
+    )
+    assert unblocked.original_min_soc == DEFAULT_MIN
     assert unblocked._window_floor_soc is None
     assert unblocked._original_discharge_limit is None
     assert unblocked._original_discharge_block is None

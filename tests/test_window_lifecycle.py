@@ -943,12 +943,14 @@ def test_prices_require_all_three(bridge):
 
 @pytest_asyncio.fixture
 async def blocking(mock_hass):
-    """Headroom coordinator with a discharge limit entity at 5000 W."""
+    """Explicit reservation with a discharge limit entity at 5000 W."""
     _real_task_runner(mock_hass)
     _persisting(mock_hass)
     _register_inverter(mock_hass)
     mock_hass.states.async_set(DISCHARGE_LIMIT, "5000", {"unit_of_measurement": "W"})
     coordinator = _make_coordinator(mock_hass, {**CONFIG, CONF_DISCHARGE_LIMIT_ENTITY: DISCHARGE_LIMIT})
+    coordinator._adhoc_until = WINDOW_END
+    coordinator._adhoc_allow_grid_charge = True
     yield coordinator
     await coordinator._stop_periodic_verification()
 
@@ -1056,7 +1058,7 @@ async def test_window_start_without_discharge_entity_falls_back_to_min_soc(
     """No switch and no power limit: the min SOC is the way, and it is logged once."""
     with caplog.at_level("INFO"):
         await coordinator._on_window_start(WINDOW_START)
-    assert "Blocking battery discharge for this window via: min_soc" in caplog.text
+    assert "Night window uses only the target min SOC" in caplog.text
     assert coordinator.discharge_block_state() == "min_soc"
 
 
@@ -1084,7 +1086,7 @@ async def test_verification_reapplies_discharge_block(mock_hass, blocking):
 
 @pytest.mark.asyncio
 async def test_restart_in_window_keeps_persisted_discharge_original(mock_hass):
-    """After a restart the live 0 is not adopted as original; the window end restores 5000."""
+    """A scheduled night releases an old ICN-owned limit immediately on restart."""
     _real_task_runner(mock_hass)
     _register_inverter(mock_hass, min_soc="45")
     mock_hass.states.async_set(DISCHARGE_LIMIT, "0")
@@ -1096,14 +1098,16 @@ async def test_restart_in_window_keeps_persisted_discharge_original(mock_hass):
     assert coordinator._original_discharge_limit == 5000.0
     try:
         await coordinator._on_window_start(WINDOW_START)
-        assert coordinator._original_discharge_limit == 5000.0
-        mock_hass.services.async_call.assert_not_awaited()  # already blocked
+        assert coordinator._original_discharge_limit is None
+        mock_hass.services.async_call.assert_awaited_once_with(
+            "number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 5000.0}, blocking=True,
+        )
+        mock_hass.services.async_call.reset_mock()
 
         await coordinator._on_window_end(WINDOW_END)
 
-        assert call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 5000.0}, blocking=True) in (
-            mock_hass.services.async_call.await_args_list
-        )
+        assert all(c.args[2]["entity_id"] != DISCHARGE_LIMIT
+                   for c in mock_hass.services.async_call.await_args_list)
     finally:
         await coordinator._stop_periodic_verification()
 
@@ -1143,6 +1147,7 @@ async def test_discharge_block_unsupported_domain(mock_hass, caplog):
     mock_hass.states.async_set("sensor.discharge", "5000")
     coordinator = _make_coordinator(mock_hass, {**CONFIG, CONF_DISCHARGE_LIMIT_ENTITY: "sensor.discharge"})
 
+    coordinator._adhoc_until = WINDOW_END
     await coordinator._apply_discharge_block()
     assert "unsupported domain sensor" in caplog.text
     mock_hass.services.async_call.assert_not_awaited()
@@ -1219,9 +1224,8 @@ async def test_planned_power_two_kwh_in_four_hours_writes_556_w(mock_hass, power
     assert powered.planned_charge_power_w == 3000.0
     assert data["planned_charge_power_w"] == 3000.0
     assert mock_hass.services.async_call.await_args_list == [
-        # The bridge target (28.1 %) is below the 40 % in the battery, so the
-        # window start raises the min SOC floor to 40 % first (plan 009).
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": 40.0}, blocking=True),
+        # The scheduled night writes the calculated floor, never the initial 40%.
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 28.9}, blocking=True),
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}, blocking=True),
         call("switch", "turn_on", {"entity_id": GRID}, blocking=True),
         call("number", "set_value", {"entity_id": AC_LIMIT, "value": 3000.0}, blocking=True),

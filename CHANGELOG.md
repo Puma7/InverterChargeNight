@@ -5,6 +5,20 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.5] - 2026-10-19
+
+### Fixed
+- Scheduled night charging now sets only the planned target min SOC. Existing energy
+  above it may supply the house; no discharge-block switch, zero discharge limit or
+  floor at the initial battery SOC is applied. The original min SOC is restored at
+  the end. Explicit reservations and evening rescue retain their holding behavior.
+- Confirm fresh switch/limit feedback before discarding captured discharge restores.
+  Delayed, missing, stale or ignored feedback retains the original for retry, including
+  at the window end; a newer capture is not cleared by an older restore.
+- Release captured legacy night restrictions on resume without losing originals on
+  failure or overriding independent discharge locks. Document the distinction in
+  setup descriptions, diagnostics guidance and the backup-detection warning.
+
 ## [3.10.4] - 2026-10-19
 
 ### Added

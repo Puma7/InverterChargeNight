@@ -77,7 +77,7 @@
           "grid_max_continuous_w": "Max Continuous Grid Power",
           "grid_headroom_w": "Safety Margin",
           "discharge_block_switch": "Block Discharge Switch",
-          "discharge_block_mode": "Discharge Block"
+          "discharge_block_mode": "Discharge block for reservations"
         },
         "data_description": {
           "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
@@ -91,7 +91,7 @@
           "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
           "auto_efficient_charge": "Tests permitted charging powers and compares AC input energy with stored DC energy. Requires a watt-based ceiling and two suitable power sensors. Results need actual measurement time, sufficient energy and plausible feedback. Load limits and safety stops take priority.",
           "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode.",
-          "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end.",
+          "discharge_limit_entity": "Optional discharge power limit. Explicit reservations may set it to zero and restore its original afterwards. Scheduled night charging never sets this limit to zero. Also usable for experimental morning discharge.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
           "main_fuse_a": "Main fuse of the house connection, per phase. 63 A on three phases is about 43 kW of nominal power. Needed unless you enter the maximum continuous power below.",
           "grid_phases": "1 for a single-phase connection, 3 for a three-phase one.",
@@ -99,8 +99,8 @@
           "grid_continuous_pct": "Share of the nominal power that may be drawn for hours on end. 80 % leaves room for the heating of meter and terminal contacts; pick a lower value for an older meter.",
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
           "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
-          "discharge_block_switch": "Optional: switch entity of the inverter that blocks battery discharge (Kostal calls it \"battery discharge lock\"). Preferred over every other way; turned on at the window start and put back to its previous state at the window end.",
-          "discharge_block_mode": "Blocks the battery from discharging into the house during the window, so stored energy is kept for the day. A switch of the inverter is preferred; if there is none, the integration raises the min SOC instead and resets it at the window end."
+          "discharge_block_switch": "Optional switch for explicit reservations/evening rescue. Its initial state is saved and restored afterwards. Scheduled night charging never turns this switch on.",
+          "discharge_block_mode": "Applies only to explicit reservations and evening rescue: Automatic uses a switch, discharge limit or raised min SOC. Off disables this additional block. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house."
         }
       },
       "advanced": {
@@ -235,7 +235,7 @@
           "grid_max_continuous_w": "Max Continuous Grid Power",
           "grid_headroom_w": "Safety Margin",
           "discharge_block_switch": "Block Discharge Switch",
-          "discharge_block_mode": "Discharge Block"
+          "discharge_block_mode": "Discharge block for reservations"
         },
         "data_description": {
           "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
@@ -249,7 +249,7 @@
           "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
           "auto_efficient_charge": "Tests permitted charging powers and compares AC input energy with stored DC energy. Requires a watt-based ceiling and two suitable power sensors. Results need actual measurement time, sufficient energy and plausible feedback. Load limits and safety stops take priority.",
           "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode.",
-          "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end.",
+          "discharge_limit_entity": "Optional discharge power limit. Explicit reservations may set it to zero and restore its original afterwards. Scheduled night charging never sets this limit to zero. Also usable for experimental morning discharge.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
           "main_fuse_a": "Main fuse of the house connection, per phase. 63 A on three phases is about 43 kW of nominal power. Needed unless you enter the maximum continuous power below.",
           "grid_phases": "1 for a single-phase connection, 3 for a three-phase one.",
@@ -257,8 +257,8 @@
           "grid_continuous_pct": "Share of the nominal power that may be drawn for hours on end. 80 % leaves room for the heating of meter and terminal contacts; pick a lower value for an older meter.",
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
           "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
-          "discharge_block_switch": "Optional: switch entity of the inverter that blocks battery discharge (Kostal calls it \"battery discharge lock\"). Preferred over every other way; turned on at the window start and put back to its previous state at the window end.",
-          "discharge_block_mode": "Blocks the battery from discharging into the house during the window, so stored energy is kept for the day. A switch of the inverter is preferred; if there is none, the integration raises the min SOC instead and resets it at the window end."
+          "discharge_block_switch": "Optional switch for explicit reservations/evening rescue. Its initial state is saved and restored afterwards. Scheduled night charging never turns this switch on.",
+          "discharge_block_mode": "Applies only to explicit reservations and evening rescue: Automatic uses a switch, discharge limit or raised min SOC. Off disables this additional block. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house."
         }
       },
       "reconfigure_advanced": {
@@ -463,15 +463,15 @@
           "high_price_start": "High-price period, start",
           "high_price_end": "High-price period, end",
           "high_price_margin_pct": "Allowance on the evening's consumption",
-          "discharge_block_mode": "Discharge Block",
+          "discharge_block_mode": "Discharge block for reservations",
           "discharge_block_switch": "Block Discharge Switch"
         },
         "data_description": {
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
           "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value.",
-          "discharge_block_mode": "Blocks the battery from discharging into the house during the window, so stored energy is kept for the day. A switch of the inverter is preferred; if there is none, the integration raises the min SOC instead and resets it at the window end.",
-          "discharge_block_switch": "Optional: switch entity of the inverter that blocks battery discharge (Kostal calls it \"battery discharge lock\"). Preferred over every other way; turned on at the window start and put back to its previous state at the window end."
+          "discharge_block_mode": "Applies only to explicit reservations and evening rescue: Automatic uses a switch, discharge limit or raised min SOC. Off disables this additional block. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house.",
+          "discharge_block_switch": "Optional switch for explicit reservations/evening rescue. Its initial state is saved and restored afterwards. Scheduled night charging never turns this switch on."
         }
       },
       "season": {
@@ -545,7 +545,7 @@
         "data_description": {
           "absolute_max_charge_power_entity": "Usually leave empty. Only for an additional independent hardware ceiling; never reuse the ordinary charging control.",
           "absolute_max_charge_power_w": "Usually leave empty. Supply only together with its separate hardware control.",
-          "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end."
+          "discharge_limit_entity": "Optional discharge power limit. Explicit reservations may set it to zero and restore its original afterwards. Scheduled night charging never sets this limit to zero. Also usable for experimental morning discharge."
         }
       },
       "runtime": {
@@ -790,7 +790,7 @@
           "grid_max_continuous_w": "Max Continuous Grid Power",
           "grid_headroom_w": "Safety Margin",
           "discharge_block_switch": "Block Discharge Switch",
-          "discharge_block_mode": "Discharge Block"
+          "discharge_block_mode": "Discharge block for reservations"
         },
         "data_description": {
           "min_charge_power_w": "Minimum charge power allowed for AUTO mode (W).",
@@ -804,7 +804,7 @@
           "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
           "auto_efficient_charge": "Tests permitted charging powers and compares AC input energy with stored DC energy. Requires a watt-based ceiling and two suitable power sensors. Results need actual measurement time, sufficient energy and plausible feedback. Load limits and safety stops take priority.",
           "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode.",
-          "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end.",
+          "discharge_limit_entity": "Optional discharge power limit. Explicit reservations may set it to zero and restore its original afterwards. Scheduled night charging never sets this limit to zero. Also usable for experimental morning discharge.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
           "main_fuse_a": "Main fuse of the house connection, per phase. 63 A on three phases is about 43 kW of nominal power. Needed unless you enter the maximum continuous power below.",
           "grid_phases": "1 for a single-phase connection, 3 for a three-phase one.",
@@ -812,8 +812,8 @@
           "grid_continuous_pct": "Share of the nominal power that may be drawn for hours on end. 80 % leaves room for the heating of meter and terminal contacts; pick a lower value for an older meter.",
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
           "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
-          "discharge_block_switch": "Optional: switch entity of the inverter that blocks battery discharge (Kostal calls it \"battery discharge lock\"). Preferred over every other way; turned on at the window start and put back to its previous state at the window end.",
-          "discharge_block_mode": "Blocks the battery from discharging into the house during the window, so stored energy is kept for the day. A switch of the inverter is preferred; if there is none, the integration raises the min SOC instead and resets it at the window end."
+          "discharge_block_switch": "Optional switch for explicit reservations/evening rescue. Its initial state is saved and restored afterwards. Scheduled night charging never turns this switch on.",
+          "discharge_block_mode": "Applies only to explicit reservations and evening rescue: Automatic uses a switch, discharge limit or raised min SOC. Off disables this additional block. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house."
         }
       },
       "advanced": {
@@ -1014,15 +1014,15 @@
           "high_price_start": "High-price period, start",
           "high_price_end": "High-price period, end",
           "high_price_margin_pct": "Allowance on the evening's consumption",
-          "discharge_block_mode": "Discharge Block",
+          "discharge_block_mode": "Discharge block for reservations",
           "discharge_block_switch": "Block Discharge Switch"
         },
         "data_description": {
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
           "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value.",
-          "discharge_block_mode": "Blocks the battery from discharging into the house during the window, so stored energy is kept for the day. A switch of the inverter is preferred; if there is none, the integration raises the min SOC instead and resets it at the window end.",
-          "discharge_block_switch": "Optional: switch entity of the inverter that blocks battery discharge (Kostal calls it \"battery discharge lock\"). Preferred over every other way; turned on at the window start and put back to its previous state at the window end."
+          "discharge_block_mode": "Applies only to explicit reservations and evening rescue: Automatic uses a switch, discharge limit or raised min SOC. Off disables this additional block. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house.",
+          "discharge_block_switch": "Optional switch for explicit reservations/evening rescue. Its initial state is saved and restored afterwards. Scheduled night charging never turns this switch on."
         }
       },
       "season": {
@@ -1096,7 +1096,7 @@
         "data_description": {
           "absolute_max_charge_power_entity": "Usually leave empty. Only for an additional independent hardware ceiling; never reuse the ordinary charging control.",
           "absolute_max_charge_power_w": "Usually leave empty. Supply only together with its separate hardware control.",
-          "discharge_limit_entity": "Optional: number entity for the battery discharge power limit (W or kW). Set to 0 at the window start so the house runs from the grid and stored PV is kept; the previous value is restored at the window end."
+          "discharge_limit_entity": "Optional discharge power limit. Explicit reservations may set it to zero and restore its original afterwards. Scheduled night charging never sets this limit to zero. Also usable for experimental morning discharge."
         }
       },
       "runtime": {
@@ -1395,7 +1395,7 @@
     },
     "discharge_block_without_backup": {
       "title": "{name}: the battery cannot supply the house during a power cut",
-      "description": "To keep the energy it bought, this integration raises the inverter's minimum SOC while the window is open - and a battery does not discharge below its minimum SOC. If the power fails during the window and your house switches to the battery, the battery will refuse to supply it, however full it is.\n\nTwo ways out, either is enough:\n\n1. Set **Backup / island mode entity** in the integration options (step 4). Any entity that says the house is running on the battery: the inverter's state sensor (a Kostal reports `ESB` - add it under **Backup mode states**), a binary sensor, or an `input_boolean` you flip yourself when you operate a manual transfer switch. The integration then hands the inverter back within seconds.\n\n2. Set **Discharge block** to `Off` in step 3. The battery may then run the house at night, which costs the difference between the window tariff and the day tariff.\n\nThis message disappears once either is done."
+      "description": "The integration {name} uses an elevated min SOC: the planned target during a scheduled night, or potentially a higher floor during an explicit reservation. During a power outage this floor may restrict battery supply. Configure a backup/island detection entity so ICN can release its controls. Turning the reservation discharge block off does not remove the scheduled night target floor."
     },
     "active_range_expired": {
       "title": "{name}: the active date range ended on {end_date}",
