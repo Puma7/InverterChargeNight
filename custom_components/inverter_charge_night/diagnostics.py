@@ -55,6 +55,9 @@ async def async_get_config_entry_diagnostics(
         grid_entity = coordinator.config.get("grid_charge_switch")
         min_soc_state = hass.states.get(min_soc_entity) if min_soc_entity else None
         grid_state = hass.states.get(grid_entity) if grid_entity else None
+        min_soc_feedback = _as_float(min_soc_state.state) if min_soc_state else None
+        if min_soc_feedback is not None and not 0 <= min_soc_feedback <= 100:
+            min_soc_feedback = None
         auto_data = coordinator.get_auto_efficiency_data()
         auto_test_duration_s: int | None = None
         if coordinator._auto_test_active and coordinator._auto_test_start:
@@ -120,7 +123,7 @@ async def async_get_config_entry_diagnostics(
                 **coordinator.auto_test_attributes(),
             },
             "charge_control": {
-                "min_soc_feedback_pct": _as_float(min_soc_state.state) if min_soc_state else None,
+                "min_soc_feedback_pct": min_soc_feedback,
                 "grid_charge_feedback": (
                     grid_state.state if grid_state and grid_state.state in ("on", "off") else None
                 ),

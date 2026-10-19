@@ -149,6 +149,7 @@ async def test_wait_reason_and_redacted_live_control_snapshot(mock_hass):
 @pytest.mark.parametrize("floor,grid", [
     ("unknown", "unknown"), ("unavailable", "unavailable"),
     ("invalid", "invalid"), ("nan", "unknown"),
+    ("-1", "unknown"), ("101", "unknown"),
 ])
 async def test_unusable_control_feedback_is_not_reported_as_zero_or_off(mock_hass, floor, grid):
     c = make(mock_hass)
@@ -165,6 +166,15 @@ async def test_unusable_control_feedback_is_not_reported_as_zero_or_off(mock_has
     assert control["reset_pending"] is True
     assert json.dumps({"data": c.entry.data, "options": c.entry.options}, sort_keys=True) == before
     assert "number.synthetic_floor" not in json.dumps(report)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("floor", ["0", "100"])
+async def test_diagnostic_minimum_soc_accepts_percentage_boundaries(mock_hass, floor):
+    c = make(mock_hass)
+    mock_hass.states.async_set("number.synthetic_floor", floor)
+    report = await async_get_config_entry_diagnostics(mock_hass, c.entry)
+    assert report["state"]["charge_control"]["min_soc_feedback_pct"] == float(floor)
 
 
 @pytest.mark.asyncio
