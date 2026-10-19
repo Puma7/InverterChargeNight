@@ -5,6 +5,19 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.3] - 2026-10-19
+
+### Fixed
+- Await minimum-SoC and grid-charge service results before reporting success or
+  enabling charging. A rejected charging floor pauses grid charging and preserves
+  the original settings for reset. Related discharge floor/stop calls also await
+  their service result.
+- Round charging floors upwards to the configured number's advertised step,
+  without exceeding device or user limits. Keep the calculated charge target
+  separate; restore the original floor unchanged at window end.
+- Expose efficiency waiting reasons and a redacted control snapshot with planned,
+  commanded and observed power values. Log a changed waiting reason once.
+
 ## [3.10.2] - 2026-10-18
 
 ### Fixed

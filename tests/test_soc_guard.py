@@ -269,4 +269,4 @@ async def test_soc_guard_handles_unavailable_battery_soc():
     assert len(grid_charge_calls) == 0, "Grid charge should be skipped when SOC is unavailable"
     hass.services.async_call.assert_awaited_once_with(
         "switch", "turn_off", {"entity_id": "switch.grid_charge"},
-    )
+    blocking=True)

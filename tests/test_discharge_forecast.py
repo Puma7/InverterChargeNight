@@ -256,7 +256,7 @@ async def test_stop_force_discharge(mock_hass, mock_config_entry):
     await coord._stop_force_discharge()
     mock_hass.services.async_call.assert_called_once_with(
         "switch", "turn_off", {"entity_id": "switch.force_discharge"},
-    )
+    blocking=True)
 
 
 @pytest.mark.asyncio

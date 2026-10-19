@@ -178,7 +178,7 @@ async def test_control_kostal_keeps_high_live_value_as_original(mock_hass):
 
     assert coordinator.original_min_soc == 50.0
     mock_hass.services.async_call.assert_awaited_with(
-        "number", "set_value", {"entity_id": "number.min_soc", "value": 30.0}
+        "number", "set_value", {"entity_id": "number.min_soc", "value": 30.0}, blocking=True
     )
 
 
@@ -242,7 +242,7 @@ async def test_control_kostal_sets_min_soc_even_if_last_set_matches_target(mock_
 
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": "number.min_soc", "value": 60.0}
-    )
+    , blocking=True)
     assert coordinator._last_soc_set == 60.0
 
 
@@ -272,7 +272,7 @@ async def test_control_discharge_sets_min_soc_even_if_last_set_matches_target(mo
     await coordinator._control_discharge(35.0)
 
     mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": "number.min_soc", "value": 35.0}
+        "number", "set_value", {"entity_id": "number.min_soc", "value": 35.0}, blocking=True
     )
     assert coordinator._last_soc_set == 35.0
 

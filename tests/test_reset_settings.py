@@ -344,7 +344,7 @@ async def test_window_start_during_pending_reset_keeps_original(mock_hass):
         # The inverter already shows the target, so only charging is switched on ...
         mock_hass.services.async_call.assert_awaited_once_with(
             "switch", "turn_on", {"entity_id": GRID}
-        )
+        , blocking=True)
         # ... and 45 % was not taken for the original
         assert coordinator.original_min_soc == 5.0
         assert _runtime_state(coordinator)["original_min_soc"] == 5.0
@@ -565,7 +565,7 @@ async def test_absolute_charge_power_reset_clears_only_on_success(mock_hass):
     assert coordinator._original_absolute_charge_power is None
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": ABS_LIMIT, "value": 9000.0}
-    )
+    , blocking=True)
 
     # Nothing captured, or an entity that is gone: nothing left to restore
     assert await coordinator._reset_absolute_charge_power() is True
@@ -980,7 +980,7 @@ async def test_the_mid_window_restore_keeps_remembering_the_original(mock_hass):
     assert coordinator._original_absolute_charge_power is None
     assert mock_hass.services.async_call.await_args_list[-1] == call(
         "number", "set_value", {"entity_id": ABS_LIMIT, "value": 9000.0}
-    )
+    , blocking=True)
 
 
 @pytest.mark.asyncio
@@ -1016,7 +1016,7 @@ async def test_a_kilowatt_entity_is_compared_in_the_same_unit(mock_hass):
     assert coordinator._original_absolute_charge_power == 9.0
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": ABS_LIMIT, "value": 5.0}
-    )
+    , blocking=True)
 
     coordinator._original_absolute_charge_power = None
     mock_hass.states.async_set(ABS_LIMIT, "5", {"unit_of_measurement": "kW"})

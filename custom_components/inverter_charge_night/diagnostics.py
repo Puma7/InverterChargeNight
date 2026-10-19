@@ -111,5 +111,29 @@ async def async_get_config_entry_diagnostics(
             "auto_test_duration_s": auto_test_duration_s,
             "auto_test_energy_sent_wh": coordinator._auto_energy_sent_wh,
             "auto_test_energy_received_wh": coordinator._auto_energy_received_wh,
+            "efficiency_search": {
+                "state": coordinator.auto_test_state,
+                **coordinator.auto_test_attributes(),
+            },
+            "charge_control": {
+                "planned_power_w": coordinator.planned_charge_power_w,
+                "planned_power_is_applied": coordinator.planned_power_is_applied,
+                "last_commanded_power_w": coordinator._planned_setpoint_written_w,
+                "charge_limit_feedback_w": coordinator._get_ac_charge_limit_w(
+                    coordinator.config.get("charge_power_entity")
+                ),
+                "ac_charge_power_w": coordinator._get_power_w(
+                    coordinator.config.get("charge_power_sent_entity")
+                ),
+                "dc_charge_power_w": coordinator._get_power_w(
+                    coordinator.config.get("charge_power_received_entity")
+                ),
+                "battery_soc": coordinator._current_battery_soc(),
+                "input_configured": {
+                    key: bool(coordinator.config.get(key))
+                    for key in ("charge_power_entity", "charge_power_sent_entity",
+                                "charge_power_received_entity", "grid_charge_switch")
+                },
+            },
         }
     return data

@@ -184,8 +184,8 @@ async def test_update_in_window_sets_min_soc_then_turns_grid_charge_on(
 
     # Order matters: the inverter must know the new min SOC before charging starts
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": EXPECTED_TARGET}),
-        call("switch", "turn_on", {"entity_id": GRID}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": EXPECTED_TARGET}, blocking=True),
+        call("switch", "turn_on", {"entity_id": GRID}, blocking=True),
     ]
     assert coordinator.original_min_soc == DEFAULT_MIN
     assert coordinator._last_soc_set == EXPECTED_TARGET
@@ -213,7 +213,7 @@ async def test_update_stops_grid_charge_once_battery_reaches_target(
 
     mock_hass.services.async_call.assert_awaited_once_with(
         "switch", "turn_off", {"entity_id": GRID}
-    )
+    , blocking=True)
     assert coordinator.target_reached is True
     assert data["target_reached"] is True
     assert data["current_soc"] == target
@@ -305,7 +305,7 @@ async def test_restart_in_window_continues_persisted_target_and_restores_origina
         # The inverter is already at the target, so only charging is switched on
         mock_hass.services.async_call.assert_awaited_once_with(
             "switch", "turn_on", {"entity_id": GRID}
-        )
+        , blocking=True)
         assert coordinator.original_min_soc == DEFAULT_MIN
 
         mock_hass.states.async_set(GRID, "on")
@@ -331,8 +331,8 @@ async def test_restart_in_window_without_persisted_state_recalculates(mock_hass,
     assert coordinator.initial_calculated_soc == EXPECTED_TARGET
     await coordinator._async_update_data()
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": EXPECTED_TARGET}),
-        call("switch", "turn_on", {"entity_id": GRID}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": EXPECTED_TARGET}, blocking=True),
+        call("switch", "turn_on", {"entity_id": GRID}, blocking=True),
     ]
 
 
@@ -366,7 +366,7 @@ async def test_override_above_target_keeps_grid_charging(mock_hass, coordinator)
     # The new target reaches the inverter and charging is not stopped: 50 % < 70 %
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": MIN_SOC, "value": 70.0}
-    )
+    , blocking=True)
     assert coordinator.target_reached is False
     assert data["target_reached"] is False
     assert coordinator.minimum_calculated_soc == 45.0
@@ -427,10 +427,10 @@ async def test_override_in_discharge_mode_uses_discharge_path(mock_hass):
 
         calls = mock_hass.services.async_call.await_args_list
         # Discharge floor is written and force discharge is switched on ...
-        assert call("number", "set_value", {"entity_id": MIN_SOC, "value": 30.0}) in calls
-        assert call("switch", "turn_on", {"entity_id": FORCE}) in calls
+        assert call("number", "set_value", {"entity_id": MIN_SOC, "value": 30.0}, blocking=True) in calls
+        assert call("switch", "turn_on", {"entity_id": FORCE}, blocking=True) in calls
         # ... but the charge path is never taken
-        assert call("switch", "turn_on", {"entity_id": GRID}) not in calls
+        assert call("switch", "turn_on", {"entity_id": GRID}, blocking=True) not in calls
         assert data["target_reached"] is False
         assert data["is_active"] is True
     finally:
@@ -615,8 +615,8 @@ async def test_bridge_mode_targets_bridge_energy_not_headroom(mock_hass, bridge)
     data = await bridge._async_update_data()
 
     assert mock_hass.services.async_call.await_args_list == [
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": BRIDGE_TARGET}),
-        call("switch", "turn_on", {"entity_id": GRID}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": BRIDGE_TARGET}, blocking=True),
+        call("switch", "turn_on", {"entity_id": GRID}, blocking=True),
     ]
     assert data["calculated_soc"] == BRIDGE_TARGET
     assert data["plan_reason"] == REASON_BRIDGE
@@ -724,7 +724,7 @@ async def test_replan_in_window_raises_target_but_never_lowers_it(mock_hass):
         assert data["calculated_soc"] == BRIDGE_TARGET
         mock_hass.services.async_call.assert_awaited_once_with(
             "number", "set_value", {"entity_id": MIN_SOC, "value": BRIDGE_TARGET}
-        )
+        , blocking=True)
         assert coordinator.entry.options[CONF_RUNTIME_STATE]["initial_calculated_soc"] == BRIDGE_TARGET
         mock_hass.states.async_set(MIN_SOC, str(BRIDGE_TARGET))
         mock_hass.services.async_call.reset_mock()
@@ -762,7 +762,7 @@ async def test_replan_raising_target_resumes_charging(mock_hass, bridge):
     assert bridge.initial_calculated_soc > BRIDGE_TARGET
     assert bridge.target_reached is False
     assert data["target_reached"] is False
-    assert call("switch", "turn_on", {"entity_id": GRID}) in mock_hass.services.async_call.await_args_list
+    assert call("switch", "turn_on", {"entity_id": GRID}, blocking=True) in mock_hass.services.async_call.await_args_list
 
 
 @pytest.mark.asyncio
@@ -963,7 +963,7 @@ async def test_window_start_blocks_discharge_and_persists_original(mock_hass, bl
 
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 0.0}
-    )
+    , blocking=True)
     assert blocking._original_discharge_limit == 5000.0
     assert _runtime_state(blocking)["original_discharge_limit"] == 5000.0
     # The target itself is unchanged by the block
@@ -984,7 +984,7 @@ async def test_window_end_restores_discharge_limit(mock_hass, blocking):
     assert mock_hass.services.async_call.await_args_list == [
         call("number", "set_value", {"entity_id": MIN_SOC, "value": DEFAULT_MIN}, blocking=True),
         call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
-        call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 5000.0}),
+        call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 5000.0}, blocking=True),
     ]
     assert blocking._original_discharge_limit is None
     assert _runtime_state(blocking)["original_discharge_limit"] is None
@@ -1001,7 +1001,7 @@ async def test_unload_during_window_restores_discharge_limit(mock_hass, blocking
 
     assert await async_unload_entry(mock_hass, blocking.entry) is True
 
-    assert call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 5000.0}) in (
+    assert call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 5000.0}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
     assert blocking._original_discharge_limit is None
@@ -1077,7 +1077,7 @@ async def test_verification_reapplies_discharge_block(mock_hass, blocking):
     await blocking._verify_and_restore_min_soc()
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 0.0}
-    )
+    , blocking=True)
     # The original stays the value captured at the window start
     assert blocking._original_discharge_limit == 5000.0
 
@@ -1101,7 +1101,7 @@ async def test_restart_in_window_keeps_persisted_discharge_original(mock_hass):
 
         await coordinator._on_window_end(WINDOW_END)
 
-        assert call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 5000.0}) in (
+        assert call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 5000.0}, blocking=True) in (
             mock_hass.services.async_call.await_args_list
         )
     finally:
@@ -1124,7 +1124,7 @@ async def test_discharge_block_deferred_while_entity_unavailable(mock_hass, bloc
     await blocking._verify_and_restore_min_soc()
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 0.0}
-    )
+    , blocking=True)
     assert blocking._original_discharge_limit == 5000.0
 
 
@@ -1221,9 +1221,9 @@ async def test_planned_power_two_kwh_in_four_hours_writes_556_w(mock_hass, power
     assert mock_hass.services.async_call.await_args_list == [
         # The bridge target (28.1 %) is below the 40 % in the battery, so the
         # window start raises the min SOC floor to 40 % first (plan 009).
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": 40.0}),
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}),
-        call("switch", "turn_on", {"entity_id": GRID}),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 40.0}, blocking=True),
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}, blocking=True),
+        call("switch", "turn_on", {"entity_id": GRID}, blocking=True),
         call("number", "set_value", {"entity_id": AC_LIMIT, "value": 3000.0}, blocking=True),
     ]
     assert powered._original_ac_charge_power == 6000.0
@@ -1384,7 +1384,7 @@ async def test_snow_nights_charge_to_max_without_forecast_and_count_down(
     assert coordinator.current_target_soc() == USER_MAX
     assert PV not in _entities_read(mock_hass)
     assert (
-        call("number", "set_value", {"entity_id": MIN_SOC, "value": USER_MAX})
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": USER_MAX}, blocking=True)
         in mock_hass.services.async_call.await_args_list
     )
     assert _persisted_snow_nights(mock_hass) == 2

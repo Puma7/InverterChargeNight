@@ -119,7 +119,7 @@ async def test_stop_grid_charging_turns_off_and_resets(mock_hass):
 
     mock_hass.services.async_call.assert_awaited_once_with(
         "switch", "turn_off", {"entity_id": "switch.grid"}
-    )
+    , blocking=True)
     coordinator._reset_absolute_charge_power.assert_awaited()
     coordinator._finalize_auto_test.assert_called_once()
 
@@ -150,7 +150,7 @@ async def test_control_kostal_min_soc_service_error_keeps_grid_charge_off(mock_h
 
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": "number.min_soc", "value": 50.0}
-    )
+    , blocking=True)
     assert coordinator._last_soc_set is None
     assert "Error setting min SOC" in caplog.text
 
@@ -183,4 +183,4 @@ async def test_update_data_survives_min_soc_service_error(mock_hass):
     # Only the failed min SOC write was attempted; no grid charge command
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": "number.min_soc", "value": 50.0}
-    )
+    , blocking=True)

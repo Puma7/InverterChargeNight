@@ -217,7 +217,7 @@ async def switched(mock_hass):
 async def test_switch_is_turned_on_and_original_persisted(mock_hass, switched):
     await switched._on_window_start(WINDOW_START)
 
-    assert call("switch", "turn_on", {"entity_id": BLOCK_SWITCH}) in (
+    assert call("switch", "turn_on", {"entity_id": BLOCK_SWITCH}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
     assert switched._original_discharge_block is False
@@ -234,7 +234,7 @@ async def test_window_end_restores_the_switch(mock_hass, switched):
 
     await switched._on_window_end(WINDOW_END)
 
-    assert call("switch", "turn_off", {"entity_id": BLOCK_SWITCH}) in (
+    assert call("switch", "turn_off", {"entity_id": BLOCK_SWITCH}, blocking=True) in (
         mock_hass.services.async_call.await_args_list
     )
     assert switched._original_discharge_block is None
@@ -256,7 +256,7 @@ async def test_switch_already_on_is_left_on_at_the_window_end(mock_hass):
 
         await made._on_window_end(WINDOW_END)
 
-        assert call("switch", "turn_on", {"entity_id": BLOCK_SWITCH}) in (
+        assert call("switch", "turn_on", {"entity_id": BLOCK_SWITCH}, blocking=True) in (
             mock_hass.services.async_call.await_args_list
         )
     finally:
@@ -332,7 +332,7 @@ async def test_power_limit_configured_behaves_exactly_as_before(mock_hass):
         await made._on_window_start(WINDOW_START)
 
         assert made._original_discharge_limit == 5000.0
-        assert call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 0.0}) in (
+        assert call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 0.0}, blocking=True) in (
             mock_hass.services.async_call.await_args_list
         )
         # The min SOC is left at the charge target even though the battery is above it
@@ -575,8 +575,8 @@ async def test_control_kostal_writes_the_floor_but_charges_to_the_target(mock_ha
         await made._control_charge(TARGET)
 
         assert mock_hass.services.async_call.await_args_list == [
-            call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}),
-            call("switch", "turn_on", {"entity_id": GRID}),
+            call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}, blocking=True),
+            call("switch", "turn_on", {"entity_id": GRID}, blocking=True),
         ]
     finally:
         await made._stop_periodic_verification()
@@ -729,8 +729,8 @@ async def test_mode_off_keeps_the_floor_at_the_target_while_charging(mock_hass):
         await made._control_charge(TARGET)
 
         assert mock_hass.services.async_call.await_args_list == [
-            call("number", "set_value", {"entity_id": MIN_SOC, "value": TARGET}),
-            call("switch", "turn_on", {"entity_id": GRID}),
+            call("number", "set_value", {"entity_id": MIN_SOC, "value": TARGET}, blocking=True),
+            call("switch", "turn_on", {"entity_id": GRID}, blocking=True),
         ]
     finally:
         await made._stop_periodic_verification()
