@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the limits go back; one that still reports on gets `turn_off` at most twice more in the
   window, never on every SOC update (Codex and CodeRabbit on #37). The retry runs before the
   SOC is looked at, so a SOC that is unknown or back below the target neither skips it nor
-  sends further stops past the bound.
+  sends further stops past the bound. While a stop is pending, every `turn_off` counts against
+  that bound, whichever path asks for it - the communication outage guard, which refreshes
+  every 15 seconds, sent one on each refresh before (22 in five minutes in the regression test).
 - **A protective charge limit above what the control accepts is written as its maximum.**
   After the Kostal falls back to its own 22 kW, a connection limit of, say, 18820 W was
   written as is - above the 12540 W the KORE control accepts. Home Assistant refused it and

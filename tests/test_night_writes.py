@@ -654,3 +654,31 @@ async def test_a_pending_stop_stays_bounded_whatever_the_soc_reads(night, soc):
     assert coordinator._grid_stop_pending is False
     assert len([c for c in hass.services.async_call.await_args_list
                 if c.args[:2] == ("switch", "turn_off")]) == 1 + GRID_STOP_MAX_RETRIES
+
+
+
+@pytest.mark.asyncio
+async def test_a_communication_outage_keeps_a_pending_stop_bounded(night):
+    """CodeRabbit on #37: the outage guard returned before the poll's retry and sent
+    turn_off on every refresh - every 15 seconds while the fault lasted."""
+    from custom_components.inverter_charge_night.coordinator import GRID_STOP_MAX_RETRIES
+
+    hass, coordinator, clock = night
+    coordinator.enable_communication_monitoring()
+    hass.states.get(GRID).state = "on"
+
+    async def switch_ignores_turn_off(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        clock.now += timedelta(seconds=1)
+
+    hass.services.async_call = AsyncMock(side_effect=switch_ignores_turn_off)
+    assert await coordinator._stop_grid_charging() is False
+    hass.states.get(BATTERY).state = "unavailable"  # a communication fault
+
+    with patch("homeassistant.components.persistent_notification.async_create"):
+        for _ in range(20):  # five minutes of 15-second refreshes
+            await coordinator._async_update_data()
+            clock.now += timedelta(seconds=15)
+
+    turn_offs = [c for c in hass.services.async_call.await_args_list
+                 if c.args[:2] == ("switch", "turn_off")]
+    assert len(turn_offs) == 1 + GRID_STOP_MAX_RETRIES

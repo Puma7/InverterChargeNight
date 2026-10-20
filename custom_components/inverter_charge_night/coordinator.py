@@ -5477,6 +5477,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     and not self._battery_idle_on_grid()):
                 if await self._set_ac_charge_limit_w(0):
                     self._planned_setpoint_written_w = 0
+            # Bounded while a stop is pending (see _pause_grid_charge); the
+            # ceilings go back only once communication is back (CodeRabbit on #37)
             await self._pause_grid_charge("communication interrupted; stop requires feedback")
             # The same guard also runs in export mode. Do not leave forced
             # discharge active, or change the house/backup discharge ceiling.
@@ -5992,10 +5994,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._apply_absolute_charge_power_limit()
 
     async def _pause_grid_charge(self, reason: str) -> None:
-        """Request a stop while retaining captures and protective power limits."""
+        """Request a stop while retaining captures and protective power limits.
+
+        While a stop on reaching the target is pending, every turn_off counts
+        against the same per-window bound, whichever path asks for it - the
+        outage guard refreshes every 15 seconds (CodeRabbit on #37).
+        """
         entity_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         state = self.hass.states.get(entity_id) if entity_id else None
         if entity_id and (state is None or state.state != "off"):
+            if self._grid_stop_pending and not self.is_discharge_mode:
+                if self._grid_stop_retries >= GRID_STOP_MAX_RETRIES:
+                    return
+                self._grid_stop_retries += 1
             try:
                 await self.hass.services.async_call(
                     "switch", "turn_off", {"entity_id": entity_id},
