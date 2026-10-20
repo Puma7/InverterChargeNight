@@ -91,7 +91,7 @@
           "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
           "auto_efficient_charge": "Tests permitted charging powers and compares AC input energy with stored DC energy. Requires a watt-based ceiling and two suitable power sensors. Results need actual measurement time, sufficient energy and plausible feedback. Load limits and safety stops take priority.",
           "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode.",
-          "discharge_limit_entity": "Optional discharge power limit. Explicit reservations may set it to zero and restore its original afterwards. Scheduled night charging never sets this limit to zero. Also usable for experimental morning discharge.",
+          "discharge_limit_entity": "Optional. Only used to give back a zero limit that a version before 3.10.6 set; the integration no longer writes this limit. The battery is held through the min SOC only.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
           "main_fuse_a": "Main fuse of the house connection, per phase. 63 A on three phases is about 43 kW of nominal power. Needed unless you enter the maximum continuous power below.",
           "grid_phases": "1 for a single-phase connection, 3 for a three-phase one.",
@@ -99,8 +99,8 @@
           "grid_continuous_pct": "Share of the nominal power that may be drawn for hours on end. 80 % leaves room for the heating of meter and terminal contacts; pick a lower value for an older meter.",
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
           "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
-          "discharge_block_switch": "Optional switch for explicit reservations/evening rescue. Its initial state is saved and restored afterwards. Scheduled night charging never turns this switch on.",
-          "discharge_block_mode": "Applies only to explicit reservations and evening rescue: Automatic uses a switch, discharge limit or raised min SOC. Off disables this additional block. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house."
+          "discharge_block_switch": "Optional. Only used to give back the state that a version before 3.10.6 changed; the integration no longer turns this switch on. The battery is held through the min SOC only.",
+          "discharge_block_mode": "Applies only to explicit reservations and the evening rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written."
         }
       },
       "advanced": {
@@ -249,7 +249,7 @@
           "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
           "auto_efficient_charge": "Tests permitted charging powers and compares AC input energy with stored DC energy. Requires a watt-based ceiling and two suitable power sensors. Results need actual measurement time, sufficient energy and plausible feedback. Load limits and safety stops take priority.",
           "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode.",
-          "discharge_limit_entity": "Optional discharge power limit. Explicit reservations may set it to zero and restore its original afterwards. Scheduled night charging never sets this limit to zero. Also usable for experimental morning discharge.",
+          "discharge_limit_entity": "Optional. Only used to give back a zero limit that a version before 3.10.6 set; the integration no longer writes this limit. The battery is held through the min SOC only.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
           "main_fuse_a": "Main fuse of the house connection, per phase. 63 A on three phases is about 43 kW of nominal power. Needed unless you enter the maximum continuous power below.",
           "grid_phases": "1 for a single-phase connection, 3 for a three-phase one.",
@@ -257,8 +257,8 @@
           "grid_continuous_pct": "Share of the nominal power that may be drawn for hours on end. 80 % leaves room for the heating of meter and terminal contacts; pick a lower value for an older meter.",
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
           "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
-          "discharge_block_switch": "Optional switch for explicit reservations/evening rescue. Its initial state is saved and restored afterwards. Scheduled night charging never turns this switch on.",
-          "discharge_block_mode": "Applies only to explicit reservations and evening rescue: Automatic uses a switch, discharge limit or raised min SOC. Off disables this additional block. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house."
+          "discharge_block_switch": "Optional. Only used to give back the state that a version before 3.10.6 changed; the integration no longer turns this switch on. The battery is held through the min SOC only.",
+          "discharge_block_mode": "Applies only to explicit reservations and the evening rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written."
         }
       },
       "reconfigure_advanced": {
@@ -470,8 +470,8 @@
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
           "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value.",
-          "discharge_block_mode": "Applies only to explicit reservations and evening rescue: Automatic uses a switch, discharge limit or raised min SOC. Off disables this additional block. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house.",
-          "discharge_block_switch": "Optional switch for explicit reservations/evening rescue. Its initial state is saved and restored afterwards. Scheduled night charging never turns this switch on."
+          "discharge_block_mode": "Applies only to explicit reservations and the evening rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written.",
+          "discharge_block_switch": "Optional. Only used to give back the state that a version before 3.10.6 changed; the integration no longer turns this switch on. The battery is held through the min SOC only."
         }
       },
       "season": {
@@ -545,7 +545,7 @@
         "data_description": {
           "absolute_max_charge_power_entity": "Usually leave empty. Only for an additional independent hardware ceiling; never reuse the ordinary charging control.",
           "absolute_max_charge_power_w": "Usually leave empty. Supply only together with its separate hardware control.",
-          "discharge_limit_entity": "Optional discharge power limit. Explicit reservations may set it to zero and restore its original afterwards. Scheduled night charging never sets this limit to zero. Also usable for experimental morning discharge."
+          "discharge_limit_entity": "Optional. Only used to give back a zero limit that a version before 3.10.6 set; the integration no longer writes this limit. The battery is held through the min SOC only."
         }
       },
       "runtime": {
@@ -804,7 +804,7 @@
           "charge_energy_received_entity": "Optional: the matching kWh meter on the battery side. Only useful together with the meter above.",
           "auto_efficient_charge": "Tests permitted charging powers and compares AC input energy with stored DC energy. Requires a watt-based ceiling and two suitable power sensors. Results need actual measurement time, sufficient energy and plausible feedback. Load limits and safety stops take priority.",
           "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode.",
-          "discharge_limit_entity": "Optional discharge power limit. Explicit reservations may set it to zero and restore its original afterwards. Scheduled night charging never sets this limit to zero. Also usable for experimental morning discharge.",
+          "discharge_limit_entity": "Optional. Only used to give back a zero limit that a version before 3.10.6 set; the integration no longer writes this limit. The battery is held through the min SOC only.",
           "grid_import_entity": "Current import from the grid in W (or kW). Without this entity the charge power is not limited against the house connection.",
           "main_fuse_a": "Main fuse of the house connection, per phase. 63 A on three phases is about 43 kW of nominal power. Needed unless you enter the maximum continuous power below.",
           "grid_phases": "1 for a single-phase connection, 3 for a three-phase one.",
@@ -812,8 +812,8 @@
           "grid_continuous_pct": "Share of the nominal power that may be drawn for hours on end. 80 % leaves room for the heating of meter and terminal contacts; pick a lower value for an older meter.",
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
           "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
-          "discharge_block_switch": "Optional switch for explicit reservations/evening rescue. Its initial state is saved and restored afterwards. Scheduled night charging never turns this switch on.",
-          "discharge_block_mode": "Applies only to explicit reservations and evening rescue: Automatic uses a switch, discharge limit or raised min SOC. Off disables this additional block. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house."
+          "discharge_block_switch": "Optional. Only used to give back the state that a version before 3.10.6 changed; the integration no longer turns this switch on. The battery is held through the min SOC only.",
+          "discharge_block_mode": "Applies only to explicit reservations and the evening rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written."
         }
       },
       "advanced": {
@@ -1021,8 +1021,8 @@
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
           "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value.",
-          "discharge_block_mode": "Applies only to explicit reservations and evening rescue: Automatic uses a switch, discharge limit or raised min SOC. Off disables this additional block. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house.",
-          "discharge_block_switch": "Optional switch for explicit reservations/evening rescue. Its initial state is saved and restored afterwards. Scheduled night charging never turns this switch on."
+          "discharge_block_mode": "Applies only to explicit reservations and the evening rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written.",
+          "discharge_block_switch": "Optional. Only used to give back the state that a version before 3.10.6 changed; the integration no longer turns this switch on. The battery is held through the min SOC only."
         }
       },
       "season": {
@@ -1096,7 +1096,7 @@
         "data_description": {
           "absolute_max_charge_power_entity": "Usually leave empty. Only for an additional independent hardware ceiling; never reuse the ordinary charging control.",
           "absolute_max_charge_power_w": "Usually leave empty. Supply only together with its separate hardware control.",
-          "discharge_limit_entity": "Optional discharge power limit. Explicit reservations may set it to zero and restore its original afterwards. Scheduled night charging never sets this limit to zero. Also usable for experimental morning discharge."
+          "discharge_limit_entity": "Optional. Only used to give back a zero limit that a version before 3.10.6 set; the integration no longer writes this limit. The battery is held through the min SOC only."
         }
       },
       "runtime": {
@@ -1275,7 +1275,7 @@
     },
     "discharge_block_mode": {
       "options": {
-        "auto": "Automatic (switch, else power limit, else min SOC)",
+        "auto": "Automatic (raised min SOC)",
         "off": "Off (the battery may discharge)"
       }
     },
@@ -1420,6 +1420,14 @@
     "pv_yield_shortfall": {
       "title": "Severe PV yield shortfall",
       "description": "{name}: expected {expected} kWh, measured {actual} kWh. The next regular night charges to the configured maximum SOC. Check the PV system, forecast and possible snow cover. The cause has not been automatically determined."
+    },
+    "reset_incomplete": {
+      "title": "{name}: inverter settings not fully restored",
+      "description": "After several attempts {name} could not confirm that these settings are back at their original values: {entities}. To protect the inverter it no longer writes them automatically. Check them in the inverter or its integration. The next charge window, the reset_inverter action or a successful reset takes the restore up again."
+    },
+    "charge_limit_not_held": {
+      "title": "{name}: the inverter does not hold the charge limit",
+      "description": "The inverter reports {actual} W on {entity} after {name} wrote {written} W several times. To protect the inverter it stops writing for the rest of this window, and grid charging stays off while the house connection limit cannot be confirmed. Check whether the inverter accepts external control (for Kostal: battery control via Modbus) and whether another integration writes the same register. The next window tries again."
     }
   },
   "services": {

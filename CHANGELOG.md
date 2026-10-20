@@ -5,6 +5,77 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.6] - 2026-10-20
+
+### Fixed
+- **A reset that could never succeed rewrote the inverter every 15 minutes, for hours.**
+  Field log, 20 October: the night window captured the AC charge limit as the device
+  reported it, 22063 W, through a KORE control that accepts at most 12540 W. Home
+  Assistant refused every restore, the reset counted as failed, and the retry ladder
+  retried every 15 minutes without end - persisted, so across restarts too. Each attempt
+  wrote the min SOC to the inverter again first, although it already read its original
+  value. The mechanism is old; this night was the first to capture such a value.
+  - A value about to be restored is limited to the entity's `min`/`max`. For a power
+    limit the maximum stands for "unlimited". The value already persisted in the field
+    is restored as 12540 W on the first reset after the update.
+  - Every setting is finished on its own, while the reset as a whole stays on record as pending
+    until all of it is confirmed - a crash in between still leaves the grid switch owed. A confirmed min SOC restore is not written
+    again by a later retry, and a setting that already shows its original value on a
+    fresh reading is only confirmed, not rewritten.
+  - The ladder is bounded: 1, 2 and 4 minutes, then twice 15 minutes apart. After that
+    nothing is written automatically; a repair issue names the entities still to check.
+    The next window, the `reset_inverter` action or a successful reset takes over. The
+    "settings still on the inverter" check, which the backup listener runs on every
+    state change, respects that as well.
+  - A pending reset no longer requests a refresh and persists the state every 15 seconds,
+    neither directly nor through the health monitor's `write_unconfirmed` fault.
+  - Deferring the reset during backup mode writes nothing and spends no attempt, so a long
+    power cut does not give the restore up. An attempt counts when it runs, and the count is
+    persisted: a restart neither hands out a fresh ladder nor loses an attempt still waiting.
+  - With a reset already pending, the "settings still on the inverter" check - which the
+    backup listener runs on every state change - leaves it to the bounded ladder instead of
+    starting another full reset each time.
+  - A restored AC charge limit, and likewise the absolute charge power, is confirmed by a fresh
+    reading before its capture is dropped. Restored to the entity maximum, any reading at or
+    above it counts for both - the device may go on reporting its own larger maximum. Clamped
+    up to the entity minimum, that minimum is what has to read back. A legacy discharge limit
+    restored as the entity maximum accepts a larger native reading the same way.
+  - An AC charge limit that a fresh reading already shows at its original value is confirmed,
+    not written again - a Kostal drops the window's limit by itself, and a late feedback can
+    show that an earlier attempt landed. The absolute charge power is confirmed the same way.
+  - Giving up is visible: `reset_abandoned` on the target sensor and in the diagnostics, next
+    to `pending_reset`. Removing the entry removes its repair issue.
+- **Why the limit was written that night at all, and why every 15 minutes.** The night log
+  shows it: at 03:10 the inverter answered Modbus with "server device failure" for a few
+  seconds, and the grid meter, min SOC and battery SOC were briefly untrusted. The target had
+  been reached at 23:01 (68 % on a 21 % floor) and grid charging was off - nothing could draw
+  from the connection. Still the communication guard wrote 0 W on every refresh while a fault
+  lasted (twelve writes in three minutes), the house connection limit wrote 0 W "after the
+  target was reached", and because the Kostal reported its own 22 kW again after each write,
+  the verification wrote 0 W anew every 15 minutes until the window ended. The value captured
+  before the first write was the 22063 W the reset then could not restore. Both mechanisms
+  date back to 3.10.2; this was the first night with such a hiccup.
+  - No protective charge limit is written while the battery cannot draw from the grid: target
+    reached, grid charging off, and the battery at least 5 points above both the planned floor
+    and the min SOC the inverter holds. Both count only if their entities reported within the
+    last five minutes, which also bridges the seconds the same hiccup blanks them; a value that
+    stopped updating or was never seen, like anything else unknown, keeps the limit.
+  - The communication guard writes its 0 W once per outage, not on every refresh.
+  - A limit the inverter does not hold is rewritten at most twice per window - a reading that
+    matches for a while does not refill that, and a restart inside the window keeps what was
+    spent (the window is named by its own deadline, an ad-hoc `charge_to` included). Only a
+    rewrite actually issued counts. Then no
+    writer at all - planner, connection limit, guard or efficiency finder - writes the charge
+    limit again in that window, and the
+    integration stops, files the repair issue "the inverter does not hold the charge limit" and
+    leaves grid charging off, whose activation needs the limit to read back. The next window
+    starts over. `charge_limit_not_held` shows it on the target sensor and in the diagnostics.
+- **Every window holds the battery through the min SOC only.** The evening rescue and
+  `block_discharge` no longer turn a discharge block switch on or write a discharge
+  limit of zero. The two entities are only used to give back a value an older version
+  captured, once at the window start and otherwise at the window end - no longer on
+  every verification.
+
 ## [3.10.5] - 2026-10-19
 
 ### Fixed

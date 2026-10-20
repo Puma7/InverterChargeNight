@@ -47,9 +47,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_USER_MIN_SOC,
     DISCHARGE_BLOCK_AUTO,
     DISCHARGE_BLOCK_OFF,
-    DISCHARGE_BLOCK_VIA_LIMIT,
     DISCHARGE_BLOCK_VIA_MIN_SOC,
-    DISCHARGE_BLOCK_VIA_SWITCH,
     MODE_MORNING_DISCHARGE,
 )
 
@@ -153,7 +151,13 @@ async def coordinator(mock_hass):
 # 1. Choosing the way ---------------------------------------------------------
 
 
-def test_switch_wins_over_limit_and_min_soc(mock_hass):
+def test_a_configured_switch_or_limit_is_never_the_way_to_hold(mock_hass):
+    """Only the min SOC holds the battery (3.10.6).
+
+    A switch or a zero discharge limit stops the battery from serving the house
+    at all, and on a Kostal each write is an external battery-control command.
+    Configured entities are only kept to give back what an older version took.
+    """
     _register(mock_hass)
     made = _make(
         mock_hass,
@@ -163,14 +167,8 @@ def test_switch_wins_over_limit_and_min_soc(mock_hass):
             CONF_DISCHARGE_LIMIT_ENTITY: DISCHARGE_LIMIT,
         },
     )
-    assert made._discharge_block_method() == DISCHARGE_BLOCK_VIA_SWITCH
-    assert made.discharge_block_state() == "switch"
-
-
-def test_limit_wins_over_min_soc(mock_hass):
-    _register(mock_hass)
-    made = _make(mock_hass, {**CONFIG, CONF_DISCHARGE_LIMIT_ENTITY: DISCHARGE_LIMIT})
-    assert made._discharge_block_method() == DISCHARGE_BLOCK_VIA_LIMIT
+    assert made._discharge_block_method() == DISCHARGE_BLOCK_VIA_MIN_SOC
+    assert made.discharge_block_state() == "min_soc"
 
 
 def test_min_soc_is_the_fallback_without_any_vendor_entity(mock_hass, coordinator):
@@ -213,21 +211,20 @@ async def switched(mock_hass):
 
 
 @pytest.mark.asyncio
-async def test_switch_is_turned_on_and_original_persisted(mock_hass, switched):
+async def test_a_reservation_never_turns_the_switch_on(mock_hass, switched):
     await switched._on_window_start(WINDOW_START)
 
-    assert call("switch", "turn_on", {"entity_id": BLOCK_SWITCH}, blocking=True) in (
-        mock_hass.services.async_call.await_args_list
-    )
-    assert switched._original_discharge_block is False
-    assert _runtime_state(switched)["original_discharge_block"] is False
-    # The min SOC stays the charge target: the switch already blocks the discharge
-    assert switched.inverter_floor_soc() == TARGET
+    for awaited in mock_hass.services.async_call.await_args_list:
+        assert awaited.args[2]["entity_id"] != BLOCK_SWITCH
+    assert switched._original_discharge_block is None
+    # The battery is held through the min SOC instead
+    assert switched.inverter_floor_soc() == ABOVE_TARGET
 
 
 @pytest.mark.asyncio
-async def test_window_end_restores_the_switch(mock_hass, switched):
+async def test_window_end_gives_back_a_switch_an_older_version_turned_on(mock_hass, switched):
     await switched._on_window_start(WINDOW_START)
+    switched._original_discharge_block = False  # captured before the update
     mock_hass.states.async_set(BLOCK_SWITCH, "on")
     mock_hass.services.async_call.reset_mock()
 
@@ -242,42 +239,26 @@ async def test_window_end_restores_the_switch(mock_hass, switched):
 
 
 @pytest.mark.asyncio
-async def test_switch_already_on_is_left_on_at_the_window_end(mock_hass):
+async def test_a_switch_the_user_turned_on_is_never_touched(mock_hass):
     """A user who blocks the discharge permanently keeps that setting."""
     _register(mock_hass)
     mock_hass.states.async_set(BLOCK_SWITCH, "on")
     made = _make(mock_hass, {**CONFIG, CONF_DISCHARGE_BLOCK_SWITCH: BLOCK_SWITCH})
     try:
         await made._on_window_start(WINDOW_START)
-        assert made._original_discharge_block is True
-        for awaited in mock_hass.services.async_call.await_args_list:
-            assert awaited.args[2]["entity_id"] != BLOCK_SWITCH
-
         await made._on_window_end(WINDOW_END)
 
-        assert call("switch", "turn_on", {"entity_id": BLOCK_SWITCH}, blocking=True) in (
-            mock_hass.services.async_call.await_args_list
-        )
+        assert made._original_discharge_block is None
+        for awaited in mock_hass.services.async_call.await_args_list:
+            assert awaited.args[2]["entity_id"] != BLOCK_SWITCH
     finally:
         await made._stop_periodic_verification()
 
 
 @pytest.mark.asyncio
-async def test_switch_unavailable_defers_the_block(mock_hass, caplog):
-    _register(mock_hass)
-    mock_hass.states.async_set(BLOCK_SWITCH, "unavailable")
-    made = _make(mock_hass, {**CONFIG, CONF_DISCHARGE_BLOCK_SWITCH: BLOCK_SWITCH})
-    made.is_active = True
-
-    await made._apply_discharge_block()
-
-    assert "block deferred" in caplog.text
-    assert made._original_discharge_block is None
-
-
-@pytest.mark.asyncio
 async def test_failed_switch_reset_keeps_the_original_for_a_retry(mock_hass, switched):
     await switched._on_window_start(WINDOW_START)
+    switched._original_discharge_block = False  # captured before the update
     mock_hass.states.async_set(BLOCK_SWITCH, "unavailable")
 
     await switched._on_window_end(WINDOW_END)
@@ -288,29 +269,21 @@ async def test_failed_switch_reset_keeps_the_original_for_a_retry(mock_hass, swi
 
 
 @pytest.mark.asyncio
-async def test_switch_with_unsupported_domain_is_refused(mock_hass, caplog):
+async def test_a_switch_with_an_unsupported_domain_has_nothing_to_restore(mock_hass):
     _register(mock_hass)
     mock_hass.states.async_set("sensor.block", "off")
     made = _make(mock_hass, {**CONFIG, CONF_DISCHARGE_BLOCK_SWITCH: "sensor.block"})
-    made.is_active = True
 
-    await made._apply_discharge_block()
-    assert "unsupported domain sensor" in caplog.text
-    mock_hass.services.async_call.assert_not_awaited()
-
-    # Nothing can be restored through an unusable entity: the reset is done
     made._original_discharge_block = False
     assert await made._reset_discharge_block_switch() is True
     assert made._original_discharge_block is None
+    mock_hass.services.async_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_switch_service_errors_are_reported(mock_hass, switched, caplog):
-    switched.is_active = True
+    mock_hass.states.async_set(BLOCK_SWITCH, "on")
     mock_hass.services.async_call = AsyncMock(side_effect=RuntimeError("modbus timeout"))
-
-    await switched._apply_discharge_block()
-    assert "Error blocking discharge" in caplog.text
 
     switched._original_discharge_block = False
     assert await switched._reset_discharge_block_switch() is False
@@ -318,26 +291,23 @@ async def test_switch_service_errors_are_reported(mock_hass, switched, caplog):
     assert "Error resetting discharge block switch" in caplog.text
 
 
-# 3. The power limit: unchanged behaviour -------------------------------------
+# 3. The power limit: never written as a block any more -----------------------
 
 
 @pytest.mark.asyncio
-async def test_power_limit_configured_behaves_exactly_as_before(mock_hass):
-    """Plan 006's way is still chosen when the entity exists - and the floor is the target."""
+async def test_a_configured_power_limit_is_not_written_as_a_block(mock_hass):
+    """The limit is left alone; the reservation holds through the min SOC."""
     _register(mock_hass, battery=str(ABOVE_TARGET))
     mock_hass.states.async_set(DISCHARGE_LIMIT, "5000", {"unit_of_measurement": "W"})
     made = _make(mock_hass, {**CONFIG, CONF_DISCHARGE_LIMIT_ENTITY: DISCHARGE_LIMIT})
     try:
         await made._on_window_start(WINDOW_START)
 
-        assert made._original_discharge_limit == 5000.0
-        assert call("number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 0.0}, blocking=True) in (
-            mock_hass.services.async_call.await_args_list
-        )
-        # The min SOC is left at the charge target even though the battery is above it
-        assert made.inverter_floor_soc() == TARGET
-        assert made._window_floor_soc is None
-        assert _min_soc_writes(mock_hass) == []
+        assert made._original_discharge_limit is None
+        for awaited in mock_hass.services.async_call.await_args_list:
+            assert awaited.args[2]["entity_id"] != DISCHARGE_LIMIT
+        assert made.inverter_floor_soc() == ABOVE_TARGET
+        assert _min_soc_writes(mock_hass) == [ABOVE_TARGET]
     finally:
         await made._stop_periodic_verification()
 
@@ -991,8 +961,8 @@ def test_an_island_entity_clears_the_flag(mock_hass):
     assert deleted and deleted[0].startswith("discharge_block_without_backup")
 
 
-def test_a_vendor_switch_needs_no_flag(mock_hass):
-    """Only the min SOC fallback has this failure mode."""
+def test_a_vendor_switch_no_longer_avoids_the_flag(mock_hass):
+    """The min SOC is the only way to hold now, so the backup warning applies."""
     import custom_components.inverter_charge_night as icn
 
     _register(mock_hass, battery=str(ABOVE_TARGET))
@@ -1003,4 +973,4 @@ def test_a_vendor_switch_needs_no_flag(mock_hass):
         mp.setattr(icn.ir, "async_delete_issue", lambda *a, **k: None)
         made.review_discharge_block_risk()
 
-    assert not created
+    assert created == [f"discharge_block_without_backup_{made.entry.entry_id}"]

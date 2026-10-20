@@ -91,7 +91,7 @@
           "charge_energy_received_entity": "Optional: der passende kWh-Zähler auf der Speicherseite. Nur zusammen mit dem Zähler darüber sinnvoll.",
           "auto_efficient_charge": "Erprobt zulässige Ladeleistungen und vergleicht AC-Eingangsenergie mit gespeicherter DC-Energie. Benötigt die Ladegrenze in W und zwei passende Leistungssensoren. Erst nach echter Messzeit, ausreichender Energie und plausibler Rückmeldung wird ein Ergebnis übernommen. Lastbegrenzung und Sicherheitsstopps haben Vorrang.",
           "force_discharge_switch": "Schalter-Entität, mit der der Wechselrichter den Akku ins Netz entlädt (z. B. über Modbus). Im Modus Morgen-Entladung erforderlich - nur darüber wird wirklich entladen; im Modus Nachtladung ungenutzt.",
-          "discharge_limit_entity": "Optionale Entladeleistungsgrenze. Ausdrückliche Reservierungen können sie auf 0 setzen; danach wird der Ausgangswert wiederhergestellt. Das reguläre Nachtfenster setzt diese Grenze nicht auf 0. Auch für die experimentelle Morgenentladung nutzbar.",
+          "discharge_limit_entity": "Optional. Dient nur dazu, eine Grenze von 0 zurückzugeben, die eine Version vor 3.10.6 gesetzt hat; die Integration schreibt diese Grenze nicht mehr. Der Akku wird ausschließlich über den Min-SOC gehalten.",
           "grid_import_entity": "Momentaner Bezug aus dem Netz in W oder kW. Ohne diese Entität wird die Ladeleistung nicht gegen den Hausanschluss begrenzt.",
           "main_fuse_a": "Vorsicherung des Hausanschlusses je Phase. 63 A dreiphasig sind rund 43 kW Nennleistung. Nötig, wenn unten keine maximale Dauerleistung eingetragen ist.",
           "grid_phases": "1 für einphasig, 3 für dreiphasig.",
@@ -99,8 +99,8 @@
           "grid_continuous_pct": "Anteil der Nennleistung, der über Stunden gezogen werden darf. 80 % lassen Reserve für die Erwärmung von Zähler- und Klemmkontakten; bei älteren Zählern niedriger wählen.",
           "grid_max_continuous_w": "Das Dauerlast-Budget direkt angeben, statt es aus der Sicherungsgröße zu berechnen. Hat Vorrang, wenn gesetzt.",
           "grid_headroom_w": "Abstand, der unter dem Budget frei bleibt, damit eine Last, die der Speicher nicht kommen sieht, den Anschluss nicht überlastet.",
-          "discharge_block_switch": "Optionaler Schalter für ausdrückliche Reservierungen/Abendrettung. Dabei wird sein Ausgangszustand gespeichert und anschließend wiederhergestellt. Im regulären Nachtfenster wird dieser Schalter nicht eingeschaltet.",
-          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch nutzt Schalter, Leistungsgrenze oder einen erhöhten Min-SOC. Aus deaktiviert diese zusätzliche Sperre. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen."
+          "discharge_block_switch": "Optional. Dient nur dazu, den Zustand zurückzugeben, den eine Version vor 3.10.6 verändert hat; die Integration schaltet diesen Schalter nicht mehr ein. Der Akku wird ausschließlich über den Min-SOC gehalten.",
+          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben."
         }
       },
       "advanced": {
@@ -249,7 +249,7 @@
           "charge_energy_received_entity": "Optional: der passende kWh-Zähler auf der Speicherseite. Nur zusammen mit dem Zähler darüber sinnvoll.",
           "auto_efficient_charge": "Erprobt zulässige Ladeleistungen und vergleicht AC-Eingangsenergie mit gespeicherter DC-Energie. Benötigt die Ladegrenze in W und zwei passende Leistungssensoren. Erst nach echter Messzeit, ausreichender Energie und plausibler Rückmeldung wird ein Ergebnis übernommen. Lastbegrenzung und Sicherheitsstopps haben Vorrang.",
           "force_discharge_switch": "Schalter-Entität, mit der der Wechselrichter den Akku ins Netz entlädt (z. B. über Modbus). Im Modus Morgen-Entladung erforderlich - nur darüber wird wirklich entladen; im Modus Nachtladung ungenutzt.",
-          "discharge_limit_entity": "Optionale Entladeleistungsgrenze. Ausdrückliche Reservierungen können sie auf 0 setzen; danach wird der Ausgangswert wiederhergestellt. Das reguläre Nachtfenster setzt diese Grenze nicht auf 0. Auch für die experimentelle Morgenentladung nutzbar.",
+          "discharge_limit_entity": "Optional. Dient nur dazu, eine Grenze von 0 zurückzugeben, die eine Version vor 3.10.6 gesetzt hat; die Integration schreibt diese Grenze nicht mehr. Der Akku wird ausschließlich über den Min-SOC gehalten.",
           "grid_import_entity": "Momentaner Bezug aus dem Netz in W oder kW. Ohne diese Entität wird die Ladeleistung nicht gegen den Hausanschluss begrenzt.",
           "main_fuse_a": "Vorsicherung des Hausanschlusses je Phase. 63 A dreiphasig sind rund 43 kW Nennleistung. Nötig, wenn unten keine maximale Dauerleistung eingetragen ist.",
           "grid_phases": "1 für einphasig, 3 für dreiphasig.",
@@ -257,8 +257,8 @@
           "grid_continuous_pct": "Anteil der Nennleistung, der über Stunden gezogen werden darf. 80 % lassen Reserve für die Erwärmung von Zähler- und Klemmkontakten; bei älteren Zählern niedriger wählen.",
           "grid_max_continuous_w": "Das Dauerlast-Budget direkt angeben, statt es aus der Sicherungsgröße zu berechnen. Hat Vorrang, wenn gesetzt.",
           "grid_headroom_w": "Abstand, der unter dem Budget frei bleibt, damit eine Last, die der Speicher nicht kommen sieht, den Anschluss nicht überlastet.",
-          "discharge_block_switch": "Optionaler Schalter für ausdrückliche Reservierungen/Abendrettung. Dabei wird sein Ausgangszustand gespeichert und anschließend wiederhergestellt. Im regulären Nachtfenster wird dieser Schalter nicht eingeschaltet.",
-          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch nutzt Schalter, Leistungsgrenze oder einen erhöhten Min-SOC. Aus deaktiviert diese zusätzliche Sperre. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen."
+          "discharge_block_switch": "Optional. Dient nur dazu, den Zustand zurückzugeben, den eine Version vor 3.10.6 verändert hat; die Integration schaltet diesen Schalter nicht mehr ein. Der Akku wird ausschließlich über den Min-SOC gehalten.",
+          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben."
         }
       },
       "reconfigure_advanced": {
@@ -470,8 +470,8 @@
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
           "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist.",
-          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch nutzt Schalter, Leistungsgrenze oder einen erhöhten Min-SOC. Aus deaktiviert diese zusätzliche Sperre. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen.",
-          "discharge_block_switch": "Optionaler Schalter für ausdrückliche Reservierungen/Abendrettung. Dabei wird sein Ausgangszustand gespeichert und anschließend wiederhergestellt. Im regulären Nachtfenster wird dieser Schalter nicht eingeschaltet."
+          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben.",
+          "discharge_block_switch": "Optional. Dient nur dazu, den Zustand zurückzugeben, den eine Version vor 3.10.6 verändert hat; die Integration schaltet diesen Schalter nicht mehr ein. Der Akku wird ausschließlich über den Min-SOC gehalten."
         }
       },
       "season": {
@@ -545,7 +545,7 @@
         "data_description": {
           "absolute_max_charge_power_entity": "Meist leer lassen. Nur für einen zweiten, unabhängigen AC/DC-Hardwaredeckel. Nicht denselben Steller wie bei der normalen Ladeleistung auswählen.",
           "absolute_max_charge_power_w": "Meist leer lassen. Nur gemeinsam mit dem eigenen zusätzlichen Hardware-Steller ausfüllen.",
-          "discharge_limit_entity": "Optionale Entladeleistungsgrenze. Ausdrückliche Reservierungen können sie auf 0 setzen; danach wird der Ausgangswert wiederhergestellt. Das reguläre Nachtfenster setzt diese Grenze nicht auf 0. Auch für die experimentelle Morgenentladung nutzbar."
+          "discharge_limit_entity": "Optional. Dient nur dazu, eine Grenze von 0 zurückzugeben, die eine Version vor 3.10.6 gesetzt hat; die Integration schreibt diese Grenze nicht mehr. Der Akku wird ausschließlich über den Min-SOC gehalten."
         }
       },
       "runtime": {
@@ -804,7 +804,7 @@
           "charge_energy_received_entity": "Optional: der passende kWh-Zähler auf der Speicherseite. Nur zusammen mit dem Zähler darüber sinnvoll.",
           "auto_efficient_charge": "Erprobt zulässige Ladeleistungen und vergleicht AC-Eingangsenergie mit gespeicherter DC-Energie. Benötigt die Ladegrenze in W und zwei passende Leistungssensoren. Erst nach echter Messzeit, ausreichender Energie und plausibler Rückmeldung wird ein Ergebnis übernommen. Lastbegrenzung und Sicherheitsstopps haben Vorrang.",
           "force_discharge_switch": "Schalter-Entität, mit der der Wechselrichter den Akku ins Netz entlädt (z. B. über Modbus). Im Modus Morgen-Entladung erforderlich - nur darüber wird wirklich entladen; im Modus Nachtladung ungenutzt.",
-          "discharge_limit_entity": "Optionale Entladeleistungsgrenze. Ausdrückliche Reservierungen können sie auf 0 setzen; danach wird der Ausgangswert wiederhergestellt. Das reguläre Nachtfenster setzt diese Grenze nicht auf 0. Auch für die experimentelle Morgenentladung nutzbar.",
+          "discharge_limit_entity": "Optional. Dient nur dazu, eine Grenze von 0 zurückzugeben, die eine Version vor 3.10.6 gesetzt hat; die Integration schreibt diese Grenze nicht mehr. Der Akku wird ausschließlich über den Min-SOC gehalten.",
           "grid_import_entity": "Momentaner Bezug aus dem Netz in W oder kW. Ohne diese Entität wird die Ladeleistung nicht gegen den Hausanschluss begrenzt.",
           "main_fuse_a": "Vorsicherung des Hausanschlusses je Phase. 63 A dreiphasig sind rund 43 kW Nennleistung. Nötig, wenn unten keine maximale Dauerleistung eingetragen ist.",
           "grid_phases": "1 für einphasig, 3 für dreiphasig.",
@@ -812,8 +812,8 @@
           "grid_continuous_pct": "Anteil der Nennleistung, der über Stunden gezogen werden darf. 80 % lassen Reserve für die Erwärmung von Zähler- und Klemmkontakten; bei älteren Zählern niedriger wählen.",
           "grid_max_continuous_w": "Das Dauerlast-Budget direkt angeben, statt es aus der Sicherungsgröße zu berechnen. Hat Vorrang, wenn gesetzt.",
           "grid_headroom_w": "Abstand, der unter dem Budget frei bleibt, damit eine Last, die der Speicher nicht kommen sieht, den Anschluss nicht überlastet.",
-          "discharge_block_switch": "Optionaler Schalter für ausdrückliche Reservierungen/Abendrettung. Dabei wird sein Ausgangszustand gespeichert und anschließend wiederhergestellt. Im regulären Nachtfenster wird dieser Schalter nicht eingeschaltet.",
-          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch nutzt Schalter, Leistungsgrenze oder einen erhöhten Min-SOC. Aus deaktiviert diese zusätzliche Sperre. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen."
+          "discharge_block_switch": "Optional. Dient nur dazu, den Zustand zurückzugeben, den eine Version vor 3.10.6 verändert hat; die Integration schaltet diesen Schalter nicht mehr ein. Der Akku wird ausschließlich über den Min-SOC gehalten.",
+          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben."
         }
       },
       "advanced": {
@@ -1021,8 +1021,8 @@
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
           "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist.",
-          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch nutzt Schalter, Leistungsgrenze oder einen erhöhten Min-SOC. Aus deaktiviert diese zusätzliche Sperre. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen.",
-          "discharge_block_switch": "Optionaler Schalter für ausdrückliche Reservierungen/Abendrettung. Dabei wird sein Ausgangszustand gespeichert und anschließend wiederhergestellt. Im regulären Nachtfenster wird dieser Schalter nicht eingeschaltet."
+          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben.",
+          "discharge_block_switch": "Optional. Dient nur dazu, den Zustand zurückzugeben, den eine Version vor 3.10.6 verändert hat; die Integration schaltet diesen Schalter nicht mehr ein. Der Akku wird ausschließlich über den Min-SOC gehalten."
         }
       },
       "season": {
@@ -1096,7 +1096,7 @@
         "data_description": {
           "absolute_max_charge_power_entity": "Meist leer lassen. Nur für einen zweiten, unabhängigen AC/DC-Hardwaredeckel. Nicht denselben Steller wie bei der normalen Ladeleistung auswählen.",
           "absolute_max_charge_power_w": "Meist leer lassen. Nur gemeinsam mit dem eigenen zusätzlichen Hardware-Steller ausfüllen.",
-          "discharge_limit_entity": "Optionale Entladeleistungsgrenze. Ausdrückliche Reservierungen können sie auf 0 setzen; danach wird der Ausgangswert wiederhergestellt. Das reguläre Nachtfenster setzt diese Grenze nicht auf 0. Auch für die experimentelle Morgenentladung nutzbar."
+          "discharge_limit_entity": "Optional. Dient nur dazu, eine Grenze von 0 zurückzugeben, die eine Version vor 3.10.6 gesetzt hat; die Integration schreibt diese Grenze nicht mehr. Der Akku wird ausschließlich über den Min-SOC gehalten."
         }
       },
       "runtime": {
@@ -1275,7 +1275,7 @@
     },
     "discharge_block_mode": {
       "options": {
-        "auto": "Automatisch (Schalter, sonst Leistungsgrenze, sonst Min-SOC)",
+        "auto": "Automatisch (erhöhter Min-SOC)",
         "off": "Aus (der Speicher darf entladen)"
       }
     },
@@ -1420,6 +1420,14 @@
     "pv_yield_shortfall": {
       "title": "PV-Ertrag stark ausgefallen",
       "description": "{name}: Erwartet waren {expected} kWh, gemessen wurden {actual} kWh. Die nächste reguläre Nacht lädt bis zum eingestellten Maximal-SoC. Bitte PV-Anlage, Prognose und mögliche Schneeauflage prüfen. Die Ursache ist nicht automatisch bestimmt."
+    },
+    "reset_incomplete": {
+      "title": "{name}: Wechselrichter-Einstellungen nicht vollständig zurückgesetzt",
+      "description": "{name} konnte nach mehreren Versuchen nicht bestätigen, dass diese Einstellungen wieder auf ihrem Ausgangswert stehen: {entities}. Zum Schutz des Wechselrichters schreibt die Integration sie nicht mehr automatisch. Bitte im Wechselrichter oder in seiner Integration prüfen. Das nächste Ladefenster, die Aktion reset_inverter oder ein erfolgreicher Reset nehmen die Rückgabe wieder auf."
+    },
+    "charge_limit_not_held": {
+      "title": "{name}: Der Wechselrichter hält das Ladelimit nicht",
+      "description": "Der Wechselrichter meldet {actual} W an {entity}, obwohl {name} mehrmals {written} W geschrieben hat. Zum Schutz des Wechselrichters wird in diesem Fenster nicht mehr geschrieben, und die Netzladung bleibt aus, solange die Hausanschlussgrenze nicht bestätigt ist. Prüfe, ob der Wechselrichter externe Steuerung annimmt (bei Kostal: Batteriesteuerung über Modbus) und ob eine andere Integration dasselbe Register beschreibt. Das nächste Fenster versucht es erneut."
     }
   },
   "services": {

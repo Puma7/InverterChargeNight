@@ -2,6 +2,7 @@
 import asyncio
 import logging
 from datetime import datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -173,7 +174,9 @@ async def test_reset_settings_fails_when_entity_unavailable(mock_hass, missing):
     ok = await coordinator._reset_settings()
 
     assert ok is False
-    assert coordinator.original_min_soc == 5.0
+    # The min SOC is finished on its own once confirmed, so a retry does not
+    # write it again; only what is still owed is kept (20 October 2026).
+    assert coordinator.original_min_soc == (5.0 if missing == MIN_SOC else None)
     assert coordinator.override_soc == 70.0
     assert coordinator._last_soc_set is None
 
@@ -194,7 +197,8 @@ async def test_reset_settings_fails_when_force_discharge_unavailable(mock_hass):
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": MIN_SOC, "value": 5.0}, blocking=True
     )
-    assert coordinator.original_min_soc == 5.0
+    # Confirmed, so it is done; the retry only owes the force discharge switch
+    assert coordinator.original_min_soc is None
 
 
 # Reset retry (finding F3) ----------------------------------------------------
@@ -252,6 +256,8 @@ def test_retry_backs_off_then_every_15_minutes(mock_hass):
     with patch(CALL_LATER, return_value=MagicMock()) as later:
         for _ in range(5):
             coordinator._schedule_reset_retry()
+            # An attempt counts once it runs (_retry_reset), not when armed
+            coordinator._reset_retry_count += 1
 
     assert [c.args[1] for c in later.call_args_list] == [
         *RESET_RETRY_DELAYS,
@@ -561,11 +567,16 @@ async def test_absolute_charge_power_reset_clears_only_on_success(mock_hass):
     coordinator = _make_coordinator(mock_hass, ABS_CONFIG)
     coordinator._original_absolute_charge_power = 9000.0
 
+    def set_values() -> list[Any]:
+        return [c for c in mock_hass.services.async_call.await_args_list if c.args[1] == "set_value"]
+
     assert await coordinator._reset_absolute_charge_power() is True
     assert coordinator._original_absolute_charge_power is None
-    mock_hass.services.async_call.assert_awaited_once_with(
+    # Without a fresh reading the value standing there is not trusted: it is written
+    mock_hass.services.async_call.assert_any_await(
         "number", "set_value", {"entity_id": ABS_LIMIT, "value": 9000.0}
     , blocking=True)
+    assert len(set_values()) == 1
 
     # Nothing captured, or an entity that is gone: nothing left to restore
     assert await coordinator._reset_absolute_charge_power() is True
@@ -573,7 +584,7 @@ async def test_absolute_charge_power_reset_clears_only_on_success(mock_hass):
     coordinator._original_absolute_charge_power = 9000.0
     assert await coordinator._reset_absolute_charge_power() is True
     assert coordinator._original_absolute_charge_power is None
-    mock_hass.services.async_call.assert_awaited_once()
+    assert len(set_values()) == 1
 
 
 @pytest.mark.asyncio
