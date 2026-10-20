@@ -129,13 +129,16 @@ async def test_the_field_state_finishes_its_reset_in_one_go(mock_hass):
     with patch(CALL_LATER, return_value=MagicMock()) as later, patch(
         f"{COORDINATOR}.dt_util.now", return_value=AFTER_THE_OUTAGE
     ):
-        await coordinator._check_current_window()
+        # What setup does with a persisted pending reset, then its first attempt
+        coordinator.async_start_pending_reset_retry()
+        await coordinator._check_current_window()  # leaves it to the ladder
+        await coordinator._retry_reset()
 
     assert coordinator._pending_reset is False
     assert coordinator._original_ac_charge_power is None
     assert coordinator.original_min_soc is None
     assert _writes(mock_hass, AC_LIMIT) == [12540.0], "the entity's maximum stands for 'unlimited'"
-    assert later.call_count == 0, "nothing is left to retry"
+    assert later.call_count == 1, "only the first attempt was ever armed"
 
 
 @pytest.mark.asyncio
@@ -446,8 +449,9 @@ async def test_a_restart_does_not_hand_out_a_fresh_ladder(mock_hass):
             runtime = coordinator.entry.options[CONF_RUNTIME_STATE]
         writes = len(_writes(mock_hass, AC_LIMIT))
 
-    # Never more than one ladder in total; a restart's re-arm spends a slot too
-    assert 0 < writes <= len(RESET_RETRY_DELAYS) + 2, f"{writes} writes across restarts"
+    # Exactly one ladder in total: a restart neither loses an attempt that had
+    # not run yet nor hands out one that had (CodeRabbit on #36)
+    assert writes == len(RESET_RETRY_DELAYS) + 2, f"{writes} writes across restarts"
     assert runtime["reset_abandoned"] is True
 
 
@@ -511,6 +515,27 @@ def test_a_given_up_reset_is_visible_on_the_sensor_and_in_diagnostics(mock_hass)
 
 
 @pytest.mark.asyncio
+async def test_a_given_up_reset_is_visible_in_diagnostics(mock_hass):
+    from custom_components.inverter_charge_night.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+
+    _register_field_entities(mock_hass)
+    coordinator = _make_coordinator(
+        mock_hass, CONFIG, {**FIELD_STATE, "pending_reset": False, "reset_abandoned": True}
+    )
+    coordinator.data = {}
+    coordinator.entry.runtime_data = coordinator
+    coordinator.entry.data = CONFIG
+    coordinator.entry.version = 1
+    coordinator.entry.minor_version = 1
+
+    diagnostics = await async_get_config_entry_diagnostics(mock_hass, coordinator.entry)
+
+    assert diagnostics["state"]["charge_control"]["reset_abandoned"] is True
+
+
+@pytest.mark.asyncio
 async def test_removing_the_entry_removes_its_repair_issue(mock_hass):
     """Codex on #36: a persistent issue must not outlive the entry it names."""
     from custom_components.inverter_charge_night import async_remove_entry
@@ -521,3 +546,32 @@ async def test_removing_the_entry_removes_its_repair_issue(mock_hass):
         await async_remove_entry(mock_hass, entry)
 
     assert any(c.args[2] == "reset_incomplete_entry_1" for c in deleted.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_window_checks_leave_a_pending_reset_to_its_ladder(mock_hass):
+    """The backup listener runs the window check on every state change.
+
+    With a reset already pending, the "settings still on the inverter" branch
+    used to start another full reset each time, outside the bounded ladder.
+    """
+    _register_field_entities(mock_hass)
+    device = _validating_device(mock_hass)
+
+    async def refuse_the_ac_limit(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if data.get("entity_id") == AC_LIMIT and service == "set_value":
+            raise RuntimeError("Modbus timeout")
+        await device(domain, service, data, **kwargs)
+
+    mock_hass.services.async_call = AsyncMock(side_effect=refuse_the_ac_limit)
+    coordinator = _make_coordinator(mock_hass, CONFIG, {**FIELD_STATE, "original_ac_charge_power": 4000.0})
+    assert coordinator._pending_reset is True
+
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=AFTER_THE_OUTAGE
+    ):
+        for _ in range(10):
+            await coordinator._check_current_window()
+
+    assert _writes(mock_hass, AC_LIMIT) == []
+    assert coordinator._reset_retry_count == 0

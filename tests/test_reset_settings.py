@@ -255,6 +255,8 @@ def test_retry_backs_off_then_every_15_minutes(mock_hass):
     with patch(CALL_LATER, return_value=MagicMock()) as later:
         for _ in range(5):
             coordinator._schedule_reset_retry()
+            # An attempt counts once it runs (_retry_reset), not when armed
+            coordinator._reset_retry_count += 1
 
     assert [c.args[1] for c in later.call_args_list] == [
         *RESET_RETRY_DELAYS,

@@ -29,8 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A pending reset no longer requests a refresh and persists the state every 15 seconds,
     neither directly nor through the health monitor's `write_unconfirmed` fault.
   - Deferring the reset during backup mode writes nothing and spends no attempt, so a long
-    power cut does not give the restore up. The attempts are persisted: a restart does not
-    hand out a fresh ladder.
+    power cut does not give the restore up. An attempt counts when it runs, and the count is
+    persisted: a restart neither hands out a fresh ladder nor loses an attempt still waiting.
+  - With a reset already pending, the "settings still on the inverter" check - which the
+    backup listener runs on every state change - leaves it to the bounded ladder instead of
+    starting another full reset each time.
   - A restored AC charge limit is confirmed by a fresh reading before its capture is dropped.
     Restored to the entity maximum, any reading at or above it counts - the device may go on
     reporting its own larger maximum.

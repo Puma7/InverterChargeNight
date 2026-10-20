@@ -59,6 +59,23 @@ async def check_night_floor(hass, lab, planner, kore_entry, check):
     block.async_write_ha_state()
     limit_entity.async_write_ha_state()
     await feedback()
+    # A verification is not a window start: it neither writes nor clears.
+    writes = []
+
+    def recording(event):
+        if event.data.get("service") in ("turn_on", "turn_off", "set_value"):
+            writes.append((event.data.get("domain"), event.data.get("service")))
+
+    unsubscribe = hass.bus.async_listen("call_service", recording)
+    try:
+        await co._apply_discharge_block()
+        await hass.async_block_till_done()
+    finally:
+        unsubscribe()
+    check("a verification leaves the legacy release to the window start or end",
+          not writes and co._original_discharge_block is False and co._original_discharge_limit == 5000,
+          {"writes": writes, "capture_block": co._original_discharge_block,
+           "capture_limit": co._original_discharge_limit})
     await co._apply_discharge_block(announce=True)
     check("legacy release clears both captures after fresh matching HA feedback",
           co._original_discharge_block is None and co._original_discharge_limit is None)

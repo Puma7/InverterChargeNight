@@ -4135,6 +4135,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 not in_window
                 and not self.is_active
                 and not self._reset_abandoned
+                # A pending reset belongs to its bounded ladder. This branch is
+                # for a window end Home Assistant was not running for; run on
+                # every backup-listener change it would reset outside the ladder.
+                and not self._pending_reset
                 and self._inverter_still_holds_our_settings()
             ):
                 # Home Assistant was not running when the window ended: nothing
@@ -4871,11 +4875,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             delay = RESET_RETRY_DELAYS[self._reset_retry_count]
         else:
             delay = RESET_RETRY_INTERVAL
-        if consume:
-            self._reset_retry_count += 1
-            # Persisted with the attempts, so a restart does not hand out a
-            # fresh ladder (Codex on #36).
-            self._persist_state()
+        # The attempt is counted when it runs (_retry_reset), not here: a
+        # restart while it waits must neither lose it nor hand out an extra one.
 
         async def _run_reset_retry(_now: datetime) -> None:
             self._reset_retry_unsub = None
@@ -4885,7 +4886,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.warning(
             "Inverter settings are not reset yet - retrying in %d seconds (attempt %d)",
             delay,
-            self._reset_retry_count,
+            self._reset_retry_count + 1,
         )
 
     def _reset_issue_id(self) -> str:
@@ -4991,6 +4992,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.info("Backup mode active - deferring the reset retry")
             self._schedule_reset_retry(consume=False)
             return
+        # Counted and persisted before it writes, so a restart cannot repeat it
+        self._reset_retry_count += 1
+        self._persist_state()
         # _reset_settings marks the outcome and reschedules a failed retry itself
         try:
             if await self._reset_settings():
