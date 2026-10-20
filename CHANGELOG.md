@@ -37,7 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     starting another full reset each time.
   - A restored AC charge limit, and likewise the absolute charge power, is confirmed by a fresh
     reading before its capture is dropped. Restored to the entity maximum, any reading at or
-    above it counts for both - the device may go on reporting its own larger maximum.
+    above it counts for both - the device may go on reporting its own larger maximum. Clamped
+    up to the entity minimum, that minimum is what has to read back.
+  - An AC charge limit that a fresh reading already shows at its original value is confirmed,
+    not written again - a Kostal drops the window's limit by itself, and a late feedback can
+    show that an earlier attempt landed.
   - Giving up is visible: `reset_abandoned` on the target sensor and in the diagnostics, next
     to `pending_reset`. Removing the entry removes its repair issue.
 - **Why the limit was written that night at all, and why every 15 minutes.** The night log

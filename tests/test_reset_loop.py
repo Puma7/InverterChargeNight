@@ -125,6 +125,7 @@ def _writes(hass: Any, entity_id: str) -> list[Any]:
 async def test_the_field_state_finishes_its_reset_in_one_go(mock_hass):
     """The persisted 22063 W original no longer locks the reset into a loop."""
     _register_field_entities(mock_hass)
+    mock_hass.states.get(AC_LIMIT).state = "0.0"  # the window's protective limit still stands
     mock_hass.services.async_call = _validating_device(mock_hass)
     coordinator = _make_coordinator(mock_hass, CONFIG, FIELD_STATE)
 
@@ -375,7 +376,7 @@ async def test_the_ac_limit_restore_is_clamped_in_the_entity_unit(mock_hass, uni
     attributes: dict[str, Any] = {"min": 0.0, "max": maximum}
     if unit:
         attributes["unit_of_measurement"] = unit
-    mock_hass.states.async_set(AC_LIMIT, str(maximum), attributes)
+    mock_hass.states.async_set(AC_LIMIT, "0", attributes)
     mock_hass.services.async_call = _validating_device(mock_hass)
     coordinator = _make_coordinator(mock_hass, {CONF_CHARGE_POWER_ENTITY: AC_LIMIT}, {})
     coordinator._original_ac_charge_power = 22063.310546875
@@ -383,6 +384,60 @@ async def test_the_ac_limit_restore_is_clamped_in_the_entity_unit(mock_hass, uni
     assert await coordinator._reset_ac_charge_limit() is True
 
     assert _writes(mock_hass, AC_LIMIT) == [expected]
+    assert coordinator._original_ac_charge_power is None
+
+
+@pytest.mark.parametrize("reading", ["22063.31", "12540.0"])
+@pytest.mark.asyncio
+async def test_an_ac_limit_that_is_already_back_is_confirmed_not_rewritten(mock_hass, reading):
+    """Codex on #36: the Kostal drops the window's limit by itself, and a late
+    feedback can show an earlier restore. Either way the limit reads as its
+    original on a fresh observation, and nothing is written."""
+    mock_hass.states.async_set(AC_LIMIT, reading, {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+    mock_hass.services.async_call = _validating_device(mock_hass)
+    coordinator = _make_coordinator(mock_hass, {CONF_CHARGE_POWER_ENTITY: AC_LIMIT}, {})
+    coordinator._original_ac_charge_power = 22063.310546875
+
+    assert await coordinator._reset_ac_charge_limit() is True
+
+    assert _writes(mock_hass, AC_LIMIT) == []
+    mock_hass.services.async_call.assert_any_await(
+        "homeassistant", "update_entity", {"entity_id": AC_LIMIT}, blocking=True
+    )
+    assert coordinator._original_ac_charge_power is None
+
+
+@pytest.mark.asyncio
+async def test_a_stale_reading_of_the_original_is_not_trusted(mock_hass):
+    """Without a fresh reading the restore is written, as before."""
+    mock_hass.states.async_set(AC_LIMIT, "22063.31", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+    device = _validating_device(mock_hass)
+
+    async def no_refresh(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if service != "update_entity":
+            await device(domain, service, data, **kwargs)
+
+    mock_hass.services.async_call = AsyncMock(side_effect=no_refresh)
+    coordinator = _make_coordinator(mock_hass, {CONF_CHARGE_POWER_ENTITY: AC_LIMIT}, {})
+    coordinator._original_ac_charge_power = 22063.310546875
+
+    assert await coordinator._reset_ac_charge_limit() is True
+
+    assert _writes(mock_hass, AC_LIMIT) == [12540.0]
+
+
+@pytest.mark.asyncio
+async def test_an_ac_limit_restore_clamped_up_to_the_minimum_is_confirmed(mock_hass):
+    """Codex on #36: below the entity minimum the write clamps up, and the
+    confirmation must expect that minimum, not the raw original."""
+    mock_hass.states.async_set(AC_LIMIT, "3000", {"min": 500.0, "max": 12540.0, "unit_of_measurement": "W"})
+    mock_hass.services.async_call = _validating_device(mock_hass)
+    coordinator = _make_coordinator(mock_hass, {CONF_CHARGE_POWER_ENTITY: AC_LIMIT}, {})
+    coordinator._original_ac_charge_power = 0.0
+
+    assert await coordinator._reset_ac_charge_limit() is True
+
+    assert _writes(mock_hass, AC_LIMIT) == [500.0]
     assert coordinator._original_ac_charge_power is None
 
 

@@ -2973,14 +2973,20 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Cannot reset AC charge limit - entity %s unavailable", entity_id)
             return False
         original = self._original_ac_charge_power
-        before_value, before_reported = state.state, getattr(state, "last_reported", None)
-        if not await self._write_ac_charge_limit(
-            entity_id, domain, original, "Reset AC charge limit", restore=True,
-        ):
-            return False
-        if not await self._confirm_ac_limit_restore(entity_id, state, before_value, before_reported, original):
-            _LOGGER.error("AC charge limit restore has no fresh matching feedback: %s", entity_id)
-            return False
+        # Already back (the Kostal drops an external 1038 limit by itself, or an
+        # earlier restore's feedback came late): confirm, do not write again.
+        if not await self._ac_limit_already_restored(entity_id, state, original):
+            state = self.hass.states.get(entity_id) or state
+            before_value, before_reported = state.state, getattr(state, "last_reported", None)
+            if not await self._write_ac_charge_limit(
+                entity_id, domain, original, "Reset AC charge limit", restore=True,
+            ):
+                return False
+            if not await self._confirm_ac_limit_restore(
+                entity_id, state, before_value, before_reported, original,
+            ):
+                _LOGGER.error("AC charge limit restore has no fresh matching feedback: %s", entity_id)
+                return False
         if self._original_ac_charge_power != original:
             return False
         self._original_ac_charge_power = None
@@ -2999,11 +3005,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         own larger maximum - the Kostal read 22063 W through a 12540 W control -
         so any reading at or above the target counts there.
         """
-        high = _as_float((getattr(state, "attributes", None) or {}).get("max"))
-        high_w = self._entity_value_as_w(state, high) if high is not None else None
-        target_w = min(original_w, high_w) if high_w is not None else original_w
-        clamped = high_w is not None and original_w > high_w
-
         def confirmed() -> bool:
             feedback = self.hass.states.get(entity_id)
             if feedback is None:
@@ -3013,12 +3014,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 or feedback.state != before_value
                 or getattr(feedback, "last_reported", None) != before_reported
             )
-            value_w = self._get_ac_charge_limit_w(entity_id)
-            if not fresh or value_w is None:
-                return False
-            if value_w < target_w - PLANNED_POWER_WRITE_THRESHOLD_W:
-                return False
-            return clamped or value_w <= target_w + PLANNED_POWER_WRITE_THRESHOLD_W
+            return fresh and self._ac_limit_reads_restored(entity_id, state, original_w)
 
         if confirmed():
             return True
@@ -3030,6 +3026,60 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.exception("Cannot refresh AC charge limit restore feedback: %s", entity_id)
             return False
         return confirmed()
+
+    def _ac_limit_reads_restored(self, entity_id: str, state: Any, original_w: float) -> bool:
+        """True when the charge limit reads as the restored original, within 100 W.
+
+        The target is the original as ``_within_entity_range`` clamps it, with
+        both entity bounds (Codex on #36). Clamped down to the maximum it means
+        "no limit", and a device may go on reporting its own larger maximum -
+        the Kostal read 22063 W through a 12540 W control - so any reading at
+        or above the target counts there.
+        """
+        attributes = getattr(state, "attributes", None) or {}
+        low = _as_float(attributes.get("min"))
+        high = _as_float(attributes.get("max"))
+        high_w = self._entity_value_as_w(state, high) if high is not None else None
+        low_w = self._entity_value_as_w(state, low) if low is not None else None
+        target_w = original_w
+        if high_w is not None and target_w > high_w:
+            target_w = high_w
+        if low_w is not None and target_w < low_w:
+            target_w = low_w
+        open_ended = high_w is not None and original_w > high_w and target_w == high_w
+        value_w = self._get_ac_charge_limit_w(entity_id)
+        if value_w is None or value_w < target_w - PLANNED_POWER_WRITE_THRESHOLD_W:
+            return False
+        return open_ended or value_w <= target_w + PLANNED_POWER_WRITE_THRESHOLD_W
+
+    async def _ac_limit_already_restored(self, entity_id: str, state: Any, original_w: float) -> bool:
+        """True when a fresh reading already shows the original - then nothing is written.
+
+        An earlier restore may have landed with its feedback arriving only
+        after that attempt gave up, or the inverter may have dropped the
+        window's limit by itself. Rewriting it on every retry is what this
+        release removes (Codex on #36). A cached value alone is not trusted.
+        """
+        if not self._ac_limit_reads_restored(entity_id, state, original_w):
+            return False
+        before_value, before_reported = state.state, getattr(state, "last_reported", None)
+        try:
+            await self.hass.services.async_call(
+                "homeassistant", "update_entity", {"entity_id": entity_id}, blocking=True,
+            )
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.debug("Cannot refresh %s before its restore - writing it", entity_id)
+            return False
+        feedback = self.hass.states.get(entity_id)
+        fresh = feedback is not None and (
+            feedback is not state
+            or feedback.state != before_value
+            or getattr(feedback, "last_reported", None) != before_reported
+        )
+        if fresh and self._ac_limit_reads_restored(entity_id, feedback, original_w):
+            _LOGGER.info("AC charge limit %s already reads its original value - nothing to write", entity_id)
+            return True
+        return False
 
     def _entity_value_as_w(self, state: Any, value: float) -> float:
         """An entity-unit value of the charge limit in W, with the write path's scale."""
