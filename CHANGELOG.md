@@ -38,7 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A restored AC charge limit, and likewise the absolute charge power, is confirmed by a fresh
     reading before its capture is dropped. Restored to the entity maximum, any reading at or
     above it counts for both - the device may go on reporting its own larger maximum. Clamped
-    up to the entity minimum, that minimum is what has to read back.
+    up to the entity minimum, that minimum is what has to read back. A legacy discharge limit
+    restored as the entity maximum accepts a larger native reading the same way.
   - An AC charge limit that a fresh reading already shows at its original value is confirmed,
     not written again - a Kostal drops the window's limit by itself, and a late feedback can
     show that an earlier attempt landed.
@@ -56,10 +57,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   date back to 3.10.2; this was the first night with such a hiccup.
   - No protective charge limit is written while the battery cannot draw from the grid: target
     reached, grid charging off, and the battery at least 5 points above both the planned floor
-    and the min SOC the inverter holds. A SOC reading from the last five minutes bridges the
-    seconds the same hiccup blanks it; anything else unknown keeps the limit.
+    and the min SOC the inverter holds. The SOC counts only if its entity reported within the
+    last five minutes, which also bridges the seconds the same hiccup blanks it; a SOC that
+    stopped updating, like anything else unknown, keeps the limit.
   - The communication guard writes its 0 W once per outage, not on every refresh.
-  - A limit the inverter does not hold is rewritten at most twice per window. Then the
+  - A limit the inverter does not hold is rewritten at most twice per window - a reading that
+    matches for a while does not refill that, and a restart inside the window keeps what was
+    spent. Then the
     integration stops, files the repair issue "the inverter does not hold the charge limit" and
     leaves grid charging off, whose activation needs the limit to read back. The next window
     starts over. `charge_limit_not_held` shows it on the target sensor and in the diagnostics.

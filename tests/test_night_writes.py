@@ -241,19 +241,88 @@ async def test_the_next_window_gets_its_own_rewrites_and_clears_the_issue(night)
 
 
 @pytest.mark.asyncio
-async def test_a_held_limit_resets_the_rewrite_count(night):
+async def test_a_briefly_held_limit_does_not_refill_the_budget(night):
+    """Codex on #36: the Kostal holds the limit for a while, then drops it.
+
+    A refill on every match would give each drop two more writes, for ever.
+    """
     hass, coordinator, _ = night
     hass.states.get(BATTERY).state = "24"
     coordinator._planned_setpoint_written_w = 0.0
     coordinator._original_ac_charge_power = 22063.310546875
-    await coordinator._verify_ac_charge_limit()
-    assert coordinator._ac_limit_rewrites == 1
+    with patch(f"{ir.__name__}.async_create_issue") as create:
+        for held in (False, True, False, True, False, False):
+            hass.states.get(AC_LIMIT).state = "0" if held else "22063.31"
+            await coordinator._verify_ac_charge_limit()
 
-    hass.states.get(AC_LIMIT).state = "0"
-    await coordinator._verify_ac_charge_limit()
+    assert _ac_writes(hass) == [0] * AC_LIMIT_MAX_REWRITES
+    create.assert_called_once()
 
+
+def _restarted(hass: Any, coordinator: Any) -> Any:
+    """A new coordinator built from what the old one persisted."""
+    from tests.test_grid_limit import _make_coordinator as make
+
+    return make(hass, CONFIG, dict(coordinator.entry.options))
+
+
+@pytest.mark.asyncio
+async def test_a_restart_inside_the_window_keeps_the_spent_budget(night):
+    """Codex on #36: a restart must not hand out a fresh pair of rewrites."""
+    hass, coordinator, clock = night
+
+    def _update(entry_: Any, options: Any = None, **kwargs: Any) -> bool:
+        if options is not None:
+            entry_.options = options
+        return True
+
+    hass.config_entries.async_update_entry = MagicMock(side_effect=_update)
+    hass.states.get(BATTERY).state = "24"
+    coordinator.is_active = True
+    coordinator._window_started_at = THE_HICCUP - timedelta(hours=4)
+    coordinator._planned_setpoint_written_w = 0.0
+    coordinator._original_ac_charge_power = 22063.310546875
+    with patch(f"{ir.__name__}.async_create_issue"):
+        for _ in range(AC_LIMIT_MAX_REWRITES + 1):
+            await coordinator._verify_ac_charge_limit()
+    assert coordinator._ac_limit_not_held is True
+
+    clock.now += timedelta(minutes=5)
+    fresh = _restarted(hass, coordinator)
+    assert fresh._ac_limit_rewrites == AC_LIMIT_MAX_REWRITES
+    assert fresh._ac_limit_not_held is True
+    fresh._start_periodic_verification = AsyncMock()
+    fresh._async_calculate_and_control = AsyncMock(return_value={})
+    with patch(f"{ir.__name__}.async_delete_issue") as delete, patch.object(
+        fresh, "_setup_battery_soc_listener"
+    ), patch.object(fresh, "_setup_inverter_min_soc_listener"), patch.object(
+        fresh, "_setup_grid_import_listener"
+    ):
+        await fresh._on_window_start(clock.now)  # the window is picked up again
+
+    assert not call_for(delete, "charge_limit_not_held_entry_1")
+    assert fresh._ac_limit_rewrites == AC_LIMIT_MAX_REWRITES
+    assert fresh._ac_limit_not_held is True
+
+
+@pytest.mark.asyncio
+async def test_the_next_nights_window_starts_with_a_fresh_budget(night):
+    hass, coordinator, clock = night
+    coordinator.is_active = False
+    coordinator._window_started_at = THE_HICCUP - timedelta(hours=4)
+    coordinator._ac_limit_rewrites = AC_LIMIT_MAX_REWRITES
+    coordinator._ac_limit_not_held = True
+    coordinator._async_calculate_and_control = AsyncMock(return_value={})
+    clock.now = THE_HICCUP + timedelta(hours=20)
+    with patch(f"{ir.__name__}.async_delete_issue") as delete, patch.object(
+        coordinator, "_setup_battery_soc_listener"
+    ), patch.object(coordinator, "_setup_inverter_min_soc_listener"), patch.object(
+        coordinator, "_setup_grid_import_listener"
+    ):
+        await coordinator._on_window_start(clock.now)
+
+    assert call_for(delete, "charge_limit_not_held_entry_1")
     assert coordinator._ac_limit_rewrites == 0
-    assert _ac_writes(hass) == [0]
 
 
 @pytest.mark.asyncio
@@ -264,6 +333,8 @@ async def test_an_idle_battery_is_not_rewritten_at_all(night):
 
     with patch(f"{ir.__name__}.async_create_issue") as create:
         for _ in range(7):
+            # KORE reports the SOC every few seconds
+            hass.states.get(BATTERY).last_reported = clock.now
             await coordinator._verify_ac_charge_limit()
             clock.now += timedelta(minutes=15)
 
@@ -272,9 +343,28 @@ async def test_an_idle_battery_is_not_rewritten_at_all(night):
 
 
 @pytest.mark.asyncio
+async def test_a_soc_that_stopped_reporting_does_not_prove_an_idle_battery(night):
+    """Codex on #36: an old number is as unknown as a blank entity."""
+    hass, coordinator, clock = night
+    coordinator.enable_communication_monitoring()
+    coordinator._async_calculate_and_control = AsyncMock(return_value={})
+    _meter_drops_out(hass)
+    clock.now += timedelta(seconds=IDLE_SOC_MAX_AGE_S + 1)  # 68 % still shown, not reported since
+
+    assert coordinator._battery_idle_on_grid() is False
+    with patch("homeassistant.components.persistent_notification.async_create"):
+        for _ in range(5):
+            await coordinator._async_update_data()
+            clock.now += timedelta(seconds=15)
+
+    assert _ac_writes(hass) == [0.0]
+
+
+@pytest.mark.asyncio
 async def test_a_window_start_clears_the_charge_limit_issue(night):
     hass, coordinator, _ = night
     coordinator.is_active = False
+    coordinator._window_started_at = None  # the previous window is unknown: a new one
     coordinator._ac_limit_rewrites = AC_LIMIT_MAX_REWRITES
     coordinator._ac_limit_not_held = True
     coordinator._async_calculate_and_control = AsyncMock(return_value={})

@@ -683,6 +683,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "pending_reset": self._pending_reset,
             "reset_abandoned": self._reset_abandoned,
             "reset_attempts": self._reset_retry_count,
+            # Bounded per window, a restart inside the window included (Codex on #36)
+            "ac_limit_rewrites": self._ac_limit_rewrites,
+            "ac_limit_not_held": self._ac_limit_not_held,
             "hands_off_until": (
                 self._hands_off_until.isoformat() if self._hands_off_until else None
             ),
@@ -750,6 +753,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         attempts = state.get("reset_attempts")
         if isinstance(attempts, int) and not isinstance(attempts, bool) and attempts > 0:
             self._reset_retry_count = attempts
+        rewrites = state.get("ac_limit_rewrites")
+        if isinstance(rewrites, int) and not isinstance(rewrites, bool) and rewrites > 0:
+            self._ac_limit_rewrites = rewrites
+        self._ac_limit_not_held = state.get("ac_limit_not_held") is True
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
             self.snow_nights = snow_raw
@@ -1373,12 +1380,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         switch = self.hass.states.get(str(switch_id)) if switch_id else None
         if switch is None or switch.state != "off":
             return False
-        soc = self._current_battery_soc()
-        if soc is None and self._last_trusted_soc is not None:
-            value, seen = self._last_trusted_soc
-            if 0 <= elapsed_seconds(dt_util.now(), seen) <= IDLE_SOC_MAX_AGE_S:
-                soc = value
-        if soc is None:
+        # The last trusted reading with the time its entity reported it: a SOC
+        # that stopped updating proves nothing about the battery now, whether
+        # the entity went blank or kept its old number (Codex on #36).
+        self._current_battery_soc()
+        if self._last_trusted_soc is None:
+            return False
+        soc, seen = self._last_trusted_soc
+        if not 0 <= elapsed_seconds(dt_util.now(), seen) <= IDLE_SOC_MAX_AGE_S:
             return False
         floors: list[float] = []
         planned = self.inverter_floor_soc()
@@ -2455,7 +2464,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Cannot reset discharge limit - entity %s unavailable", entity_id)
             return False
         value = _within_entity_range(state, original, entity_id, "Reset discharge limit")
-        if await self._already_confirmed(entity_id, state, value):
+        # Clamped down to the maximum, a reading above it is restored too (Codex on #36)
+        clamped_down = value < original
+        if await self._already_confirmed(entity_id, state, value, at_least=clamped_down):
             if self._original_discharge_limit != original:
                 return False
             self._original_discharge_limit = None
@@ -2466,7 +2477,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ):
             return False
         if not await self._confirm_discharge_restore(
-            entity_id, before_value, before_reported, value,
+            entity_id, before_value, before_reported, value, at_least=clamped_down,
         ):
             _LOGGER.error("Discharge limit restore has no fresh matching feedback: %s", entity_id)
             return False
@@ -2477,6 +2488,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _already_confirmed(
         self, entity_id: str, state: Any, expected: str | float, tolerance: float = 1e-6,
+        *, at_least: bool = False,
     ) -> bool:
         """True when the entity already shows ``expected`` on a fresh observation.
 
@@ -2492,7 +2504,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if isinstance(expected, str):
                 return bool(current.state == expected)
             value = _as_float(current.state)
-            return value is not None and abs(value - expected) <= tolerance
+            if value is None:
+                return False
+            if at_least:
+                # Clamped to the entity maximum: "no limit", whatever larger
+                # native value the device goes on reporting.
+                return value >= expected - tolerance
+            return abs(value - expected) <= tolerance
 
         if not matches(state):
             return False
@@ -4341,6 +4359,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         mode_label = "Morning discharge" if self.is_discharge_mode else "Night charge"
         _LOGGER.info("%s window started", mode_label)
+        # A restart inside the window resumes it: what this window already
+        # spent of its bounded charge-limit rewrites stays spent.
+        same_window = self._window_started_at is not None and 0 <= (
+            now - self._window_started_at
+        ).total_seconds() <= self._window_length_s() + 3600
         if self._window_started_at is not None and self.initial_calculated_soc is not None:
             previous = self._window_started_at
             if (now - previous).total_seconds() > self._window_length_s() + 3600:
@@ -4363,7 +4386,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # value it kept is not captured again (original_min_soc stays set).
         self._cancel_reset_retry()
         self._clear_reset_abandoned()  # this window's end starts a fresh backoff
-        self._clear_ac_limit_not_held()
+        if not same_window:
+            self._clear_ac_limit_not_held()
         self._pending_reset = False
 
         # Arm the listeners and the verification first. The target calculation
@@ -6342,7 +6366,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if abs(actual_w - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
             if self._auto_test_active:
                 self._auto_test_limit_confirmed = True
-            self._ac_limit_rewrites = 0
+            # The rewrite budget is not refilled here: a Kostal holds the limit
+            # for a while and then drops it, and every refill would hand it
+            # two more writes (Codex on #36). Only a new window starts over.
             return
         if actual_w < written:
             if self._auto_test_active:
@@ -6378,6 +6404,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._report_ac_limit_not_held(target[0], actual_w, written)
             return
         self._ac_limit_rewrites += 1
+        self._persist_state()
         _LOGGER.warning(
             "The inverter holds an AC charge limit of %.0f W, not the %.0f W this "
             "integration wrote - writing it again (%d of %d). If this repeats, the inverter "
@@ -6406,6 +6433,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._ac_limit_not_held:
             return
         self._ac_limit_not_held = True
+        self._persist_state()
         _LOGGER.error(
             "The inverter keeps %.0f W on %s after %d writes of %.0f W - no further writes "
             "this window. The house connection limit cannot protect it",
@@ -6419,6 +6447,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             DOMAIN,
             self._ac_limit_issue_id(),
             is_fixable=False,
+            is_persistent=True,
             issue_domain=DOMAIN,
             severity=ir.IssueSeverity.WARNING,
             translation_key="charge_limit_not_held",

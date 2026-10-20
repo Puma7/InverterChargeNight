@@ -558,9 +558,11 @@ The limit is a protection, not an optimisation, so it behaves accordingly:
 - Not even the efficiency finder may order more than the connection carries.
 - It is **not written while the battery cannot draw from the grid**: the target is reached,
   grid charging is off and the battery stands at least 5 points above every min SOC floor of
-  the window (a reading from the last five minutes bridges a briefly blank SOC). A short outage
+  the window. The SOC counts only if it was reported within the last five minutes, which also
+  bridges a briefly blank entity; a SOC that stopped updating keeps the limit. A short outage
   of the grid import sensor then writes nothing, and nothing has to be restored afterwards.
-- An inverter that does not hold the written limit gets it **at most twice more per window**.
+- An inverter that does not hold the written limit gets it **at most twice more per window**,
+  a restart included; holding it for a while in between does not reset that count.
   Then the integration stops writing, files a repair issue and leaves grid charging off: it is
   only switched on once the limit reads back. Some inverters fall back to their own value
   shortly after an external write (a Kostal reported its 22 kW again after every 0 W).

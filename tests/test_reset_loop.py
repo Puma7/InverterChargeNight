@@ -426,6 +426,30 @@ async def test_a_stale_reading_of_the_original_is_not_trusted(mock_hass):
     assert _writes(mock_hass, AC_LIMIT) == [12540.0]
 
 
+@pytest.mark.parametrize("already_back", [False, True])
+@pytest.mark.asyncio
+async def test_a_clamped_legacy_discharge_limit_accepts_the_devices_own_maximum(mock_hass, already_back):
+    """Codex on #36: restored as the entity maximum, a larger native reading is restored too."""
+    mock_hass.states.async_set(
+        LIMIT, "22063.31" if already_back else "0", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"}
+    )
+    device = _validating_device(mock_hass)
+
+    async def keeps_its_native_maximum(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        await device(domain, service, data, **kwargs)
+        if data.get("entity_id") == LIMIT and service == "set_value":
+            mock_hass.states.get(LIMIT).state = "22063.31"
+
+    mock_hass.services.async_call = AsyncMock(side_effect=keeps_its_native_maximum)
+    coordinator = _make_coordinator(mock_hass, {CONF_DISCHARGE_LIMIT_ENTITY: LIMIT}, {})
+    coordinator._original_discharge_limit = 22063.31
+
+    assert await coordinator._reset_discharge_limit() is True
+
+    assert _writes(mock_hass, LIMIT) == ([] if already_back else [12540.0])
+    assert coordinator._original_discharge_limit is None
+
+
 @pytest.mark.asyncio
 async def test_an_ac_limit_restore_clamped_up_to_the_minimum_is_confirmed(mock_hass):
     """Codex on #36: below the entity minimum the write clamps up, and the
