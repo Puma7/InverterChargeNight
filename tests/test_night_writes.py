@@ -334,8 +334,9 @@ async def test_an_idle_battery_is_not_rewritten_at_all(night):
 
     with patch(f"{ir.__name__}.async_create_issue") as create:
         for _ in range(7):
-            # KORE reports the SOC every few seconds
+            # KORE reports the SOC and the min SOC every few seconds
             hass.states.get(BATTERY).last_reported = clock.now
+            hass.states.get(MIN_SOC).last_reported = clock.now
             await coordinator._verify_ac_charge_limit()
             clock.now += timedelta(minutes=15)
 
@@ -476,3 +477,65 @@ async def test_no_writer_touches_a_limit_declared_not_held(night):
     assert _ac_writes(hass) == []
     assert coordinator._original_ac_charge_power is None
     assert hass.states.get(GRID).state == "off"  # paused instead
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_inverter_floor_does_not_prove_an_idle_battery(night):
+    """Codex on #36: the plan says 21 %, but nobody knows what the inverter holds now."""
+    hass, coordinator, clock = night
+    coordinator.enable_communication_monitoring()
+    coordinator._async_calculate_and_control = AsyncMock(return_value={})
+    _meter_drops_out(hass)
+    hass.states.get(MIN_SOC).state = "unavailable"
+
+    assert coordinator._battery_idle_on_grid() is False
+    with patch("homeassistant.components.persistent_notification.async_create"):
+        for _ in range(5):
+            await coordinator._async_update_data()
+            clock.now += timedelta(seconds=15)
+
+    assert _ac_writes(hass) == [0.0]
+
+
+@pytest.mark.asyncio
+async def test_the_floor_seen_just_before_the_entity_went_blank_still_counts(night):
+    """The listener keeps the last numeric floor when the same hiccup blanks it."""
+    from homeassistant.core import State
+
+    hass, coordinator, clock = night
+    with patch(
+        "custom_components.inverter_charge_night.coordinator.async_track_state_change_event"
+    ) as track:
+        coordinator._setup_inverter_min_soc_listener()
+    on_change = track.call_args.args[2]
+    before = State(MIN_SOC, "21", last_reported=clock.now)
+    hass.states.get(MIN_SOC).state = "unavailable"
+    hass.states.get(MIN_SOC).last_reported = clock.now
+    coordinator._last_trusted_min_soc = None
+    await on_change(SimpleNamespace(data={"old_state": before, "new_state": hass.states.get(MIN_SOC)}))
+    clock.now += timedelta(seconds=10)
+
+    assert coordinator._battery_idle_on_grid() is True
+    clock.now += timedelta(seconds=IDLE_SOC_MAX_AGE_S)
+    assert coordinator._battery_idle_on_grid() is False  # too old to vouch for the floor
+
+
+@pytest.mark.asyncio
+async def test_a_rewrite_that_another_writer_preempted_spends_nothing(night):
+    """Codex on #36: the pause awaits, and another writer may replace the setpoint meanwhile."""
+    hass, coordinator, _ = night
+    hass.states.get(BATTERY).state = "24"
+    coordinator._planned_setpoint_written_w = 0.0
+    coordinator._original_ac_charge_power = 22063.310546875
+
+    async def another_writer_gets_in(reason: str) -> None:
+        coordinator._planned_setpoint_written_w = 1500.0
+
+    coordinator._pause_grid_charge = AsyncMock(side_effect=another_writer_gets_in)
+    for _ in range(AC_LIMIT_MAX_REWRITES + 1):
+        coordinator._planned_setpoint_written_w = 0.0
+        await coordinator._verify_ac_charge_limit()
+
+    assert _ac_writes(hass) == []
+    assert coordinator._ac_limit_rewrites == 0
+    assert coordinator._ac_limit_not_held is False

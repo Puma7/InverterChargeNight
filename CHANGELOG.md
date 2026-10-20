@@ -57,13 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   date back to 3.10.2; this was the first night with such a hiccup.
   - No protective charge limit is written while the battery cannot draw from the grid: target
     reached, grid charging off, and the battery at least 5 points above both the planned floor
-    and the min SOC the inverter holds. The SOC counts only if its entity reported within the
-    last five minutes, which also bridges the seconds the same hiccup blanks it; a SOC that
-    stopped updating, like anything else unknown, keeps the limit.
+    and the min SOC the inverter holds. Both count only if their entities reported within the
+    last five minutes, which also bridges the seconds the same hiccup blanks them; a value that
+    stopped updating or was never seen, like anything else unknown, keeps the limit.
   - The communication guard writes its 0 W once per outage, not on every refresh.
   - A limit the inverter does not hold is rewritten at most twice per window - a reading that
     matches for a while does not refill that, and a restart inside the window keeps what was
-    spent (the window is named by its own deadline, an ad-hoc `charge_to` included). Then no
+    spent (the window is named by its own deadline, an ad-hoc `charge_to` included). Only a
+    rewrite actually issued counts. Then no
     writer at all - planner, connection limit, guard or efficiency finder - writes the charge
     limit again in that window, and the
     integration stops, files the repair issue "the inverter does not hold the charge limit" and
