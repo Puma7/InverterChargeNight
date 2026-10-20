@@ -202,6 +202,21 @@ type InverterChargeNightConfigEntry = ConfigEntry[InverterChargeNightCoordinator
 RESET_RETRY_DELAYS: tuple[int, ...] = (60, 120, 240)
 RESET_RETRY_INTERVAL = 900
 RESET_RETRY_SLOW_ATTEMPTS = 2
+# A protective charge limit only matters while the battery can draw from the
+# connection. With grid charging switched off and the battery this many points
+# above the min SOC floor, it cannot: on 20 October 2026 a short meter outage
+# had the integration write 0 W at 03:10 although nothing was charging, and the
+# value it captured before that write fed the reset loop at the window end.
+IDLE_BATTERY_SOC_MARGIN = 5.0
+# A battery SOC this recent still answers that question while the entity briefly
+# reports nothing (the same inverter hiccup also blanks the SOC); a battery
+# cannot fall by the margin above in that time.
+IDLE_SOC_MAX_AGE_S = 300
+# The verification rewrites a charge limit the inverter does not hold at most
+# this many times per window. That night the Kostal reported its own 22 kW
+# again after every 0 W write, and the integration wrote it anew every 15
+# minutes until the window ended.
+AC_LIMIT_MAX_REWRITES = 2
 SKIP_NEXT_DURATION = timedelta(hours=24)
 # A bridge longer than this means the sunrise or the window end is off; the plan
 # is still made, but it is worth a warning in the log.
@@ -309,6 +324,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Set while the options update tears a window down; see async_update_entry
     _reconfiguring: bool = False
     _reset_abandoned: bool = False
+    _ac_limit_rewrites: int = 0
+    _ac_limit_not_held: bool = False
+    _last_trusted_soc: tuple[float, datetime] | None = None
     # True once async_unload_entry started: no new timers may be armed.
     _unloading: bool = False
     # House connection limit (plan 008): read by the sensor and by the teardown
@@ -396,6 +414,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The bounded retry ladder ran out: nothing is written automatically any
         # more until a window starts, a manual reset runs or a reset succeeds.
         self._reset_abandoned = False
+        # Rewrites of a charge limit the inverter did not hold, this window;
+        # bounded by AC_LIMIT_MAX_REWRITES, then a repair issue instead.
+        self._ac_limit_rewrites = 0
+        self._ac_limit_not_held = False
+        self._last_trusted_soc: tuple[float, datetime] | None = None
         self._reset_retry_unsub: CALLBACK_TYPE | None = None
         self._reset_retry_count = 0
         self._battery_soc_listener: CALLBACK_TYPE | None = None
@@ -1327,7 +1350,48 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not state or state.state in ("unknown", "unavailable"):
             return None
         value = _as_float(state.state)
-        return value if value is not None and 0 <= value <= 100 else None
+        if value is None or not 0 <= value <= 100:
+            return None
+        seen = getattr(state, "last_reported", None) or getattr(state, "last_updated", None)
+        if isinstance(seen, datetime):
+            self._last_trusted_soc = (value, seen)
+        return value
+
+    def _battery_idle_on_grid(self) -> bool:
+        """True when the battery provably cannot draw from the connection right now.
+
+        It can do so in two ways: grid charging, and the inverter topping the
+        battery up to its min SOC. Neither is possible once the target is
+        reached, grid charging is switched off and the battery is well above
+        every floor this window wrote - and then a protective charge limit
+        protects nothing, while writing it captures a value that has to be
+        restored later. Anything unknown answers False and keeps the limit.
+        """
+        if not self.target_reached:
+            return False
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        switch = self.hass.states.get(str(switch_id)) if switch_id else None
+        if switch is None or switch.state != "off":
+            return False
+        soc = self._current_battery_soc()
+        if soc is None and self._last_trusted_soc is not None:
+            value, seen = self._last_trusted_soc
+            if 0 <= elapsed_seconds(dt_util.now(), seen) <= IDLE_SOC_MAX_AGE_S:
+                soc = value
+        if soc is None:
+            return False
+        floors: list[float] = []
+        planned = self.inverter_floor_soc()
+        if planned is not None:
+            floors.append(planned)
+        min_soc_id = self.config.get(CONF_MIN_SOC_ENTITY)
+        min_soc_state = self.hass.states.get(str(min_soc_id)) if min_soc_id else None
+        held = _as_float(min_soc_state.state) if min_soc_state is not None else None
+        if held is not None and 0 <= held <= 100:
+            floors.append(held)
+        if not floors:
+            return False
+        return soc >= max(floors) + IDLE_BATTERY_SOC_MARGIN
 
     @staticmethod
     def _align_tz(value: datetime, like: datetime) -> datetime:
@@ -4249,6 +4313,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # value it kept is not captured again (original_min_soc stays set).
         self._cancel_reset_retry()
         self._clear_reset_abandoned()  # this window's end starts a fresh backoff
+        self._clear_ac_limit_not_held()
         self._pending_reset = False
 
         # Arm the listeners and the verification first. The target calculation
@@ -5231,7 +5296,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if faults and self.is_active and not self._ending and not self._unloading:
             # No raised ceiling may replace a protective zero while the stop
             # path is missing. Keep captures for the normal recovery/reset.
-            if self._ac_charge_limit_target() is not None:
+            # Written once per outage, not on every refresh, and not at all
+            # while the battery cannot draw from the grid anyway.
+            if (self._ac_charge_limit_target() is not None
+                    and self._planned_setpoint_written_w != 0
+                    and not self._battery_idle_on_grid()):
                 if await self._set_ac_charge_limit_w(0):
                     self._planned_setpoint_written_w = 0
             await self._pause_grid_charge("communication interrupted; stop requires feedback")
@@ -6223,6 +6292,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if abs(actual_w - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
             if self._auto_test_active:
                 self._auto_test_limit_confirmed = True
+            self._ac_limit_rewrites = 0
             return
         if actual_w < written:
             if self._auto_test_active:
@@ -6244,21 +6314,79 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 written,
             )
             return
-        _LOGGER.warning(
-            "The inverter holds an AC charge limit of %.0f W, not the %.0f W this "
-            "integration wrote - writing it again. If this repeats, the inverter is not "
-            "accepting external control, and the house connection limit cannot protect it",
-            actual_w,
-            written,
-        )
         if self._grid_limit_configured():
             await self._pause_grid_charge("inverter readback exceeds the protective charge limit")
+        if self._battery_idle_on_grid():
+            _LOGGER.debug(
+                "The inverter holds an AC charge limit of %.0f W, not %.0f W, but the battery "
+                "cannot draw from the grid - not writing it again",
+                actual_w,
+                written,
+            )
+            return
+        if self._ac_limit_rewrites >= AC_LIMIT_MAX_REWRITES:
+            self._report_ac_limit_not_held(target[0], actual_w, written)
+            return
+        self._ac_limit_rewrites += 1
+        _LOGGER.warning(
+            "The inverter holds an AC charge limit of %.0f W, not the %.0f W this "
+            "integration wrote - writing it again (%d of %d). If this repeats, the inverter "
+            "is not accepting external control, and the house connection limit cannot protect it",
+            actual_w,
+            written,
+            self._ac_limit_rewrites,
+            AC_LIMIT_MAX_REWRITES,
+        )
         latest = (float(self._auto_test_power_w)
                   if self._auto_test_active and self._auto_test_power_w is not None
                   else self._planned_setpoint_written_w)
         if self._ac_charge_limit_write_lock.locked() or latest != written:
             return
         await self._set_ac_charge_limit_w(int(written))
+
+    def _ac_limit_issue_id(self) -> str:
+        return f"charge_limit_not_held_{self.entry.entry_id}"
+
+    def _report_ac_limit_not_held(self, entity_id: str, actual_w: float, written: float) -> None:
+        """Stop rewriting a limit the inverter drops, once, and say so.
+
+        Grid charging stays blocked: its activation requires a readback at or
+        below the protective limit, which this inverter does not give.
+        """
+        if self._ac_limit_not_held:
+            return
+        self._ac_limit_not_held = True
+        _LOGGER.error(
+            "The inverter keeps %.0f W on %s after %d writes of %.0f W - no further writes "
+            "this window. The house connection limit cannot protect it",
+            actual_w,
+            entity_id,
+            self._ac_limit_rewrites,
+            written,
+        )
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._ac_limit_issue_id(),
+            is_fixable=False,
+            issue_domain=DOMAIN,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="charge_limit_not_held",
+            translation_placeholders={
+                "name": str(self.entry.title),
+                "entity": entity_id,
+                "written": f"{written:.0f}",
+                "actual": f"{actual_w:.0f}",
+            },
+        )
+
+    def _clear_ac_limit_not_held(self) -> None:
+        """Give every window its own bounded rewrites."""
+        self._ac_limit_rewrites = 0
+        if not self._ac_limit_not_held:
+            return
+        self._ac_limit_not_held = False
+        ir.async_delete_issue(self.hass, DOMAIN, self._ac_limit_issue_id())
 
     async def _verify_and_restore_min_soc(self) -> None:
         """Finish in-flight writes before a reset and reject unloading callbacks."""
@@ -6526,6 +6654,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # inverter until it ends.
             return
         if not self.config.get(CONF_GRID_IMPORT_ENTITY) or self._grid_budget() is None:
+            return
+        if self._battery_idle_on_grid():
+            _LOGGER.debug("House connection limit: the battery cannot draw from the grid - not writing")
             return
         reference = self._planned_setpoint_written_w
         if reference is None:

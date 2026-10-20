@@ -130,6 +130,8 @@ async def async_get_config_entry_diagnostics(
                 "original_min_soc_pct": coordinator.original_min_soc,
                 "reset_pending": coordinator._pending_reset,
                 "reset_abandoned": coordinator._reset_abandoned,
+                "charge_limit_not_held": coordinator._ac_limit_not_held,
+                "charge_limit_rewrites": coordinator._ac_limit_rewrites,
                 "planned_power_w": coordinator.planned_charge_power_w,
                 "planned_power_is_applied": coordinator.planned_power_is_applied,
                 "last_commanded_power_w": coordinator._planned_setpoint_written_w,

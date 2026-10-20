@@ -1424,6 +1424,10 @@
     "reset_incomplete": {
       "title": "{name}: Wechselrichter-Einstellungen nicht vollständig zurückgesetzt",
       "description": "{name} konnte nach mehreren Versuchen nicht bestätigen, dass diese Einstellungen wieder auf ihrem Ausgangswert stehen: {entities}. Zum Schutz des Wechselrichters schreibt die Integration sie nicht mehr automatisch. Bitte im Wechselrichter oder in seiner Integration prüfen. Das nächste Ladefenster, die Aktion reset_inverter oder ein erfolgreicher Reset nehmen die Rückgabe wieder auf."
+    },
+    "charge_limit_not_held": {
+      "title": "{name}: Der Wechselrichter hält das Ladelimit nicht",
+      "description": "Der Wechselrichter meldet {actual} W an {entity}, obwohl {name} mehrmals {written} W geschrieben hat. Zum Schutz des Wechselrichters wird in diesem Fenster nicht mehr geschrieben, und die Netzladung bleibt aus, solange die Hausanschlussgrenze nicht bestätigt ist. Prüfe, ob der Wechselrichter externe Steuerung annimmt (bei Kostal: Batteriesteuerung über Modbus) und ob eine andere Integration dasselbe Register beschreibt. Das nächste Fenster versucht es erneut."
     }
   },
   "services": {

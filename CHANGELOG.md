@@ -37,11 +37,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     starting another full reset each time.
   - A restored AC charge limit, and likewise the absolute charge power, is confirmed by a fresh
     reading before its capture is dropped. Restored to the entity maximum, any reading at or
-    above it counts for both.
-    Restored to the entity maximum, any reading at or above it counts - the device may go on
-    reporting its own larger maximum.
+    above it counts for both - the device may go on reporting its own larger maximum.
   - Giving up is visible: `reset_abandoned` on the target sensor and in the diagnostics, next
     to `pending_reset`. Removing the entry removes its repair issue.
+- **Why the limit was written that night at all, and why every 15 minutes.** The night log
+  shows it: at 03:10 the inverter answered Modbus with "server device failure" for a few
+  seconds, and the grid meter, min SOC and battery SOC were briefly untrusted. The target had
+  been reached at 23:01 (68 % on a 21 % floor) and grid charging was off - nothing could draw
+  from the connection. Still the communication guard wrote 0 W on every refresh while a fault
+  lasted (twelve writes in three minutes), the house connection limit wrote 0 W "after the
+  target was reached", and because the Kostal reported its own 22 kW again after each write,
+  the verification wrote 0 W anew every 15 minutes until the window ended. The value captured
+  before the first write was the 22063 W the reset then could not restore. Both mechanisms
+  date back to 3.10.2; this was the first night with such a hiccup.
+  - No protective charge limit is written while the battery cannot draw from the grid: target
+    reached, grid charging off, and the battery at least 5 points above both the planned floor
+    and the min SOC the inverter holds. A SOC reading from the last five minutes bridges the
+    seconds the same hiccup blanks it; anything else unknown keeps the limit.
+  - The communication guard writes its 0 W once per outage, not on every refresh.
+  - A limit the inverter does not hold is rewritten at most twice per window. Then the
+    integration stops, files the repair issue "the inverter does not hold the charge limit" and
+    leaves grid charging off, whose activation needs the limit to read back. The next window
+    starts over. `charge_limit_not_held` shows it on the target sensor and in the diagnostics.
 - **Every window holds the battery through the min SOC only.** The evening rescue and
   `block_discharge` no longer turn a discharge block switch on or write a discharge
   limit of zero. The two entities are only used to give back a value an older version

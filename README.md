@@ -556,6 +556,14 @@ The limit is a protection, not an optimisation, so it behaves accordingly:
 - It never engages **outside a window**: outside the window the integration does not control
   the inverter at all.
 - Not even the efficiency finder may order more than the connection carries.
+- It is **not written while the battery cannot draw from the grid**: the target is reached,
+  grid charging is off and the battery stands at least 5 points above every min SOC floor of
+  the window (a reading from the last five minutes bridges a briefly blank SOC). A short outage
+  of the grid import sensor then writes nothing, and nothing has to be restored afterwards.
+- An inverter that does not hold the written limit gets it **at most twice more per window**.
+  Then the integration stops writing, files a repair issue and leaves grid charging off: it is
+  only switched on once the limit reads back. Some inverters fall back to their own value
+  shortly after an external write (a Kostal reported its 22 kW again after every 0 W).
 - Between the regular polls a listener on the grid import sensor lowers the setpoint within
   about 30 seconds when the house load rises. It only ever lowers; raising it again waits for
   the next poll, so a load that drops for a moment does not push the battery straight back up.
@@ -570,8 +578,8 @@ and whether the limit is currently braking.
 > integrations. Leave this feature off (no grid import entity) and nothing changes.
 
 The limit stays on the inverter for the **whole window**, not only while the battery is
-charging: once the min SOC floor is raised (see below) the inverter can buy power at any
-moment, so the cap is only handed back at the window end. And the efficiency finder never
+charging: once the min SOC floor is raised (see below) the inverter can buy power whenever the
+battery nears that floor, so the cap is only handed back at the window end. And the efficiency finder never
 runs a test the connection cannot carry - a test that is already running when the wallboxes
 start is abandoned rather than continued at a power it was not measuring.
 

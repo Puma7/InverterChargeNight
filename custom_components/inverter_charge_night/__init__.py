@@ -341,6 +341,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     a reset action that no longer exists once the entry is gone (Codex on #36).
     """
     ir.async_delete_issue(hass, DOMAIN, f"reset_incomplete_{entry.entry_id}")
+    ir.async_delete_issue(hass, DOMAIN, f"charge_limit_not_held_{entry.entry_id}")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> bool:

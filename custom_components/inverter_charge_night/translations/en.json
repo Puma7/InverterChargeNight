@@ -1424,6 +1424,10 @@
     "reset_incomplete": {
       "title": "{name}: inverter settings not fully restored",
       "description": "After several attempts {name} could not confirm that these settings are back at their original values: {entities}. To protect the inverter it no longer writes them automatically. Check them in the inverter or its integration. The next charge window, the reset_inverter action or a successful reset takes the restore up again."
+    },
+    "charge_limit_not_held": {
+      "title": "{name}: the inverter does not hold the charge limit",
+      "description": "The inverter reports {actual} W on {entity} after {name} wrote {written} W several times. To protect the inverter it stops writing for the rest of this window, and grid charging stays off while the house connection limit cannot be confirmed. Check whether the inverter accepts external control (for Kostal: battery control via Modbus) and whether another integration writes the same register. The next window tries again."
     }
   },
   "services": {
