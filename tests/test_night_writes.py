@@ -608,3 +608,16 @@ async def test_after_the_window_end_nothing_reaches_the_inverter_until_noon(nigh
             await coordinator._verify_ac_charge_limit()
 
     assert _inverter_writes(hass) == at_the_end
+
+
+@pytest.mark.asyncio
+async def test_the_regular_poll_retries_an_unconfirmed_stop(night):
+    """The poll's target-reached branch is where the bounded retry runs (Codex on #37)."""
+    hass, coordinator, _ = night
+    coordinator._grid_stop_pending = True  # an earlier stop had no off feedback
+    retry = AsyncMock()
+    coordinator._retry_grid_stop = retry
+
+    await coordinator._async_calculate_and_control()
+
+    retry.assert_awaited_once()

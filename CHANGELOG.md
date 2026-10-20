@@ -15,7 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restored as that maximum instead of being refused, so a failed stop could have raised the
   protective 0 W to the full ceiling while grid charging went on. Now the limits and their
   captures stay until the switch reports off; the window-end reset applies the same rule.
-  Raised by CodeRabbit on #35, which #36 superseded.
+  Raised by CodeRabbit on #35, which #36 superseded. An unconfirmed stop is retried from the
+  regular poll: a switch that reports off by then is confirmed without another command and
+  the limits go back; one that still reports on gets `turn_off` at most twice more in the
+  window, never on every SOC update (Codex and CodeRabbit on #37).
 - **A protective charge limit above what the control accepts is written as its maximum.**
   After the Kostal falls back to its own 22 kW, a connection limit of, say, 18820 W was
   written as is - above the 12540 W the KORE control accepts. Home Assistant refused it and

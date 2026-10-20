@@ -217,6 +217,10 @@ IDLE_SOC_MAX_AGE_S = 300
 # again after every 0 W write, and the integration wrote it anew every 15
 # minutes until the window ended.
 AC_LIMIT_MAX_REWRITES = 2
+# An unconfirmed grid-charge stop on reaching the target is retried from the
+# regular poll, sending turn_off at most this many more times per window; the
+# window-end reset, with its own bounded ladder, takes it from there.
+GRID_STOP_MAX_RETRIES = 2
 SKIP_NEXT_DURATION = timedelta(hours=24)
 # A bridge longer than this means the sunrise or the window end is off; the plan
 # is still made, but it is worth a warning in the log.
@@ -327,6 +331,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _ac_limit_rewrites: int = 0
     _ac_limit_not_held: bool = False
     _ac_limit_window: str | None = None
+    _grid_stop_pending: bool = False
+    _grid_stop_retries: int = 0
     _last_trusted_soc: tuple[float, datetime] | None = None
     _last_trusted_min_soc: tuple[float, datetime] | None = None
     # True once async_unload_entry started: no new timers may be armed.
@@ -422,6 +428,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ac_limit_not_held = False
         # Which window spent them: a restart inside it resumes, any other starts over
         self._ac_limit_window: str | None = None
+        # Reaching the target asked for a grid-charge stop that was not confirmed off
+        self._grid_stop_pending = False
+        self._grid_stop_retries = 0
         self._last_trusted_soc: tuple[float, datetime] | None = None
         # The inverter's own min SOC as last reported, for the same question
         self._last_trusted_min_soc: tuple[float, datetime] | None = None
@@ -4453,6 +4462,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._clear_reset_abandoned()  # this window's end starts a fresh backoff
         if not same_window:
             self._clear_ac_limit_not_held()
+        self._grid_stop_pending = False
+        self._grid_stop_retries = 0
         self._pending_reset = False
 
         # Arm the listeners and the verification first. The target calculation
@@ -5665,6 +5676,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             else:
                                 await self._stop_grid_charging()
                             self.target_reached = True
+                        elif self._grid_stop_pending and not self.is_discharge_mode:
+                            # Every poll after the target returns here (Codex on #37)
+                            await self._retry_grid_stop()
                         self.planned_charge_power_w = 0.0
                         return {
                             "calculated_soc": calculated_soc,
@@ -6197,8 +6211,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as e:
                 _LOGGER.error("Error stopping force discharge: %s", e, exc_info=True)
 
-    async def _stop_grid_charging(self) -> None:
-        """Stop grid charging when target is reached.
+    async def _stop_grid_charging(self) -> bool:
+        """Stop grid charging when target is reached; True once it is confirmed off.
 
         The charge ceilings are only handed back once the switch reports off.
         A stop that failed or has no off feedback may leave grid charging on,
@@ -6232,11 +6246,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as e:
                 _LOGGER.error("Error stopping grid charge: %s", e, exc_info=True)
         self._finalize_auto_test()
+        self._grid_stop_pending = not stopped
         if not stopped:
-            # Keep the protective ceilings and their captures: the next check
-            # stops again, and the window-end reset restores only after off.
+            # Keep the protective ceilings and their captures: the regular poll
+            # retries the stop (bounded), and the window-end reset restores
+            # only after off (Codex and CodeRabbit on #37).
             _LOGGER.warning("Keeping the charge limits - grid charging is not confirmed off")
-            return
+            return False
         # The window is still open here - reaching the target does not end it -
         # so the captured original has to survive this restore.
         await self._reset_absolute_charge_power(forget=False)
@@ -6254,6 +6270,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             # Charging is over for this window: take a running test's value off the inverter
             await self._reset_ac_charge_limit()
+        return True
+
+    async def _retry_grid_stop(self) -> None:
+        """Retry a stop that was not confirmed off, from the regular poll only.
+
+        A switch that reports off by now is confirmed without another command,
+        and the ceilings go back. One that still reports on gets turn_off at
+        most GRID_STOP_MAX_RETRIES more times this window - a command on every
+        SOC update is exactly what must not reach the inverter.
+        """
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        state = self.hass.states.get(str(switch_id)) if switch_id else None
+        if state is not None and state.state == "on":
+            if self._grid_stop_retries >= GRID_STOP_MAX_RETRIES:
+                return  # the window-end reset takes it from here
+            self._grid_stop_retries += 1
+        await self._stop_grid_charging()
 
     def _setup_battery_soc_listener(self) -> None:
         """Set up a listener for battery SOC changes to check target more frequently."""

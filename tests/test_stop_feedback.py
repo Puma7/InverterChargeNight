@@ -71,11 +71,19 @@ async def test_an_unconfirmed_stop_keeps_the_protective_ceiling(mock_hass, failu
     )
     coordinator = _make_coordinator(mock_hass)
 
-    await coordinator._stop_grid_charging()
+    assert await coordinator._stop_grid_charging() is False
 
+    # The stop itself was attempted wherever the switch could take it (Codex on #37)
+    stop_calls = [c for c in mock_hass.services.async_call.await_args_list
+                  if c.args[:2] == ("switch", "turn_off")]
+    if failure == "switch_unavailable":
+        assert stop_calls == []
+    else:
+        assert [c.args[2] for c in stop_calls] == [{"entity_id": GRID}]
     assert _ac_writes(mock_hass) == []
     assert coordinator._original_ac_charge_power == pytest.approx(22063.31)
     assert mock_hass.states.get(AC_LIMIT).state == "0"
+    assert coordinator._grid_stop_pending is True
 
 
 @pytest.mark.asyncio
@@ -116,3 +124,43 @@ async def test_a_protective_limit_above_the_control_maximum_is_written_as_that_m
     assert await coordinator._set_ac_charge_limit_w(requested_w) is True
 
     assert _ac_writes(mock_hass) == [written]
+
+
+def _turn_offs(hass: Any) -> int:
+    return sum(1 for c in hass.services.async_call.await_args_list if c.args[:2] == ("switch", "turn_off"))
+
+
+@pytest.mark.asyncio
+async def test_a_late_off_is_picked_up_by_the_next_poll_without_another_command(mock_hass):
+    """Codex and CodeRabbit on #37: the callers set target_reached, so nothing retried."""
+    mock_hass.states.async_set(GRID, "on")
+    mock_hass.states.async_set(AC_LIMIT, "0", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+    mock_hass.services.async_call = _device(mock_hass, switch_obeys=False)
+    coordinator = _make_coordinator(mock_hass)
+    assert await coordinator._stop_grid_charging() is False
+
+    mock_hass.states.get(GRID).state = "off"  # the switch reports off after all
+    await coordinator._retry_grid_stop()
+
+    assert _turn_offs(mock_hass) == 1
+    assert _ac_writes(mock_hass) == [12540.0]
+    assert coordinator._original_ac_charge_power is None
+    assert coordinator._grid_stop_pending is False
+
+
+@pytest.mark.asyncio
+async def test_a_switch_that_never_reports_off_gets_a_bounded_number_of_stops(mock_hass):
+    from custom_components.inverter_charge_night.coordinator import GRID_STOP_MAX_RETRIES
+
+    mock_hass.states.async_set(GRID, "on")
+    mock_hass.states.async_set(AC_LIMIT, "0", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+    mock_hass.services.async_call = _device(mock_hass, switch_obeys=False)
+    coordinator = _make_coordinator(mock_hass)
+    await coordinator._stop_grid_charging()
+
+    for _ in range(10):  # ten polls, 15 minutes apart
+        await coordinator._retry_grid_stop()
+
+    assert _turn_offs(mock_hass) == 1 + GRID_STOP_MAX_RETRIES
+    assert _ac_writes(mock_hass) == []
+    assert coordinator._original_ac_charge_power == pytest.approx(22063.31)
