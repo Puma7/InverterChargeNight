@@ -450,6 +450,27 @@ async def test_a_clamped_legacy_discharge_limit_accepts_the_devices_own_maximum(
     assert coordinator._original_discharge_limit is None
 
 
+@pytest.mark.parametrize(("reading", "original"), [("9000", 9000.0), ("22063.31", 22063.31)])
+@pytest.mark.asyncio
+async def test_an_absolute_charge_power_that_is_already_back_is_not_rewritten(mock_hass, reading, original):
+    """Codex on #36: a late earlier write, or a device back at its own maximum."""
+    from custom_components.inverter_charge_night.const import CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY
+
+    absolute = "number.kostal_g3_battery_max_charge_power_abs"
+    mock_hass.states.async_set(absolute, reading, {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+    mock_hass.services.async_call = _validating_device(mock_hass)
+    coordinator = _make_coordinator(mock_hass, {CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY: absolute}, {})
+    coordinator._original_absolute_charge_power = original
+
+    assert await coordinator._reset_absolute_charge_power() is True
+
+    assert _writes(mock_hass, absolute) == []
+    mock_hass.services.async_call.assert_any_await(
+        "homeassistant", "update_entity", {"entity_id": absolute}, blocking=True
+    )
+    assert coordinator._original_absolute_charge_power is None
+
+
 @pytest.mark.asyncio
 async def test_an_ac_limit_restore_clamped_up_to_the_minimum_is_confirmed(mock_hass):
     """Codex on #36: below the entity minimum the write clamps up, and the

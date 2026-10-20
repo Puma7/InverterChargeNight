@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     restored as the entity maximum accepts a larger native reading the same way.
   - An AC charge limit that a fresh reading already shows at its original value is confirmed,
     not written again - a Kostal drops the window's limit by itself, and a late feedback can
-    show that an earlier attempt landed.
+    show that an earlier attempt landed. The absolute charge power is confirmed the same way.
   - Giving up is visible: `reset_abandoned` on the target sensor and in the diagnostics, next
     to `pending_reset`. Removing the entry removes its repair issue.
 - **Why the limit was written that night at all, and why every 15 minutes.** The night log
@@ -63,7 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The communication guard writes its 0 W once per outage, not on every refresh.
   - A limit the inverter does not hold is rewritten at most twice per window - a reading that
     matches for a while does not refill that, and a restart inside the window keeps what was
-    spent. Then the
+    spent (the window is named by its own deadline, an ad-hoc `charge_to` included). Then no
+    writer at all - planner, connection limit, guard or efficiency finder - writes the charge
+    limit again in that window, and the
     integration stops, files the repair issue "the inverter does not hold the charge limit" and
     leaves grid charging off, whose activation needs the limit to read back. The next window
     starts over. `charge_limit_not_held` shows it on the target sensor and in the diagnostics.

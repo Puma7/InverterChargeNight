@@ -562,7 +562,8 @@ The limit is a protection, not an optimisation, so it behaves accordingly:
   bridges a briefly blank entity; a SOC that stopped updating keeps the limit. A short outage
   of the grid import sensor then writes nothing, and nothing has to be restored afterwards.
 - An inverter that does not hold the written limit gets it **at most twice more per window**,
-  a restart included; holding it for a while in between does not reset that count.
+  a restart included; holding it for a while in between does not reset that count. After that
+  nothing in the integration writes the charge limit again until the next window.
   Then the integration stops writing, files a repair issue and leaves grid charging off: it is
   only switched on once the limit reads back. Some inverters fall back to their own value
   shortly after an external write (a Kostal reported its 22 kW again after every 0 W).

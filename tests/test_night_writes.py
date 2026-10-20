@@ -280,6 +280,7 @@ async def test_a_restart_inside_the_window_keeps_the_spent_budget(night):
     hass.states.get(BATTERY).state = "24"
     coordinator.is_active = True
     coordinator._window_started_at = THE_HICCUP - timedelta(hours=4)
+    coordinator._ac_limit_window = coordinator._window_identity(THE_HICCUP)  # as its start named it
     coordinator._planned_setpoint_written_w = 0.0
     coordinator._original_ac_charge_power = 22063.310546875
     with patch(f"{ir.__name__}.async_create_issue"):
@@ -423,3 +424,55 @@ async def test_the_sensor_and_diagnostics_show_a_limit_that_is_not_held(night):
     charge_control = diagnostics["state"]["charge_control"]
     assert charge_control["charge_limit_not_held"] is True
     assert charge_control["charge_limit_rewrites"] == AC_LIMIT_MAX_REWRITES
+
+
+@pytest.mark.asyncio
+async def test_a_restart_inside_a_long_ad_hoc_window_keeps_the_spent_budget(night):
+    """Codex on #36: an eight-hour charge_to window outlives a one-hour schedule.
+
+    Three hours in, the guess "longer than the configured window" called the
+    restart a new window and handed out a fresh budget. The ad-hoc deadline
+    names the window instead.
+    """
+    hass, coordinator, clock = night
+    coordinator.config = {**coordinator.config, "start_time": "23:00", "end_time": "00:00"}
+    coordinator._adhoc_until = THE_HICCUP + timedelta(hours=5)
+    coordinator._ac_limit_window = coordinator._window_identity(THE_HICCUP - timedelta(hours=3))
+    coordinator._ac_limit_rewrites = AC_LIMIT_MAX_REWRITES
+    coordinator._ac_limit_not_held = True
+    coordinator._window_started_at = THE_HICCUP - timedelta(hours=3)
+    coordinator.is_active = False
+    coordinator._async_calculate_and_control = AsyncMock(return_value={})
+    with patch(f"{ir.__name__}.async_delete_issue") as delete, patch.object(
+        coordinator, "_setup_battery_soc_listener"
+    ), patch.object(coordinator, "_setup_inverter_min_soc_listener"), patch.object(
+        coordinator, "_setup_grid_import_listener"
+    ):
+        await coordinator._on_window_start(clock.now)
+
+    assert not call_for(delete, "charge_limit_not_held_entry_1")
+    assert coordinator._ac_limit_not_held is True
+
+
+def test_two_scheduled_nights_are_two_windows_even_when_nearly_a_day_long(night):
+    """Codex on #36: a 23.5 h schedule made tomorrow's window look like a resume."""
+    _, coordinator, _ = night
+    coordinator.config = {**coordinator.config, "start_time": "05:00", "end_time": "04:30"}
+    tonight = coordinator._window_identity(THE_HICCUP)
+    tomorrow = coordinator._window_identity(THE_HICCUP + timedelta(hours=23, minutes=55))
+    assert tonight is not None and tomorrow is not None
+    assert tonight != tomorrow
+
+
+@pytest.mark.asyncio
+async def test_no_writer_touches_a_limit_declared_not_held(night):
+    """Codex on #36: the repair issue says writing stopped - every writer has to honour it."""
+    hass, coordinator, _ = night
+    coordinator._ac_limit_not_held = True
+    hass.states.get(GRID).state = "on"
+
+    assert await coordinator._set_ac_charge_limit_w(3000) is False
+
+    assert _ac_writes(hass) == []
+    assert coordinator._original_ac_charge_power is None
+    assert hass.states.get(GRID).state == "off"  # paused instead

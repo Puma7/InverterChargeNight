@@ -326,6 +326,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _reset_abandoned: bool = False
     _ac_limit_rewrites: int = 0
     _ac_limit_not_held: bool = False
+    _ac_limit_window: str | None = None
     _last_trusted_soc: tuple[float, datetime] | None = None
     # True once async_unload_entry started: no new timers may be armed.
     _unloading: bool = False
@@ -418,6 +419,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # bounded by AC_LIMIT_MAX_REWRITES, then a repair issue instead.
         self._ac_limit_rewrites = 0
         self._ac_limit_not_held = False
+        # Which window spent them: a restart inside it resumes, any other starts over
+        self._ac_limit_window: str | None = None
         self._last_trusted_soc: tuple[float, datetime] | None = None
         self._reset_retry_unsub: CALLBACK_TYPE | None = None
         self._reset_retry_count = 0
@@ -686,6 +689,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Bounded per window, a restart inside the window included (Codex on #36)
             "ac_limit_rewrites": self._ac_limit_rewrites,
             "ac_limit_not_held": self._ac_limit_not_held,
+            "ac_limit_window": self._ac_limit_window,
             "hands_off_until": (
                 self._hands_off_until.isoformat() if self._hands_off_until else None
             ),
@@ -757,6 +761,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if isinstance(rewrites, int) and not isinstance(rewrites, bool) and rewrites > 0:
             self._ac_limit_rewrites = rewrites
         self._ac_limit_not_held = state.get("ac_limit_not_held") is True
+        window_raw = state.get("ac_limit_window")
+        self._ac_limit_window = window_raw if isinstance(window_raw, str) else None
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
             self.snow_nights = snow_raw
@@ -2933,6 +2939,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if target is None:
             return False
         entity_id, domain = target
+        if self._ac_limit_not_held:
+            # The repair issue says writing has stopped for this window, and
+            # every writer has to honour that, not only the verification
+            # (Codex on #36). Grid charging stays paused instead.
+            _LOGGER.debug("Not writing %d W to %s: the inverter does not hold it", power_w, entity_id)
+            if self.is_active and self._grid_limit_configured():
+                await self._pause_grid_charge("the inverter does not hold the protective charge limit")
+            return False
         limited_w = int(self._grid_limited_setpoint(float(power_w)))
         if limited_w < power_w:
             _LOGGER.info(
@@ -3215,6 +3229,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             state, self._original_absolute_charge_power, str(entity_id), "Reset absolute charge power"
         )
         unit = _unit_of(state)
+        # Clamped down to the maximum: a device reading above it is restored
+        clamped_down = value < self._original_absolute_charge_power
+        if state is not None and await self._already_confirmed(
+            str(entity_id), state, value, at_least=clamped_down,
+        ):
+            # Already back - an earlier write landed late (Codex on #36)
+            pass
+        elif not await self._write_absolute_restore(str(entity_id), domain, state, value, forget, clamped_down):
+            return False
+        _LOGGER.info("Reset absolute charge power to original value: %.3f (%s)", value, unit or "unitless")
+        self._absolute_charge_power_written_w = None
+        if forget:
+            self._original_absolute_charge_power = None
+            self._persist_state()
+        return True
+
+    async def _write_absolute_restore(
+        self, entity_id: str, domain: str, state: Any, value: float, forget: bool, clamped_down: bool,
+    ) -> bool:
+        """Write the absolute charge power back; with ``forget``, also confirm it."""
         # Read before the write: the entity may update this very object in place
         before_value = state.state if state else ""
         before_reported = getattr(state, "last_reported", None)
@@ -3229,19 +3263,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Error resetting absolute charge power: %s", e, exc_info=True)
             return False
         if forget and not await self._confirm_discharge_restore(
-            str(entity_id), before_value, before_reported, value,
-            # Clamped down to the maximum: a device reading above it is restored
-            at_least=value < self._original_absolute_charge_power,
+            entity_id, before_value, before_reported, value, at_least=clamped_down,
         ):
             # Same rule as the other restores (Codex on #36): an accepted call is
             # not a restored limit, and the capture is what a retry needs.
             _LOGGER.error("Absolute charge power restore has no fresh matching feedback: %s", entity_id)
             return False
-        _LOGGER.info("Reset absolute charge power to original value: %.3f (%s)", value, unit or "unitless")
-        self._absolute_charge_power_written_w = None
-        if forget:
-            self._original_absolute_charge_power = None
-            self._persist_state()
         return True
 
     def _efficiency_signature(self) -> str:
@@ -4360,10 +4387,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         mode_label = "Morning discharge" if self.is_discharge_mode else "Night charge"
         _LOGGER.info("%s window started", mode_label)
         # A restart inside the window resumes it: what this window already
-        # spent of its bounded charge-limit rewrites stays spent.
-        same_window = self._window_started_at is not None and 0 <= (
-            now - self._window_started_at
-        ).total_seconds() <= self._window_length_s() + 3600
+        # spent of its bounded charge-limit rewrites stays spent. The window is
+        # named by its own deadline, not guessed from its length (Codex on #36).
+        identity = self._window_identity(now)
+        same_window = identity is not None and identity == self._ac_limit_window
+        self._ac_limit_window = identity
         if self._window_started_at is not None and self.initial_calculated_soc is not None:
             previous = self._window_started_at
             if (now - previous).total_seconds() > self._window_length_s() + 3600:
@@ -4775,6 +4803,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._adhoc_until.isoformat(timespec="minutes"),
                 until.isoformat(timespec="minutes"),
             )
+            if self._ac_limit_window == f"adhoc:{self._adhoc_until.isoformat()}":
+                # Extending is the same window: its spent rewrites stay spent
+                self._ac_limit_window = f"adhoc:{until.isoformat()}"
             self._adhoc_until = until
             self._adhoc_target_soc = target_soc
             self._adhoc_allow_grid_charge = allow_grid_charge
@@ -6420,6 +6451,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._ac_charge_limit_write_lock.locked() or latest != written:
             return
         await self._set_ac_charge_limit_w(int(written))
+
+    def _window_identity(self, now: datetime) -> str | None:
+        """Name the window that is starting: an ad-hoc deadline or the scheduled end."""
+        if self._adhoc_until is not None:
+            return f"adhoc:{self._adhoc_until.isoformat()}"
+        bounds = scheduled_window_bounds(now, *self._window_times())
+        return f"scheduled:{bounds[1].isoformat()}" if bounds is not None else None
 
     def _ac_limit_issue_id(self) -> str:
         return f"charge_limit_not_held_{self.entry.entry_id}"

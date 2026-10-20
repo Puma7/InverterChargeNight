@@ -2,6 +2,7 @@
 import asyncio
 import logging
 from datetime import datetime
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -566,11 +567,16 @@ async def test_absolute_charge_power_reset_clears_only_on_success(mock_hass):
     coordinator = _make_coordinator(mock_hass, ABS_CONFIG)
     coordinator._original_absolute_charge_power = 9000.0
 
+    def set_values() -> list[Any]:
+        return [c for c in mock_hass.services.async_call.await_args_list if c.args[1] == "set_value"]
+
     assert await coordinator._reset_absolute_charge_power() is True
     assert coordinator._original_absolute_charge_power is None
-    mock_hass.services.async_call.assert_awaited_once_with(
+    # Without a fresh reading the value standing there is not trusted: it is written
+    mock_hass.services.async_call.assert_any_await(
         "number", "set_value", {"entity_id": ABS_LIMIT, "value": 9000.0}
     , blocking=True)
+    assert len(set_values()) == 1
 
     # Nothing captured, or an entity that is gone: nothing left to restore
     assert await coordinator._reset_absolute_charge_power() is True
@@ -578,7 +584,7 @@ async def test_absolute_charge_power_reset_clears_only_on_success(mock_hass):
     coordinator._original_absolute_charge_power = 9000.0
     assert await coordinator._reset_absolute_charge_power() is True
     assert coordinator._original_absolute_charge_power is None
-    mock_hass.services.async_call.assert_awaited_once()
+    assert len(set_values()) == 1
 
 
 @pytest.mark.asyncio
