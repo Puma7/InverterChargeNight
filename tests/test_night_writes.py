@@ -624,6 +624,42 @@ async def test_the_regular_poll_retries_an_unconfirmed_stop(night):
 
 
 
+@pytest.mark.asyncio
+async def test_a_raised_target_drops_the_stop_of_the_old_one(night):
+    """Codex on #37: the next poll sent turn_off for the old target before charging
+    towards the raised one - a relay flip on every raise."""
+    hass, coordinator, clock = night
+    hass.states.get(GRID).state = "on"
+
+    async def device(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        clock.now += timedelta(seconds=1)
+        if service == "set_value":  # number writes hold; only the switch lags
+            state = hass.states.get(data["entity_id"])
+            state.state = str(data["value"])
+            state.last_reported = state.last_updated = clock.now
+
+    hass.services.async_call = AsyncMock(side_effect=device)
+    assert await coordinator._stop_grid_charging() is False
+    stops = len(hass.services.async_call.await_args_list)
+    # The bridge planner raises the target above the SOC
+    plan = SimpleNamespace(target_soc=80.0, reason="bridge")
+    coordinator._parse_forecast_energy = MagicMock(return_value=(10.0, True))
+    coordinator._plan_target = AsyncMock(return_value=plan)
+    assert await coordinator._replan_in_window(68.0) == 80.0
+    retry = AsyncMock()
+    coordinator._retry_grid_stop = retry
+
+    await coordinator._async_calculate_and_control()
+
+    retry.assert_not_awaited()
+    assert coordinator._grid_stop_pending is False
+    after = [c.args[:2] for c in hass.services.async_call.await_args_list[stops:]]
+    assert ("switch", "turn_off") not in after
+    # ...and the control path charges towards the raised target instead
+    assert hass.services.async_call.await_args_list[stops].args == (
+        "number", "set_value", {"entity_id": MIN_SOC, "value": 80.0})
+
+
 @pytest.mark.parametrize("soc", ["unavailable", "15"])
 @pytest.mark.asyncio
 async def test_a_pending_stop_stays_bounded_whatever_the_soc_reads(night, soc):

@@ -1335,6 +1335,27 @@ async def test_measured_optimum_yields_to_ev_and_house_load(mock_hass, foreign, 
 
 
 @pytest.mark.asyncio
+async def test_the_planner_plans_what_the_control_can_take(mock_hass):
+    """Codex on #37: an 18,820 W plan on a 12,540 W control was recorded as 18,820 W
+    applied, though only 12,540 W reached the inverter."""
+    _register(mock_hass, import_w="1000")
+    mock_hass.states.async_set(AC_LIMIT, "6000", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+    co = _make_coordinator(mock_hass, {**LIMITED_CONFIG, CONF_GRID_MAX_CONTINUOUS_W: 40000,
+        CONF_GRID_HEADROOM_W: 0, CONF_MAX_CHARGE_POWER_W: 20000})
+    co.entry.options = {CONF_AUTO_EFFICIENCY_DATA: {"best_power_w": 18820, "history": {"18820": .05},
+        "measurement_signature": co._efficiency_signature()}}
+    co.is_active = True
+
+    await co._plan_charge_power(70)
+    await co._plan_charge_power(70)  # the next poll: the same value stands, nothing to write
+
+    assert _ac_writes(mock_hass) == [12540]
+    assert co.planned_charge_power_w == 12540
+    assert co._planned_setpoint_written_w == 12540
+    assert co.planned_power_is_applied is True
+
+
+@pytest.mark.asyncio
 async def test_optimum_resumes_after_ev_load_falls(mock_hass):
     _register(mock_hass, import_w="34000")
     co = _make_coordinator(mock_hass, {**LIMITED_CONFIG, CONF_GRID_MAX_CONTINUOUS_W: 40000,

@@ -2143,6 +2143,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         min_w = float(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000))
         max_w = float(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000))
+        target = self._ac_charge_limit_target()
+        control_max_w = self._control_max_w(target[0]) if target is not None else None
+        if control_max_w is not None:
+            # Plan what the control can take, so the record, the sensor and the
+            # "already written" comparison all hold the value it really took
+            # (Codex on #37)
+            max_w = min(max_w, float(int(control_max_w)))
         # Per band where one has been searched, battery-wide otherwise (plan 015)
         best = self.best_charge_power_w(current_soc)
         # Prefer the measured optimum, finishing early rather than stretching
@@ -3518,8 +3525,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 int(allowed),
             )
             self._reset_auto_test_state()
-        if await self._set_ac_charge_limit_w(int(allowed)):
-            self._planned_setpoint_written_w = allowed
+        # The setter records what the control took, clamped to its maximum
+        await self._set_ac_charge_limit_w(int(allowed))
 
     def _efficiency_now(self) -> datetime:
         """Measurement wall clock; durations are converted to UTC elapsed time."""
@@ -5682,7 +5689,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # A stop that was not confirmed off is retried first, bounded - whatever
         # the SOC reads now: unknown, or already below the target again
         # (CodeRabbit on #37).
-        pending_grid_stop = self._grid_stop_pending and not self.is_discharge_mode
+        if self._grid_stop_pending and not self.target_reached:
+            # A raised plan, override, snow night or ad-hoc target re-armed
+            # charging: the stop belonged to the old target, and the control
+            # path below decides afresh (Codex on #37)
+            self._grid_stop_pending = False
+            self._grid_stop_retries = 0
+        pending_grid_stop = self._stop_pending_for_this_target()
         if pending_grid_stop:
             await self._retry_grid_stop()
 
@@ -5993,6 +6006,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if grid_charge_switch and not should_skip_charging:
             await self._apply_absolute_charge_power_limit()
 
+    def _stop_pending_for_this_target(self) -> bool:
+        """A stop on reaching the current target still waits for off feedback."""
+        return self._grid_stop_pending and self.target_reached and not self.is_discharge_mode
+
     async def _pause_grid_charge(self, reason: str) -> None:
         """Request a stop while retaining captures and protective power limits.
 
@@ -6003,7 +6020,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         entity_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         state = self.hass.states.get(entity_id) if entity_id else None
         if entity_id and (state is None or state.state != "off"):
-            if self._grid_stop_pending and not self.is_discharge_mode:
+            if self._stop_pending_for_this_target():
                 if self._grid_stop_retries >= GRID_STOP_MAX_RETRIES:
                     return
                 self._grid_stop_retries += 1

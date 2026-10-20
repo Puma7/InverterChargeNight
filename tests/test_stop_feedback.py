@@ -207,3 +207,22 @@ async def test_the_connection_limit_records_the_value_the_control_took(mock_hass
     assert _ac_writes(mock_hass) == [12540.0]
     assert coordinator._planned_setpoint_written_w == 12540.0
     assert coordinator.planned_charge_power_w == 12540.0
+
+
+@pytest.mark.asyncio
+async def test_the_efficiency_limiter_records_the_value_the_control_took(mock_hass):
+    """Codex on #37: the limiter overwrote the setter's record with its request."""
+    mock_hass.states.async_set(GRID, "off")
+    mock_hass.states.async_set(AC_LIMIT, "22063.31", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+    mock_hass.services.async_call = _device(mock_hass, switch_obeys=True)
+    coordinator = _make_coordinator(mock_hass)
+    coordinator._planned_setpoint_written_w = 22063.31
+    coordinator._grid_limit_configured = MagicMock(return_value=True)
+    coordinator._grid_limited_setpoint = MagicMock(return_value=18820.0)
+    coordinator._grid_write_is_debounced = MagicMock(return_value=False)
+    coordinator._battery_idle_on_grid = MagicMock(return_value=False)
+
+    await coordinator._limit_the_efficiency_finder()
+
+    assert _ac_writes(mock_hass) == [12540.0]
+    assert coordinator._planned_setpoint_written_w == 12540.0

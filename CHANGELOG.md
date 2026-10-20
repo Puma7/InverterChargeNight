@@ -23,13 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sends further stops past the bound. While a stop is pending, every `turn_off` counts against
   that bound, whichever path asks for it - the communication outage guard, which refreshes
   every 15 seconds, sent one on each refresh before (22 in five minutes in the regression test).
+  A raised target (bridge plan, override, snow nights, ad-hoc) drops the pending stop of the
+  old one, so the next poll charges towards the new target instead of first switching grid
+  charging off once more (Codex on #37).
 - **A protective charge limit above what the control accepts is written as its maximum.**
   After the Kostal falls back to its own 22 kW, a connection limit of, say, 18820 W was
   written as is - above the 12540 W the KORE control accepts. Home Assistant refused it and
   grid charging stayed paused. The control's maximum is lower and protects at least as well.
   Found by the new morning-silence lab campaign. The clamp sits at the single place a setpoint
   reaches the inverter, in W, so a unitless control inferred as kW is covered too; the value
-  written is what the connection limit, the guard and the activation record as standing there;
+  written is what the planner, the connection limit, the guard, the activation and the
+  efficiency limiter record as standing there - the planner plans no more than the control
+  takes, so its "already written" comparison and the sensor hold the real value;
   and the efficiency finder does not test a power above the control's maximum (Codex on #37).
   A unitless control above 1000 still has no known scale and is not written beyond its maximum.
 - The lab campaign observes a native charge ceiling above KORE's accepted maximum through
