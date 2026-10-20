@@ -5,6 +5,49 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.7] - 2026-10-20
+
+### Fixed
+- **On reaching the target, the charge limits are handed back only after grid charging is
+  confirmed off.** Without a house connection limit, `_stop_grid_charging` restored the AC
+  charge limit (and the absolute charge power) even when `switch.turn_off` failed or the
+  switch never reported off. Since 3.10.6 a captured ceiling above the entity maximum is
+  restored as that maximum instead of being refused, so a failed stop could have raised the
+  protective 0 W to the full ceiling while grid charging went on. Now the limits and their
+  captures stay until the switch reports off; the window-end reset applies the same rule.
+  Raised by CodeRabbit on #35, which #36 superseded. An unconfirmed stop is retried from the
+  regular poll: a switch that reports off by then is confirmed without another command and
+  the limits go back; one that still reports on gets `turn_off` at most twice more in the
+  window, never on every SOC update (Codex and CodeRabbit on #37). The retry runs before the
+  SOC is looked at, so a SOC that is unknown or back below the target neither skips it nor
+  sends further stops past the bound. While a stop is pending, every `turn_off` counts against
+  that bound, whichever path asks for it - the communication outage guard, which refreshes
+  every 15 seconds, sent one on each refresh before (22 in five minutes in the regression test).
+  A raised target (bridge plan, override, snow nights, ad-hoc) drops the pending stop of the
+  old one, so the next poll charges towards the new target instead of first switching grid
+  charging off once more (Codex on #37).
+- **A protective charge limit above what the control accepts is written as its maximum.**
+  After the Kostal falls back to its own 22 kW, a connection limit of, say, 18820 W was
+  written as is - above the 12540 W the KORE control accepts. Home Assistant refused it and
+  grid charging stayed paused. The control's maximum is lower and protects at least as well.
+  Found by the new morning-silence lab campaign. The clamp sits at the single place a setpoint
+  reaches the inverter, in W, so a unitless control inferred as kW is covered too; the value
+  written is what the planner, the connection limit, the guard, the activation and the
+  efficiency limiter record as standing there - the planner plans no more than the control
+  takes, so its "already written" comparison and the sensor hold the real value;
+  and the efficiency finder does not test a power above the control's maximum (Codex on #37).
+  A unitless control above 1000 still has no known scale and is not written beyond its maximum.
+- The lab campaign observes a native charge ceiling above KORE's accepted maximum through
+  the real KORE services and checks the bounded, confirmed restore (from #35).
+- **New lab campaign: nothing reaches the inverter after the window end.** Three nights
+  through real HA, real KORE and the emulated Kostal - charging 50 % to 60 %, draining 50 %
+  to 20 % on a 10 % original floor, holding 50 % - each with the field's quirks (a native
+  ceiling above the KORE maximum, a Kostal that drops written limits back to it, a Modbus
+  silence at 03:15 and again at 06:00). Every REST and Modbus command the emulated inverter
+  receives is recorded: at 05:00 the min SOC goes back once, and from then until 13:00 it
+  receives nothing at all. A unit test runs the same morning with the field configuration,
+  house connection limit included.
+
 ## [3.10.6] - 2026-10-20
 
 ### Fixed

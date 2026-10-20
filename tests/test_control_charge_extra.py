@@ -107,7 +107,11 @@ async def test_control_kostal_sets_min_and_grid(mock_hass):
 @pytest.mark.asyncio
 async def test_stop_grid_charging_turns_off_and_resets(mock_hass):
     mock_hass.states.async_set("switch.grid", "on")
-    mock_hass.services.async_call = AsyncMock()
+
+    async def switch_reports_off(domain, service, data, **kwargs):
+        mock_hass.states.async_set("switch.grid", "off")
+
+    mock_hass.services.async_call = AsyncMock(side_effect=switch_reports_off)
 
     coordinator = _make_coordinator(
         mock_hass, {CONF_GRID_CHARGE_SWITCH: "switch.grid"}

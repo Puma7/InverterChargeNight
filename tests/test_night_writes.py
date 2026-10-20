@@ -539,3 +539,182 @@ async def test_a_rewrite_that_another_writer_preempted_spends_nothing(night):
     assert _ac_writes(hass) == []
     assert coordinator._ac_limit_rewrites == 0
     assert coordinator._ac_limit_not_held is False
+
+
+def _inverter_writes(hass: Any) -> list[tuple[str, str, Any]]:
+    return [
+        (c.args[1], c.args[2].get("entity_id"), c.args[2].get("value"))
+        for c in hass.services.async_call.await_args_list
+        if c.args[1] in ("set_value", "turn_on", "turn_off")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_after_the_window_end_nothing_reaches_the_inverter_until_noon(night):
+    """The field configuration, house connection limit included, from 04:58 to 13:00.
+
+    The morning of 20 October wrote the min SOC every 15 minutes. Here the
+    window ends once, then eight hours pass with everything that ran that
+    morning: refreshes, the 15-second staleness check, verifications, window
+    checks, grid meter readings that come and go, a min SOC entity that blinks,
+    and the Kostal reporting its own 22 kW. At 04:58 the min SOC goes back once
+    and the charge ceiling at most once, and nothing reaches the inverter after.
+    """
+    hass, coordinator, clock = night
+    coordinator.enable_communication_monitoring()
+    # What 03:10 left behind: the Kostal's own 22 kW captured as the original
+    coordinator._original_ac_charge_power = 22063.310546875
+    device = hass.services.async_call.side_effect
+
+    async def kore_validates_the_range(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        clock.now += timedelta(seconds=1)  # a command takes time; its feedback is newer
+        if data.get("entity_id") == AC_LIMIT and service == "set_value" and data["value"] > 12540.0:
+            from homeassistant.exceptions import ServiceValidationError
+            raise ServiceValidationError("outside valid range 0.0 - 12540.0")
+        await device(domain, service, data, **kwargs)
+
+    hass.services.async_call = AsyncMock(side_effect=kore_validates_the_range)
+    clock.now = THE_HICCUP.replace(hour=4, minute=58, second=0)
+    for entity_id in (BATTERY, MIN_SOC, AC_LIMIT, GRID, GRID_IMPORT):
+        hass.states.get(entity_id).last_reported = clock.now
+
+    with patch("homeassistant.components.persistent_notification.async_create"), patch(
+        "custom_components.inverter_charge_night.coordinator.async_call_later"
+    ) as later:
+        await coordinator._on_window_end(clock.now, scheduled=True)
+        at_the_end = _inverter_writes(hass)
+        # The min SOC once, the charge ceiling at most once - as the entity's maximum
+        assert at_the_end.count(("set_value", MIN_SOC, 8.0)) == 1
+        assert at_the_end.count(("set_value", AC_LIMIT, 12540.0)) <= 1
+        assert len(at_the_end) <= 2
+        assert coordinator._pending_reset is False
+        assert coordinator._original_ac_charge_power is None
+        later.assert_not_called()  # no retry armed
+
+        for step in range(8 * 12):  # every 5 minutes until 13:00
+            clock.now += timedelta(minutes=5)
+            meter = hass.states.get(GRID_IMPORT)
+            meter.state = "unavailable" if step % 7 == 3 else "800"
+            meter.last_reported = clock.now
+            minimum = hass.states.get(MIN_SOC)
+            minimum.state = "unavailable" if step % 11 == 5 else "8.0"
+            minimum.last_reported = clock.now
+            hass.states.get(BATTERY).last_reported = clock.now
+            hass.states.get(AC_LIMIT).state = "22063.310546875"  # the Kostal's own value
+            await coordinator._async_update_data()
+            await coordinator._verify_and_restore_min_soc()
+            await coordinator._check_current_window()
+            await coordinator._react_to_grid_import()
+            await coordinator._verify_ac_charge_limit()
+
+    assert _inverter_writes(hass) == at_the_end
+
+
+@pytest.mark.asyncio
+async def test_the_regular_poll_retries_an_unconfirmed_stop(night):
+    """The poll's target-reached branch is where the bounded retry runs (Codex on #37)."""
+    hass, coordinator, _ = night
+    coordinator._grid_stop_pending = True  # an earlier stop had no off feedback
+    retry = AsyncMock()
+    coordinator._retry_grid_stop = retry
+
+    await coordinator._async_calculate_and_control()
+
+    retry.assert_awaited_once()
+
+
+
+@pytest.mark.asyncio
+async def test_a_raised_target_drops_the_stop_of_the_old_one(night):
+    """Codex on #37: the next poll sent turn_off for the old target before charging
+    towards the raised one - a relay flip on every raise."""
+    hass, coordinator, clock = night
+    hass.states.get(GRID).state = "on"
+
+    async def device(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        clock.now += timedelta(seconds=1)
+        if service == "set_value":  # number writes hold; only the switch lags
+            state = hass.states.get(data["entity_id"])
+            state.state = str(data["value"])
+            state.last_reported = state.last_updated = clock.now
+
+    hass.services.async_call = AsyncMock(side_effect=device)
+    assert await coordinator._stop_grid_charging() is False
+    stops = len(hass.services.async_call.await_args_list)
+    # The bridge planner raises the target above the SOC
+    plan = SimpleNamespace(target_soc=80.0, reason="bridge")
+    coordinator._parse_forecast_energy = MagicMock(return_value=(10.0, True))
+    coordinator._plan_target = AsyncMock(return_value=plan)
+    assert await coordinator._replan_in_window(68.0) == 80.0
+    retry = AsyncMock()
+    coordinator._retry_grid_stop = retry
+
+    await coordinator._async_calculate_and_control()
+
+    retry.assert_not_awaited()
+    assert coordinator._grid_stop_pending is False
+    after = [c.args[:2] for c in hass.services.async_call.await_args_list[stops:]]
+    assert ("switch", "turn_off") not in after
+    # ...and the control path charges towards the raised target instead
+    assert hass.services.async_call.await_args_list[stops].args == (
+        "number", "set_value", {"entity_id": MIN_SOC, "value": 80.0})
+
+
+@pytest.mark.parametrize("soc", ["unavailable", "15"])
+@pytest.mark.asyncio
+async def test_a_pending_stop_stays_bounded_whatever_the_soc_reads(night, soc):
+    """CodeRabbit on #37: an unknown SOC sent turn_off on every poll past the bound,
+    and a SOC back below the target skipped the retry altogether."""
+    from custom_components.inverter_charge_night.coordinator import GRID_STOP_MAX_RETRIES
+
+    hass, coordinator, clock = night
+    hass.states.get(GRID).state = "on"
+
+    async def switch_ignores_turn_off(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        clock.now += timedelta(seconds=1)
+
+    hass.services.async_call = AsyncMock(side_effect=switch_ignores_turn_off)
+    assert await coordinator._stop_grid_charging() is False
+    hass.states.get(BATTERY).state = soc
+
+    for _ in range(10):  # ten polls
+        await coordinator._async_calculate_and_control()
+
+    turn_offs = [c for c in hass.services.async_call.await_args_list
+                 if c.args[:2] == ("switch", "turn_off")]
+    assert len(turn_offs) == 1 + GRID_STOP_MAX_RETRIES
+
+    # The switch reports off after all: the next poll confirms it without a command
+    hass.states.get(GRID).state = "off"
+    await coordinator._async_calculate_and_control()
+    assert coordinator._grid_stop_pending is False
+    assert len([c for c in hass.services.async_call.await_args_list
+                if c.args[:2] == ("switch", "turn_off")]) == 1 + GRID_STOP_MAX_RETRIES
+
+
+
+@pytest.mark.asyncio
+async def test_a_communication_outage_keeps_a_pending_stop_bounded(night):
+    """CodeRabbit on #37: the outage guard returned before the poll's retry and sent
+    turn_off on every refresh - every 15 seconds while the fault lasted."""
+    from custom_components.inverter_charge_night.coordinator import GRID_STOP_MAX_RETRIES
+
+    hass, coordinator, clock = night
+    coordinator.enable_communication_monitoring()
+    hass.states.get(GRID).state = "on"
+
+    async def switch_ignores_turn_off(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        clock.now += timedelta(seconds=1)
+
+    hass.services.async_call = AsyncMock(side_effect=switch_ignores_turn_off)
+    assert await coordinator._stop_grid_charging() is False
+    hass.states.get(BATTERY).state = "unavailable"  # a communication fault
+
+    with patch("homeassistant.components.persistent_notification.async_create"):
+        for _ in range(20):  # five minutes of 15-second refreshes
+            await coordinator._async_update_data()
+            clock.now += timedelta(seconds=15)
+
+    turn_offs = [c for c in hass.services.async_call.await_args_list
+                 if c.args[:2] == ("switch", "turn_off")]
+    assert len(turn_offs) == 1 + GRID_STOP_MAX_RETRIES

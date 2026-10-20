@@ -217,6 +217,10 @@ IDLE_SOC_MAX_AGE_S = 300
 # again after every 0 W write, and the integration wrote it anew every 15
 # minutes until the window ended.
 AC_LIMIT_MAX_REWRITES = 2
+# An unconfirmed grid-charge stop on reaching the target is retried from the
+# regular poll, sending turn_off at most this many more times per window; the
+# window-end reset, with its own bounded ladder, takes it from there.
+GRID_STOP_MAX_RETRIES = 2
 SKIP_NEXT_DURATION = timedelta(hours=24)
 # A bridge longer than this means the sunrise or the window end is off; the plan
 # is still made, but it is worth a warning in the log.
@@ -327,6 +331,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _ac_limit_rewrites: int = 0
     _ac_limit_not_held: bool = False
     _ac_limit_window: str | None = None
+    _grid_stop_pending: bool = False
+    _grid_stop_retries: int = 0
     _last_trusted_soc: tuple[float, datetime] | None = None
     _last_trusted_min_soc: tuple[float, datetime] | None = None
     # True once async_unload_entry started: no new timers may be armed.
@@ -422,6 +428,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ac_limit_not_held = False
         # Which window spent them: a restart inside it resumes, any other starts over
         self._ac_limit_window: str | None = None
+        # Reaching the target asked for a grid-charge stop that was not confirmed off
+        self._grid_stop_pending = False
+        self._grid_stop_retries = 0
         self._last_trusted_soc: tuple[float, datetime] | None = None
         # The inverter's own min SOC as last reported, for the same question
         self._last_trusted_min_soc: tuple[float, datetime] | None = None
@@ -2134,6 +2143,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         min_w = float(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000))
         max_w = float(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000))
+        target = self._ac_charge_limit_target()
+        control_max_w = self._control_max_w(target[0]) if target is not None else None
+        if control_max_w is not None:
+            # Plan what the control can take, so the record, the sensor and the
+            # "already written" comparison all hold the value it really took
+            # (Codex on #37)
+            max_w = min(max_w, float(int(control_max_w)))
         # Per band where one has been searched, battery-wide otherwise (plan 015)
         best = self.best_charge_power_w(current_soc)
         # Prefer the measured optimum, finishing early rather than stretching
@@ -2981,6 +2997,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 power_w,
             )
             power_w = limited_w
+        control_max_w = self._control_max_w(entity_id)
+        if control_max_w is not None and power_w > control_max_w:
+            # A limit above what the control accepts is refused by Home
+            # Assistant, and the refused write left grid charging paused. The
+            # control's maximum is lower and protects at least as well; it is
+            # what gets recorded as written (Codex on #37).
+            _LOGGER.debug(
+                "Writing %d W instead of %d W: %s accepts at most that",
+                int(control_max_w), power_w, entity_id,
+            )
+            power_w = int(control_max_w)
         if self._original_ac_charge_power is None:
             current_w = self._get_ac_charge_limit_w(entity_id)
             if current_w is None:
@@ -3004,6 +3031,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if power_w == 0 and self.is_active and self._grid_limit_configured():
             await self._pause_grid_charge("no confirmed connection headroom")
         return True
+
+    def _control_max_w(self, entity_id: str) -> float | None:
+        """The charge control's maximum in W, when its scale is known.
+
+        A unit, or a unitless maximum below 1000 (kilowatts, as the write path
+        infers). A unitless control with a larger maximum has no known scale,
+        and the write path refuses a value above it rather than guess.
+        """
+        state = self.hass.states.get(entity_id)
+        maximum = _as_float((getattr(state, "attributes", None) or {}).get("max")) if state else None
+        if maximum is None or maximum <= 0:
+            return None
+        if not _unit_of(state) and maximum >= 1000:
+            return None
+        return self._entity_value_as_w(state, maximum)
 
     async def _reset_ac_charge_limit(self) -> bool:
         """Restore only after an already-started limit command has finished."""
@@ -3483,8 +3525,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 int(allowed),
             )
             self._reset_auto_test_state()
-        if await self._set_ac_charge_limit_w(int(allowed)):
-            self._planned_setpoint_written_w = allowed
+        # The setter records what the control took, clamped to its maximum
+        await self._set_ac_charge_limit_w(int(allowed))
 
     def _efficiency_now(self) -> datetime:
         """Measurement wall clock; durations are converted to UTC elapsed time."""
@@ -3513,9 +3555,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     power_w,
                     int(allowed),
                 )
-                if await self._set_ac_charge_limit_w(int(allowed)):
-                    self._planned_setpoint_written_w = allowed
+                await self._set_ac_charge_limit_w(int(allowed))  # records what it wrote
                 return
+        target = self._ac_charge_limit_target()
+        control_max_w = self._control_max_w(target[0]) if target is not None else None
+        if control_max_w is not None and power_w > control_max_w + PLANNED_POWER_WRITE_THRESHOLD_W:
+            # The control would write its maximum while the sample was filed under
+            # this power - the same poisoning as a connection-limited test.
+            self._set_auto_wait_reason("charge_limit_above_control_maximum")
+            return
         if not await self._set_ac_charge_limit_w(power_w):
             # The battery would charge at whatever stands on the inverter -
             # usually the previous test's higher value, which the follow check
@@ -4442,6 +4490,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._clear_reset_abandoned()  # this window's end starts a fresh backoff
         if not same_window:
             self._clear_ac_limit_not_held()
+        self._grid_stop_pending = False
+        self._grid_stop_retries = 0
         self._pending_reset = False
 
         # Arm the listeners and the verification first. The target calculation
@@ -5434,6 +5484,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     and not self._battery_idle_on_grid()):
                 if await self._set_ac_charge_limit_w(0):
                     self._planned_setpoint_written_w = 0
+            # Bounded while a stop is pending (see _pause_grid_charge); the
+            # ceilings go back only once communication is back (CodeRabbit on #37)
             await self._pause_grid_charge("communication interrupted; stop requires feedback")
             # The same guard also runs in export mode. Do not leave forced
             # discharge active, or change the house/backup discharge ceiling.
@@ -5634,6 +5686,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # count as reached.
         can_check_soc = battery_soc_entity is not None and self._current_battery_soc() is not None
 
+        # A stop that was not confirmed off is retried first, bounded - whatever
+        # the SOC reads now: unknown, or already below the target again
+        # (CodeRabbit on #37).
+        if self._grid_stop_pending and not self.target_reached:
+            # A raised plan, override, snow night or ad-hoc target re-armed
+            # charging: the stop belonged to the old target, and the control
+            # path below decides afresh (Codex on #37)
+            self._grid_stop_pending = False
+            self._grid_stop_retries = 0
+        pending_grid_stop = self._stop_pending_for_this_target()
+        if pending_grid_stop:
+            await self._retry_grid_stop()
+
         # CRITICAL: Check if target is already reached before controlling
         if can_check_soc and battery_soc_entity is not None:
             battery_state = self.hass.states.get(battery_soc_entity)
@@ -5669,7 +5734,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if self._current_battery_soc() is None:
             _LOGGER.warning("Battery SoC cannot be trusted - pausing inverter control until it reports again")
-            await self._pause_grid_charge("battery SoC cannot be trusted")
+            if not pending_grid_stop:
+                # A pending stop already had its bounded attempt above
+                await self._pause_grid_charge("battery SoC cannot be trusted")
             await self._enforce_grid_limit_now()
             self.planned_charge_power_w = None
             self.planned_power_is_applied = False
@@ -5939,11 +6006,24 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if grid_charge_switch and not should_skip_charging:
             await self._apply_absolute_charge_power_limit()
 
+    def _stop_pending_for_this_target(self) -> bool:
+        """A stop on reaching the current target still waits for off feedback."""
+        return self._grid_stop_pending and self.target_reached and not self.is_discharge_mode
+
     async def _pause_grid_charge(self, reason: str) -> None:
-        """Request a stop while retaining captures and protective power limits."""
+        """Request a stop while retaining captures and protective power limits.
+
+        While a stop on reaching the target is pending, every turn_off counts
+        against the same per-window bound, whichever path asks for it - the
+        outage guard refreshes every 15 seconds (CodeRabbit on #37).
+        """
         entity_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         state = self.hass.states.get(entity_id) if entity_id else None
         if entity_id and (state is None or state.state != "off"):
+            if self._stop_pending_for_this_target():
+                if self._grid_stop_retries >= GRID_STOP_MAX_RETRIES:
+                    return
+                self._grid_stop_retries += 1
             try:
                 await self.hass.services.async_call(
                     "switch", "turn_off", {"entity_id": entity_id},
@@ -5995,7 +6075,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if not await self._set_ac_charge_limit_w(int(allowed)):
                     await self._pause_grid_charge("protective charge-limit write failed")
                     return False
-                self._planned_setpoint_written_w = allowed
             readback = self._get_ac_charge_limit_w(target[0])
             if readback is None or readback > allowed:
                 await self._pause_grid_charge("protective charge limit is not confirmed by readback")
@@ -6186,10 +6265,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as e:
                 _LOGGER.error("Error stopping force discharge: %s", e, exc_info=True)
 
-    async def _stop_grid_charging(self) -> None:
-        """Stop grid charging when target is reached."""
+    async def _stop_grid_charging(self) -> bool:
+        """Stop grid charging when target is reached; True once it is confirmed off.
+
+        The charge ceilings are only handed back once the switch reports off.
+        A stop that failed or has no off feedback may leave grid charging on,
+        and raising the ceiling then turns a protective limit into full power
+        - the window-end reset has the same rule (CodeRabbit on #35).
+        """
+        stopped = True
         grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
         if grid_charge_switch:
+            stopped = False
             try:
                 state = self.hass.states.get(grid_charge_switch)
                 if state and state.state == "on":
@@ -6199,17 +6286,30 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         {"entity_id": grid_charge_switch},
                         blocking=True,
                     )
-                    _LOGGER.info("Stopped grid charging - target SOC reached")
+                    feedback = self.hass.states.get(grid_charge_switch)
+                    stopped = feedback is not None and feedback.state == "off"
+                    if stopped:
+                        _LOGGER.info("Stopped grid charging - target SOC reached")
+                    else:
+                        _LOGGER.error("Grid charge stop has no off feedback")
                 elif state and state.state == "off":
+                    stopped = True
                     _LOGGER.debug("Grid charge already off")
                 else:
                     _LOGGER.warning("Cannot stop grid charge - entity state unavailable")
             except Exception as e:
                 _LOGGER.error("Error stopping grid charge: %s", e, exc_info=True)
+        self._finalize_auto_test()
+        self._grid_stop_pending = not stopped
+        if not stopped:
+            # Keep the protective ceilings and their captures: the regular poll
+            # retries the stop (bounded), and the window-end reset restores
+            # only after off (Codex and CodeRabbit on #37).
+            _LOGGER.warning("Keeping the charge limits - grid charging is not confirmed off")
+            return False
         # The window is still open here - reaching the target does not end it -
         # so the captured original has to survive this restore.
         await self._reset_absolute_charge_power(forget=False)
-        self._finalize_auto_test()
         if self.is_active and self._grid_budget() is not None:
             # The house connection limit stays on the inverter until the window
             # ends. Reaching the charge target does not end the window: the
@@ -6224,6 +6324,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             # Charging is over for this window: take a running test's value off the inverter
             await self._reset_ac_charge_limit()
+        return True
+
+    async def _retry_grid_stop(self) -> None:
+        """Retry a stop that was not confirmed off, from the regular poll only.
+
+        A switch that reports off by now is confirmed without another command,
+        and the ceilings go back. One that still reports on gets turn_off at
+        most GRID_STOP_MAX_RETRIES more times this window - a command on every
+        SOC update is exactly what must not reach the inverter.
+        """
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        state = self.hass.states.get(str(switch_id)) if switch_id else None
+        if state is not None and state.state == "on":
+            if self._grid_stop_retries >= GRID_STOP_MAX_RETRIES:
+                return  # the window-end reset takes it from here
+            self._grid_stop_retries += 1
+        await self._stop_grid_charging()
 
     def _setup_battery_soc_listener(self) -> None:
         """Set up a listener for battery SOC changes to check target more frequently."""
@@ -6823,9 +6940,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the next reading tries again instead of assuming it is capped.
             return
         # What stands on the inverter is the reference for the next reading, so
-        # an unchanged load does not write the same value over and over.
-        self._planned_setpoint_written_w = allowed
-        self.planned_charge_power_w = allowed
+        # an unchanged load does not write the same value over and over. The
+        # setter recorded it - the control's maximum if it was lower.
+        self.planned_charge_power_w = self._planned_setpoint_written_w
         self.planned_power_is_applied = True
 
     def _grid_write_is_debounced(self) -> bool:
@@ -7021,6 +7138,5 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         if not await self._set_ac_charge_limit_w(int(limited)):
             return
-        self._planned_setpoint_written_w = limited
-        self.planned_charge_power_w = limited
+        self.planned_charge_power_w = self._planned_setpoint_written_w
         self.planned_power_is_applied = True
