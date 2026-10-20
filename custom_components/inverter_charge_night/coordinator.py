@@ -6187,9 +6187,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.error("Error stopping force discharge: %s", e, exc_info=True)
 
     async def _stop_grid_charging(self) -> None:
-        """Stop grid charging when target is reached."""
+        """Stop grid charging when target is reached.
+
+        The charge ceilings are only handed back once the switch reports off.
+        A stop that failed or has no off feedback may leave grid charging on,
+        and raising the ceiling then turns a protective limit into full power
+        - the window-end reset has the same rule (CodeRabbit on #35).
+        """
+        stopped = True
         grid_charge_switch = self.config.get(CONF_GRID_CHARGE_SWITCH)
         if grid_charge_switch:
+            stopped = False
             try:
                 state = self.hass.states.get(grid_charge_switch)
                 if state and state.state == "on":
@@ -6199,17 +6207,28 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         {"entity_id": grid_charge_switch},
                         blocking=True,
                     )
-                    _LOGGER.info("Stopped grid charging - target SOC reached")
+                    feedback = self.hass.states.get(grid_charge_switch)
+                    stopped = feedback is not None and feedback.state == "off"
+                    if stopped:
+                        _LOGGER.info("Stopped grid charging - target SOC reached")
+                    else:
+                        _LOGGER.error("Grid charge stop has no off feedback")
                 elif state and state.state == "off":
+                    stopped = True
                     _LOGGER.debug("Grid charge already off")
                 else:
                     _LOGGER.warning("Cannot stop grid charge - entity state unavailable")
             except Exception as e:
                 _LOGGER.error("Error stopping grid charge: %s", e, exc_info=True)
+        self._finalize_auto_test()
+        if not stopped:
+            # Keep the protective ceilings and their captures: the next check
+            # stops again, and the window-end reset restores only after off.
+            _LOGGER.warning("Keeping the charge limits - grid charging is not confirmed off")
+            return
         # The window is still open here - reaching the target does not end it -
         # so the captured original has to survive this restore.
         await self._reset_absolute_charge_power(forget=False)
-        self._finalize_auto_test()
         if self.is_active and self._grid_budget() is not None:
             # The house connection limit stays on the inverter until the window
             # ends. Reaching the charge target does not end the window: the

@@ -71,7 +71,9 @@ async def test_stop_grid_charging_state_unavailable(mock_hass, caplog):
 
     assert "Cannot stop grid charge - entity state unavailable" in caplog.text
     mock_hass.services.async_call.assert_not_awaited()
-    coordinator._reset_absolute_charge_power.assert_awaited_once()
+    # Not confirmed off: the protective ceilings stay (CodeRabbit on #35)
+    coordinator._reset_absolute_charge_power.assert_not_awaited()
+    assert "not confirmed off" in caplog.text
 
 
 @pytest.mark.asyncio

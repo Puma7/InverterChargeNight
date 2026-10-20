@@ -5,6 +5,20 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.7] - 2026-10-20
+
+### Fixed
+- **On reaching the target, the charge limits are handed back only after grid charging is
+  confirmed off.** Without a house connection limit, `_stop_grid_charging` restored the AC
+  charge limit (and the absolute charge power) even when `switch.turn_off` failed or the
+  switch never reported off. Since 3.10.6 a captured ceiling above the entity maximum is
+  restored as that maximum instead of being refused, so a failed stop could have raised the
+  protective 0 W to the full ceiling while grid charging went on. Now the limits and their
+  captures stay until the switch reports off; the window-end reset applies the same rule.
+  Raised by CodeRabbit on #35, which #36 superseded.
+- The lab campaign observes a native charge ceiling above KORE's accepted maximum through
+  the real KORE services and checks the bounded, confirmed restore (from #35).
+
 ## [3.10.6] - 2026-10-20
 
 ### Fixed
