@@ -36,7 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     backup listener runs on every state change - leaves it to the bounded ladder instead of
     starting another full reset each time.
   - A restored AC charge limit, and likewise the absolute charge power, is confirmed by a fresh
-    reading before its capture is dropped.
+    reading before its capture is dropped. Restored to the entity maximum, any reading at or
+    above it counts for both.
     Restored to the entity maximum, any reading at or above it counts - the device may go on
     reporting its own larger maximum.
   - Giving up is visible: `reset_abandoned` on the target sensor and in the diagnostics, next

@@ -2453,9 +2453,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _confirm_discharge_restore(
         self, entity_id: str, before_value: str, before_reported: datetime | None,
-        expected: str | float,
+        expected: str | float, *, at_least: bool = False,
     ) -> bool:
-        """Retain captures until a fresh observation confirms their restoration."""
+        """Retain captures until a fresh observation confirms their restoration.
+
+        ``at_least`` is for a restore clamped to the entity maximum, which means
+        "no limit": a device may go on reporting its own larger maximum, and any
+        fresh reading at or above the written value counts then.
+        """
         def confirmed() -> bool:
             feedback = self.hass.states.get(entity_id)
             if feedback is None:
@@ -2464,8 +2469,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 matches = feedback.state == expected
             else:
                 value = _as_float(feedback.state)
-                matches = value is not None and math.isclose(
-                    value, expected, rel_tol=1e-6, abs_tol=1e-6,
+                matches = value is not None and (
+                    value >= expected - 1e-6 if at_least else math.isclose(
+                        value, expected, rel_tol=1e-6, abs_tol=1e-6,
+                    )
                 )
             return matches and (
                 feedback.state != before_value or feedback.last_reported != before_reported
@@ -3091,6 +3098,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         if forget and not await self._confirm_discharge_restore(
             str(entity_id), before_value, before_reported, value,
+            # Clamped down to the maximum: a device reading above it is restored
+            at_least=value < self._original_absolute_charge_power,
         ):
             # Same rule as the other restores (Codex on #36): an accepted call is
             # not a restored limit, and the capture is what a retry needs.

@@ -644,3 +644,30 @@ async def test_an_ignored_absolute_power_restore_is_not_forgotten(mock_hass):
     mock_hass.services.async_call = AsyncMock(side_effect=apply)
     assert await coordinator._reset_absolute_charge_power() is True
     assert coordinator._original_absolute_charge_power is None
+
+
+@pytest.mark.asyncio
+async def test_a_clamped_absolute_power_restore_accepts_the_device_maximum(mock_hass):
+    """CodeRabbit on #36: the field case, for the absolute charge power.
+
+    Restored to the entity maximum means "no limit". A device that goes on
+    reporting its own larger maximum afterwards has restored it; demanding
+    the exact clamped value would fail the reset every night.
+    """
+    from custom_components.inverter_charge_night.const import CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY
+
+    absolute = "number.kostal_g3_battery_max_charge_power_abs"
+    attributes = {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"}
+    mock_hass.states.async_set(absolute, "3000.0", attributes)
+
+    async def report_the_device_maximum(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if service == "set_value":
+            mock_hass.states.async_set(absolute, "22063.31", attributes)
+
+    mock_hass.services.async_call = AsyncMock(side_effect=report_the_device_maximum)
+    coordinator = _make_coordinator(mock_hass, {CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY: absolute}, {})
+    coordinator._original_absolute_charge_power = 22063.310546875
+
+    assert await coordinator._reset_absolute_charge_power() is True
+    assert _writes(mock_hass, absolute) == [12540.0]
+    assert coordinator._original_absolute_charge_power is None
