@@ -26,7 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     The next window, the `reset_inverter` action or a successful reset takes over. The
     "settings still on the inverter" check, which the backup listener runs on every
     state change, respects that as well.
-  - A pending reset no longer requests a refresh and persists the state every 15 seconds.
+  - A pending reset no longer requests a refresh and persists the state every 15 seconds,
+    neither directly nor through the health monitor's `write_unconfirmed` fault.
+  - Deferring the reset during backup mode writes nothing and spends no attempt, so a long
+    power cut does not give the restore up. The attempts are persisted: a restart does not
+    hand out a fresh ladder.
+  - A restored AC charge limit is confirmed by a fresh reading before its capture is dropped.
+    Restored to the entity maximum, any reading at or above it counts - the device may go on
+    reporting its own larger maximum.
+  - Giving up is visible: `reset_abandoned` on the target sensor and in the diagnostics, next
+    to `pending_reset`. Removing the entry removes its repair issue.
 - **Every window holds the battery through the min SOC only.** The evening rescue and
   `block_discharge` no longer turn a discharge block switch on or write a discharge
   limit of zero. The two entities are only used to give back a value an older version

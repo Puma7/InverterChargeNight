@@ -238,6 +238,15 @@ async def test_a_pending_reset_does_not_poll_every_fifteen_seconds(mock_hass):
     _register_field_entities(mock_hass)
     coordinator = _make_coordinator(mock_hass, CONFIG, FIELD_STATE)
     assert coordinator._pending_reset is True
+    # As set up for real: the health monitor records the pending reset as
+    # "write_unconfirmed" (CodeRabbit on #36 - without this the test was blind).
+    coordinator.enable_communication_monitoring()
+    with patch("homeassistant.components.persistent_notification.async_create"), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=AFTER_THE_OUTAGE
+    ):
+        coordinator._update_communication_health()
+    assert coordinator._communication is not None
+    assert "write_unconfirmed" in coordinator._communication.faults
     callbacks: list[Any] = []
     with patch(
         f"{COORDINATOR}.async_track_time_interval",
@@ -385,3 +394,130 @@ def test_giving_up_is_not_reported_as_a_recovery(mock_hass):
         coordinator._update_communication_health()
 
     assert "write_unconfirmed" in coordinator._communication.faults
+
+
+@pytest.mark.asyncio
+async def test_backup_mode_deferrals_do_not_spend_the_attempts(mock_hass):
+    """Codex and CodeRabbit on #36: an outage longer than the ladder gave up on it.
+
+    Nothing is written while the house runs on the battery, so a deferral is no
+    attempt. After the grid returns the full ladder is still there.
+    """
+    _register_field_entities(mock_hass)
+    mock_hass.services.async_call = _validating_device(mock_hass)
+    coordinator = _make_coordinator(mock_hass, CONFIG, {**FIELD_STATE, "original_ac_charge_power": 4000.0})
+    coordinator._is_backup_active = MagicMock(return_value=True)
+    with patch(CALL_LATER, return_value=MagicMock()) as later, patch(
+        f"{COORDINATOR}.dt_util.now", return_value=AFTER_THE_OUTAGE
+    ), patch(f"{COORDINATOR}.ir.async_create_issue") as issue:
+        for _ in range(12):  # three hours of outage
+            await coordinator._retry_reset()
+
+    assert coordinator._reset_abandoned is False
+    assert coordinator._pending_reset is True
+    assert coordinator._reset_retry_count == 0
+    issue.assert_not_called()
+    assert all(c.args[1] == 900 for c in later.call_args_list)
+    mock_hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_restart_does_not_hand_out_a_fresh_ladder(mock_hass):
+    """Codex on #36: the attempts survive a restart, or restarts undo the bound."""
+    _register_field_entities(mock_hass)
+    device = _validating_device(mock_hass)
+
+    async def refuse_the_ac_limit(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if data.get("entity_id") == AC_LIMIT and service == "set_value":
+            raise RuntimeError("Modbus timeout")
+        await device(domain, service, data, **kwargs)
+
+    mock_hass.services.async_call = AsyncMock(side_effect=refuse_the_ac_limit)
+    runtime = {**FIELD_STATE, "original_ac_charge_power": 4000.0}
+    writes = 0
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=AFTER_THE_OUTAGE
+    ), patch(f"{COORDINATOR}.ir.async_create_issue"):
+        for _ in range(4):  # a restart after every second attempt
+            coordinator = _make_coordinator(mock_hass, CONFIG, runtime)
+            coordinator.async_start_pending_reset_retry()
+            for _ in range(2):
+                await coordinator._retry_reset()
+            runtime = coordinator.entry.options[CONF_RUNTIME_STATE]
+        writes = len(_writes(mock_hass, AC_LIMIT))
+
+    # Never more than one ladder in total; a restart's re-arm spends a slot too
+    assert 0 < writes <= len(RESET_RETRY_DELAYS) + 2, f"{writes} writes across restarts"
+    assert runtime["reset_abandoned"] is True
+
+
+@pytest.mark.asyncio
+async def test_an_ignored_ac_limit_restore_is_not_forgotten(mock_hass):
+    """Codex on #36: an accepted call is not a restored limit.
+
+    Without fresh feedback the capture is kept and the bounded ladder tries
+    again; it used to be dropped as soon as the service call returned.
+    """
+    _register_field_entities(mock_hass)
+    mock_hass.states.async_set(AC_LIMIT, "3000.0", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+
+    async def ignore(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        return None  # acknowledged, never applied, never observed
+
+    mock_hass.services.async_call = AsyncMock(side_effect=ignore)
+    coordinator = _make_coordinator(mock_hass, {CONF_CHARGE_POWER_ENTITY: AC_LIMIT}, {})
+    coordinator._original_ac_charge_power = 22063.310546875
+
+    assert await coordinator._reset_ac_charge_limit() is False
+    assert coordinator._original_ac_charge_power == 22063.310546875
+
+
+@pytest.mark.asyncio
+async def test_a_device_that_keeps_reporting_its_own_maximum_counts_as_restored(mock_hass):
+    """The field case: 12540 W is written, the register may still read 22063 W.
+
+    Restored to the entity maximum means "no limit"; any reading at or above
+    it is that. Only a reading below - our own limit still in force - is not.
+    """
+    _register_field_entities(mock_hass)
+    mock_hass.states.async_set(AC_LIMIT, "3000.0", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+
+    async def report_the_device_maximum(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if service == "set_value":
+            mock_hass.states.async_set(
+                AC_LIMIT, "22063.31", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"}
+            )
+
+    mock_hass.services.async_call = AsyncMock(side_effect=report_the_device_maximum)
+    coordinator = _make_coordinator(mock_hass, {CONF_CHARGE_POWER_ENTITY: AC_LIMIT}, {})
+    coordinator._original_ac_charge_power = 22063.310546875
+
+    assert await coordinator._reset_ac_charge_limit() is True
+    assert coordinator._original_ac_charge_power is None
+
+
+def test_a_given_up_reset_is_visible_on_the_sensor_and_in_diagnostics(mock_hass):
+    """Codex on #36: pending_reset reads False after giving up; something must say so."""
+    from custom_components.inverter_charge_night.sensor import CalculatedSOCSensor
+
+    _register_field_entities(mock_hass)
+    coordinator = _make_coordinator(
+        mock_hass, CONFIG, {**FIELD_STATE, "pending_reset": False, "reset_abandoned": True}
+    )
+    coordinator.data = {}
+    sensor = CalculatedSOCSensor(coordinator, coordinator.entry)
+
+    assert sensor.extra_state_attributes["reset_abandoned"] is True
+
+
+@pytest.mark.asyncio
+async def test_removing_the_entry_removes_its_repair_issue(mock_hass):
+    """Codex on #36: a persistent issue must not outlive the entry it names."""
+    from custom_components.inverter_charge_night import async_remove_entry
+
+    entry = MagicMock()
+    entry.entry_id = "entry_1"
+    with patch("custom_components.inverter_charge_night.ir.async_delete_issue") as deleted:
+        await async_remove_entry(mock_hass, entry)
+
+    assert any(c.args[2] == "reset_incomplete_entry_1" for c in deleted.call_args_list)

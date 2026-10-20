@@ -48,8 +48,9 @@ async def check_night_floor(hass, lab, planner, kore_entry, check):
     await feedback()
     co._original_discharge_block, co._original_discharge_limit = False, 5000
     # HA's forced entity update also uses the private publication boundary.
+    # Released once, at a window start (3.10.6); verifications no longer write it.
     with patch.object(block, "_async_write_ha_state"), patch.object(limit_entity, "_async_write_ha_state"):
-        await co._apply_discharge_block()
+        await co._apply_discharge_block(announce=True)
     check("legacy release actuates real switch and Modbus limit without discarding delayed captures",
           not lab.plant.block_discharge and lab.plant.discharge_limit == 5000
           and co._original_discharge_block is False and co._original_discharge_limit == 5000,
@@ -58,7 +59,7 @@ async def check_night_floor(hass, lab, planner, kore_entry, check):
     block.async_write_ha_state()
     limit_entity.async_write_ha_state()
     await feedback()
-    await co._apply_discharge_block()
+    await co._apply_discharge_block(announce=True)
     check("legacy release clears both captures after fresh matching HA feedback",
           co._original_discharge_block is None and co._original_discharge_limit is None)
 

@@ -540,8 +540,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._accumulate_auto_energy()
             # A pending reset is not a reason: its retry timer owns the next
             # attempt, and a refresh every 15 s only persisted state for nothing.
+            # Nor is its "write_unconfirmed" in the health monitor (CodeRabbit on #36).
             if self._auto_measurement_is_complete() or self._communication_faults() or (
-                self._communication is not None and self._communication.faults
+                self._communication is not None
+                and any(fault != "write_unconfirmed" for fault in self._communication.faults)
             ):
                 await self.async_request_refresh()
 
@@ -657,6 +659,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "original_absolute_charge_power": self._original_absolute_charge_power,
             "pending_reset": self._pending_reset,
             "reset_abandoned": self._reset_abandoned,
+            "reset_attempts": self._reset_retry_count,
             "hands_off_until": (
                 self._hands_off_until.isoformat() if self._hands_off_until else None
             ),
@@ -721,6 +724,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._pending_reset = state.get("pending_reset") is True
         self._reset_abandoned = state.get("reset_abandoned") is True
+        attempts = state.get("reset_attempts")
+        if isinstance(attempts, int) and not isinstance(attempts, bool) and attempts > 0:
+            self._reset_retry_count = attempts
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
             self.snow_nights = snow_raw
@@ -810,7 +816,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._pending_reset:
             return
         _LOGGER.warning("Inverter settings were not reset before the last shutdown - retrying")
-        self._reset_retry_count = 0
+        # The attempts already spent stay spent (restored with the state).
         self._schedule_reset_retry()
 
     def _automatic_pv_shortfall_active(self) -> bool:
@@ -2895,14 +2901,75 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not state or state.state in ("unknown", "unavailable"):
             _LOGGER.error("Cannot reset AC charge limit - entity %s unavailable", entity_id)
             return False
+        original = self._original_ac_charge_power
+        before_value, before_reported = state.state, getattr(state, "last_reported", None)
         if not await self._write_ac_charge_limit(
-            entity_id, domain, self._original_ac_charge_power, "Reset AC charge limit", restore=True,
+            entity_id, domain, original, "Reset AC charge limit", restore=True,
         ):
+            return False
+        if not await self._confirm_ac_limit_restore(entity_id, state, before_value, before_reported, original):
+            _LOGGER.error("AC charge limit restore has no fresh matching feedback: %s", entity_id)
+            return False
+        if self._original_ac_charge_power != original:
             return False
         self._original_ac_charge_power = None
         self._planned_setpoint_written_w = None
         self._grid_plan_request_w = None
         return True
+
+    async def _confirm_ac_limit_restore(
+        self, entity_id: str, state: Any, before_value: str, before_reported: Any, original_w: float,
+    ) -> bool:
+        """Keep the capture until a fresh reading shows the limit is back (Codex on #36).
+
+        An accepted service call is not a restored limit: a device that ignores
+        it keeps the window's lower limit in force. A restore clamped to the
+        entity maximum means "no limit", and a device may go on reporting its
+        own larger maximum - the Kostal read 22063 W through a 12540 W control -
+        so any reading at or above the target counts there.
+        """
+        high = _as_float((getattr(state, "attributes", None) or {}).get("max"))
+        high_w = self._entity_value_as_w(state, high) if high is not None else None
+        target_w = min(original_w, high_w) if high_w is not None else original_w
+        clamped = high_w is not None and original_w > high_w
+
+        def confirmed() -> bool:
+            feedback = self.hass.states.get(entity_id)
+            if feedback is None:
+                return False
+            fresh = (
+                feedback is not state
+                or feedback.state != before_value
+                or getattr(feedback, "last_reported", None) != before_reported
+            )
+            value_w = self._get_ac_charge_limit_w(entity_id)
+            if not fresh or value_w is None:
+                return False
+            if value_w < target_w - PLANNED_POWER_WRITE_THRESHOLD_W:
+                return False
+            return clamped or value_w <= target_w + PLANNED_POWER_WRITE_THRESHOLD_W
+
+        if confirmed():
+            return True
+        try:
+            await self.hass.services.async_call(
+                "homeassistant", "update_entity", {"entity_id": entity_id}, blocking=True,
+            )
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Cannot refresh AC charge limit restore feedback: %s", entity_id)
+            return False
+        return confirmed()
+
+    def _entity_value_as_w(self, state: Any, value: float) -> float:
+        """An entity-unit value of the charge limit in W, with the write path's scale."""
+        unit = _unit_of(state)
+        if unit in ("kw", "kilowatt", "kilowatts"):
+            return value * 1000.0
+        if not unit:
+            entity_max = _as_float((getattr(state, "attributes", None) or {}).get("max"))
+            if entity_max is not None and 0 < entity_max < 1000:
+                return value * 1000.0
+        return value
 
     async def _apply_absolute_charge_power_limit(self) -> None:
         """Apply absolute max charge power (AC+DC) during AC charging.
@@ -4783,7 +4850,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._persist_state()
             await self.async_request_refresh()
 
-    def _schedule_reset_retry(self) -> None:
+    def _schedule_reset_retry(self, *, consume: bool = True) -> None:
         """Retry the failed reset after 60 s, 120 s, 240 s, then twice every 15 minutes.
 
         Then it stops. Each attempt writes to the inverter, and a restore that
@@ -4793,14 +4860,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         or a successful one takes it from there.
         """
         self._cancel_reset_retry()
-        if self._reset_retry_count >= len(RESET_RETRY_DELAYS) + RESET_RETRY_SLOW_ATTEMPTS:
+        if consume and self._reset_retry_count >= len(RESET_RETRY_DELAYS) + RESET_RETRY_SLOW_ATTEMPTS:
             self._abandon_reset()
             return
-        if self._reset_retry_count < len(RESET_RETRY_DELAYS):
+        if not consume:
+            # A deferral (backup mode) writes nothing, so it spends nothing:
+            # an outage longer than the ladder must not give the restore up.
+            delay = RESET_RETRY_INTERVAL
+        elif self._reset_retry_count < len(RESET_RETRY_DELAYS):
             delay = RESET_RETRY_DELAYS[self._reset_retry_count]
         else:
             delay = RESET_RETRY_INTERVAL
-        self._reset_retry_count += 1
+        if consume:
+            self._reset_retry_count += 1
+            # Persisted with the attempts, so a restart does not hand out a
+            # fresh ladder (Codex on #36).
+            self._persist_state()
 
         async def _run_reset_retry(_now: datetime) -> None:
             self._reset_retry_unsub = None
@@ -4847,6 +4922,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._pending_reset = False
         self._reset_abandoned = True
+        self._persist_state()
         ir.async_create_issue(
             self.hass,
             DOMAIN,
@@ -4913,7 +4989,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._is_backup_active():
             # Never override backup mode: try again later
             _LOGGER.info("Backup mode active - deferring the reset retry")
-            self._schedule_reset_retry()
+            self._schedule_reset_retry(consume=False)
             return
         # _reset_settings marks the outcome and reschedules a failed retry itself
         try:

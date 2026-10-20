@@ -58,6 +58,7 @@ __all__ = [
     "InverterChargeNightConfigEntry",
     "InverterChargeNightCoordinator",
     "async_setup",
+    "async_remove_entry",
     "async_setup_entry",
     "async_unload_entry",
     "async_update_entry",
@@ -331,6 +332,15 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
 
     # Request refresh to recalculate with new settings
     await coordinator.async_request_refresh()
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> None:
+    """Delete the repair issues that name this entry.
+
+    The "inverter settings not fully restored" issue is persistent and names
+    a reset action that no longer exists once the entry is gone (Codex on #36).
+    """
+    ir.async_delete_issue(hass, DOMAIN, f"reset_incomplete_{entry.entry_id}")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> bool:

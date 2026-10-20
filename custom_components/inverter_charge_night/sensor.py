@@ -84,6 +84,9 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
             ),
             "original_min_soc": self.coordinator.original_min_soc,
             "pending_reset": self.coordinator._pending_reset,
+            # True once the bounded reset ladder gave up: settings may still be
+            # on the inverter although pending_reset reads False (repair issue).
+            "reset_abandoned": self.coordinator._reset_abandoned,
             # Planner v2 (plan 006): only present while a bridge plan exists
             "plan_reason": data.get("plan_reason"),
             "bridge_kwh": data.get("bridge_kwh"),

@@ -80,8 +80,8 @@ day will do.
   one 63 A connection is exactly the situation this exists for. See
   [House connection](#house-connection).
 - **Night floor and reservations** - scheduled nights let the battery supply the house down to
-  the planned min SOC. Explicit reservations can hold more energy using a switch, discharge
-  power limit or raised min SOC. See
+  the planned min SOC. Explicit reservations can hold more energy through a raised min SOC
+  only. See
   [Discharge in the Window](#discharge-in-the-window).
 - **Efficiency search** — measures at which charge power the least energy is lost between the grid
   and the battery, and then keeps to it. See [Efficiency search](#efficiency-search).
