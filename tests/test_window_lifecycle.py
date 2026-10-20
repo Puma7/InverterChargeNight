@@ -484,9 +484,12 @@ async def test_window_end_waits_for_running_verification_before_reset(mock_hass)
 
     assert task.done()
     assert coordinator._verification_task is None
-    # The run was gone before the first reset command went out
+    # The run was gone before the first reset command went out. The min SOC
+    # already reads its original, so a fresh reading is asked for first; this
+    # double does not answer it, so the value is written after all.
     assert events == [
         "verification cancelled",
+        ("update_entity", MIN_SOC),
         ("set_value", DEFAULT_MIN),
         ("turn_off", GRID),
     ]
@@ -960,22 +963,23 @@ def _runtime_state(coordinator) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_window_start_blocks_discharge_and_persists_original(mock_hass, blocking):
+async def test_a_reservation_leaves_the_discharge_limit_alone(mock_hass, blocking):
+    """3.10.6: the battery is held through the min SOC only, never a zero limit."""
     await blocking._on_window_start(WINDOW_START)
 
-    mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 0.0}
-    , blocking=True)
-    assert blocking._original_discharge_limit == 5000.0
-    assert _runtime_state(blocking)["original_discharge_limit"] == 5000.0
-    # The target itself is unchanged by the block
+    for awaited in mock_hass.services.async_call.await_args_list:
+        assert awaited.args[2]["entity_id"] != DISCHARGE_LIMIT
+    assert blocking._original_discharge_limit is None
+    assert _runtime_state(blocking)["original_discharge_limit"] is None
     assert blocking.initial_calculated_soc == EXPECTED_TARGET
 
 
 @pytest.mark.asyncio
 async def test_window_end_restores_discharge_limit(mock_hass, blocking):
+    """A zero limit an older version left behind still goes back at the end."""
     await blocking._on_window_start(WINDOW_START)
     await blocking._async_update_data()
+    blocking._original_discharge_limit = 5000.0
     mock_hass.states.async_set(DISCHARGE_LIMIT, "0")
     mock_hass.states.async_set(MIN_SOC, str(EXPECTED_TARGET))
     mock_hass.states.async_set(GRID, "on")
@@ -996,6 +1000,7 @@ async def test_window_end_restores_discharge_limit(mock_hass, blocking):
 @pytest.mark.asyncio
 async def test_unload_during_window_restores_discharge_limit(mock_hass, blocking):
     await blocking._on_window_start(WINDOW_START)
+    blocking._original_discharge_limit = 5000.0  # captured by an older version
     mock_hass.states.async_set(DISCHARGE_LIMIT, "0")
     mock_hass.services.async_call.reset_mock()
     mock_hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
@@ -1063,25 +1068,17 @@ async def test_window_start_without_discharge_entity_falls_back_to_min_soc(
 
 
 @pytest.mark.asyncio
-async def test_verification_reapplies_discharge_block(mock_hass, blocking):
+async def test_verification_never_writes_the_discharge_limit(mock_hass, blocking):
     await blocking._on_window_start(WINDOW_START)
     await blocking._async_update_data()
-    mock_hass.states.async_set(DISCHARGE_LIMIT, "0")
-    mock_hass.states.async_set(MIN_SOC, str(EXPECTED_TARGET))
+    mock_hass.states.async_set(DISCHARGE_LIMIT, "3000")
     mock_hass.services.async_call.reset_mock()
 
-    # Already 0: nothing is written
     await blocking._verify_and_restore_min_soc()
-    mock_hass.services.async_call.assert_not_awaited()
 
-    # Something outside lifted the limit: the verification blocks again
-    mock_hass.states.async_set(DISCHARGE_LIMIT, "3000")
-    await blocking._verify_and_restore_min_soc()
-    mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 0.0}
-    , blocking=True)
-    # The original stays the value captured at the window start
-    assert blocking._original_discharge_limit == 5000.0
+    for awaited in mock_hass.services.async_call.await_args_list:
+        assert awaited.args[2]["entity_id"] != DISCHARGE_LIMIT
+    assert blocking._original_discharge_limit is None
 
 
 @pytest.mark.asyncio
@@ -1113,44 +1110,9 @@ async def test_restart_in_window_keeps_persisted_discharge_original(mock_hass):
 
 
 @pytest.mark.asyncio
-async def test_discharge_block_deferred_while_entity_unavailable(mock_hass, blocking, caplog):
-    mock_hass.states.async_set(DISCHARGE_LIMIT, "unavailable")
-
-    await blocking._on_window_start(WINDOW_START)
-
-    assert "block deferred" in caplog.text
-    assert blocking._original_discharge_limit is None
-    mock_hass.services.async_call.assert_not_awaited()
-
-    # The entity comes back: the verification captures the original and blocks
-    mock_hass.states.async_set(DISCHARGE_LIMIT, "5000")
-    mock_hass.states.async_set(MIN_SOC, str(EXPECTED_TARGET))
-    await blocking._verify_and_restore_min_soc()
-    mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": DISCHARGE_LIMIT, "value": 0.0}
-    , blocking=True)
-    assert blocking._original_discharge_limit == 5000.0
-
-
-@pytest.mark.asyncio
-async def test_discharge_block_not_written_when_value_unreadable(mock_hass, blocking, caplog):
-    mock_hass.states.async_set(DISCHARGE_LIMIT, "n/a")
-
-    await blocking._apply_discharge_block()
-
-    assert "could not be restored" in caplog.text
-    mock_hass.services.async_call.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_discharge_block_unsupported_domain(mock_hass, caplog):
     mock_hass.states.async_set("sensor.discharge", "5000")
     coordinator = _make_coordinator(mock_hass, {**CONFIG, CONF_DISCHARGE_LIMIT_ENTITY: "sensor.discharge"})
-
-    coordinator._adhoc_until = WINDOW_END
-    await coordinator._apply_discharge_block()
-    assert "unsupported domain sensor" in caplog.text
-    mock_hass.services.async_call.assert_not_awaited()
 
     # Nothing can be restored through an unusable entity: the reset is done
     coordinator._original_discharge_limit = 5000.0
@@ -1161,6 +1123,7 @@ async def test_discharge_block_unsupported_domain(mock_hass, caplog):
 @pytest.mark.asyncio
 async def test_failed_discharge_reset_keeps_original_for_retry(mock_hass, blocking):
     await blocking._on_window_start(WINDOW_START)
+    blocking._original_discharge_limit = 5000.0  # captured by an older version
     mock_hass.states.async_set(DISCHARGE_LIMIT, "unavailable")
 
     await blocking._on_window_end(WINDOW_END)

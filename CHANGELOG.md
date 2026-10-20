@@ -5,6 +5,34 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.6] - 2026-10-20
+
+### Fixed
+- **A reset that could never succeed rewrote the inverter every 15 minutes, for hours.**
+  Field log, 20 October: the night window captured the AC charge limit as the device
+  reported it, 22063 W, through a KORE control that accepts at most 12540 W. Home
+  Assistant refused every restore, the reset counted as failed, and the retry ladder
+  retried every 15 minutes without end - persisted, so across restarts too. Each attempt
+  wrote the min SOC to the inverter again first, although it already read its original
+  value. The mechanism is old; this night was the first to capture such a value.
+  - A value about to be restored is limited to the entity's `min`/`max`. For a power
+    limit the maximum stands for "unlimited". The value already persisted in the field
+    is restored as 12540 W on the first reset after the update.
+  - Every setting is finished on its own. A confirmed min SOC restore is not written
+    again by a later retry, and a setting that already shows its original value on a
+    fresh reading is only confirmed, not rewritten.
+  - The ladder is bounded: 1, 2 and 4 minutes, then twice 15 minutes apart. After that
+    nothing is written automatically; a repair issue names the entities still to check.
+    The next window, the `reset_inverter` action or a successful reset takes over. The
+    "settings still on the inverter" check, which the backup listener runs on every
+    state change, respects that as well.
+  - A pending reset no longer requests a refresh and persists the state every 15 seconds.
+- **Every window holds the battery through the min SOC only.** The evening rescue and
+  `block_discharge` no longer turn a discharge block switch on or write a discharge
+  limit of zero. The two entities are only used to give back a value an older version
+  captured, once at the window start and otherwise at the window end - no longer on
+  every verification.
+
 ## [3.10.5] - 2026-10-19
 
 ### Fixed

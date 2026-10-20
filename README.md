@@ -87,9 +87,10 @@ day will do.
   and the battery, and then keeps to it. See [Efficiency search](#efficiency-search).
 - **Backup/island aware** — during a power cut the integration hands the inverter back, so the
   battery can supply the house. See [Backup and island operation](#backup-and-island-operation).
-- **Everything it changes, it changes back** — minimum SOC, grid charge switch, charge limit,
-  discharge limit and discharge block switch are captured before the first write and restored at
-  the end of the window; a failed reset is retried until it works.
+- **Everything it changes, it changes back** — minimum SOC, grid charge switch and charge limits
+  are captured before the first write and restored at the end of the window. A failed reset is
+  retried a bounded number of times; after that the integration stops writing and files a repair
+  issue naming what is still to check.
 - **Survives a restart** — the runtime state is persisted, so a restart inside a window continues
   where it left off, and a restart *after* the window still cleans up.
 - **Manual overrides** — a target SOC override, a `Snow nights` counter that charges to the
@@ -588,19 +589,23 @@ At 05:00 ICN restores the original 8% floor. **Restoring the floor does not drai
 battery to 8%**; it lets the house use the remaining energy normally.
 
 An **explicit ad-hoc reservation**, including evening rescue, can intentionally hold
-existing energy for a later period. Only these reservations use **Discharge block for
-reservations** (`Automatic` / `Off`) and its switch, zero discharge limit or raised
-min-SOC fallback. Their settings are restored at the end of the reservation.
+existing energy for a later period. It does so **only through the min SOC**: with
+**Discharge block for reservations** on `Automatic` the floor is raised to the level being
+held, on `Off` only the target min SOC is set. Since 3.10.6 no window turns a discharge
+block switch on or writes a discharge limit of zero - either stops the battery from serving
+the house at all, and on a Kostal each write is an external battery-control command. The
+two entities stay configurable only so a value an older version captured is given back.
 
 The target sensor attributes `inverter_floor_soc` and `discharge_block`
-(`switch` / `limit` / `min_soc` / `off`) expose the mechanism. For scheduled nights,
+(`min_soc` / `off`) expose the mechanism. For scheduled nights,
 `min_soc` means the planned partial floor, not a complete discharge lock. A higher
 floor than the charge target belongs only to an explicit reservation. The inverter's
 number step may require a rounded floor; the semantic charge target stays unchanged.
 
-When resuming an older ICN night, a captured ICN-owned block is released (a previously
-off switch or positive discharge limit), and a saved higher floor is replaced by the
-planned target. Failed releases retain their originals for retry. ICN does not cancel
+When resuming an older ICN night, a captured ICN-owned block is released once at the
+window start (a previously off switch or positive discharge limit), and a saved higher
+floor is replaced by the planned target. A failed release is retried at the window end,
+not on every verification. ICN does not cancel
 an independent user/third-party discharge lock without captured ownership.
 
 Morning Discharge windows do not apply a discharge block.
@@ -648,8 +653,14 @@ explains what it is for and when it pays.
 4. State flags (is_active, target_reached), the manual override and the stored originals are
    cleared, and `snow_nights` counts down by one if this was a night-charge window that
    reached its configured end time
-5. A reset that failed (e.g. an unavailable entity) is retried after 1, 2 and 4 minutes, then
-   every 15 minutes, until it works
+5. Each setting is finished on its own: once its restore is confirmed it is not written again,
+   and a setting that already shows its original value is only confirmed, not rewritten
+6. A captured value outside what the entity accepts (a Kostal charge limit that reads 22063 W
+   through a control that takes at most 12540 W) is restored as the entity's limit instead
+7. A reset that failed (e.g. an unavailable entity) is retried after 1, 2 and 4 minutes and
+   twice more 15 minutes apart. Then the integration stops writing and files the repair issue
+   "inverter settings not fully restored"; the next window, the `reset_inverter` action or a
+   successful reset takes over again
 
 **Safety Mechanisms:**
 - Automatic reset if the integration is unloaded during an active window
@@ -1211,8 +1222,8 @@ Step 3 -- charge power:
   efficiency finder
 - `auto_efficient_charge` - Efficiency finder enabled (also written at runtime by the switch)
 - `force_discharge_switch` - Optional switch that forces discharge to the grid
-- `discharge_limit_entity` - Optional limit for explicit reservations or morning discharge;
-  scheduled night charging never sets it to zero
+- `discharge_limit_entity` - Optional; only used to give back a zero limit an older version
+  set. No window writes it any more
 - `grid_import_entity` - Optional sensor with the current grid import in W or kW; without it
   the charge power is not limited against the house connection
 - `main_fuse_a` - Main fuse of the house connection, per phase
@@ -1221,9 +1232,9 @@ Step 3 -- charge power:
 - `grid_continuous_pct` - Share of the nominal power allowed as continuous load
 - `grid_max_continuous_w` - The budget in W directly; takes precedence over the fuse size
 - `grid_headroom_w` - Safety margin kept below the budget
-- `discharge_block_switch` - Optional discharge lock used only for explicit reservations
-- `discharge_block_mode` - For explicit reservations: `auto` (switch, else power limit,
-  else raised min SOC) or `off`; scheduled nights always use only their target floor
+- `discharge_block_switch` - Optional; only used to give back a state an older version changed
+- `discharge_block_mode` - For explicit reservations: `auto` (raised min SOC) or `off`;
+  scheduled nights always use only their target floor
 
 Step 4 -- advanced:
 - `update_interval` - Coordinator refresh interval in seconds (default 900)

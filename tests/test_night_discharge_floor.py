@@ -97,10 +97,15 @@ async def test_failed_legacy_release_keeps_its_original_for_retry(mock_hass):
     c = night(mock_hass, "switch")
     c._original_discharge_block = False
     mock_hass.states.async_set("switch.synthetic_block", "unavailable")
-    await c._apply_discharge_block()
+    await c._apply_discharge_block(announce=True)
     assert c._original_discharge_block is False
     mock_hass.states.async_set("switch.synthetic_block", "on")
+    # Not from every verification: a device that ignores it would be written
+    # to every 15 minutes. The window end gives it back.
     await c._apply_discharge_block()
+    assert c._original_discharge_block is False
+    mock_hass.services.async_call.assert_not_awaited()
+    assert await c._reset_discharge_block_switch() is True
     assert c._original_discharge_block is None
     assert mock_hass.states.get("switch.synthetic_block").state == "off"
     mock_hass.services.async_call.assert_awaited_once_with(
@@ -113,7 +118,7 @@ async def test_legacy_cleanup_does_not_activate_a_preexisting_block(mock_hass):
     c = night(mock_hass, "both")
     c._original_discharge_block = True
     c._original_discharge_limit = 0
-    await c._apply_discharge_block()
+    await c._apply_discharge_block(announce=True)
     mock_hass.services.async_call.assert_not_awaited()
 
 
@@ -129,7 +134,7 @@ async def test_ignored_release_retains_capture_even_when_cached_value_matches(mo
     mock_hass.states.async_set(entity_id, ("off" if binding == "switch" else "8000") if cached_match
                                else ("on" if binding == "switch" else "0"))
     mock_hass.services.async_call = AsyncMock()  # Command and refresh are acknowledged, never observed.
-    await c._apply_discharge_block()
+    await c._apply_discharge_block(announce=True)
     assert getattr(c, attribute) == original
     mock_hass.services.async_call.assert_any_await(
         "homeassistant", "update_entity", {"entity_id": entity_id}, blocking=True,
@@ -140,7 +145,7 @@ async def test_ignored_release_retains_capture_even_when_cached_value_matches(mo
     async def observed(domain, service, data, **kwargs):
         mock_hass.states.async_set(entity_id, "off" if binding == "switch" else "8000")
     mock_hass.services.async_call = AsyncMock(side_effect=observed)
-    await c._apply_discharge_block()
+    await c._apply_discharge_block(announce=True)
     assert getattr(c, attribute) is None
     mock_hass.services.async_call.assert_awaited_once()
 
@@ -157,7 +162,7 @@ async def test_release_can_be_confirmed_by_an_explicit_feedback_refresh(mock_has
         if domain == "homeassistant":
             mock_hass.states.async_set(entity_id, "off" if binding == "switch" else "8000")
     mock_hass.services.async_call = AsyncMock(side_effect=delayed)
-    await c._apply_discharge_block()
+    await c._apply_discharge_block(announce=True)
     assert getattr(c, attribute) is None
     mock_hass.services.async_call.assert_any_await(
         "homeassistant", "update_entity", {"entity_id": entity_id}, blocking=True,

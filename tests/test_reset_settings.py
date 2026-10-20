@@ -173,7 +173,9 @@ async def test_reset_settings_fails_when_entity_unavailable(mock_hass, missing):
     ok = await coordinator._reset_settings()
 
     assert ok is False
-    assert coordinator.original_min_soc == 5.0
+    # The min SOC is finished on its own once confirmed, so a retry does not
+    # write it again; only what is still owed is kept (20 October 2026).
+    assert coordinator.original_min_soc == (5.0 if missing == MIN_SOC else None)
     assert coordinator.override_soc == 70.0
     assert coordinator._last_soc_set is None
 
@@ -194,7 +196,8 @@ async def test_reset_settings_fails_when_force_discharge_unavailable(mock_hass):
     mock_hass.services.async_call.assert_awaited_once_with(
         "number", "set_value", {"entity_id": MIN_SOC, "value": 5.0}, blocking=True
     )
-    assert coordinator.original_min_soc == 5.0
+    # Confirmed, so it is done; the retry only owes the force discharge switch
+    assert coordinator.original_min_soc is None
 
 
 # Reset retry (finding F3) ----------------------------------------------------
