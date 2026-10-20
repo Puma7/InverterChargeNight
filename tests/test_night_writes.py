@@ -621,3 +621,36 @@ async def test_the_regular_poll_retries_an_unconfirmed_stop(night):
     await coordinator._async_calculate_and_control()
 
     retry.assert_awaited_once()
+
+
+
+@pytest.mark.parametrize("soc", ["unavailable", "15"])
+@pytest.mark.asyncio
+async def test_a_pending_stop_stays_bounded_whatever_the_soc_reads(night, soc):
+    """CodeRabbit on #37: an unknown SOC sent turn_off on every poll past the bound,
+    and a SOC back below the target skipped the retry altogether."""
+    from custom_components.inverter_charge_night.coordinator import GRID_STOP_MAX_RETRIES
+
+    hass, coordinator, clock = night
+    hass.states.get(GRID).state = "on"
+
+    async def switch_ignores_turn_off(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        clock.now += timedelta(seconds=1)
+
+    hass.services.async_call = AsyncMock(side_effect=switch_ignores_turn_off)
+    assert await coordinator._stop_grid_charging() is False
+    hass.states.get(BATTERY).state = soc
+
+    for _ in range(10):  # ten polls
+        await coordinator._async_calculate_and_control()
+
+    turn_offs = [c for c in hass.services.async_call.await_args_list
+                 if c.args[:2] == ("switch", "turn_off")]
+    assert len(turn_offs) == 1 + GRID_STOP_MAX_RETRIES
+
+    # The switch reports off after all: the next poll confirms it without a command
+    hass.states.get(GRID).state = "off"
+    await coordinator._async_calculate_and_control()
+    assert coordinator._grid_stop_pending is False
+    assert len([c for c in hass.services.async_call.await_args_list
+                if c.args[:2] == ("switch", "turn_off")]) == 1 + GRID_STOP_MAX_RETRIES

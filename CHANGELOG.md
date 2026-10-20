@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Raised by CodeRabbit on #35, which #36 superseded. An unconfirmed stop is retried from the
   regular poll: a switch that reports off by then is confirmed without another command and
   the limits go back; one that still reports on gets `turn_off` at most twice more in the
-  window, never on every SOC update (Codex and CodeRabbit on #37).
+  window, never on every SOC update (Codex and CodeRabbit on #37). The retry runs before the
+  SOC is looked at, so a SOC that is unknown or back below the target neither skips it nor
+  sends further stops past the bound.
 - **A protective charge limit above what the control accepts is written as its maximum.**
   After the Kostal falls back to its own 22 kW, a connection limit of, say, 18820 W was
   written as is - above the 12540 W the KORE control accepts. Home Assistant refused it and

@@ -5677,6 +5677,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # count as reached.
         can_check_soc = battery_soc_entity is not None and self._current_battery_soc() is not None
 
+        # A stop that was not confirmed off is retried first, bounded - whatever
+        # the SOC reads now: unknown, or already below the target again
+        # (CodeRabbit on #37).
+        pending_grid_stop = self._grid_stop_pending and not self.is_discharge_mode
+        if pending_grid_stop:
+            await self._retry_grid_stop()
+
         # CRITICAL: Check if target is already reached before controlling
         if can_check_soc and battery_soc_entity is not None:
             battery_state = self.hass.states.get(battery_soc_entity)
@@ -5697,9 +5704,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             else:
                                 await self._stop_grid_charging()
                             self.target_reached = True
-                        elif self._grid_stop_pending and not self.is_discharge_mode:
-                            # Every poll after the target returns here (Codex on #37)
-                            await self._retry_grid_stop()
                         self.planned_charge_power_w = 0.0
                         return {
                             "calculated_soc": calculated_soc,
@@ -5715,7 +5719,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if self._current_battery_soc() is None:
             _LOGGER.warning("Battery SoC cannot be trusted - pausing inverter control until it reports again")
-            await self._pause_grid_charge("battery SoC cannot be trusted")
+            if not pending_grid_stop:
+                # A pending stop already had its bounded attempt above
+                await self._pause_grid_charge("battery SoC cannot be trusted")
             await self._enforce_grid_limit_now()
             self.planned_charge_power_w = None
             self.planned_power_is_applied = False
