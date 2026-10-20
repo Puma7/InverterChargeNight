@@ -2452,7 +2452,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return False
 
     async def _confirm_discharge_restore(
-        self, entity_id: str, before_value: str, before_reported: datetime,
+        self, entity_id: str, before_value: str, before_reported: datetime | None,
         expected: str | float,
     ) -> bool:
         """Retain captures until a fresh observation confirms their restoration."""
@@ -3076,6 +3076,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             state, self._original_absolute_charge_power, str(entity_id), "Reset absolute charge power"
         )
         unit = _unit_of(state)
+        # Read before the write: the entity may update this very object in place
+        before_value = state.state if state else ""
+        before_reported = getattr(state, "last_reported", None)
         try:
             await self.hass.services.async_call(
                 domain,
@@ -3085,6 +3088,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         except Exception as e:
             _LOGGER.error("Error resetting absolute charge power: %s", e, exc_info=True)
+            return False
+        if forget and not await self._confirm_discharge_restore(
+            str(entity_id), before_value, before_reported, value,
+        ):
+            # Same rule as the other restores (Codex on #36): an accepted call is
+            # not a restored limit, and the capture is what a retry needs.
+            _LOGGER.error("Absolute charge power restore has no fresh matching feedback: %s", entity_id)
             return False
         _LOGGER.info("Reset absolute charge power to original value: %.3f (%s)", value, unit or "unitless")
         self._absolute_charge_power_written_w = None
@@ -5105,6 +5115,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         # an unrelated restore kept failing (20 October 2026).
                         self.original_min_soc = None
                         self._window_floor_soc = None
+                        # The reset as a whole is still owed (grid switch, limits):
+                        # a crash right after this persist must leave that on
+                        # record, or nothing would switch grid charging off after
+                        # the restart (Codex on #36). _record_reset_outcome sets
+                        # the final value.
+                        self._pending_reset = True
                         self._persist_state()
                 else:
                     _LOGGER.error("Cannot reset min SOC - entity state unavailable")

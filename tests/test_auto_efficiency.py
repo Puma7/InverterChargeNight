@@ -87,14 +87,16 @@ async def test_reset_absolute_charge_power_restores_original(mock_hass: HomeAssi
         },
     )
     coordinator._original_absolute_charge_power = 12.0
-    await coordinator._reset_absolute_charge_power()
+    # This double acknowledges but never applies: the capture stays for a retry
+    assert await coordinator._reset_absolute_charge_power() is False
+    assert coordinator._original_absolute_charge_power == 12.0
 
-    mock_hass.services.async_call.assert_called()
-    args, kwargs = mock_hass.services.async_call.call_args
-    data = kwargs.get("service_data") if kwargs else None
-    if data is None and len(args) >= 3:
-        data = args[2]
-    assert data["value"] == 12.0
+    writes = [
+        c.args[2]["value"]
+        for c in mock_hass.services.async_call.await_args_list
+        if c.args[1] == "set_value"
+    ]
+    assert writes == [12.0]
 
 
 @pytest.mark.asyncio

@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A value about to be restored is limited to the entity's `min`/`max`. For a power
     limit the maximum stands for "unlimited". The value already persisted in the field
     is restored as 12540 W on the first reset after the update.
-  - Every setting is finished on its own. A confirmed min SOC restore is not written
+  - Every setting is finished on its own, while the reset as a whole stays on record as pending
+    until all of it is confirmed - a crash in between still leaves the grid switch owed. A confirmed min SOC restore is not written
     again by a later retry, and a setting that already shows its original value on a
     fresh reading is only confirmed, not rewritten.
   - The ladder is bounded: 1, 2 and 4 minutes, then twice 15 minutes apart. After that
@@ -34,7 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - With a reset already pending, the "settings still on the inverter" check - which the
     backup listener runs on every state change - leaves it to the bounded ladder instead of
     starting another full reset each time.
-  - A restored AC charge limit is confirmed by a fresh reading before its capture is dropped.
+  - A restored AC charge limit, and likewise the absolute charge power, is confirmed by a fresh
+    reading before its capture is dropped.
     Restored to the entity maximum, any reading at or above it counts - the device may go on
     reporting its own larger maximum.
   - Giving up is visible: `reset_abandoned` on the target sensor and in the diagnostics, next

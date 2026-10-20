@@ -8,6 +8,8 @@ reset counted as failed, and the retry ladder rewrote the min SOC every
 """
 from __future__ import annotations
 
+import asyncio
+
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -575,3 +577,70 @@ async def test_window_checks_leave_a_pending_reset_to_its_ladder(mock_hass):
 
     assert _writes(mock_hass, AC_LIMIT) == []
     assert coordinator._reset_retry_count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_crash_after_the_min_soc_still_leaves_a_pending_reset(mock_hass):
+    """Codex on #36: finishing the min SOC on its own persists state mid-reset.
+
+    If Home Assistant stops right after that write - before the grid switch is
+    turned off - the stored state must still say a reset is owed, or nothing
+    after the restart would know to switch grid charging off.
+    """
+    _register_field_entities(mock_hass)
+    mock_hass.states.async_set(GRID, "on")
+    device = _validating_device(mock_hass)
+    persisted: list[dict[str, Any]] = []
+
+    async def crash_on_the_grid_switch(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if data.get("entity_id") == GRID:
+            raise asyncio.CancelledError("Home Assistant stopped")
+        await device(domain, service, data, **kwargs)
+
+    mock_hass.services.async_call = AsyncMock(side_effect=crash_on_the_grid_switch)
+    coordinator = _make_coordinator(mock_hass, {**CONFIG, CONF_CHARGE_POWER_ENTITY: None}, {})
+    coordinator.original_min_soc = 30.0
+    mock_hass.states.async_set(MIN_SOC, "45.0", {"min": 0, "max": 100, "unit_of_measurement": "%"})
+    real_update = mock_hass.config_entries.async_update_entry.side_effect
+
+    def remember(entry: Any, options: Any = None, **kwargs: Any) -> bool:
+        if options is not None:
+            persisted.append(dict(options[CONF_RUNTIME_STATE]))
+        return real_update(entry, options=options, **kwargs)
+
+    mock_hass.config_entries.async_update_entry.side_effect = remember
+
+    with pytest.raises(asyncio.CancelledError):
+        await coordinator._reset_settings()
+
+    last = persisted[-1]
+    assert last["original_min_soc"] is None, "the min SOC was done"
+    assert last["pending_reset"] is True, "but the reset as a whole was not"
+
+
+@pytest.mark.asyncio
+async def test_an_ignored_absolute_power_restore_is_not_forgotten(mock_hass):
+    """Codex on #36: the same gap as the AC limit had, for the absolute power."""
+    from custom_components.inverter_charge_night.const import CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY
+
+    absolute = "number.kostal_g3_battery_max_charge_power_abs"
+    mock_hass.states.async_set(absolute, "3000.0", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+
+    async def ignore(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        return None
+
+    mock_hass.services.async_call = AsyncMock(side_effect=ignore)
+    coordinator = _make_coordinator(mock_hass, {CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY: absolute}, {})
+    coordinator._original_absolute_charge_power = 9000.0
+
+    assert await coordinator._reset_absolute_charge_power() is False
+    assert coordinator._original_absolute_charge_power == 9000.0
+
+    # Observed: done
+    async def apply(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if service == "set_value":
+            mock_hass.states.async_set(absolute, str(data["value"]), {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+
+    mock_hass.services.async_call = AsyncMock(side_effect=apply)
+    assert await coordinator._reset_absolute_charge_power() is True
+    assert coordinator._original_absolute_charge_power is None
