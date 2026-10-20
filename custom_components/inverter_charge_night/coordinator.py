@@ -2922,6 +2922,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
         if restore:
             value = _within_entity_range(state, value, entity_id, what)
+        elif unit:
+            # A protective limit above what the control accepts is refused by
+            # Home Assistant, and the refused write left grid charging paused.
+            # The control's maximum is lower, so it protects at least as well.
+            entity_max = _as_float(getattr(state, "attributes", {}).get("max")) if state else None
+            if entity_max is not None and value > entity_max:
+                _LOGGER.debug(
+                    "%s: %.3f exceeds what %s accepts - writing its maximum %.3f",
+                    what, value, entity_id, entity_max,
+                )
+                value = entity_max
         try:
             await self.hass.services.async_call(
                 domain,

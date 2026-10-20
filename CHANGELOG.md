@@ -16,8 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   protective 0 W to the full ceiling while grid charging went on. Now the limits and their
   captures stay until the switch reports off; the window-end reset applies the same rule.
   Raised by CodeRabbit on #35, which #36 superseded.
+- **A protective charge limit above what the control accepts is written as its maximum.**
+  After the Kostal falls back to its own 22 kW, a connection limit of, say, 18820 W was
+  written as is - above the 12540 W the KORE control accepts. Home Assistant refused it and
+  grid charging stayed paused. The control's maximum is lower and protects at least as well.
+  Found by the new morning-silence lab campaign.
 - The lab campaign observes a native charge ceiling above KORE's accepted maximum through
   the real KORE services and checks the bounded, confirmed restore (from #35).
+- **New lab campaign: nothing reaches the inverter after the window end.** Three nights
+  through real HA, real KORE and the emulated Kostal - charging 50 % to 60 %, draining 50 %
+  to 20 % on a 10 % original floor, holding 50 % - each with the field's quirks (a native
+  ceiling above the KORE maximum, a Kostal that drops written limits back to it, a Modbus
+  silence at 03:15 and again at 06:00). Every REST and Modbus command the emulated inverter
+  receives is recorded: at 05:00 the min SOC goes back once, and from then until 13:00 it
+  receives nothing at all. A unit test runs the same morning with the field configuration,
+  house connection limit included.
 
 ## [3.10.6] - 2026-10-20
 

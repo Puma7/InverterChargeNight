@@ -90,3 +90,29 @@ async def test_a_confirmed_stop_hands_the_ceiling_back(mock_hass):
     assert mock_hass.states.get(GRID).state == "off"
     assert _ac_writes(mock_hass) == [12540.0]
     assert coordinator._original_ac_charge_power is None
+
+
+@pytest.mark.parametrize(("unit", "maximum", "requested_w", "written"), [
+    ("W", 12540.0, 18820, 12540.0),
+    ("kW", 12.54, 18820, 12.54),
+    ("W", 12540.0, 6000, 6000.0),
+])
+@pytest.mark.asyncio
+async def test_a_protective_limit_above_the_control_maximum_is_written_as_that_maximum(
+    mock_hass, unit, maximum, requested_w, written
+):
+    """Found by the morning-silence lab campaign.
+
+    After the Kostal falls back to its own 22 kW, a connection limit of, say,
+    18820 W was written as is - above the 12540 W the KORE control accepts.
+    Home Assistant refused it and grid charging stayed paused. The control's
+    maximum is lower than the limit asked for, so it protects at least as well.
+    """
+    mock_hass.states.async_set(GRID, "off")
+    mock_hass.states.async_set(AC_LIMIT, "22063.31", {"min": 0.0, "max": maximum, "unit_of_measurement": unit})
+    mock_hass.services.async_call = _device(mock_hass, switch_obeys=True)
+    coordinator = _make_coordinator(mock_hass)
+
+    assert await coordinator._set_ac_charge_limit_w(requested_w) is True
+
+    assert _ac_writes(mock_hass) == [written]
