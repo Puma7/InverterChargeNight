@@ -23,7 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   After the Kostal falls back to its own 22 kW, a connection limit of, say, 18820 W was
   written as is - above the 12540 W the KORE control accepts. Home Assistant refused it and
   grid charging stayed paused. The control's maximum is lower and protects at least as well.
-  Found by the new morning-silence lab campaign.
+  Found by the new morning-silence lab campaign. The clamp sits at the single place a setpoint
+  reaches the inverter, in W, so a unitless control inferred as kW is covered too; the value
+  written is what the connection limit, the guard and the activation record as standing there;
+  and the efficiency finder does not test a power above the control's maximum (Codex on #37).
+  A unitless control above 1000 still has no known scale and is not written beyond its maximum.
 - The lab campaign observes a native charge ceiling above KORE's accepted maximum through
   the real KORE services and checks the bounded, confirmed restore (from #35).
 - **New lab campaign: nothing reaches the inverter after the window end.** Three nights

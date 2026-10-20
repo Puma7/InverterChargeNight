@@ -103,6 +103,7 @@ async def test_a_confirmed_stop_hands_the_ceiling_back(mock_hass):
 @pytest.mark.parametrize(("unit", "maximum", "requested_w", "written"), [
     ("W", 12540.0, 18820, 12540.0),
     ("kW", 12.54, 18820, 12.54),
+    (None, 12.54, 18820, 12.54),  # unitless, inferred kW (Codex on #37)
     ("W", 12540.0, 6000, 6000.0),
 ])
 @pytest.mark.asyncio
@@ -116,14 +117,35 @@ async def test_a_protective_limit_above_the_control_maximum_is_written_as_that_m
     Home Assistant refused it and grid charging stayed paused. The control's
     maximum is lower than the limit asked for, so it protects at least as well.
     """
+    attributes: dict[str, Any] = {"min": 0.0, "max": maximum}
+    if unit is not None:
+        attributes["unit_of_measurement"] = unit
     mock_hass.states.async_set(GRID, "off")
-    mock_hass.states.async_set(AC_LIMIT, "22063.31", {"min": 0.0, "max": maximum, "unit_of_measurement": unit})
+    mock_hass.states.async_set(AC_LIMIT, "22063.31", attributes)
     mock_hass.services.async_call = _device(mock_hass, switch_obeys=True)
     coordinator = _make_coordinator(mock_hass)
 
     assert await coordinator._set_ac_charge_limit_w(requested_w) is True
 
     assert _ac_writes(mock_hass) == [written]
+    # What is recorded as written is what was written, in W (Codex on #37)
+    assert coordinator._planned_setpoint_written_w == pytest.approx(min(requested_w, 12540.0))
+
+
+@pytest.mark.asyncio
+async def test_no_efficiency_trial_runs_above_the_control_maximum(mock_hass):
+    """Codex on #37: the control would write its maximum, the sample be filed under more."""
+    mock_hass.states.async_set(GRID, "off")
+    mock_hass.states.async_set(AC_LIMIT, "0", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+    mock_hass.services.async_call = _device(mock_hass, switch_obeys=True)
+    coordinator = _make_coordinator(mock_hass)
+    coordinator._set_auto_wait_reason = MagicMock()
+
+    await coordinator._start_auto_test(18820)
+
+    assert _ac_writes(mock_hass) == []
+    assert coordinator._auto_test_active is False
+    coordinator._set_auto_wait_reason.assert_called_once_with("charge_limit_above_control_maximum")
 
 
 def _turn_offs(hass: Any) -> int:
@@ -164,3 +186,24 @@ async def test_a_switch_that_never_reports_off_gets_a_bounded_number_of_stops(mo
     assert _turn_offs(mock_hass) == 1 + GRID_STOP_MAX_RETRIES
     assert _ac_writes(mock_hass) == []
     assert coordinator._original_ac_charge_power == pytest.approx(22063.31)
+
+
+@pytest.mark.asyncio
+async def test_the_connection_limit_records_the_value_the_control_took(mock_hass):
+    """Codex on #37: the reference for the next reading is what stands there, not the request."""
+    mock_hass.states.async_set(GRID, "off")
+    mock_hass.states.async_set(AC_LIMIT, "22063.31", {"min": 0.0, "max": 12540.0, "unit_of_measurement": "W"})
+    mock_hass.services.async_call = _device(mock_hass, switch_obeys=True)
+    coordinator = _make_coordinator(mock_hass)
+    coordinator._planned_setpoint_written_w = 22063.31
+    coordinator.config = {**CONFIG, "grid_import_entity": "sensor.grid_import"}
+    coordinator._grid_budget = MagicMock(return_value=34776.0)
+    coordinator._grid_limited_setpoint = MagicMock(return_value=18820.0)
+    coordinator._grid_write_is_debounced = MagicMock(return_value=False)
+    coordinator._battery_idle_on_grid = MagicMock(return_value=False)
+
+    await coordinator._enforce_grid_limit_now()
+
+    assert _ac_writes(mock_hass) == [12540.0]
+    assert coordinator._planned_setpoint_written_w == 12540.0
+    assert coordinator.planned_charge_power_w == 12540.0

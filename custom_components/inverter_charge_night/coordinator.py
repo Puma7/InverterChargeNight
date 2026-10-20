@@ -2931,17 +2931,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
         if restore:
             value = _within_entity_range(state, value, entity_id, what)
-        elif unit:
-            # A protective limit above what the control accepts is refused by
-            # Home Assistant, and the refused write left grid charging paused.
-            # The control's maximum is lower, so it protects at least as well.
-            entity_max = _as_float(getattr(state, "attributes", {}).get("max")) if state else None
-            if entity_max is not None and value > entity_max:
-                _LOGGER.debug(
-                    "%s: %.3f exceeds what %s accepts - writing its maximum %.3f",
-                    what, value, entity_id, entity_max,
-                )
-                value = entity_max
         try:
             await self.hass.services.async_call(
                 domain,
@@ -3001,6 +2990,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 power_w,
             )
             power_w = limited_w
+        control_max_w = self._control_max_w(entity_id)
+        if control_max_w is not None and power_w > control_max_w:
+            # A limit above what the control accepts is refused by Home
+            # Assistant, and the refused write left grid charging paused. The
+            # control's maximum is lower and protects at least as well; it is
+            # what gets recorded as written (Codex on #37).
+            _LOGGER.debug(
+                "Writing %d W instead of %d W: %s accepts at most that",
+                int(control_max_w), power_w, entity_id,
+            )
+            power_w = int(control_max_w)
         if self._original_ac_charge_power is None:
             current_w = self._get_ac_charge_limit_w(entity_id)
             if current_w is None:
@@ -3024,6 +3024,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if power_w == 0 and self.is_active and self._grid_limit_configured():
             await self._pause_grid_charge("no confirmed connection headroom")
         return True
+
+    def _control_max_w(self, entity_id: str) -> float | None:
+        """The charge control's maximum in W, when its scale is known.
+
+        A unit, or a unitless maximum below 1000 (kilowatts, as the write path
+        infers). A unitless control with a larger maximum has no known scale,
+        and the write path refuses a value above it rather than guess.
+        """
+        state = self.hass.states.get(entity_id)
+        maximum = _as_float((getattr(state, "attributes", None) or {}).get("max")) if state else None
+        if maximum is None or maximum <= 0:
+            return None
+        if not _unit_of(state) and maximum >= 1000:
+            return None
+        return self._entity_value_as_w(state, maximum)
 
     async def _reset_ac_charge_limit(self) -> bool:
         """Restore only after an already-started limit command has finished."""
@@ -3533,9 +3548,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     power_w,
                     int(allowed),
                 )
-                if await self._set_ac_charge_limit_w(int(allowed)):
-                    self._planned_setpoint_written_w = allowed
+                await self._set_ac_charge_limit_w(int(allowed))  # records what it wrote
                 return
+        target = self._ac_charge_limit_target()
+        control_max_w = self._control_max_w(target[0]) if target is not None else None
+        if control_max_w is not None and power_w > control_max_w + PLANNED_POWER_WRITE_THRESHOLD_W:
+            # The control would write its maximum while the sample was filed under
+            # this power - the same poisoning as a connection-limited test.
+            self._set_auto_wait_reason("charge_limit_above_control_maximum")
+            return
         if not await self._set_ac_charge_limit_w(power_w):
             # The battery would charge at whatever stands on the inverter -
             # usually the previous test's higher value, which the follow check
@@ -6020,7 +6041,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if not await self._set_ac_charge_limit_w(int(allowed)):
                     await self._pause_grid_charge("protective charge-limit write failed")
                     return False
-                self._planned_setpoint_written_w = allowed
             readback = self._get_ac_charge_limit_w(target[0])
             if readback is None or readback > allowed:
                 await self._pause_grid_charge("protective charge limit is not confirmed by readback")
@@ -6886,9 +6906,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the next reading tries again instead of assuming it is capped.
             return
         # What stands on the inverter is the reference for the next reading, so
-        # an unchanged load does not write the same value over and over.
-        self._planned_setpoint_written_w = allowed
-        self.planned_charge_power_w = allowed
+        # an unchanged load does not write the same value over and over. The
+        # setter recorded it - the control's maximum if it was lower.
+        self.planned_charge_power_w = self._planned_setpoint_written_w
         self.planned_power_is_applied = True
 
     def _grid_write_is_debounced(self) -> bool:
@@ -7084,6 +7104,5 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         if not await self._set_ac_charge_limit_w(int(limited)):
             return
-        self._planned_setpoint_written_w = limited
-        self.planned_charge_power_w = limited
+        self.planned_charge_power_w = self._planned_setpoint_written_w
         self.planned_power_is_applied = True

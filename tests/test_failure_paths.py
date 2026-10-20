@@ -629,7 +629,12 @@ async def test_a_successful_limit_write_moves_the_reference(mock_hass):
     coordinator.config = dict(CONFIG) | {CONF_GRID_IMPORT_ENTITY: "sensor.grid_import"}
     coordinator._grid_limited_setpoint = MagicMock(return_value=2000.0)
     coordinator._grid_write_is_debounced = MagicMock(return_value=False)
-    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
+
+    async def setter_records_what_it_wrote(power_w: int) -> bool:
+        coordinator._planned_setpoint_written_w = float(power_w)
+        return True
+
+    coordinator._set_ac_charge_limit_w = AsyncMock(side_effect=setter_records_what_it_wrote)
 
     await coordinator._enforce_grid_limit_now()
 
