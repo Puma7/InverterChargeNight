@@ -90,3 +90,19 @@ den gespeicherten Originalwert am Morgen. Ausdrueckliche Reservierungen und
 die Abendrettung koennen weiterhin Energie halten; Grund und Ende stehen
 in den Diagnoseattributen. Eine unabhaengig gesetzte Sperre wird nicht
 pauschal aufgehoben. Beim Update bleiben Zuordnungen und Einstellungen erhalten.
+
+## Ruecksetzung der Ladeleistungsgrenze ab 3.10.6
+
+Ein ausgelesener Grenzwert kann hoeher sein als der vom HA-Regler erlaubte
+Schreibbereich. ICN stellt dann hoechstens dessen aktuellen Maximalwert wieder
+her und protokolliert die Abweichung als Warnung. Beispiel: gespeicherte Grenze
+24 kW, erlaubtes Maximum 12 kW => Ruecksetzung auf 12 kW. Die Integration erhoeht
+den erlaubten Schreibbereich nicht. Der ausgelesene Grenzwert ist keine Messung
+der tatsaechlichen Batterieladeleistung.
+
+Das gilt auch fuer vor dem Update gespeicherte Ruecksetzungen. Schlaegt der
+Schreibversuch fehl, bleiben Original und Wiederholung erhalten. Ein gueltiger
+Originalwert wird unveraendert zurueckgeschrieben. Min-SOC und Netzlade-Stopp
+werden weiterhin unabhaengig geprueft; eine bereits auf 8% freigegebene Batterie
+kann deshalb gleichzeitig noch eine ausstehende Leistungsgrenzen-Ruecksetzung
+melden. Einrichtung und Effizienzdaten bleiben beim Update erhalten.

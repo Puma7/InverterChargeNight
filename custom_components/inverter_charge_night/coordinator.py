@@ -2828,7 +2828,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Restore the AC charge limit captured before the finder's first write.
 
         Returns True when nothing is left to restore; on failure the original
-        value is kept for a retry.
+        value is kept for a retry. A native readback can exceed the number's
+        accepted write range. Restore at most its current maximum rather than
+        retrying an impossible command forever or raising the entity's limit.
         """
         if self._original_ac_charge_power is None:
             return True
@@ -2844,8 +2846,24 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not state or state.state in ("unknown", "unavailable"):
             _LOGGER.error("Cannot reset AC charge limit - entity %s unavailable", entity_id)
             return False
+        restore_w = self._original_ac_charge_power
+        entity_max = _as_float(state.attributes.get("max"))
+        unit = _unit_of(state)
+        if entity_max is not None and entity_max >= 0:
+            # Match the unit inference used by both reads and writes, including
+            # unitless kW helpers. Keep the raw capture until the write succeeds.
+            scale = (1000.0 if unit in ("kw", "kilowatt", "kilowatts")
+                     or (not unit and 0 < entity_max < 1000) else 1.0)
+            maximum_w = entity_max * scale
+            if restore_w > maximum_w:
+                _LOGGER.warning(
+                    "Stored AC charge limit %.3f W exceeds the current maximum "
+                    "of %s (%.3f W); restoring the supported ceiling instead",
+                    restore_w, entity_id, maximum_w,
+                )
+                restore_w = maximum_w
         if not await self._write_ac_charge_limit(
-            entity_id, domain, self._original_ac_charge_power, "Reset AC charge limit"
+            entity_id, domain, restore_w, "Reset AC charge limit"
         ):
             return False
         self._original_ac_charge_power = None

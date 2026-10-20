@@ -131,6 +131,32 @@ async def check_night_floor(hass, lab, planner, kore_entry, check):
                   plant.soc < soc and plant.battery_power < 0)
             # Completed windows intentionally cannot reopen after a clock rollback.
             start += timedelta(days=1)
+
+    # Native battery ceilings can be larger than KORE's accepted HA write range.
+    # Exercise both the real range validator and Modbus readback on recovery.
+    co = planner.runtime_data
+    charge_id = data["charge_power_entity"]
+    charge_number = hass.data[DATA_INSTANCES]["number"].get_entity(charge_id)
+    maximum = charge_number.native_max_value
+    previous_limit = lab.plant.charge_limit
+    native_limit = maximum * 2 + .25
+    lab.plant.charge_limit = native_limit
+    modbus._slow_tick = 5
+    await feedback()
+    check("native charge ceiling above HA maximum is observed before capture",
+          float(hass.states.get(charge_id).state) == native_limit,
+          {"observed_w": hass.states.get(charge_id).state, "native_w": native_limit})
+    check("protective zero captures the native ceiling through real KORE services",
+          await co._set_ac_charge_limit_w(0)
+          and co._original_ac_charge_power == native_limit and lab.plant.charge_limit == 0)
+    co.original_min_soc = 8
+    check("bounded ceiling recovery completes the whole reset without pending retry",
+          await co._reset_settings() and not co._pending_reset
+          and co._original_ac_charge_power is None and lab.plant.charge_limit == maximum
+          and lab.plant.min_soc == 8 and not lab.plant.grid_charge,
+          {"captured_w": native_limit, "restored_w": lab.plant.charge_limit, "maximum_w": maximum})
+    lab.plant.charge_limit = previous_limit
+    await feedback()
     hass.config_entries.async_update_entry(planner, data=saved_data)
     lab.plant.forecast_today, lab.plant.forecast_tomorrow = forecasts
     lab.plant.house_load = house_load

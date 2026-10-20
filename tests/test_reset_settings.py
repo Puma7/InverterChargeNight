@@ -461,6 +461,103 @@ async def test_reset_ac_charge_limit_keeps_original_when_entity_unavailable(mock
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "entity_id,unit,maximum,restored",
+    [
+        (AC_LIMIT, "W", 12000, 12000),
+        (AC_LIMIT, "kW", 12, 12),
+        (AC_LIMIT, None, 12000, 12000),
+        (AC_LIMIT, None, 12, 12),
+        ("input_number.ac_limit", "kW", 12, 12),
+    ],
+)
+async def test_window_end_bounds_unrestorable_charge_ceiling(
+    mock_hass, caplog, entity_id, unit, maximum, restored
+):
+    """A readable native ceiling may exceed the number's accepted write range."""
+    attrs = {"min": 0, "max": maximum}
+    if unit is not None:
+        attrs["unit_of_measurement"] = unit
+    mock_hass.states.async_set(MIN_SOC, "30", {"unit_of_measurement": "%"})
+    mock_hass.states.async_set(GRID, "on")
+    mock_hass.states.async_set(entity_id, "0", attrs)
+    actor = mock_hass.services.async_call.side_effect
+
+    async def range_checked_call(domain, service, data, **kwargs):
+        if data.get("entity_id") == entity_id and service == "set_value":
+            if not 0 <= data["value"] <= maximum:
+                raise ValueError("number value is outside its allowed range")
+            # The common actor models number, not input_number.
+            if domain == "input_number":
+                mock_hass.states.async_set(entity_id, str(data["value"]), attrs)
+                return
+        await actor(domain, service, data, **kwargs)
+
+    mock_hass.services.async_call.side_effect = range_checked_call
+    coordinator = _make_coordinator(
+        mock_hass, {**CONFIG, CONF_CHARGE_POWER_ENTITY: entity_id},
+        options={CONF_RUNTIME_STATE: {
+            "original_min_soc": 8.0, "original_ac_charge_power": 24000.25,
+            "pending_reset": True,
+        }},
+    )
+    assert coordinator._original_ac_charge_power == 24000.25
+    assert coordinator._pending_reset is True
+    coordinator._planned_setpoint_written_w = 0
+
+    assert await coordinator._reset_settings() is True
+
+    assert mock_hass.services.async_call.await_args_list == [
+        call("number", "set_value", {"entity_id": MIN_SOC, "value": 8.0}, blocking=True),
+        call("switch", "turn_off", {"entity_id": GRID}, blocking=True),
+        call(entity_id.split(".")[0], "set_value",
+             {"entity_id": entity_id, "value": restored}, blocking=True),
+    ]
+    assert float(mock_hass.states.get(entity_id).state) == restored
+    assert coordinator._original_ac_charge_power is None
+    assert coordinator._pending_reset is False
+    assert _runtime_state(coordinator)["original_ac_charge_power"] is None
+    assert "exceeds the current maximum" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_bounded_charge_restore_keeps_capture_until_service_succeeds(mock_hass):
+    """A rejected bounded write retains the exact capture for a later retry."""
+    mock_hass.states.async_set(AC_LIMIT, "24000.25", {"unit_of_measurement": "W", "max": 12000})
+    coordinator = _make_coordinator(mock_hass, {**CONFIG, CONF_CHARGE_POWER_ENTITY: AC_LIMIT})
+    assert await coordinator._set_ac_charge_limit_w(0) is True
+    assert coordinator._original_ac_charge_power == 24000.25
+    actor = mock_hass.services.async_call.side_effect
+    mock_hass.services.async_call.side_effect = RuntimeError("device offline")
+
+    assert await coordinator._reset_ac_charge_limit() is False
+    assert coordinator._original_ac_charge_power == 24000.25
+    mock_hass.services.async_call.assert_awaited_with(
+        "number", "set_value", {"entity_id": AC_LIMIT, "value": 12000}, blocking=True
+    )
+
+    # A changed entity maximum is respected on the retry as well.
+    mock_hass.states.async_set(AC_LIMIT, "0", {"unit_of_measurement": "W", "max": 10000})
+    mock_hass.services.async_call.side_effect = actor
+    assert await coordinator._reset_ac_charge_limit() is True
+    mock_hass.services.async_call.assert_awaited_with(
+        "number", "set_value", {"entity_id": AC_LIMIT, "value": 10000}, blocking=True
+    )
+    assert coordinator._original_ac_charge_power is None
+
+
+@pytest.mark.asyncio
+async def test_charge_restore_preserves_valid_fractional_original(mock_hass):
+    mock_hass.states.async_set(AC_LIMIT, "0", {"unit_of_measurement": "W", "max": 12000, "step": 100})
+    coordinator = _make_coordinator(mock_hass, {**CONFIG, CONF_CHARGE_POWER_ENTITY: AC_LIMIT})
+    coordinator._original_ac_charge_power = 6000.25
+    assert await coordinator._reset_ac_charge_limit() is True
+    mock_hass.services.async_call.assert_awaited_once_with(
+        "number", "set_value", {"entity_id": AC_LIMIT, "value": 6000.25}, blocking=True
+    )
+
+
+@pytest.mark.asyncio
 async def test_reset_ac_charge_limit_with_nothing_to_restore(mock_hass):
     coordinator = _make_coordinator(mock_hass, CONFIG)
     assert await coordinator._reset_ac_charge_limit() is True

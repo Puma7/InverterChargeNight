@@ -5,6 +5,15 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.6] - 2026-10-20
+
+### Fixed
+- Bound a captured AC charge ceiling to the number entity's current maximum
+  when restoring it. Some native readbacks exceed the accepted write range;
+  those values previously left reset pending forever. Log the bounded restore,
+  preserve the raw capture on write failure and respect W/kW unit inference.
+  Existing persisted captures recover without reconfiguring the integration.
+
 ## [3.10.5] - 2026-10-19
 
 ### Fixed
