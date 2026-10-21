@@ -366,8 +366,9 @@ bought at night   = evening reserve − covered by the PV, never below zero
 
 The forecast error margin takes the safe side for each use: the room kept free for tomorrow's
 sun assumes the forecast plus the margin, the evening the battery has to carry assumes the
-forecast minus it. Until 3.10.8 the evening was credited the larger figure as well, and the
-night bought too little for it.
+forecast minus it, in the night plan and in the afternoon outlook of the evening rescue alike.
+Until 3.10.8 the evening was credited the larger figure as well, and the night bought too
+little for it.
 
 On a summer day whose forecast covers the house anyway, this changes nothing: the sun fills the
 battery long before the evening. On a dull winter day the whole evening is added to the night's

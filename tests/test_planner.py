@@ -810,3 +810,15 @@ def test_a_zero_load_period_is_not_a_price_decision():
         )
     )
     assert dropped.evening_reserve_dropped is True
+
+
+def test_the_outlook_counts_the_forecast_less_its_margin():
+    """Codex on #38: the night plan credits the evening the forecast less its
+    margin, the afternoon outlook credited all of it. A forecast 20 % too good
+    is inside a 20 % margin - and hid the shortfall the rescue is there for."""
+    trusting = _outlook(current_soc=20.0, forecast_kwh_today=8.0)
+    cautious = _outlook(current_soc=20.0, forecast_kwh_today=8.0, forecast_error_margin_pct=20.0)
+
+    assert cautious.pv_to_come_kwh == pytest.approx(trusting.pv_to_come_kwh * 0.8)
+    assert trusting.missing_kwh == 0.0
+    assert cautious.missing_kwh > 0.0

@@ -231,8 +231,11 @@ LIMIT_FEEDBACK_WAIT_S = 12
 # The Kostal hands battery control back to its own management unless the
 # Modbus values are written again within its timeout (30-60 s; 20/21 October:
 # 1000 W written at 23:01, about 8 kW charging at 23:12). KORE and evcc write
-# them cyclically; so does a window that can draw from the grid, at this interval
-CHARGE_LIMIT_KEEPALIVE_S = 30
+# them cyclically; so does a window that can draw from the grid, at this interval.
+# Sleep plus the write itself must stay inside the shortest timeout, 30 s: a
+# third of it is left for the write and the event loop (Codex on #38).
+KOSTAL_MODBUS_TIMEOUT_MIN_S = 30
+CHARGE_LIMIT_KEEPALIVE_S = 20
 SKIP_NEXT_DURATION = timedelta(hours=24)
 # A bridge longer than this means the sunrise or the window end is off; the plan
 # is still made, but it is worth a warning in the log.
@@ -1905,6 +1908,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 sunset=sunset,
                 forecast_kwh_today=forecast_kwh,
                 forecast_available=forecast_available,
+                forecast_error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
             )
         except (ValueError, TypeError) as err:
             _LOGGER.error("Could not work out the evening outlook: %s", err)
@@ -3124,7 +3128,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             entity_id, domain, power_w, "Set AC charge limit"
         ):
             self._suspend_grid_switch_if_on()
-            if self.is_active and self._grid_limit_configured():
+            if self.is_active and (self._grid_switch_suspended or self._grid_limit_configured()):
                 await self._pause_grid_charge("protective charge-limit write failed")
             return False
         self._grid_limit_last_write = dt_util.now()
@@ -6218,10 +6222,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not await self._set_ac_charge_limit_w(int(written)):
             # Switched on a moment ago, whatever Home Assistant shows yet: the
             # lab caught KORE's switch still reading "off" here, and with it
-            # neither the suspension nor the pause took effect
-            switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
-            switch = self.hass.states.get(str(switch_id)) if switch_id else None
-            paused = switch is not None and switch.state == "on" and self._grid_limit_configured()
+            # neither the suspension nor the pause took effect. A switch that
+            # did read "on" was suspended and paused by the setter.
+            paused = self._grid_switch_suspended
             self._suspend_grid_switch_if_on(switched_on=True)
             if not paused:
                 await self._pause_grid_charge(
@@ -6265,7 +6268,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             actual, written,
         )
         self._suspend_grid_switch_if_on()
-        if self._grid_limit_configured():
+        # Off whether or not the house connection limit is configured: a
+        # suspended switch left on is a forced charge to the target (Codex and
+        # CodeRabbit on #38)
+        if self._grid_switch_suspended or self._grid_limit_configured():
             await self._pause_grid_charge("the charge limit did not hold with grid charging switched on")
         await self._set_ac_charge_limit_w(int(written))
         return True
@@ -6814,7 +6820,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             return
         self._suspend_grid_switch_if_on()
-        if self._grid_limit_configured():
+        if self._grid_switch_suspended or self._grid_limit_configured():
             await self._pause_grid_charge("inverter readback exceeds the protective charge limit")
         if self._battery_idle_on_grid():
             _LOGGER.debug(

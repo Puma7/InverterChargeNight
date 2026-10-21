@@ -358,6 +358,19 @@ async def test_the_outlook_sees_a_battery_that_will_not_make_the_evening(mock_ha
 
 
 @pytest.mark.asyncio
+async def test_the_outlook_takes_the_configured_forecast_margin(mock_hass):
+    """The same forecast margin as the night plan's evening (Codex on #38)."""
+    coordinator = _outlook_coordinator(mock_hass)
+    outlooks = []
+    for margin in (0.0, 25.0):
+        coordinator.config = {**coordinator.config, CONF_FORECAST_ERROR_MARGIN: margin}
+        with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 6, 1, 14, 0)):
+            outlooks.append(await coordinator.async_evening_outlook())
+
+    assert outlooks[1].pv_to_come_kwh == pytest.approx(outlooks[0].pv_to_come_kwh * 0.75)
+
+
+@pytest.mark.asyncio
 async def test_the_outlook_is_quiet_when_the_battery_will_make_it(mock_hass):
     coordinator = _outlook_coordinator(mock_hass)
 
