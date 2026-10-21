@@ -497,13 +497,15 @@ def evening_outlook(
     sunset: datetime,
     forecast_kwh_today: float,
     forecast_available: bool,
+    forecast_error_margin_pct: float = 0.0,
 ) -> EveningOutlook:
     """Project the battery forward to the start of the high-price period.
 
     What it needs there is the period's own load, grossed up for the way out of
     the battery, on top of the user minimum - the day's surplus is *not*
     subtracted here the way it is in the night plan, because the sun between now
-    and then is already in the projection.
+    and then is already in the projection. That sun is the forecast less its
+    error margin, as for the evening in the night plan (:func:`surplus_kwh`).
 
     Raises ValueError for a non-positive capacity, like the other entry points.
     """
@@ -520,8 +522,10 @@ def evening_outlook(
     )
 
     load_to_come = integrate_load(house_load_kw_profile, now, zone_start)
+    cautious = max(0.0, 1 - max(0.0, forecast_error_margin_pct) / 100.0)
     pv_to_come = (
-        max(0.0, forecast_kwh_today) * pv_fraction_between(sunrise, sunset, now, zone_start)
+        max(0.0, forecast_kwh_today) * cautious
+        * pv_fraction_between(sunrise, sunset, now, zone_start)
         if forecast_available
         else 0.0
     )

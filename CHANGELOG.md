@@ -54,7 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     planned limit is written back. The raised min SOC keeps charging the battery, under that
     limit, as it did through the whole of that night. Right after the switch-on KORE may still
     show the switch as off - it publishes it with its next settings poll - so the switch-off
-    there does not rely on that state (found in the lab).
+    there does not rely on that state (found in the lab). The switch-off does not depend on the
+    optional house connection limit either: without it, the switch was suspended but left on,
+    and the forced charge ran on to the target (Codex and CodeRabbit on #38).
   - The min SOC was raised before the charge limit was written, so the Kostal charged at its
     own 22 kW for the seconds in between (the spike at 23:01). A floor above the battery
     level now goes on only after the planned limit.
@@ -62,7 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   battery control back to its own management unless the Modbus values are written again within
   its timeout (30-60 s): 1000 W written and confirmed at 23:01:05, about 8 kW charging at 23:12,
   and nobody else wrote the register in between. KORE and evcc write it cyclically; the window
-  now does too, every `CHARGE_LIMIT_KEEPALIVE_S` (30 s), while it holds a limit it wrote and the
+  now does too, every `CHARGE_LIMIT_KEEPALIVE_S` (20 s - a third of the shortest timeout is left
+  for the write itself; 30 s let the limit lapse for a moment every cycle, Codex on #38), while it holds a limit it wrote and the
   battery is not provably idle. The keepalive captures, records and pauses nothing - the
   verification and its bounded rewrites still judge what the inverter holds - and it stops with
   the window: after the window end nothing reaches the inverter. Before, the limit was rewritten every 15 minutes
@@ -79,7 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The forecast error margin takes the safe side for the evening.** It still widens the room
   kept free for tomorrow's sun, but the evening the battery has to carry now counts on the
   forecast *less* the margin. On 20 October the evening was credited 12.0 kWh of sun for a
-  10.9 kWh forecast, and the night bought too little for it.
+  10.9 kWh forecast, and the night bought too little for it. The afternoon outlook that drives
+  the evening rescue counts the rest of today's sun the same way (Codex on #38).
 
 ### Lab
 - **New lab campaign: forced charge.** The night through real HA, real KORE and the emulated

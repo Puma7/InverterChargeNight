@@ -422,3 +422,67 @@ async def test_a_switch_whose_feedback_lags_is_still_switched_off(night):
 
     assert coordinator._grid_switch_suspended is True
     assert ("switch", "turn_off", GRID) in _calls(hass)
+
+
+@pytest.mark.parametrize("path", ["recheck", "verification", "write"])
+@pytest.mark.asyncio
+async def test_a_forced_charge_goes_off_without_a_house_connection_limit(night, path):
+    """Codex and CodeRabbit on #38: the stop sat behind the house connection
+    limit, an optional feature. Without it the switch was suspended but left
+    on, and the forced charge ran at the Kostal's own 22 kW to the target."""
+    from custom_components.inverter_charge_night.const import CONF_GRID_IMPORT_ENTITY
+
+    hass, coordinator, clock = night
+    coordinator.config = {k: v for k, v in coordinator.config.items() if k != CONF_GRID_IMPORT_ENTITY}
+    assert not coordinator._grid_limit_configured()
+    coordinator.is_active = True
+    coordinator._planned_setpoint_written_w = 1000.0
+    coordinator._original_ac_charge_power = 22027.836
+    coordinator._battery_idle_on_grid = MagicMock(return_value=False)
+    hass.states.get(GRID).state = "on"
+    hass.states.get(AC_LIMIT).state = str(FORCED_W)
+
+    if path == "recheck":
+        assert await coordinator._limit_lifted_by_switch_on() is True
+    elif path == "verification":
+        await coordinator._verify_ac_charge_limit()
+    else:
+        assert await coordinator._set_ac_charge_limit_w(1000) is False
+
+    assert coordinator._grid_switch_suspended is True
+    assert ("switch", "turn_off", GRID) in _calls(hass)
+    assert hass.states.get(GRID).state == "off"
+
+
+@pytest.mark.asyncio
+async def test_the_keepalive_comes_well_inside_the_shortest_timeout(mock_hass):
+    """Codex on #38: a 30-s sleep against a 30-s timeout let the limit lapse to
+    the Kostal's own value before every keepalive, for the time the write took."""
+    import asyncio
+
+    from custom_components.inverter_charge_night.coordinator import KOSTAL_MODBUS_TIMEOUT_MIN_S
+
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.is_active = coordinator.is_enabled = True
+    coordinator._keep_charge_limit_alive = AsyncMock()
+    loops: dict[str, Any] = {}
+
+    def capture(coro: Any, name: str | None = None) -> MagicMock:
+        loops[name or ""] = coro
+        return MagicMock()
+
+    mock_hass.async_create_background_task = MagicMock(side_effect=capture)
+    await coordinator._start_periodic_verification()
+    loops.pop("inverter_charge_night_periodic_verification").close()
+    sleeps: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+        if len(sleeps) > 2:
+            raise asyncio.CancelledError
+
+    with patch("asyncio.sleep", new=sleep):
+        await loops["inverter_charge_night_charge_limit_keepalive"]
+
+    assert coordinator._keep_charge_limit_alive.await_count == 2
+    assert all(delay <= KOSTAL_MODBUS_TIMEOUT_MIN_S * 2 / 3 for delay in sleeps)

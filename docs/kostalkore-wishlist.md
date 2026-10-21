@@ -87,8 +87,8 @@ the emulated battery at the written power for as long as it is kept alive.
 
 ## 5. Log volume of repeated identical writes
 
-**Seen.** Every write with a float readback logs a WARNING. With a keepalive every 30 s that is
-120 warnings per hour of charging.
+**Seen.** Every write with a float readback logs a WARNING. With a keepalive every 20 s that is
+180 warnings per hour of charging.
 
 **Change.** Log a mismatch that is within the tolerance of item 1 at DEBUG, and rate-limit
 repeated identical mismatches (once per value per hour).
