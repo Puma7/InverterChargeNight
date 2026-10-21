@@ -70,6 +70,13 @@ async def check_forced_charge(hass, lab, planner, kore_entry, check):
     lab.audit = recording
     lab.emulator.readback_offset_w = 1.5
     lab.emulator.manual_charge_limit_w = native_ceiling
+    # The third quirk, in real seconds: a limit on 1038 lapses back to the
+    # Kostal's own value 3 s after its last write; the keepalive runs every 1 s
+    import custom_components.inverter_charge_night.coordinator as icn
+    keepalive_s = icn.CHARGE_LIMIT_KEEPALIVE_S
+    icn.CHARGE_LIMIT_KEEPALIVE_S = 1
+    lab.emulator.native_charge_limit_w = native_ceiling
+    lab.emulator.limit_fallback_s = 3.0
     try:
         if True:
             plant = lab.plant
@@ -106,7 +113,10 @@ async def check_forced_charge(hass, lab, planner, kore_entry, check):
                   "suspended": co._grid_switch_suspended})
 
             peak_w = 0.0
+            bought_before = plant.grid_charge_energy
             while clock[0] < now + timedelta(hours=4):
+                await asyncio.sleep(1.5)  # real time for the lapse and the keepalive
+                lab.emulator.apply_limit_fallback()
                 plant.advance(STEP.total_seconds())
                 peak_w = max(peak_w, plant.charge_ac_power)
                 clock[0] += STEP
@@ -125,16 +135,25 @@ async def check_forced_charge(hass, lab, planner, kore_entry, check):
                   not plant.grid_charge and co._grid_switch_suspended is (len(switched_on) == 1),
                   {"grid_charge": plant.grid_charge, "suspended": co._grid_switch_suspended})
             limits = [r for r in night if r[1] == "charge_limit"]
-            check("forced charge: the charge limit is not rewritten every poll",
-                  len(limits) <= 4, [(t.strftime("%H:%M"), v, a) for t, _, v, a in limits])
+            # The keepalive writes about once a real second while the battery charges
+            kept = [r for r in limits if r[0] > night[0][0]]
+            check("forced charge: the limit is kept alive while the battery charges",
+                  len(kept) >= 10, len(kept))
             first_limit = next(i for i, r in enumerate(night) if r[1] == "charge_limit")
             first_floor = next(i for i, r in enumerate(night) if r[1] == "min_soc" and r[2] >= 44)
             check("forced charge: the limit goes on before the floor that makes the Kostal charge",
                   first_limit < first_floor, [(k, v) for _, k, v, _ in night[:4]])
             # The plan runs on the real clock, which barely moves: it keeps
             # spreading the rest over six hours, so the night is not finished
+            # Energy, not a peak: the model's last 5-s step may end at the floor
+            bought = plant.grid_charge_energy - bought_before
+            planned_w = max((v for _, k, v, accepted in received if k == "charge_limit" and accepted),
+                            default=0.0)
+            allowed = planned_w * 4 / 1000 + .1  # four hours at the highest limit written
             check("forced charge: the raised floor keeps charging, under the planned limit",
-                  plant.soc > 38 and peak_w <= 731 + 100, {"soc": plant.soc, "peak_w": peak_w})
+                  plant.soc > 38 and peak_w <= 731 + 100 and bought <= allowed,
+                  {"soc": plant.soc, "peak_w": peak_w, "bought_kwh": round(bought, 2),
+                   "allowed_kwh": round(allowed, 2)})
             issues = [i.issue_id for i in ir.async_get(hass).issues.values()
                       if i.domain == "inverter_charge_night" and i.issue_id.startswith("charge_limit_not_held")]
             check("forced charge: a float readback is no reason for a repair issue", not issues, issues)
@@ -146,7 +165,8 @@ async def check_forced_charge(hass, lab, planner, kore_entry, check):
             await feedback()
             # The restore reads back as a float too: KORE calls it unconfirmed,
             # and the first retry, 60 s later, finds it back without writing -
-            # as in the field at 04:59 on 21 October
+            # as in the field at 04:59 on 21 October. The keepalive (1 s here)
+            # has stopped with the window: 65 s in which it would have written
             await asyncio.sleep(65)
             await feedback()
             ended = len(received)
@@ -163,6 +183,8 @@ async def check_forced_charge(hass, lab, planner, kore_entry, check):
                   not late and plant.min_soc == 8.0 and not co._pending_reset, late)
     finally:
         lab.audit = audit
+        icn.CHARGE_LIMIT_KEEPALIVE_S = keepalive_s
+        lab.emulator.limit_fallback_s = None
         lab.emulator.readback_offset_w = 0.0
         lab.emulator.manual_charge_limit_w = None
         hass.config_entries.async_update_entry(planner, data=saved_data)

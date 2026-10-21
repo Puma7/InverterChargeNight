@@ -70,6 +70,11 @@ the switch lifted it, grid charging goes off again for the rest of the window an
 SOC does the charging. Expect one short switch-on per night and the warning
 `The charge limit did not hold with ... switched on` in the log.
 
+**A limit on 1038 lapses unless it is written again.** 1000 W written and confirmed at 23:01,
+about 8 kW charging at 23:12, with nothing else writing the register. Inverter Charge Night
+writes the limit in force again every minute while the battery can draw from the grid in a
+window (KOSTAL KORE and evcc write it cyclically too), and never outside a window.
+
 **The charge limit reads back as a float.** A written 1000 W reads 997.9 to 999.9 W. KOSTAL KORE
 compares its readback exactly and reports such a write as unconfirmed; Inverter Charge Night
 accepts it once the next reading has moved to within 100 W of the written value.

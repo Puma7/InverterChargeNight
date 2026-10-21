@@ -165,14 +165,22 @@ def evening_reserve_kwh(p: PlanInput) -> float:
     return load_kwh * (1 + max(0.0, p.reserve_margin_pct) / 100.0)
 
 
-def surplus_kwh(p: PlanInput) -> float:
+def surplus_kwh(p: PlanInput, *, cautious: bool = False) -> float:
     """Tomorrow's forecast (with margin) minus the load it has to cover first.
 
     What is left over is what the day will actually put into the battery, and
     therefore what the evening does not have to be bought for.
+
+    The margin says how far the forecast may be off, and each use takes the
+    side that is safe for it: the room kept free for the sun assumes more of
+    it, the evening that has to be carried assumes less (``cautious``). Until
+    21 October 2026 the evening was credited the larger forecast too - 12.0
+    instead of 10.9 kWh - and the night bought too little for it.
     """
     daytime_load_kwh = integrate_load(p.house_load_kw_profile, p.pv_crossover, p.sunset)
-    forecast_with_margin = max(0.0, p.forecast_kwh_next_day) * (1 + p.error_margin_pct / 100.0)
+    margin = max(0.0, p.error_margin_pct) / 100.0
+    factor = max(0.0, 1 - margin) if cautious else 1 + margin
+    forecast_with_margin = max(0.0, p.forecast_kwh_next_day) * factor
     return max(0.0, forecast_with_margin - daytime_load_kwh)
 
 
@@ -191,7 +199,7 @@ def evening_shortfall_kwh(p: PlanInput) -> float:
     the charge efficiency instead - the conservative direction, for a check
     that acts on its own.
     """
-    covered_by_pv = surplus_kwh(p) if p.forecast_available else 0.0
+    covered_by_pv = surplus_kwh(p, cautious=True) if p.forecast_available else 0.0
     return max(0.0, evening_reserve_kwh(p) - covered_by_pv)
 
 

@@ -316,3 +316,78 @@ async def test_a_retained_value_with_a_new_timestamp_confirms_nothing(night):
     assert await coordinator._set_ac_charge_limit_w(1000) is False
     assert coordinator._grid_switch_suspended is True
     assert hass.states.get(GRID).state == "off"
+
+
+# --- The Kostal drops a 1038 limit after a few minutes (23:01 -> about 8 kW at 23:12) ---
+
+
+def _charging(hass: Any, coordinator: Any) -> None:
+    coordinator.is_active = True
+    coordinator._original_ac_charge_power = 22027.836
+    coordinator._planned_setpoint_written_w = 1000.0
+    hass.states.get(AC_LIMIT).state = "998.5"
+    hass.states.get(GRID).state = "off"
+    coordinator._battery_idle_on_grid = MagicMock(return_value=False)
+
+
+@pytest.mark.asyncio
+async def test_the_keepalive_writes_the_limit_in_force_again(night):
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+
+    await coordinator._keep_charge_limit_alive()
+
+    assert _calls(hass) == [("number", "set_value", AC_LIMIT)]
+    assert hass.services.async_call.await_args_list[0].args[2]["value"] == 1000.0
+    # KORE called it unconfirmed (the float readback): no wait, no pause, no record change
+    assert coordinator._grid_switch_suspended is False
+    assert coordinator._planned_setpoint_written_w == 1000.0
+
+
+@pytest.mark.parametrize("why", ["inactive", "not_captured", "not_held", "idle", "discharge"])
+@pytest.mark.asyncio
+async def test_the_keepalive_writes_nothing_it_does_not_own(night, why):
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+    if why == "inactive":
+        coordinator.is_active = False
+    elif why == "not_captured":
+        coordinator._original_ac_charge_power = None
+    elif why == "not_held":
+        coordinator._ac_limit_not_held = True
+    elif why == "idle":
+        coordinator._battery_idle_on_grid = MagicMock(return_value=True)
+    else:
+        coordinator.operation_mode = "morning_discharge"
+
+    await coordinator._keep_charge_limit_alive()
+
+    assert _calls(hass) == []
+
+
+@pytest.mark.asyncio
+async def test_a_kostal_that_drops_the_limit_keeps_it_with_the_keepalive(night):
+    """Without the keepalive the limit lapses five minutes after each write."""
+    from custom_components.inverter_charge_night.coordinator import CHARGE_LIMIT_KEEPALIVE_S
+
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+    last_write = [clock.now]
+    device = hass.services.async_call.side_effect
+
+    async def kostal_with_fallback(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if data.get("entity_id") == AC_LIMIT and service == "set_value":
+            last_write[0] = clock.now
+        await device(domain, service, data, **kwargs)
+
+    hass.services.async_call = AsyncMock(side_effect=kostal_with_fallback)
+    lapsed = []
+    for _ in range(30):  # half an hour
+        clock.now += timedelta(seconds=CHARGE_LIMIT_KEEPALIVE_S)
+        if clock.now - last_write[0] > timedelta(minutes=5):
+            hass.states.get(AC_LIMIT).state = "22027.836"  # the Kostal's own again
+            lapsed.append(clock.now)
+        await coordinator._keep_charge_limit_alive()
+
+    assert not lapsed
+    assert hass.states.get(AC_LIMIT).state == "998.5"

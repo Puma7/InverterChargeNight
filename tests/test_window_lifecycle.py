@@ -164,7 +164,8 @@ async def test_window_start_calculates_target_and_arms_listeners(mock_hass, coor
     assert coordinator._inverter_min_soc_listener is not None
     assert coordinator._verification_task is not None
     assert not coordinator._verification_task.done()
-    mock_hass.async_create_background_task.assert_called_once()
+    assert coordinator._keepalive_task is not None
+    assert mock_hass.async_create_background_task.call_count == 2  # verification, keepalive
 
     # Window start itself only schedules the refresh; the refresh does the work
     coordinator.async_request_refresh.assert_awaited_once()

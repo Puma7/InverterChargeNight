@@ -28,11 +28,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The min SOC was raised before the charge limit was written, so the Kostal charged at its
     own 22 kW for the seconds in between (the spike at 23:01). A floor above the battery
     level now goes on only after the planned limit.
+- **The charge limit is kept alive while the battery can draw from the grid.** The Kostal drops
+  a limit on register 1038 after a few minutes unless it is written again: 1000 W written and
+  confirmed at 23:01:05, about 8 kW charging at 23:12, and nobody else wrote the register in
+  between. KORE and evcc write it cyclically; the window now does too, every
+  `CHARGE_LIMIT_KEEPALIVE_S` (60 s), while it holds a limit it wrote and the battery is not
+  provably idle. The keepalive captures, records and pauses nothing - the verification and its
+  bounded rewrites still judge what the inverter holds - and it stops with the window: after
+  the window end nothing reaches the inverter. Before, the limit was rewritten every 15 minutes
+  only by accident, because every write counted as failed; with the readback fixed above it
+  would have been written twice a night and lapsed for the rest of it.
+
+### Changed
+- **The evening rescue acts only when switched on, holding included** (Pascal's decision of
+  21 October). That morning the min SOC sat at 35 % and went back up every time it was set by
+  hand - most likely the rescue holding the battery for the 16:30 period: an integration for the
+  night changing the inverter in the middle of the day. `switch.…_evening_rescue_charge` is now "Evening rescue (hold and
+  charge)", off by default; switching it off ends a running rescue at once, and a rescue window
+  persisted from before the update ends at the next poll.
+- **The forecast error margin takes the safe side for the evening.** It still widens the room
+  kept free for tomorrow's sun, but the evening the battery has to carry now counts on the
+  forecast *less* the margin. On 20 October the evening was credited 12.0 kWh of sun for a
+  10.9 kWh forecast, and the night bought too little for it.
+
+### Lab
 - **New lab campaign: forced charge.** The night through real HA, real KORE and the emulated
-  Kostal with both quirks - float readback and a forced charge behind `ManualCharge` - and
-  the efficiency search on, as in the field: the switch goes on at most once and off in the
-  same poll, the limit precedes the floor and holds, no repair issue, and nothing reaches the
-  inverter after the window end.
+  Kostal with all three quirks - float readback, a forced charge behind `ManualCharge` and a
+  limit that lapses unless written again - and the efficiency search on, as in the field: the
+  switch goes on at most once and off in the same poll, the limit precedes the floor and is
+  kept alive, the battery charges no faster than the planned limit allows, no repair issue,
+  and nothing reaches the inverter after the window end. Without the keepalive the same night
+  draws 4.4 instead of at most 3.0 kWh.
 
 ## [3.10.7] - 2026-10-20
 

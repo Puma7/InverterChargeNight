@@ -85,7 +85,8 @@ async def test_start_periodic_verification_uses_background_task(mock_hass):
 
     await coordinator._start_periodic_verification()
 
-    mock_hass.async_create_background_task.assert_called_once()
+    # The verification and the charge-limit keepalive
+    assert mock_hass.async_create_background_task.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -97,7 +98,7 @@ async def test_periodic_verification_loop_handles_cancel(mock_hass):
     captured = {}
 
     def _capture(coro, name=None):
-        captured["coro"] = coro
+        captured[name] = coro
         return MagicMock()
 
     mock_hass.async_create_background_task = MagicMock(side_effect=_capture)
@@ -105,7 +106,9 @@ async def test_periodic_verification_loop_handles_cancel(mock_hass):
     await coordinator._start_periodic_verification()
 
     with patch("asyncio.sleep", new=AsyncMock(side_effect=asyncio.CancelledError())):
-        await captured["coro"]
+        # Both loops end on a cancel, the keepalive as well
+        await captured["inverter_charge_night_charge_limit_keepalive"]
+        await captured["inverter_charge_night_periodic_verification"]
 
 
 @pytest.mark.asyncio
@@ -113,10 +116,10 @@ async def test_start_periodic_verification_passes_task_name(mock_hass):
     coordinator = _make_coordinator(mock_hass, {})
     coordinator.is_active = True
     coordinator.is_enabled = True
-    captured_name = {}
+    captured_names = []
 
     def _capture(coro, name=None):
-        captured_name["name"] = name
+        captured_names.append(name)
         coro.close()
         return MagicMock()
 
@@ -124,7 +127,10 @@ async def test_start_periodic_verification_passes_task_name(mock_hass):
 
     await coordinator._start_periodic_verification()
 
-    assert captured_name["name"] == "inverter_charge_night_periodic_verification"
+    assert captured_names == [
+        "inverter_charge_night_periodic_verification",
+        "inverter_charge_night_charge_limit_keepalive",
+    ]
 
 
 @pytest.mark.asyncio

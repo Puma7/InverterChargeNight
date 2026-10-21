@@ -360,9 +360,14 @@ battery by the time the period starts. It does not simply buy all of it:
 
 ```
 evening reserve   = house load over the period   (+ your allowance)
-covered by the PV = tomorrow's surplus           (forecast − daytime load)
+covered by the PV = tomorrow's surplus           (forecast × (1 − margin) − daytime load)
 bought at night   = evening reserve − covered by the PV, never below zero
 ```
+
+The forecast error margin takes the safe side for each use: the room kept free for tomorrow's
+sun assumes the forecast plus the margin, the evening the battery has to carry assumes the
+forecast minus it. Until 3.10.8 the evening was credited the larger figure as well, and the
+night bought too little for it.
 
 On a summer day whose forecast covers the house anyway, this changes nothing: the sun fills the
 battery long before the evening. On a dull winter day the whole evening is added to the night's
@@ -395,15 +400,20 @@ The night plan buys for the high-price period in advance. The rescue is what hap
 plan turns out to have been too optimistic — snow on the panels, say, with the snow nights not
 set. By mid-afternoon it is already decidable, and there is still time.
 
+Since 3.10.8 the rescue acts only with `switch.…_evening_rescue_charge` on — holding included.
+Holding raises the inverter's min SOC to the level the battery is at, in the middle of the day,
+and keeps it there: a min SOC set by hand would be put back. Switching it off ends a running
+rescue at once.
+
 `sensor.…_evening_outlook` carries the shortfall in kWh, normally 0. It needs a forecast entity
 for **today**: in the afternoon the tomorrow entity is tomorrow, and the rescue would act on the
 wrong day's sun. Without one the sensor stays empty and nothing is rescued. When it is not 0:
 
-1. **The discharge is blocked** — automatically. The house then runs from the sun, and from the
-   grid at the day tariff when the sun is not enough, rather than from a battery that is needed
+1. **The discharge is blocked.** The house then runs from the sun, and from the grid at the day
+   tariff when the sun is not enough, rather than from a battery that is needed
    in three hours at the peak tariff. Nothing is spent that the same evening does not pay back.
-2. **The rest is bought** — only with `switch.…_evening_rescue_charge` on, and only in the last
-   two hours before the period, when the forecast hardly turns any more. Bought at noon is
+2. **The rest is bought** — only in the last two hours before the period, when the forecast
+   hardly turns any more. Bought at noon is
    bought for a sun that might still have come.
 3. **At the period's start the block is released** and the inverter goes back to the settings it
    had before, so the battery carries the evening.
@@ -728,7 +738,7 @@ as "Inverter Charge Night <name>". The entity ids are stable; the display names 
 | Automation | `switch.…_enabled` | The main switch. Off means the integration controls nothing. |
 | Efficiency search | `switch.…_auto_efficient_charge_finder` | Starts the search for the most efficient charge power. Switches itself off when it is done. |
 | Skip the next window (24 h) | `switch.…_skip_next` | Skips one window, then expires by itself. |
-| Evening rescue: charge from the grid | `switch.…_evening_rescue_charge` | Lets the rescue buy for the evening, not only hold what is there. Off by default. |
+| Evening rescue (hold and charge) | `switch.…_evening_rescue_charge` | Lets the rescue act: hold the battery for the evening and, in the last two hours, buy the rest. Off by default. |
 | Operation mode | `select.…_operation_mode` | Night Charge or Morning Discharge. |
 | Target SOC override | `number.…_min_soc_override` | Overrules the planner for this window. |
 | Snow nights | `number.…_snow_nights` | Charge the next N nights to the maximum. |

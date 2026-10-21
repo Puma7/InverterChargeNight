@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import secrets
 import struct
+import time
 
 from aiohttp import web
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -43,6 +44,11 @@ class KostalEmulator:
         # forced charge that lifts the limit to the inverter's own value
         self.readback_offset_w = 0.0
         self.manual_charge_limit_w: float | None = None
+        # ...and a limit on 1038 lapses back to the inverter's own value unless
+        # it is written again within this many seconds (23:01 -> 8 kW at 23:12)
+        self.limit_fallback_s: float | None = None
+        self.native_charge_limit_w = 0.0
+        self._limit_written_at = 0.0
 
     async def start(self, http_port=80, modbus_port=1502):
         host = inverter_host()
@@ -260,7 +266,13 @@ class KostalEmulator:
             return web.json_response({"sessionId": session})
         return web.json_response({"message": "Invalid authentication request"}, status=400)
 
+    def apply_limit_fallback(self):
+        if (self.limit_fallback_s is not None
+                and time.monotonic() - self._limit_written_at > self.limit_fallback_s):
+            self.lab.plant.charge_limit = self.native_charge_limit_w
+
     def registers(self):
+        self.apply_limit_fallback()
         p = self.lab.plant
         values = {}
 
@@ -339,6 +351,8 @@ class KostalEmulator:
                             self.lab.audit(key, value, accepted=not refused)
                             if not refused:
                                 setattr(self.lab.plant, key, float(value))
+                                if key == "charge_limit":
+                                    self._limit_written_at = time.monotonic()
                             self.lab.publish()
                             response = struct.pack(">BHH", 16, address, count)
                         else:

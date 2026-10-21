@@ -78,6 +78,8 @@ def _make_coordinator(hass, extra=None, options=None):
     coordinator.async_request_refresh = AsyncMock()
     coordinator._start_periodic_verification = AsyncMock()
     coordinator._stop_periodic_verification = AsyncMock()
+    # The windows here are the rescue's, and it acts only when switched on
+    coordinator.evening_rescue_charge = True
     return coordinator
 
 

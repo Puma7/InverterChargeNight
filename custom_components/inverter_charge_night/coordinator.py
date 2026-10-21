@@ -228,6 +228,11 @@ SWITCH_ON_RECHECK_S = 45
 # How long a write KORE reports as unconfirmed waits for its fresh reading.
 # The write itself makes KORE's next poll (5 s) read the register.
 LIMIT_FEEDBACK_WAIT_S = 12
+# The Kostal drops a charge limit on register 1038 after a few minutes unless
+# it is written again (20/21 October: 1000 W written at 23:01, about 8 kW
+# charging at 23:12). KORE and evcc write it cyclically; so does a window that
+# can draw from the grid, at this interval
+CHARGE_LIMIT_KEEPALIVE_S = 60
 SKIP_NEXT_DURATION = timedelta(hours=24)
 # A bridge longer than this means the sunrise or the window end is off; the plan
 # is still made, but it is worth a warning in the log.
@@ -451,6 +456,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._battery_soc_listener: CALLBACK_TYPE | None = None
         self._inverter_min_soc_listener: CALLBACK_TYPE | None = None
         self._verification_task: asyncio.Task[None] | None = None
+        self._keepalive_task: asyncio.Task[None] | None = None
         self._verifying_min_soc = False
         self._min_soc_write_lock = asyncio.Lock()
         self._ac_charge_limit_write_lock = asyncio.Lock()
@@ -2906,6 +2912,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _write_ac_charge_limit(
         self, entity_id: str, domain: str, power_w: float, what: str, *, restore: bool = False,
+        keepalive: bool = False,
     ) -> bool:
         """Write ``power_w`` to the AC charge limit entity in its own unit; report success.
 
@@ -2961,6 +2968,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 blocking=True,
             )
         except Exception as e:
+            if keepalive:
+                # The same value once more: KORE's exact readback says nothing
+                # new, and the verification judges what the inverter holds
+                _LOGGER.debug("%s to %.3f: %s", what, value, e)
+                return False
             if (not restore and not isinstance(e, ServiceValidationError)
                     and await self._limit_reads_back(entity_id, before_value, power_w)):
                 # KORE compares its readback exactly, and the Kostal answers a
@@ -2974,8 +2986,40 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return True
             _LOGGER.error("Error writing AC charge limit (%s): %s", what, e, exc_info=True)
             return False
-        _LOGGER.info("%s to %.3f (%s)", what, value, unit or "unitless")
+        if keepalive:
+            _LOGGER.debug("%s to %.3f (%s)", what, value, unit or "unitless")
+        else:
+            _LOGGER.info("%s to %.3f (%s)", what, value, unit or "unitless")
         return True
+
+    async def _keep_charge_limit_alive(self) -> None:
+        """Write the charge limit in force again, so the Kostal does not drop it.
+
+        Only while this window holds a limit it wrote and the battery could
+        draw from the grid. Nothing is captured, recorded or paused here: the
+        verification and its bounded rewrites judge what the inverter holds.
+        """
+        if (not self.is_active or self._ending or self._unloading or self.is_discharge_mode
+                or self._ac_limit_not_held or self._original_ac_charge_power is None):
+            return
+        target = self._ac_charge_limit_target()
+        written = (
+            float(self._auto_test_power_w)
+            if self._auto_test_active and self._auto_test_power_w is not None
+            else self._planned_setpoint_written_w
+        )
+        if target is None or written is None or self._is_backup_active():
+            return
+        if self._battery_idle_on_grid():
+            return
+        if self._ac_charge_limit_write_lock.locked():
+            return  # a writer is at it right now
+        async with self._ac_charge_limit_write_lock:
+            if not self.is_active or self._ending or self._unloading:
+                return
+            await self._write_ac_charge_limit(
+                target[0], target[1], written, "Keep AC charge limit", keepalive=True,
+            )
 
     async def _limit_reads_back(self, entity_id: str, before_value: str | None, power_w: float) -> bool:
         """True when the reading moved to within 100 W of ``power_w`` after the write.
@@ -4799,6 +4843,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         cheapest place for that energy to be, and the window ends when the
         period starts anyway.
         """
+        await self.async_end_evening_rescue_if_off()
+        if not self.evening_rescue_charge:
+            # Only on request (21 October 2026): held at 35 % from the morning
+            # on, the min SOC went back up every time it was set by hand
+            return
         outlook = self.last_evening_outlook
         if outlook is None or outlook.missing_kwh <= 0:
             return
@@ -4811,7 +4860,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         now = dt_util.now()
         close_enough = (outlook.zone_start - now) <= timedelta(hours=EVENING_RESCUE_CHARGE_LEAD_H)
-        stage = 2 if (self.evening_rescue_charge and close_enough) else 1
+        stage = 2 if close_enough else 1
         if stage <= self._rescue_stage:
             return
 
@@ -4836,6 +4885,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             allow_grid_charge=stage == 2,
         ):
             self._rescue_stage = stage
+
+    async def async_end_evening_rescue_if_off(self) -> None:
+        """Release a rescue window once the rescue is switched off.
+
+        A window the rescue opened before it became opt-in, persisted across
+        the update, ends here too.
+        """
+        if (self.evening_rescue_charge or self._adhoc_until is None
+                or self._adhoc_reason != ADHOC_REASON_EVENING_RESCUE):
+            return
+        _LOGGER.info("The evening rescue is switched off - releasing its window")
+        await self._on_window_end(dt_util.now())
 
     async def async_charge_to(self, target_soc: float, duration: timedelta) -> bool:
         """Charge to a level from the grid, for the ``charge_to`` action.
@@ -6645,6 +6706,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _periodic_verification_loop(),
             "inverter_charge_night_periodic_verification",
         )
+
+        async def _keepalive_loop() -> None:
+            while self.is_active and self.is_enabled:
+                try:
+                    await asyncio.sleep(CHARGE_LIMIT_KEEPALIVE_S)
+                    if self.is_active and self.is_enabled:
+                        await self._keep_charge_limit_alive()
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    _LOGGER.error("Error keeping the charge limit alive: %s", e, exc_info=True)
+
+        self._keepalive_task = self.hass.async_create_background_task(
+            _keepalive_loop(), "inverter_charge_night_charge_limit_keepalive",
+        )
         _LOGGER.debug("Started periodic verification task (interval: %d seconds)",
                      self.config.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
 
@@ -6655,14 +6731,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ``is_active`` check could otherwise write the night target back to
         the inverter after the window-end reset (finding F11).
         """
-        task = self._verification_task
-        self._verification_task = None
-        if task is None or task.done():
-            return
-        task.cancel()
-        if task is asyncio.current_task():
-            return  # cancelling ourselves; the loop exits on its own
-        await asyncio.gather(task, return_exceptions=True)
+        for name in ("_verification_task", "_keepalive_task"):
+            task: asyncio.Task[None] | None = getattr(self, name)
+            setattr(self, name, None)
+            if task is None or task.done():
+                continue
+            task.cancel()
+            if task is asyncio.current_task():
+                continue  # cancelling ourselves; the loop exits on its own
+            await asyncio.gather(task, return_exceptions=True)
         _LOGGER.debug("Stopped periodic verification task")
 
     async def _verify_ac_charge_limit(self) -> None:
