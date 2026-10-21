@@ -609,11 +609,22 @@ async def test_a_failed_lowering_write_is_no_lift(night):
     coordinator._planned_setpoint_written_w = 5000.0
     hass.states.get(GRID).state = "on"
     hass.states.get(AC_LIMIT).state = "4998.5"
-    hass.services.async_call = AsyncMock(side_effect=HomeAssistantError("Modbus timeout"))
+    device = hass.services.async_call.side_effect
+
+    async def modbus(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if service == "set_value" and data.get("entity_id") == AC_LIMIT:
+            raise HomeAssistantError("Modbus timeout")
+        await device(domain, service, data, **kwargs)
+
+    hass.services.async_call = AsyncMock(side_effect=modbus)
 
     assert await coordinator._set_ac_charge_limit_w(1000) is False
 
     assert coordinator._grid_switch_suspended is False
+    # The house connection limit still pauses for the failed write - once,
+    # not for the rest of the window (CodeRabbit on #39)
+    assert ("switch", "turn_off", GRID) in _calls(hass)
+    assert hass.states.get(GRID).state == "off"
 
 
 @pytest.mark.asyncio
@@ -687,3 +698,39 @@ async def test_only_an_expiring_control_is_kept_alive(mock_hass, platform, kept)
 
     assert ("inverter_charge_night_charge_limit_keepalive" in names) is kept
     registry.async_get.assert_called_with(AC_LIMIT)
+
+
+@pytest.mark.parametrize("delivered", [True, False])
+@pytest.mark.asyncio
+async def test_a_lifted_limit_is_written_again_before_the_floor_rises(night, delivered):
+    """Codex on #38: later in the window the plan wrote nothing - its setpoint
+    was within 100 W of the one written - but the Kostal had dropped that limit
+    since. The raised floor would charge at its own 22 kW. The limit in force
+    is read first and written again; if that fails, the floor waits."""
+    hass, coordinator, clock = night
+    await coordinator._on_window_start(WINDOW_START)
+    coordinator.initial_calculated_soc = 43.1
+    coordinator._original_ac_charge_power = 22027.836
+    coordinator._planned_setpoint_written_w = 1000.0
+    coordinator._plan_charge_power = AsyncMock()  # nothing new to write
+    hass.states.get(AC_LIMIT).state = "22027.836"  # dropped back to the Kostal's own
+    if not delivered:
+        device = hass.services.async_call.side_effect
+
+        async def modbus(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+            if service == "set_value" and data.get("entity_id") == AC_LIMIT:
+                raise HomeAssistantError("Modbus timeout")
+            await device(domain, service, data, **kwargs)
+
+        hass.services.async_call = AsyncMock(side_effect=modbus)
+    _fresh(hass, clock)
+
+    await coordinator._async_update_data()
+
+    args = [c.args for c in hass.services.async_call.await_args_list]
+    floor = ("number", "set_value", {"entity_id": MIN_SOC, "value": 43.1})
+    if delivered:
+        raised = args.index(floor)
+        assert ("number", "set_value", {"entity_id": AC_LIMIT, "value": 1000.0}) in args[:raised]
+    else:
+        assert floor not in args
