@@ -30,7 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     show the switch as off - it publishes it with its next settings poll - so the switch-off
     there does not rely on that state (found in the lab). The switch-off does not depend on the
     optional house connection limit either: without it, the switch was suspended but left on,
-    and the forced charge ran on to the target (Codex and CodeRabbit on #38).
+    and the forced charge ran on to the target (Codex and CodeRabbit on #38). Only evidence of a
+    forced charge suspends the switch - a reading above the limit, or a failed rewrite right after
+    switching on; a write lost to a Modbus timeout no longer costs an inverter that needs the
+    switch its night (CodeRabbit on #39).
   - The min SOC was raised before the charge limit was written, so the Kostal charged at its
     own 22 kW for the seconds in between (the spike at 23:01). A floor above the battery
     level now goes on only after the planned limit.
@@ -44,7 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verification and its bounded rewrites still judge what the inverter holds - and it stops with
   the window: after the window end nothing reaches the inverter. Before, the limit was rewritten every 15 minutes
   only by accident, because every write counted as failed; with the readback fixed above it
-  would have been written twice a night and lapsed for the rest of it.
+  would have been written twice a night and lapsed for the rest of it. A limit someone else has
+  lowered (the user, evcc) is left alone, as the verification does (CodeRabbit on #38). A
+  keepalive that is not delivered while the inverter no longer reads the limit runs the
+  verification at once, not up to 15 minutes later (Codex on #39).
 
 ### Changed
 - **The evening rescue acts only when switched on, holding included** (Pascal's decision of

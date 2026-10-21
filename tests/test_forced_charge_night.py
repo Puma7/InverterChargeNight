@@ -165,7 +165,9 @@ async def test_an_old_reading_does_not_confirm_a_failed_write(night):
 
     assert ("homeassistant", "update_entity", AC_LIMIT) in _calls(hass)
     assert ("switch", "turn_off", GRID) in _calls(hass)
-    assert coordinator._grid_switch_suspended is True
+    # Paused, not suspended: a lost write is no forced charge, and the next
+    # poll may switch grid charging on again (CodeRabbit on #39)
+    assert coordinator._grid_switch_suspended is False
 
 
 @pytest.mark.asyncio
@@ -312,8 +314,11 @@ async def test_a_retained_value_with_a_new_timestamp_confirms_nothing(night):
             raise HomeAssistantError(f"Readback is unconfirmed for {AC_LIMIT}")
 
     hass.services.async_call = AsyncMock(side_effect=kore)
+    coordinator._original_ac_charge_power = 22027.836
+    coordinator._planned_setpoint_written_w = 1000.0
 
-    assert await coordinator._set_ac_charge_limit_w(1000) is False
+    # The rewrite right after switching on: unconfirmed there means lifted
+    await coordinator._confirm_limit_after_switch_on()
     assert coordinator._grid_switch_suspended is True
     assert hass.states.get(GRID).state == "off"
 
@@ -486,3 +491,54 @@ async def test_the_keepalive_comes_well_inside_the_shortest_timeout(mock_hass):
 
     assert coordinator._keep_charge_limit_alive.await_count == 2
     assert all(delay <= KOSTAL_MODBUS_TIMEOUT_MIN_S * 2 / 3 for delay in sleeps)
+
+
+@pytest.mark.asyncio
+async def test_the_keepalive_leaves_a_lower_limit_alone(night):
+    """CodeRabbit on #38: someone lowered the limit - the user, evcc. The
+    verification leaves a lower limit alone; the keepalive raised it again
+    within 20 s."""
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+    hass.states.get(AC_LIMIT).state = "500"
+
+    await coordinator._keep_charge_limit_alive()
+
+    assert _calls(hass) == []
+
+
+@pytest.mark.parametrize("held", [True, False])
+@pytest.mark.asyncio
+async def test_a_keepalive_that_is_not_delivered_is_verified_at_once(night, held):
+    """Codex on #39: a refused keepalive was treated like KORE's float readback.
+    The Kostal drops the limit within a minute, the verification ran up to 15
+    minutes later. A reading that still matches is the float case; anything
+    else is checked now."""
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+    coordinator._verify_ac_charge_limit = AsyncMock()
+    if not held:
+        hass.states.get(AC_LIMIT).state = "22027.836"  # lapsed to the Kostal's own
+    hass.services.async_call = AsyncMock(side_effect=ServiceValidationError("unavailable"))
+
+    await coordinator._keep_charge_limit_alive()
+
+    assert hass.services.async_call.await_count == 1
+    assert coordinator._verify_ac_charge_limit.await_count == (0 if held else 1)
+
+
+@pytest.mark.asyncio
+async def test_a_transient_write_failure_does_not_suspend_the_switch(night):
+    """CodeRabbit on #39: a Modbus timeout while grid charging was on suspended
+    the switch for the whole window - on an inverter that needs the switch to
+    charge, the night was lost. Only a reading above the limit is a forced charge."""
+    hass, coordinator, clock = night
+    coordinator.is_active = True
+    coordinator._original_ac_charge_power = 22027.836
+    hass.states.get(GRID).state = "on"
+    hass.states.get(AC_LIMIT).state = "998.5"
+    hass.services.async_call = AsyncMock(side_effect=HomeAssistantError("Modbus timeout"))
+
+    assert await coordinator._set_ac_charge_limit_w(1000) is False
+
+    assert coordinator._grid_switch_suspended is False

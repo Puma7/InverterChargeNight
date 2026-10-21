@@ -3016,14 +3016,32 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if self._battery_idle_on_grid():
             return
+        actual = self._get_ac_charge_limit_w(target[0])
+        if actual is not None and actual < written - PLANNED_POWER_WRITE_THRESHOLD_W:
+            # Lowered by someone else - the user, evcc. The verification leaves
+            # a lower limit alone, and so does the keepalive (CodeRabbit on #38)
+            return
         if self._ac_charge_limit_write_lock.locked():
             return  # a writer is at it right now
         async with self._ac_charge_limit_write_lock:
             if not self.is_active or self._ending or self._unloading:
                 return
-            await self._write_ac_charge_limit(
+            if await self._write_ac_charge_limit(
                 target[0], target[1], written, "Keep AC charge limit", keepalive=True,
-            )
+            ):
+                return
+        actual = self._get_ac_charge_limit_w(target[0])
+        if actual is None or abs(actual - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
+            # KORE's exact readback of the Kostal's float: the limit holds
+            return
+        # Not delivered, and the inverter no longer reads the limit: it drops it
+        # within a minute, the verification would come up to 15 minutes later
+        # (Codex on #39). It judges the reading and acts, with its bounded rewrites.
+        _LOGGER.warning(
+            "Keeping the AC charge limit at %.0f W failed and the inverter reads %.0f W - "
+            "verifying it now", written, actual,
+        )
+        await self._verify_ac_charge_limit()
 
     async def _limit_reads_back(self, entity_id: str, before_value: str | None, power_w: float) -> bool:
         """True when the reading moved to within 100 W of ``power_w`` after the write.
@@ -3127,7 +3145,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not await self._write_ac_charge_limit(
             entity_id, domain, power_w, "Set AC charge limit"
         ):
-            self._suspend_grid_switch_if_on()
+            # A forced charge reads above the limit; a Modbus timeout does not,
+            # and must not cost an inverter that needs the switch its night
+            # (CodeRabbit on #39)
+            reading = self._get_ac_charge_limit_w(entity_id)
+            if reading is not None and reading > power_w + PLANNED_POWER_WRITE_THRESHOLD_W:
+                self._suspend_grid_switch_if_on()
             if self.is_active and (self._grid_switch_suspended or self._grid_limit_configured()):
                 await self._pause_grid_charge("protective charge-limit write failed")
             return False
@@ -6216,6 +6239,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         written = self._planned_setpoint_written_w
         if target is None or written is None:
             return
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        switch = self.hass.states.get(str(switch_id)) if switch_id else None
+        shown_on = switch is not None and switch.state == "on"
         # Written once more: KORE reads the register back directly, while Home
         # Assistant sees it only every 30 s. A forced charge fails this write
         # within a second, and the setter suspends the switch and pauses.
@@ -6223,8 +6249,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Switched on a moment ago, whatever Home Assistant shows yet: the
             # lab caught KORE's switch still reading "off" here, and with it
             # neither the suspension nor the pause took effect. A switch that
-            # did read "on" was suspended and paused by the setter.
-            paused = self._grid_switch_suspended
+            # did read "on" was paused by the setter when it was suspended or
+            # the house connection limit is configured.
+            paused = shown_on and self.is_active and (
+                self._grid_switch_suspended or self._grid_limit_configured()
+            )
             self._suspend_grid_switch_if_on(switched_on=True)
             if not paused:
                 await self._pause_grid_charge(
