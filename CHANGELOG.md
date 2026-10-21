@@ -28,7 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     planned limit is written back. The raised min SOC keeps charging the battery, under that
     limit, as it did through the whole of that night. Right after the switch-on KORE may still
     show the switch as off - it publishes it with its next settings poll - so the switch-off
-    there does not rely on that state (found in the lab). The switch-off does not depend on the
+    there does not rely on that state (found in the lab), nor does the recheck 45 s later
+    (Codex on #38); the switch-off is sent once, not again by a check that read the state from
+    before the write. A suspended switch is off for the efficiency search too, whatever KORE still
+    shows - after dark the lab saw it start a trial on that stale "on". A planned limit written
+    back after the switch-off, or by the verification, that fails holds a higher floor back, and
+    none is written back once the window has ended (Codex on #38). The switch-off does not depend on the
     optional house connection limit either: without it, the switch was suspended but left on,
     and the forced charge ran on to the target (Codex and CodeRabbit on #38). Only evidence of a
     forced charge suspends the switch - a reading above the limit, or a failed rewrite right after

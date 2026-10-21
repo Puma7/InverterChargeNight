@@ -734,3 +734,139 @@ async def test_a_lifted_limit_is_written_again_before_the_floor_rises(night, del
         assert ("number", "set_value", {"entity_id": AC_LIMIT, "value": 1000.0}) in args[:raised]
     else:
         assert floor not in args
+
+
+@pytest.mark.asyncio
+async def test_the_recheck_does_not_trust_a_switch_that_still_reads_off(night):
+    """Codex on #38: switched on, the rewrite held, and 45 s later KORE still
+    showed the switch "off" while the limit read the forced value. The recheck
+    knows the switch was commanded on: it suspends and stops it all the same."""
+    from custom_components.inverter_charge_night.coordinator import SWITCH_ON_RECHECK_S
+
+    hass, coordinator, clock = night
+    coordinator.is_active = True
+    coordinator._original_ac_charge_power = 22027.836
+    coordinator._planned_setpoint_written_w = 1000.0
+    hass.states.get(AC_LIMIT).state = "998.5"
+    hass.states.get(GRID).state = "off"  # KORE has not published the switch yet
+    hass.services.async_call = AsyncMock()
+
+    with patch("custom_components.inverter_charge_night.coordinator.async_call_later") as later:
+        await coordinator._confirm_limit_after_switch_on()
+        delay, recheck = later.call_args.args[1:]
+        assert delay == SWITCH_ON_RECHECK_S
+        hass.states.get(AC_LIMIT).state = str(FORCED_W)
+        hass.services.async_call = _kostal(hass, clock)
+        await recheck(clock.now)
+
+    assert coordinator._grid_switch_suspended is True
+    assert ("switch", "turn_off", GRID) in _calls(hass)
+
+
+def _limit_writes_fail(hass: Any) -> None:
+    device = hass.services.async_call.side_effect
+
+    async def modbus(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if service == "set_value" and data.get("entity_id") == AC_LIMIT:
+            raise HomeAssistantError("Modbus timeout")
+        await device(domain, service, data, **kwargs)
+
+    hass.services.async_call = AsyncMock(side_effect=modbus)
+
+
+@pytest.mark.parametrize("path", ["verification", "switch_on_recheck"])
+@pytest.mark.asyncio
+async def test_a_failed_protective_rewrite_holds_the_floor_back(night, path):
+    """Codex on #38: the verification and the switch-on recheck each write a
+    lifted limit back, and ignored a failure - the min SOC verification could
+    then raise the floor under the inverter's own limit."""
+    hass, coordinator, clock = night
+    coordinator.is_active = True
+    coordinator._original_ac_charge_power = 22027.836
+    coordinator._planned_setpoint_written_w = 1000.0
+    coordinator._battery_idle_on_grid = MagicMock(return_value=False)
+    hass.states.get(AC_LIMIT).state = str(FORCED_W)
+    hass.states.get(GRID).state = "on" if path == "switch_on_recheck" else "off"
+    _limit_writes_fail(hass)
+
+    if path == "verification":
+        await coordinator._verify_ac_charge_limit()
+    else:
+        assert await coordinator._limit_lifted_by_switch_on() is True
+
+    assert coordinator._plan_limit_write_failed is True
+
+
+@pytest.mark.asyncio
+async def test_no_recovery_rewrite_once_the_window_has_ended(night):
+    """Codex on #38: the first write after switching on failed while the window
+    ended; the window end restored the user's limit, and the recovery rewrite
+    put the planned one back over it."""
+    hass, coordinator, clock = night
+    coordinator.is_active = True
+    coordinator._planned_setpoint_written_w = 1000.0
+    hass.states.get(GRID).state = "on"
+    calls = []
+
+    async def write(power_w: int) -> bool:
+        calls.append(power_w)
+        coordinator.is_active = False  # the window ended meanwhile
+        return False
+
+    coordinator._set_ac_charge_limit_w = write
+    await coordinator._confirm_limit_after_switch_on()
+
+    assert calls == [1000]
+
+
+@pytest.mark.asyncio
+async def test_no_efficiency_trial_on_a_suspended_switch_that_still_reads_on(mock_hass):
+    """Lab, after dark: the forced charge was found and the switch suspended and
+    paused, but KORE still showed it "on" - and the efficiency search started a
+    trial on it. A suspended switch is off for the search."""
+    from tests.test_efficiency_finder import CONFIG as FINDER, NOW as FINDER_NOW, START, _make, _power
+
+    mock_hass.states.async_set(GRID, "on")
+    mock_hass.states.async_set("number.ac_limit", "1000", {"unit_of_measurement": "W"})
+    _power(mock_hass, 0, 0)
+    coordinator = _make(mock_hass, {**FINDER, "grid_charge_switch": GRID})
+    coordinator.is_active = True
+    coordinator.auto_efficient_charge = True
+    coordinator._grid_switch_suspended = True
+    coordinator._start_auto_test = AsyncMock()
+
+    with patch(FINDER_NOW, return_value=START):
+        await coordinator._handle_auto_charge()
+
+    coordinator._start_auto_test.assert_not_awaited()
+    assert coordinator._auto_wait_reason == "grid_charge_not_confirmed"
+    coordinator._remove_auto_sample_listener()
+
+
+@pytest.mark.asyncio
+async def test_the_switch_is_turned_off_once_when_its_state_arrives_during_the_write(night):
+    """Lab, after dark: KORE showed the switch "off" when the rewrite began and
+    "on" by the time it failed. The setter paused; the check, reading the state
+    from before the write, sent a second turn_off."""
+    hass, coordinator, clock = night
+    coordinator.is_active = True
+    coordinator._original_ac_charge_power = 22027.836
+    coordinator._planned_setpoint_written_w = 1000.0
+    hass.states.get(GRID).state = "off"  # not published yet
+    hass.states.get(AC_LIMIT).state = str(FORCED_W)
+    device = _kostal(hass, clock)
+
+    async def lagging(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if service == "set_value" and data.get("entity_id") == AC_LIMIT and lagging.first:
+            lagging.first = False
+            hass.states.get(GRID).state = "on"  # KORE publishes it now
+            raise HomeAssistantError(f"Readback is unconfirmed for {AC_LIMIT}")
+        await device(domain, service, data, **kwargs)
+
+    lagging.first = True
+    hass.services.async_call = AsyncMock(side_effect=lagging)
+
+    await coordinator._confirm_limit_after_switch_on()
+
+    assert _calls(hass).count(("switch", "turn_off", GRID)) == 1
+    assert coordinator._grid_switch_suspended is True
