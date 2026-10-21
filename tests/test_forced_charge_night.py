@@ -595,3 +595,21 @@ async def test_a_limit_the_inverter_does_not_hold_does_not_stop_the_night(night)
     assert ("number", "set_value", {"entity_id": MIN_SOC, "value": 43.1}) in [
         c.args for c in hass.services.async_call.await_args_list
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_lowering_write_is_no_lift(night):
+    """Codex on #39: the plan goes from 5000 W down to 1000 W and the write
+    times out. The reading still shows the 5000 W written before - above the
+    new limit, but nothing lifted it. Only a reading above anything written is."""
+    hass, coordinator, clock = night
+    coordinator.is_active = True
+    coordinator._original_ac_charge_power = 22027.836
+    coordinator._planned_setpoint_written_w = 5000.0
+    hass.states.get(GRID).state = "on"
+    hass.states.get(AC_LIMIT).state = "4998.5"
+    hass.services.async_call = AsyncMock(side_effect=HomeAssistantError("Modbus timeout"))
+
+    assert await coordinator._set_ac_charge_limit_w(1000) is False
+
+    assert coordinator._grid_switch_suspended is False

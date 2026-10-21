@@ -33,7 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and the forced charge ran on to the target (Codex and CodeRabbit on #38). Only evidence of a
     forced charge suspends the switch - a reading above the limit, or a failed rewrite right after
     switching on; a write lost to a Modbus timeout no longer costs an inverter that needs the
-    switch its night (CodeRabbit on #39).
+    switch its night (CodeRabbit on #39). The reading has to be above anything written, not only
+    the new limit: a failed lowering write leaves the earlier, higher limit in it (Codex on #39).
   - The min SOC was raised before the charge limit was written, so the Kostal charged at its
     own 22 kW for the seconds in between (the spike at 23:01). A floor above the battery
     level now goes on only after the planned limit, and not at all in a poll where that limit

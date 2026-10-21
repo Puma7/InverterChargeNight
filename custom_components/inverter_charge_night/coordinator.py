@@ -3155,8 +3155,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A forced charge reads above the limit; a Modbus timeout does not,
             # and must not cost an inverter that needs the switch its night
             # (CodeRabbit on #39)
+            # Above anything written here, too: a failed lowering write leaves
+            # the earlier, higher limit in the reading (Codex on #39)
             reading = self._get_ac_charge_limit_w(entity_id)
-            if reading is not None and reading > power_w + PLANNED_POWER_WRITE_THRESHOLD_W:
+            reference = max(float(power_w), self._planned_setpoint_written_w or 0.0)
+            if reading is not None and reading > reference + PLANNED_POWER_WRITE_THRESHOLD_W:
                 self._suspend_grid_switch_if_on()
             if self.is_active and (self._grid_switch_suspended or self._grid_limit_configured()):
                 await self._pause_grid_charge("protective charge-limit write failed")
