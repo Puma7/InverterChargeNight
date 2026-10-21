@@ -150,6 +150,7 @@ async def _start_and_apply(mock_hass, coordinator) -> float:
 
 @pytest.mark.asyncio
 async def test_window_start_calculates_target_and_arms_listeners(mock_hass, coordinator):
+    coordinator._charge_limit_expires = MagicMock(return_value=True)  # KostalKore's 1038
     await coordinator._on_window_start(WINDOW_START)
 
     assert coordinator.is_active is True
