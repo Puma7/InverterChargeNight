@@ -61,6 +61,19 @@ on a multi-inverter or generator site it does not see everything either. The hou
 limit needs the total import at the meter: use the KSEM / power-meter sensor. When in doubt,
 compare the sensor against your meter while a wallbox is charging.
 
+**`Battery Manual Charge` can be a forced charge.** On a PLENTICORE G3 (October 2026) the
+charge limit on register 1038 read the inverter's own 22.3 kW within a second of switching
+`Battery:ManualCharge` on, and a limit written while it was on was ignored. Raising the min SOC
+alone made the same inverter charge from the grid up to it, under the written limit. Inverter
+Charge Night writes the limit again right after switching on and rechecks it shortly after; if
+the switch lifted it, grid charging goes off again for the rest of the window and the raised min
+SOC does the charging. Expect one short switch-on per night and the warning
+`The charge limit did not hold with ... switched on` in the log.
+
+**The charge limit reads back as a float.** A written 1000 W reads 997.9 to 999.9 W. KOSTAL KORE
+compares its readback exactly and reports such a write as unconfirmed; Inverter Charge Night
+accepts it once the next reading has moved to within 100 W of the written value.
+
 **Installer code.** `Battery:ManualCharge`, `Battery:BackupMode:Enable` and the charge-power
 controls are marked as installer-only in KOSTAL KORE. Without the code stored there, the grid
 charge switch cannot be operated and this integration cannot do its job.

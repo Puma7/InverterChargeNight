@@ -190,6 +190,8 @@ async def main():
             await asyncio.wait_for(check_night_floor(hass, lab, planner, entry, check), 180)
             from morning_silence_campaign import check_morning_silence
             await asyncio.wait_for(check_morning_silence(hass, lab, planner, entry, check), 300)
+            from forced_charge_campaign import check_forced_charge
+            await asyncio.wait_for(check_forced_charge(hass, lab, planner, entry, check), 300)
             await hass.services.async_call("inverter_charge_night", "charge_to",
                 {"target_soc": 70, "duration": {"hours": 2}}, blocking=True)
             # A preceding configuration update can occupy HA's refresh debounce.

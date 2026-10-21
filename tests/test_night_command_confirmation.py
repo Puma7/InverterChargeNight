@@ -2,7 +2,7 @@
 from datetime import datetime
 import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
@@ -190,9 +190,11 @@ async def test_unconfirmed_limit_never_starts_trial(mock_hass):
     await c._start_auto_test(3000)
     assert c._auto_test_active is False
     assert c.auto_test_attributes()["waiting_reason"] == "charge_limit_write_failed"
-    mock_hass.services.async_call.assert_awaited_once_with(
-        "number", "set_value", {"entity_id": "number.synthetic_limit", "value": 3000.0}, blocking=True
-    )
+    # The write, then one refresh of the feedback, which fails as well
+    assert mock_hass.services.async_call.await_args_list == [
+        call("number", "set_value", {"entity_id": "number.synthetic_limit", "value": 3000.0}, blocking=True),
+        call("homeassistant", "update_entity", {"entity_id": "number.synthetic_limit"}, blocking=True),
+    ]
 
 
 @pytest.mark.asyncio

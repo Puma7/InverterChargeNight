@@ -65,6 +65,9 @@ class Plant:
     forecast_available: bool = True
     reject_writes: bool = False
     reject_charge_limit: bool = False
+    # A Kostal charges from the grid up to a raised min SOC by itself, under
+    # its charge limit, without Battery:ManualCharge (field, 20/21 October 2026)
+    floor_charges_from_grid: bool = False
     battery_power: float = 0.0
     charge_ac_power: float = 0.0
     grid_power: float = 600.0
@@ -187,7 +190,8 @@ class Plant:
                      max(0, self.capacity - energy) * 1000 / hours)
             self.battery_power = dc
             net += dc / self.charge_efficiency
-        elif self.grid_charge and self.grid_connected and energy < floor:
+        elif ((self.grid_charge or self.floor_charges_from_grid)
+              and self.grid_connected and energy < floor):
             ac = min(self.charge_limit,
                      (floor - energy) * 1000 / hours / self.charge_efficiency)
             self.charge_ac_power = ac

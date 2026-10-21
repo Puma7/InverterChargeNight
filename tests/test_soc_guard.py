@@ -152,6 +152,7 @@ async def test_start_charging_when_current_soc_less_than_target():
         "user_max_soc": 100.0,
         "default_min_soc": 8.0,
     }
+    entry.options = {}  # the charge plan runs before the floor goes up
 
     coordinator = InverterChargeNightCoordinator(hass, entry)
     coordinator.is_active = True

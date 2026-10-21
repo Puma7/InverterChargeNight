@@ -655,9 +655,12 @@ async def test_a_raised_target_drops_the_stop_of_the_old_one(night):
     assert coordinator._grid_stop_pending is False
     after = [c.args[:2] for c in hass.services.async_call.await_args_list[stops:]]
     assert ("switch", "turn_off") not in after
-    # ...and the control path charges towards the raised target instead
-    assert hass.services.async_call.await_args_list[stops].args == (
-        "number", "set_value", {"entity_id": MIN_SOC, "value": 80.0})
+    # ...and the control path charges towards the raised target instead: the
+    # planned limit first, then the floor
+    assert [c.args for c in hass.services.async_call.await_args_list[stops:stops + 2]] == [
+        ("number", "set_value", {"entity_id": AC_LIMIT, "value": 742.0}),
+        ("number", "set_value", {"entity_id": MIN_SOC, "value": 80.0}),
+    ]
 
 
 @pytest.mark.parametrize("soc", ["unavailable", "15"])

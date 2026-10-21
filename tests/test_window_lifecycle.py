@@ -1189,8 +1189,12 @@ async def test_planned_power_two_kwh_in_four_hours_writes_556_w(mock_hass, power
     assert mock_hass.services.async_call.await_args_list == [
         # The scheduled night writes the calculated floor, never the initial 40%.
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 28.9}, blocking=True),
+        # The limit goes on before a floor above the SOC makes the inverter charge
+        call("number", "set_value", {"entity_id": AC_LIMIT, "value": 3000.0}, blocking=True),
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}, blocking=True),
         call("switch", "turn_on", {"entity_id": GRID}, blocking=True),
+        # ...and once more after switching on: KORE reads it back directly, so
+        # a forced charge that lifts it shows at once
         call("number", "set_value", {"entity_id": AC_LIMIT, "value": 3000.0}, blocking=True),
     ]
     assert powered._original_ac_charge_power == 6000.0

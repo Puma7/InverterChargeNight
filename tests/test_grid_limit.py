@@ -328,7 +328,9 @@ async def test_without_a_grid_entity_the_behaviour_is_unchanged(mock_hass, unlim
 
     # 2 kWh missing in 4 h at 0.9 efficiency -> 556 W, exactly as before
     assert unlimited.planned_charge_power_w == 556.0
-    assert _ac_writes(mock_hass) == [556.0]
+    # Before the floor, and once more after switching on: KORE reads it back
+    # directly, so a forced charge that lifts it shows at once
+    assert _ac_writes(mock_hass) == [556.0, 556.0]
     assert unlimited.grid_charge_headroom_w is None
     assert unlimited.grid_limit_attributes()["limited"] is False
 
@@ -340,7 +342,9 @@ async def test_a_quiet_house_does_not_hold_the_battery_back(mock_hass, limited):
     await limited._async_update_data()
 
     assert limited.planned_charge_power_w == 556.0
-    assert _ac_writes(mock_hass) == [556.0]
+    # Before the floor, and once more after switching on: KORE reads it back
+    # directly, so a forced charge that lifts it shows at once
+    assert _ac_writes(mock_hass) == [556.0, 556.0]
     assert limited.grid_charge_headroom_w == pytest.approx(BUDGET_W - 500 - 1000)
     attributes = limited.grid_limit_attributes()
     assert attributes["limited"] is False
@@ -358,7 +362,9 @@ async def test_two_wallboxes_push_the_battery_down(mock_hass, limited):
 
     expected = BUDGET_W - 500 - 33000
     assert limited.planned_charge_power_w == pytest.approx(expected)
-    assert _ac_writes(mock_hass) == [pytest.approx(expected)]
+    # Before the floor, and once more after switching on: KORE reads it back
+    # directly, so a forced charge that lifts it shows at once
+    assert _ac_writes(mock_hass) == [pytest.approx(expected)] * 2
     assert limited.grid_limit_attributes()["limited"] is True
 
 
@@ -640,7 +646,9 @@ async def test_headroom_mode_writes_the_limited_setpoint(mock_hass):
         await coordinator._async_update_data()
         expected = BUDGET_W - 500 - 33000
         assert coordinator.planned_charge_power_w == pytest.approx(expected)
-        assert _ac_writes(mock_hass) == [pytest.approx(expected)]
+        # Before the floor, and once more after switching on: KORE reads it back
+        # directly, so a forced charge that lifts it shows at once
+        assert _ac_writes(mock_hass) == [pytest.approx(expected)] * 2
     finally:
         await coordinator._stop_periodic_verification()
 

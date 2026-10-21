@@ -5,6 +5,35 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.8] - 2026-10-21
+
+### Fixed
+- **Grid charging is no longer switched on and off every 15 minutes all night.** The night of
+  20/21 October, from the field log: each poll switched `Battery:ManualCharge` on, and a
+  second later switched it off again - 28 relay switchings, each with a grid draw of up to
+  12 kW for a few seconds. Three causes worked together:
+  - KORE compares its readback exactly, and the Kostal answers a written 1000 W with 997.9 to
+    999.9 W. Every write counted as failed, and a failed protective write pauses grid
+    charging. A write KORE calls unconfirmed now counts as held when the next reading has
+    moved to within 100 W of it. KORE republishes the old value with a new timestamp on every
+    fast poll, so only a changed value is evidence; the reading may take a few seconds
+    (`LIMIT_FEEDBACK_WAIT_S`).
+  - On the Kostal, `Battery:ManualCharge` is a forced charge: within a second of switching it
+    on the charge limit read 22.3 kW, and a limit written while it is on is ignored. The limit
+    is now written again right after switching on - KORE reads that one back directly - and
+    rechecked `SWITCH_ON_RECHECK_S` later. If switching on lifted it, grid charging goes off at
+    once, stays off for the rest of the window (a restart inside it included), and the
+    planned limit is written back. The raised min SOC keeps charging the battery, under that
+    limit, as it did through the whole of that night.
+  - The min SOC was raised before the charge limit was written, so the Kostal charged at its
+    own 22 kW for the seconds in between (the spike at 23:01). A floor above the battery
+    level now goes on only after the planned limit.
+- **New lab campaign: forced charge.** The night through real HA, real KORE and the emulated
+  Kostal with both quirks - float readback and a forced charge behind `ManualCharge` - and
+  the efficiency search on, as in the field: the switch goes on at most once and off in the
+  same poll, the limit precedes the floor and holds, no repair issue, and nothing reaches the
+  inverter after the window end.
+
 ## [3.10.7] - 2026-10-20
 
 ### Fixed
