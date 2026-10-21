@@ -391,3 +391,34 @@ async def test_a_kostal_that_drops_the_limit_keeps_it_with_the_keepalive(night):
 
     assert not lapsed
     assert hass.states.get(AC_LIMIT).state == "998.5"
+
+
+@pytest.mark.asyncio
+async def test_a_switch_whose_feedback_lags_is_still_switched_off(night):
+    """Lab, 21 October: KORE publishes the switch with its next settings poll. Right
+    after turn_on it still read "off" - and neither the suspension nor the pause,
+    both reading that state, took effect: the forced charge ran on."""
+    hass, coordinator, clock = night
+    coordinator.is_active = True
+    coordinator._planned_setpoint_written_w = 1000.0
+    coordinator._original_ac_charge_power = 22027.836
+    hass.states.get(AC_LIMIT).state = str(FORCED_W)  # the forced charge is on
+    hass.states.get(GRID).state = "off"  # ...but HA does not show the switch yet
+    device = _kostal(hass, clock)
+
+    async def lagging(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if domain == "switch":
+            return  # the inverter obeys; HA learns it later
+        if service == "set_value" and data.get("entity_id") == AC_LIMIT and not lagging.off:
+            clock.now += timedelta(seconds=1)
+            hass.states.get(AC_LIMIT).last_reported = clock.now
+            raise HomeAssistantError(f"Readback is unconfirmed for {AC_LIMIT}")
+        await device(domain, service, data, **kwargs)
+
+    lagging.off = False
+    hass.services.async_call = AsyncMock(side_effect=lagging)
+
+    await coordinator._confirm_limit_after_switch_on()
+
+    assert coordinator._grid_switch_suspended is True
+    assert ("switch", "turn_off", GRID) in _calls(hass)

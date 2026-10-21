@@ -26,7 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     rechecked `SWITCH_ON_RECHECK_S` later. If switching on lifted it, grid charging goes off at
     once, stays off for the rest of the window (a restart inside it included), and the
     planned limit is written back. The raised min SOC keeps charging the battery, under that
-    limit, as it did through the whole of that night.
+    limit, as it did through the whole of that night. Right after the switch-on KORE may still
+    show the switch as off - it publishes it with its next settings poll - so the switch-off
+    there does not rely on that state (found in the lab).
   - The min SOC was raised before the charge limit was written, so the Kostal charged at its
     own 22 kW for the seconds in between (the spike at 23:01). A floor above the battery
     level now goes on only after the planned limit.

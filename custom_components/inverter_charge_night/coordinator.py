@@ -6137,16 +6137,20 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """A stop on reaching the current target still waits for off feedback."""
         return self._grid_stop_pending and self.target_reached and not self.is_discharge_mode
 
-    async def _pause_grid_charge(self, reason: str) -> None:
+    async def _pause_grid_charge(self, reason: str, *, assume_on: bool = False) -> None:
         """Request a stop while retaining captures and protective power limits.
 
         While a stop on reaching the target is pending, every turn_off counts
         against the same per-window bound, whichever path asks for it - the
         outage guard refreshes every 15 seconds (CodeRabbit on #37).
+
+        ``assume_on``: this integration switched it on a moment ago, and KORE
+        publishes the switch only with its next settings poll - an "off" in
+        Home Assistant then says nothing about the inverter.
         """
         entity_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         state = self.hass.states.get(entity_id) if entity_id else None
-        if entity_id and (state is None or state.state != "off"):
+        if entity_id and (assume_on or state is None or state.state != "off"):
             if self._stop_pending_for_this_target():
                 if self._grid_stop_retries >= GRID_STOP_MAX_RETRIES:
                     return
@@ -6170,7 +6174,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return elapsed_seconds(self._adhoc_until, now) > 0
         return self._scheduled_window_is_open(now)
 
-    def _suspend_grid_switch_if_on(self) -> None:
+    def _suspend_grid_switch_if_on(self, *, switched_on: bool = False) -> None:
         """Keep the grid switch off for the window once a limit failed with it on.
 
         A Kostal treats Battery:ManualCharge as a forced charge: within a second
@@ -6183,7 +6187,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         state = self.hass.states.get(str(switch_id)) if switch_id else None
-        if state is None or state.state != "on":
+        if not switched_on and (state is None or state.state != "on"):
             return
         self._grid_switch_suspended = True
         self._persist_state()
@@ -6212,11 +6216,20 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Assistant sees it only every 30 s. A forced charge fails this write
         # within a second, and the setter suspends the switch and pauses.
         if not await self._set_ac_charge_limit_w(int(written)):
-            if self._grid_switch_suspended and self._grid_limit_configured():
-                # Switched off again (the feedback may lag): the Kostal holds a
-                # limit then, and the floor charges under it now - not under
-                # its own 22 kW until the next poll
-                await self._set_ac_charge_limit_w(int(written))
+            # Switched on a moment ago, whatever Home Assistant shows yet: the
+            # lab caught KORE's switch still reading "off" here, and with it
+            # neither the suspension nor the pause took effect
+            switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+            switch = self.hass.states.get(str(switch_id)) if switch_id else None
+            paused = switch is not None and switch.state == "on" and self._grid_limit_configured()
+            self._suspend_grid_switch_if_on(switched_on=True)
+            if not paused:
+                await self._pause_grid_charge(
+                    "the charge limit did not hold with grid charging switched on", assume_on=True,
+                )
+            # Off again, the Kostal holds a limit: the floor charges under it
+            # now, not under its own 22 kW until the next poll
+            await self._set_ac_charge_limit_w(int(written))
             return
         if await self._limit_lifted_by_switch_on() or self._unloading:
             return
