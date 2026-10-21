@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     fast poll, so only a changed value is evidence; the reading may take a few seconds
     (`LIMIT_FEEDBACK_WAIT_S`).
   - On the Kostal, `Battery:ManualCharge` is a forced charge: within a second of switching it
-    on the charge limit read 22.3 kW, and a limit written while it is on is ignored. The limit
+    on the charge limit read 22.3 kW, a limit written while it is on is ignored, and the min SOC
+    register read one point higher for a minute or two (the 44/45 % steps every 15 minutes in
+    the history - the integration wrote the min SOC three times that night). The limit
     is now written again right after switching on - KORE reads that one back directly - and
     rechecked `SWITCH_ON_RECHECK_S` later. If switching on lifted it, grid charging goes off at
     once, stays off for the rest of the window (a restart inside it included), and the
@@ -28,14 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The min SOC was raised before the charge limit was written, so the Kostal charged at its
     own 22 kW for the seconds in between (the spike at 23:01). A floor above the battery
     level now goes on only after the planned limit.
-- **The charge limit is kept alive while the battery can draw from the grid.** The Kostal drops
-  a limit on register 1038 after a few minutes unless it is written again: 1000 W written and
-  confirmed at 23:01:05, about 8 kW charging at 23:12, and nobody else wrote the register in
-  between. KORE and evcc write it cyclically; the window now does too, every
-  `CHARGE_LIMIT_KEEPALIVE_S` (60 s), while it holds a limit it wrote and the battery is not
-  provably idle. The keepalive captures, records and pauses nothing - the verification and its
-  bounded rewrites still judge what the inverter holds - and it stops with the window: after
-  the window end nothing reaches the inverter. Before, the limit was rewritten every 15 minutes
+- **The charge limit is kept alive while the battery can draw from the grid.** The Kostal hands
+  battery control back to its own management unless the Modbus values are written again within
+  its timeout (30-60 s): 1000 W written and confirmed at 23:01:05, about 8 kW charging at 23:12,
+  and nobody else wrote the register in between. KORE and evcc write it cyclically; the window
+  now does too, every `CHARGE_LIMIT_KEEPALIVE_S` (30 s), while it holds a limit it wrote and the
+  battery is not provably idle. The keepalive captures, records and pauses nothing - the
+  verification and its bounded rewrites still judge what the inverter holds - and it stops with
+  the window: after the window end nothing reaches the inverter. Before, the limit was rewritten every 15 minutes
   only by accident, because every write counted as failed; with the readback fixed above it
   would have been written twice a night and lapsed for the rest of it.
 

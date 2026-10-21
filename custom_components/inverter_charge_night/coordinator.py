@@ -228,11 +228,11 @@ SWITCH_ON_RECHECK_S = 45
 # How long a write KORE reports as unconfirmed waits for its fresh reading.
 # The write itself makes KORE's next poll (5 s) read the register.
 LIMIT_FEEDBACK_WAIT_S = 12
-# The Kostal drops a charge limit on register 1038 after a few minutes unless
-# it is written again (20/21 October: 1000 W written at 23:01, about 8 kW
-# charging at 23:12). KORE and evcc write it cyclically; so does a window that
-# can draw from the grid, at this interval
-CHARGE_LIMIT_KEEPALIVE_S = 60
+# The Kostal hands battery control back to its own management unless the
+# Modbus values are written again within its timeout (30-60 s; 20/21 October:
+# 1000 W written at 23:01, about 8 kW charging at 23:12). KORE and evcc write
+# them cyclically; so does a window that can draw from the grid, at this interval
+CHARGE_LIMIT_KEEPALIVE_S = 30
 SKIP_NEXT_DURATION = timedelta(hours=24)
 # A bridge longer than this means the sunrise or the window end is off; the plan
 # is still made, but it is worth a warning in the log.
