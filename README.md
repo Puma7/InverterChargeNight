@@ -466,18 +466,31 @@ while charging from the grid, it works through the charge power range:
 1. It writes a charge power and waits **two minutes** — the ramp to a new setpoint belongs to
    no power in particular.
 2. It then measures for at least **five minutes and 0.3 kWh**, integrating the power sensors
-   between their readings, or reading the two energy meters if you configured them.
+   between their readings, or reading the two energy meters if you configured them. The loss is
+   taken per minute as well, and the measurement goes on until the standard error of those is
+   **below 0.15 percentage points** — telling 9.5 % from 9.6 % loss needs that — or for at most
+   **20 minutes**. The error is kept with the result (`uncertainty_by_power_pct`).
 3. It records the loss `1 − received / drawn` for that power and moves on to the next
-   candidate, halving the remaining range each time (golden-section search).
-4. When the range is narrower than 100 W it stores the best measured power and switches itself
-   off. `sensor.…_best_charge_power` keeps the result. Subsequent charging prefers that power
+   candidate: first a **coarse pass** upwards, 2 kW apart, until the loss has risen twice in a
+   row past the best (80, 85, 90, 92, 91, 90 % efficiency - the curve has turned); then the gap
+   between the best power and its nearest measured neighbour is **halved**, on either side.
+4. When both gaps are 250 W or narrower - or both neighbours lie within the measured
+   uncertainty of the best, so a finer step could not tell them apart - it stores the best
+   measured power and switches itself off. `sensor.…_best_charge_power` keeps the result. Subsequent charging prefers that power
    and stops at target SOC, rather than spreading a less efficient trickle across the window.
    The deadline may require more power; the configured maximum and free house connection
    capacity always constrain the final setpoint. For example, a 40 kW budget minus 22 kW and
    11 kW cars and 1 kW house leaves 6 kW, even with an 11 kW optimum.
 
 Because it takes several measurements per window, a six-hour window is usually enough to find
-the optimum; it does not need a week of nights.
+the optimum; it does not need a week of nights. A trial starts only when the window still has
+enough to charge to finish it (`waiting_reason: not_enough_charge_left` otherwise): one the
+target cuts short is discarded, so it waits for a night with more to charge.
+
+**Over the min SOC.** On an inverter whose grid charge switch is a forced charge - the Kostal's
+`Battery Manual Charge` - the switch stays off for the window (3.10.8), and the raised min SOC
+charges the battery from the grid under the written limit. The search measures there as well:
+the trial's power is the charge limit, kept alive every 30 seconds.
 
 **What it refuses to record**, because a wrong sample steers every later night:
 
@@ -493,7 +506,7 @@ the optimum; it does not need a week of nights.
 - daylight or an unknown `sun.sun` state, because PV entering the battery would contaminate
   the AC/DC comparison. Regular charging continues under the normal planner while waiting.
 
-The search assumes a smooth, single-basin loss curve and has 100 W setpoint resolution. Its
+The search assumes a smooth loss curve with one optimum and has 250 W resolution near it. Its
 result is an estimate from the measured conditions, not an exact lifetime hardware constant.
 Temperature, SOC and changed hardware can move it. Sensor bindings and battery capacity are
 fingerprinted: changing them invalidates old measurements. Measurements from versions before
@@ -775,8 +788,8 @@ as "Inverter Charge Night <name>". The entity ids are stable; the display names 
 - **`sensor.inverter_charge_night_efficiency_search`** - What the search is doing
   - States: `Off`, `Waiting for charging`, `Settling`, `Measuring`, `Finished`
   - Attributes: `test_power_w`, `best_power_w`, `best_loss_pct`, `loss_by_power_pct`,
-    `search_range_w`, `measured_energy_kwh`, `measuring_for_min`, `last_result`,
-    `measurement_source`
+    `uncertainty_by_power_pct`, `search_range_w`, `measured_energy_kwh`, `measuring_for_min`,
+    `last_result`, `measurement_source`
   - `loss_by_power_pct` is the whole measurement series: charge power in W against the measured
     loss in percent. `last_result` also says why a measurement was discarded, if it was
 

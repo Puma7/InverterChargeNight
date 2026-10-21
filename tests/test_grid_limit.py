@@ -689,7 +689,8 @@ async def test_the_efficiency_finder_cannot_exceed_the_connection(mock_hass, cap
     every later night.
     """
     caplog.set_level(logging.INFO)
-    _register(mock_hass, import_w="33000")
+    # 76 W left: below even the coarse search's first, lowest power (500 W)
+    _register(mock_hass, import_w="34200")
     mock_hass.states.async_set(SENT, "0", {"unit_of_measurement": "W"})
     mock_hass.states.async_set(RECEIVED, "0", {"unit_of_measurement": "W"})
     coordinator = _make_coordinator(mock_hass, _finder_config())
@@ -701,7 +702,7 @@ async def test_the_efficiency_finder_cannot_exceed_the_connection(mock_hass, cap
         assert coordinator._auto_test_active is False
         written = _ac_writes(mock_hass)
         assert written, "the connection limit must still reach the inverter"
-        assert written[-1] <= BUDGET_W - 500 - 33000
+        assert written[-1] <= BUDGET_W - 500 - 34200
         assert not coordinator.get_auto_efficiency_data().get("history"), "No fictitious efficiency sample"
     finally:
         await coordinator._stop_periodic_verification()

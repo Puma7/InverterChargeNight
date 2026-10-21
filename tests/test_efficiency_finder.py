@@ -320,74 +320,119 @@ def test_short_measurements_never_lower_the_search_ceiling(mock_hass, finder, ca
     assert "only" in caplog.text
 
 
-def test_the_search_skips_a_power_it_cannot_measure(mock_hass, finder):
+def _store(finder, history=None, uncertainty=None, failed=None):
     options = dict(finder.entry.options)
-    options[CONF_AUTO_EFFICIENCY_DATA] = {
-        "history": {},
-        "failed": {str(c): AUTO_TEST_MAX_ATTEMPTS for c in (8300, 12700)},
-        "failed_window": finder._efficiency_window_key(),
-    }
+    data = {"history": {str(p): loss for p, loss in (history or {}).items()}}
+    if uncertainty:
+        data["uncertainty"] = {str(p): e for p, e in uncertainty.items()}
+    if failed:
+        data["failed"] = {str(p): n for p, n in failed.items()}
+        data["failed_window"] = finder._efficiency_window_key()
+    options[CONF_AUTO_EFFICIENCY_DATA] = data
     finder.entry.options = options
 
-    candidate = finder._select_next_auto_test_power_w()
 
-    assert candidate is None
-    assert finder._auto_search_deferred is True
+COARSE = [1000, 3000, 5000, 7000, 9000, 11000, 13000, 15000, 17000, 19000, 20000]
 
 
-def test_unmeasurable_powers_defer_without_excluding_unmeasured_intervals(
-    mock_hass, finder
-):
-    """Ending there would keep a far-from-optimal best for good.
-
-    Both golden-section points being unmeasurable used to mean "done", with
-    large unexplored stretches left in the interval and whatever had been
-    measured so far written to the inverter as the optimum.
-    """
-    options = dict(finder.entry.options)
-    options[CONF_AUTO_EFFICIENCY_DATA] = {
-        "history": {},
-        "failed": {str(c): AUTO_TEST_MAX_ATTEMPTS for c in (8300, 12700)},
-        "failed_window": finder._efficiency_window_key(),
-    }
-    finder.entry.options = options
-
-    candidate = finder._select_next_auto_test_power_w()
-
-    assert candidate is None
-    assert finder._auto_search_deferred is True
-    # ... and the interval really moved, so the next round asks something new
-    narrowed = finder.get_auto_efficiency_data()
-    assert "range_min_w" not in narrowed and "range_max_w" not in narrowed
+def _curve(power_w: int) -> float:
+    """A loss curve with its optimum at 6300 W: high at both ends, flat near it."""
+    return 0.06 + ((power_w - 6300) / 10000) ** 2
 
 
-def test_the_search_ends_only_when_the_interval_is_exhausted(mock_hass, finder):
-    options = dict(finder.entry.options)
-    options[CONF_AUTO_EFFICIENCY_DATA] = {
-        "history": {},
-        "range_min_w": 9000,
-        "range_max_w": 9050,
-    }
-    finder.entry.options = options
+def test_the_coarse_pass_stops_once_the_loss_has_risen_twice(finder):
+    """Pascal: 1, 2, 3 kW and so on - 80, 85, 90, 92, 91, 90 % - and then left and right
+    of the best. Here 2 kW apart, from the bottom of the range."""
+    asked = []
+    while len(asked) < 6:
+        asked.append(finder._select_next_auto_test_power_w())
+        _store(finder, {p: _curve(p) for p in asked})
+    assert asked == [1000, 3000, 5000, 7000, 9000, 11000]
+    # 9000 and 11000 lost more than 7000: refining between 5000 and 9000 now
+    assert finder._select_next_auto_test_power_w() == 6000
+
+
+def test_a_curve_that_keeps_falling_is_scanned_to_the_top(finder):
+    asked = []
+    while (power := finder._select_next_auto_test_power_w()) in COARSE and len(asked) < 20:
+        asked.append(power)
+        _store(finder, {p: 0.2 - p / 200000 for p in asked})
+    assert asked == COARSE
+
+
+def test_the_gap_next_to_the_best_power_is_halved(finder):
+    _store(finder, {p: _curve(p) for p in COARSE})
+    assert finder._select_next_auto_test_power_w() == 6000  # between 5000 and 7000
+    _store(finder, {p: _curve(p) for p in [*COARSE, 6000]})
+    assert finder._select_next_auto_test_power_w() == 5500  # 6000 is the best now
+
+
+def test_the_search_finds_the_optimum_in_few_trials(finder):
+    asked = []
+    while (power := finder._select_next_auto_test_power_w()) is not None:
+        asked.append(power)
+        _store(finder, {p: _curve(p) for p in asked})
+        assert len(asked) < 40
+    best = min(asked, key=_curve)
+    assert abs(best - 6300) <= 250
+    assert len(asked) <= 12  # six coarse, then the gaps around the best
+    assert finder._auto_search_deferred is False
+
+
+def test_a_flat_optimum_ends_the_search_early(finder):
+    """Neighbours within the measured uncertainty: a finer step cannot tell them apart."""
+    history = {p: _curve(p) for p in [*COARSE, 6000, 8000]}
+    history[6000] = history[7000] + 0.0005
+    history[8000] = history[7000] + 0.0008
+    _store(finder, history, uncertainty={p: 0.001 for p in history})
 
     assert finder._select_next_auto_test_power_w() is None
+    assert finder._auto_search_deferred is False
 
 
-def test_many_measured_points_do_not_end_the_search_early(mock_hass, finder):
-    """The old five-round cap could report "done" with the interval still open."""
-    options = dict(finder.entry.options)
-    options[CONF_AUTO_EFFICIENCY_DATA] = {
-        # A dense history: every round finds both points measured and narrows
-        "history": {str(p): 0.1 + (p - 1000) / 200000 for p in range(1000, 20001, 100)},
-    }
-    finder.entry.options = options
+def test_without_an_uncertainty_the_search_refines_on(finder):
+    history = {p: _curve(p) for p in [*COARSE, 6000, 8000]}
+    history[6000] = history[7000] + 0.0005
+    history[8000] = history[7000] + 0.0008
+    _store(finder, history)
 
-    candidate = finder._select_next_auto_test_power_w()
-    data = finder.get_auto_efficiency_data()
+    assert finder._select_next_auto_test_power_w() == 6500
 
-    assert candidate is None
-    # Narrowed until the two golden-section points sit on the interval bounds
-    assert data["range_max_w"] - data["range_min_w"] <= 200
+
+def test_an_unmeasurable_coarse_power_is_skipped(finder):
+    _store(finder, {1000: 0.1}, failed={3000: AUTO_TEST_MAX_ATTEMPTS})
+    assert finder._select_next_auto_test_power_w() == 5000
+
+
+def test_an_unmeasurable_neighbour_of_the_best_keeps_the_search_open(finder):
+    """It might be the better one: a failure proves nothing about its loss."""
+    history = {p: _curve(p) for p in COARSE}
+    failed = {6000: AUTO_TEST_MAX_ATTEMPTS}
+    _store(finder, history, failed=failed)
+    assert finder._select_next_auto_test_power_w() == 8000
+    asked = [8000]
+    while (power := finder._select_next_auto_test_power_w()) is not None:
+        asked.append(power)
+        _store(finder, {**history, **{p: _curve(p) for p in asked}}, failed=failed)
+        assert len(asked) < 20
+    assert finder._auto_search_deferred is True
+
+
+def test_nothing_measurable_at_all_defers(finder):
+    _store(finder, failed={p: AUTO_TEST_MAX_ATTEMPTS for p in COARSE})
+    assert finder._select_next_auto_test_power_w() is None
+    assert finder._auto_search_deferred is True
+
+
+def test_the_search_stays_below_the_controls_maximum(mock_hass, finder):
+    """A trial above it would be written as the maximum and filed under the wrong power."""
+    mock_hass.states.async_set(AC_LIMIT, "6000", {"unit_of_measurement": "W", "max": 12540.0})
+    asked = []
+    while (power := finder._select_next_auto_test_power_w()) is not None and len(asked) < 20:
+        asked.append(power)
+        _store(finder, {p: 0.2 - p / 200000 for p in asked})  # best at the top
+    assert asked[:7] == [1000, 3000, 5000, 7000, 9000, 11000, 12540]
+    assert max(asked) == 12540
 
 
 def test_an_impossible_power_range_is_reported_once(mock_hass, caplog):
@@ -568,6 +613,7 @@ async def test_a_finished_measurement_frees_the_window_for_the_next(mock_hass, f
         started.append(power_w)
 
     finder._start_auto_test = _record
+    finder._enough_charge_left_for = MagicMock(return_value=True)  # a night with plenty to charge
     with patch(NOW, return_value=end):
         await finder._handle_auto_charge()
 
@@ -626,13 +672,13 @@ def test_measurement_signature_invalidates_changed_sensor_paths(finder):
 
 def test_transient_failure_is_retried_in_a_future_window(finder):
     with patch(NOW, return_value=START):
-        for point in (8300, 12700):
+        for point in COARSE:
             for _ in range(AUTO_TEST_MAX_ATTEMPTS):
                 finder._record_failed_attempt(point, too_short=False)
         assert finder._select_next_auto_test_power_w() is None
         assert finder._auto_search_deferred
     with patch(NOW, return_value=START + timedelta(days=1)):
-        assert finder._select_next_auto_test_power_w() == 8300
+        assert finder._select_next_auto_test_power_w() == 1000
         assert not finder._auto_search_deferred
 
 

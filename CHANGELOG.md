@@ -5,6 +5,32 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.9] - 2026-10-21
+
+### Changed
+- **The efficiency search measures over the min SOC.** On the field Kostal `Battery:ManualCharge`
+  is a forced charge and 3.10.8 keeps it off for the window; the search waited for the switch and
+  never measured (`grid_charge_not_confirmed` all night). Where the switch is suspended and the
+  raised min SOC lies above the battery level, the inverter charges from the grid by itself under
+  the written limit - the trial's power, kept alive every 30 s - and that is now a measurement.
+- **Coarse to fine instead of golden section** (Pascal's design). A coarse pass upwards, 2 kW
+  apart, until the loss has risen twice in a row past the best; then the gap between the best
+  power and its nearest measured neighbour is halved on either side, down to 250 W. Neighbours
+  within the measured uncertainty of the best end it early. Golden section narrowed on two noisy
+  samples and assumed a clean minimum; the coarse pass sees the curve first. Trials above the
+  control's maximum are not asked for.
+- **A trial measures until its loss is known.** Besides the five minutes and 0.3 kWh, the loss is
+  taken per minute and the trial ends once the standard error of those is below 0.15 percentage
+  points, or after 20 minutes. The error is stored with each result
+  (`uncertainty_by_power_pct`).
+- **A trial starts only when the window has enough left to charge to finish it**
+  (`not_enough_charge_left`): one cut short by the target is discarded.
+
+### Lab
+- **New lab campaign: efficiency over the floor.** Real HA, real KORE, the emulated Kostal with
+  the forced charge and the float readback: the switch goes on once and off again at once, the
+  search runs over the min SOC with twelve trials, and finds the fixture's 8 kW optimum.
+
 ## [3.10.8] - 2026-10-21
 
 ### Fixed

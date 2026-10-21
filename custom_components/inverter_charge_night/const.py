@@ -157,6 +157,20 @@ AUTO_TEST_MIN_ENERGY_WH = 300.0  # ... and this much energy, so 20 kW is measura
 AUTO_TEST_MIN_FOLLOW_RATIO = 0.8  # the inverter has to draw what it was told to draw
 AUTO_TEST_MAX_PLAUSIBLE_LOSS = 0.5  # above this the sensors are wrong, not the inverter
 AUTO_TEST_MAX_ATTEMPTS = 2  # after this many failures a power counts as unmeasurable
+# How long a trial measures is set by how sure it is, not by the clock alone:
+# the loss is taken per block, and the trial ends once the standard error of
+# their mean is below the target - or at the longest trial, whichever is first.
+# Telling 9.5 % from 9.6 % loss needs about that error.
+AUTO_TEST_BLOCK_S = 60
+AUTO_TEST_MIN_BLOCKS = 3
+AUTO_TEST_TARGET_SE = 0.0015  # 0.15 percentage points
+AUTO_TEST_MAX_DURATION_S = 1200
+# The search: a coarse pass across the whole range, then the step halved around
+# the best power found so far, down to the finest step. Two neighbours that are
+# within the measured uncertainty of the best end it early - the optimum is flat
+# there and a finer step could not tell the powers apart.
+EFFICIENCY_COARSE_STEP_W = 2000
+EFFICIENCY_FINE_STEP_W = 250
 AUTO_TEST_STATE_IDLE = "idle"
 AUTO_TEST_STATE_MEASURING = "measuring"
 AUTO_TEST_STATE_SETTLING = "settling"
@@ -276,8 +290,11 @@ AUTO_EFFICIENCY_KEYS: frozenset[str] = frozenset(
         "history",
         "best_power_w",
         "best_loss",
+        # The golden-section interval of 3.10.8 and earlier; kept so an older
+        # store loads, no longer written
         "range_min_w",
         "range_max_w",
+        "uncertainty",
         "failed",
         "bounds_w",
         "measurement_signature",
