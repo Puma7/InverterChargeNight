@@ -156,3 +156,42 @@ def test_blocks_are_a_minute_each(mock_hass, finder):
     end = _measure(finder, mock_hass, power_w=10000, samples=[(10000, 9000)] * 10, minutes=6)
     assert len(finder._auto_block_losses) in (5, 6)
     assert end - START >= timedelta(minutes=8)
+
+
+@pytest.mark.asyncio
+async def test_a_complete_trial_is_evaluated_within_15_s_not_at_the_next_poll(mock_hass, finder):
+    """Codex on #39: the poll runs every 15 minutes. The 15-s check that
+    watches the meters asks for a refresh once a trial is complete, so a
+    trial ends at its bounds, not at the next poll."""
+    end = _measure(finder, mock_hass, power_w=10000, samples=[(10000, 9000)] * 10, minutes=6)
+    finder.async_request_refresh = AsyncMock()
+    module = "custom_components.inverter_charge_night.coordinator"
+    with patch(f"{module}.async_track_time_interval") as interval, \
+            patch(f"{module}.async_track_state_change_event"):
+        finder.setup_communication_listener()
+    check, period = interval.call_args.args[1:3]
+    assert period == timedelta(seconds=15)
+
+    with patch(NOW, return_value=end):
+        await check(end)
+
+    finder.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_trial_the_target_cuts_short_is_kept_with_its_uncertainty(mock_hass, finder):
+    """Codex on #39 asked to reserve the longest trial (22 minutes, 2.9 kWh at
+    8 kW) before starting one. A trial the target ends past the minimum is not
+    lost: it is recorded with the uncertainty it reached, and the search weighs
+    it by that."""
+    end = _measure(finder, mock_hass, power_w=10000, samples=_noisy(400, 12), minutes=8)
+    finder.auto_efficient_charge = True
+    finder.target_reached = True
+
+    with patch(NOW, return_value=end):
+        assert finder._auto_measurement_is_complete() is False  # still noisy
+        await finder._handle_auto_charge()
+
+    data = finder.entry.options[CONF_AUTO_EFFICIENCY_DATA]
+    assert "10000" in data["history"]
+    assert data["uncertainty"]["10000"] > AUTO_TEST_TARGET_SE
