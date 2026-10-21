@@ -71,12 +71,15 @@ async def check_forced_charge(hass, lab, planner, kore_entry, check):
     lab.emulator.readback_offset_w = 1.5
     lab.emulator.manual_charge_limit_w = native_ceiling
     # The third quirk, in real seconds: a limit on 1038 lapses back to the
-    # Kostal's own value 3 s after its last write; the keepalive runs every 1 s
+    # Kostal's own value 15 s after its last write; the keepalive runs every 1 s.
+    # The lapse stays above the 12 s a write may wait for its reading, as the
+    # field's 30-60 s do: at 3 s, an efficiency trial started after dark lapsed
+    # while its own write waited, which no Kostal does
     import custom_components.inverter_charge_night.coordinator as icn
     keepalive_s = icn.CHARGE_LIMIT_KEEPALIVE_S
     icn.CHARGE_LIMIT_KEEPALIVE_S = 1
     lab.emulator.native_charge_limit_w = native_ceiling
-    lab.emulator.limit_fallback_s = 3.0
+    lab.emulator.limit_fallback_s = 15.0
     try:
         if True:
             plant = lab.plant
