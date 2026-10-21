@@ -542,3 +542,56 @@ async def test_a_transient_write_failure_does_not_suspend_the_switch(night):
     assert await coordinator._set_ac_charge_limit_w(1000) is False
 
     assert coordinator._grid_switch_suspended is False
+
+
+@pytest.mark.asyncio
+async def test_no_raised_floor_while_the_limit_cannot_be_written(night):
+    """Codex on #38: a floor above the SOC makes the Kostal charge at once, at
+    whatever limit stands - its own 22 kW when the planned one could not be
+    written. The floor waits for a limit that was written; the next poll tries
+    again. A plan that writes nothing on purpose is not a failure."""
+    hass, coordinator, clock = night
+    await coordinator._on_window_start(WINDOW_START)
+    coordinator.initial_calculated_soc = 43.1
+    device = hass.services.async_call.side_effect
+    down = [True]
+
+    async def modbus(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if down[0] and service == "set_value" and data.get("entity_id") == AC_LIMIT:
+            raise HomeAssistantError("Modbus timeout")
+        await device(domain, service, data, **kwargs)
+
+    hass.services.async_call = AsyncMock(side_effect=modbus)
+    _fresh(hass, clock)
+    await coordinator._async_update_data()
+
+    floors = [c.args[2]["value"] for c in hass.services.async_call.await_args_list
+              if c.args[1] == "set_value" and c.args[2]["entity_id"] == MIN_SOC]
+    assert all(value < 33 for value in floors), floors
+    assert ("switch", "turn_on", GRID) not in _calls(hass)
+
+    down[0] = False  # Modbus back: the next poll raises the floor under the limit
+    clock.now += timedelta(minutes=15)
+    _fresh(hass, clock)
+    await coordinator._async_update_data()
+    args = [c.args for c in hass.services.async_call.await_args_list]
+    raised = args.index(("number", "set_value", {"entity_id": MIN_SOC, "value": 43.1}))
+    assert args[raised - 1][2]["entity_id"] == AC_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_a_limit_the_inverter_does_not_hold_does_not_stop_the_night(night):
+    """Once the repair issue says the inverter does not hold the limit, writes
+    stop for the window on purpose. That refusal is no failed write: the floor
+    still charges the battery."""
+    hass, coordinator, clock = night
+    await coordinator._on_window_start(WINDOW_START)
+    coordinator.initial_calculated_soc = 43.1
+    coordinator._ac_limit_not_held = True
+    _fresh(hass, clock)
+
+    await coordinator._async_update_data()
+
+    assert ("number", "set_value", {"entity_id": MIN_SOC, "value": 43.1}) in [
+        c.args for c in hass.services.async_call.await_args_list
+    ]
