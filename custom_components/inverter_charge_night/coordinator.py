@@ -511,6 +511,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # worth showing in every mode, but a number that looks like a command
         # and is not would be the worse kind of wrong (see the sensor).
         self.planned_power_is_applied = False
+        # The last plan tried to write its limit and the write failed - not
+        # the same as a plan that writes nothing on purpose
+        self._plan_limit_write_failed = False
         self._pv_crossover: datetime | None = None
         self._original_discharge_limit: float | None = None  # raw value in the entity's unit
         self._planned_setpoint_written_w: float | None = None
@@ -2228,6 +2231,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if await self._set_ac_charge_limit_w(int(setpoint)):
             self._planned_setpoint_written_w = setpoint
             self.planned_power_is_applied = True
+        elif not self._ac_limit_not_held:
+            # Refused on purpose once the inverter was found not to hold the
+            # limit this window: the floor charges as before, not never
+            self._plan_limit_write_failed = True
 
     # Discharge block (plan 006, step 5) --------------------------------------
 
@@ -6194,7 +6201,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A floor above the SOC makes a Kostal charge from the grid at once,
             # at whatever limit stands - its own is 22 kW. The planned limit goes
             # on first, not seconds later (20 October 2026, 23:01).
+            self._plan_limit_write_failed = False
             await self._plan_charge_power(target_soc)
+            if self._plan_limit_write_failed:
+                # Not without it: the next poll tries again (Codex on #38)
+                _LOGGER.warning(
+                    "The planned charge limit could not be written - not raising the min SOC "
+                    "to %.1f%% this poll, the inverter would charge at its own limit",
+                    floor_soc,
+                )
+                return
 
         # CRITICAL: Send commands together to avoid double DC checks
         # If both min SOC and grid charge need to be set, send them with minimal delay (0.1s)

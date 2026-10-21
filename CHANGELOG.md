@@ -62,7 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     switch its night (CodeRabbit on #39).
   - The min SOC was raised before the charge limit was written, so the Kostal charged at its
     own 22 kW for the seconds in between (the spike at 23:01). A floor above the battery
-    level now goes on only after the planned limit.
+    level now goes on only after the planned limit, and not at all in a poll where that limit
+    could not be written; the next poll tries again (Codex on #38). A plan that writes nothing on
+    purpose, or a limit already reported as not held, does not hold the floor back.
 - **The charge limit is kept alive while the battery can draw from the grid.** The Kostal hands
   battery control back to its own management unless the Modbus values are written again within
   its timeout (30-60 s): 1000 W written and confirmed at 23:01:05, about 8 kW charging at 23:12,
