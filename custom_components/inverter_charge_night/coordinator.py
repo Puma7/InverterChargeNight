@@ -3086,6 +3086,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         await self._verify_ac_charge_limit()
 
+    async def _rewrite_limit_if_lifted(self) -> None:
+        """Write the limit in force again when the inverter reads it higher.
+
+        A plan within 100 W of the written setpoint writes nothing, and the
+        Kostal may have dropped that limit since: the floor about to rise would
+        charge at its own 22 kW (Codex on #38). A failed rewrite holds it back.
+        """
+        target = self._ac_charge_limit_target()
+        written = self._planned_setpoint_written_w
+        if target is None or written is None or self._ac_limit_not_held:
+            return
+        actual = self._get_ac_charge_limit_w(target[0])
+        if actual is None or actual <= written + PLANNED_POWER_WRITE_THRESHOLD_W:
+            return
+        if not await self._set_ac_charge_limit_w(int(written)):
+            self._plan_limit_write_failed = True
+
     def _charge_limit_expires(self) -> bool:
         """Whether the charge-limit control lapses unless written again."""
         target = self._ac_charge_limit_target()
@@ -6262,6 +6279,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # on first, not seconds later (20 October 2026, 23:01).
             self._plan_limit_write_failed = False
             await self._plan_charge_power(target_soc)
+            if not self._plan_limit_write_failed:
+                await self._rewrite_limit_if_lifted()
             if self._plan_limit_write_failed:
                 # Not without it: the next poll tries again (Codex on #38)
                 _LOGGER.warning(
