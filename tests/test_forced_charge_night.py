@@ -887,3 +887,41 @@ async def test_a_suspended_switch_found_on_is_stopped_again(night, shown):
     assert await coordinator._grid_charge_activation_safe(44.0) is False
 
     assert (("switch", "turn_off", GRID) in _calls(hass)) is (shown == "on")
+
+
+@pytest.mark.asyncio
+async def test_the_lapse_timer_does_not_outlive_its_lapse(night):
+    """Codex on #38: a lapse seen, then the limit lowered by someone else - the
+    timer stayed set and the next high reading, much later, counted as a lapse
+    of minutes and was verified at once."""
+    from custom_components.inverter_charge_night.coordinator import KEEPALIVE_LAPSE_GRACE_S
+
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+    hass.services.async_call = AsyncMock()
+    coordinator._verify_ac_charge_limit = AsyncMock()
+    hass.states.get(AC_LIMIT).state = "22027.836"
+    await coordinator._keep_charge_limit_alive()  # the lapse begins
+    hass.states.get(AC_LIMIT).state = "500"  # lowered by evcc
+    await coordinator._keep_charge_limit_alive()
+    clock.now += timedelta(seconds=KEEPALIVE_LAPSE_GRACE_S * 4)
+    hass.states.get(AC_LIMIT).state = "22027.836"  # high again, freshly
+
+    await coordinator._keep_charge_limit_alive()
+
+    coordinator._verify_ac_charge_limit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("key", ["grid_charge_switch", "charge_power_entity", "min_soc_entity"])
+@pytest.mark.asyncio
+async def test_new_controls_do_not_inherit_the_suspension(night, key):
+    """Codex on #38: the options replaced the grid-charge switch mid-window; the
+    window restarted with the same identity and kept the old switch's suspension."""
+    hass, coordinator, clock = night
+    await coordinator._on_window_start(WINDOW_START)
+    coordinator._grid_switch_suspended = True
+    coordinator._on_window_end = AsyncMock()
+
+    await coordinator.async_release_changed_entities({**coordinator.config, key: "switch.other"})
+
+    assert coordinator._grid_switch_suspended is (key == "min_soc_entity")
