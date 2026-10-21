@@ -418,6 +418,29 @@ def test_an_unmeasurable_neighbour_of_the_best_keeps_the_search_open(finder):
     assert finder._auto_search_deferred is True
 
 
+def test_a_loss_that_falls_again_does_not_end_the_coarse_pass(finder):
+    """Codex on #39: 10, 20, then 15 % - the second point worse than the best is
+    no second rise, the curve has turned down again. Rises count against the
+    point before, as Pascal described it."""
+    _store(finder, {1000: 0.10, 3000: 0.20, 5000: 0.15})
+    assert finder._select_next_auto_test_power_w() == 7000
+
+
+def test_an_unmeasurable_boundary_next_to_the_best_defers(finder):
+    """Codex on #39: 1000 W could not be measured and the loss rises from 3000 W
+    on. The search refines right of 3000 W - and must not end for good without
+    1000 W, which may be the better one."""
+    failed = {1000: AUTO_TEST_MAX_ATTEMPTS}
+    _store(finder, failed=failed)
+    asked: list[int] = []
+    while (power := finder._select_next_auto_test_power_w()) is not None:
+        asked.append(power)
+        _store(finder, {p: 0.05 + (p - 3000) / 100000 for p in asked}, failed=failed)
+        assert len(asked) < 20
+    assert 1000 not in asked and min(asked) == 3000
+    assert finder._auto_search_deferred is True
+
+
 def test_nothing_measurable_at_all_defers(finder):
     _store(finder, failed={p: AUTO_TEST_MAX_ATTEMPTS for p in COARSE})
     assert finder._select_next_auto_test_power_w() is None

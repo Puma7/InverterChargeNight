@@ -12,11 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a forced charge and 3.10.8 keeps it off for the window; the search waited for the switch and
   never measured (`grid_charge_not_confirmed` all night). Where the switch is suspended and the
   raised min SOC lies above the battery level, the inverter charges from the grid by itself under
-  the written limit - the trial's power, kept alive every 30 s - and that is now a measurement.
+  the written limit - the trial's power, kept alive every 20 s - and that is now a measurement.
 - **Coarse to fine instead of golden section** (Pascal's design). A coarse pass upwards, 2 kW
-  apart, until the loss has risen twice in a row past the best; then the gap between the best
-  power and its nearest measured neighbour is halved on either side, down to 250 W. Neighbours
-  within the measured uncertainty of the best end it early. Golden section narrowed on two noisy
+  apart, until the loss has risen twice in a row, each time against the point before (a loss that
+  falls again starts the count over); then the gap between the best power and its nearest
+  measured neighbour is halved on either side, down to 250 W. Neighbours within the measured
+  uncertainty of the best end it early. A side next to the best that could not be measured
+  keeps the search open for another night (Codex on #39). Golden section narrowed on two noisy
   samples and assumed a clean minimum; the coarse pass sees the curve first. Trials above the
   control's maximum are not asked for.
 - **A trial measures until its loss is known.** Besides the five minutes and 0.3 kWh, the loss is

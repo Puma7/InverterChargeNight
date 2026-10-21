@@ -473,7 +473,8 @@ while charging from the grid, it works through the charge power range:
    **20 minutes**. The error is kept with the result (`uncertainty_by_power_pct`).
 3. It records the loss `1 − received / drawn` for that power and moves on to the next
    candidate: first a **coarse pass** upwards, 2 kW apart, until the loss has risen twice in a
-   row past the best (80, 85, 90, 92, 91, 90 % efficiency - the curve has turned); then the gap
+   row, each time against the point before (80, 85, 90, 92, 91, 90 % efficiency - the curve has
+   turned; a loss that falls again starts the count over); then the gap
    between the best power and its nearest measured neighbour is **halved**, on either side.
 4. When both gaps are 250 W or narrower - or both neighbours lie within the measured
    uncertainty of the best, so a finer step could not tell them apart - it stores the best

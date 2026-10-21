@@ -3547,7 +3547,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Coarse to fine, using valid measurements only.
 
         First a coarse pass upwards, EFFICIENCY_COARSE_STEP_W apart, until the
-        loss has risen twice in a row past the best; then the gap between the best power so far and its nearest
+        loss has risen twice in a row, each time against the point before; then
+        the gap between the best power so far and its nearest
         measured neighbour is halved, on either side, until both gaps are no
         wider than EFFICIENCY_FINE_STEP_W. A golden-section search
         assumed one clean minimum and narrowed on two noisy samples; the coarse
@@ -3590,18 +3591,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         coarse = sorted({snap(min_w + i * EFFICIENCY_COARSE_STEP_W)
                          for i in range((max_w - min_w) // EFFICIENCY_COARSE_STEP_W + 1)} | {max_w})
-        # Upwards until the loss has risen twice in a row past the best: the
-        # curve has turned, and the rest of the range is not worth a trial
-        best_coarse: int | None = None
-        worse_in_row = 0
+        # Upwards until the loss has risen twice in a row, each time against the
+        # point before: the curve has turned, and the rest of the range is not
+        # worth a trial. A loss that falls again starts the count over - worse
+        # than the best is not a rise (Codex on #39).
+        previous: int | None = None
+        rises_in_row = 0
         for power in coarse:
             if power in history:
-                if best_coarse is None or history[power] < history[best_coarse]:
-                    best_coarse, worse_in_row = power, 0
-                elif not self._losses_indistinguishable(power, best_coarse, history, uncertainty):
-                    worse_in_row += 1
-                    if worse_in_row >= 2:
+                if (previous is not None and history[power] > history[previous]
+                        and not self._losses_indistinguishable(power, previous, history, uncertainty)):
+                    rises_in_row += 1
+                    if rises_in_row >= 2:
                         break
+                else:
+                    rises_in_row = 0
+                previous = power
                 continue
             if power not in unmeasurable:
                 return power
@@ -3621,6 +3626,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 and self._losses_indistinguishable(best, left, measured, uncertainty)
                 and self._losses_indistinguishable(best, right, measured, uncertainty)):
             return None  # flat around the best: a finer step cannot tell them apart
+        # A side without a measured neighbour, where a coarse power could not
+        # be measured, is unexplored, not worse (Codex on #39)
+        if left is None and any(p in unmeasurable for p in coarse if p < best):
+            blocked = True
+        if right is None and any(p in unmeasurable for p in coarse if p > best):
+            blocked = True
         for neighbour in (left, right):
             if neighbour is None or abs(best - neighbour) <= EFFICIENCY_FINE_STEP_W:
                 continue
