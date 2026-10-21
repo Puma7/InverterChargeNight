@@ -3038,6 +3038,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if actual is not None and actual < written - PLANNED_POWER_WRITE_THRESHOLD_W:
             # Lowered by someone else - the user, evcc. The verification leaves
             # a lower limit alone, and so does the keepalive (CodeRabbit on #38)
+            self._keepalive_lapse_since = None  # no lapse to time (Codex on #38)
             return
         lapsed_s: float | None = None
         if actual is not None and actual > written + PLANNED_POWER_WRITE_THRESHOLD_W:
@@ -4918,6 +4919,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ", ".join(changed),
         )
         await self._on_window_end(dt_util.now())
+        if {CONF_GRID_CHARGE_SWITCH, CONF_CHARGE_POWER_ENTITY} & set(changed):
+            # The suspension is evidence about the old switch and limit; the
+            # window restarted on the new ones keeps the same identity and
+            # would otherwise inherit it (Codex on #38)
+            self._grid_switch_suspended = False
+            self._keepalive_lapse_since = None
+            self._persist_state()
 
     async def _maybe_rescue_the_evening(self) -> None:
         """Act on a shortfall the outlook has already worked out (plan 013).
@@ -6894,6 +6902,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if task is asyncio.current_task():
                 continue  # cancelling ourselves; the loop exits on its own
             await asyncio.gather(task, return_exceptions=True)
+        # A lapse is timed within one run of the keepalive (Codex on #38)
+        self._keepalive_lapse_since = None
         _LOGGER.debug("Stopped periodic verification task")
 
     async def _verify_ac_charge_limit(self) -> None:
@@ -7040,6 +7050,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Give every window its own bounded rewrites."""
         self._ac_limit_rewrites = 0
         self._grid_switch_suspended = False
+        self._keepalive_lapse_since = None
         if not self._ac_limit_not_held:
             return
         self._ac_limit_not_held = False
