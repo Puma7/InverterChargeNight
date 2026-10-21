@@ -79,6 +79,7 @@ async def test_start_periodic_verification_uses_background_task(mock_hass):
     coordinator = _make_coordinator(mock_hass, {})
     coordinator.is_active = True
     coordinator.is_enabled = True
+    coordinator._charge_limit_expires = MagicMock(return_value=True)  # KostalKore's 1038
     mock_hass.async_create_background_task = MagicMock(
         side_effect=lambda coro, name=None: coro.close()
     )
@@ -94,6 +95,7 @@ async def test_periodic_verification_loop_handles_cancel(mock_hass):
     coordinator = _make_coordinator(mock_hass, {})
     coordinator.is_active = True
     coordinator.is_enabled = True
+    coordinator._charge_limit_expires = MagicMock(return_value=True)  # KostalKore's 1038
     coordinator._verify_and_restore_min_soc = AsyncMock()
     captured = {}
 
@@ -116,6 +118,7 @@ async def test_start_periodic_verification_passes_task_name(mock_hass):
     coordinator = _make_coordinator(mock_hass, {})
     coordinator.is_active = True
     coordinator.is_enabled = True
+    coordinator._charge_limit_expires = MagicMock(return_value=True)  # KostalKore's 1038
     captured_names = []
 
     def _capture(coro, name=None):

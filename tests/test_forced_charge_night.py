@@ -470,6 +470,7 @@ async def test_the_keepalive_comes_well_inside_the_shortest_timeout(mock_hass):
     coordinator = _make_coordinator(mock_hass, CONFIG)
     coordinator.is_active = coordinator.is_enabled = True
     coordinator._keep_charge_limit_alive = AsyncMock()
+    coordinator._charge_limit_expires = MagicMock(return_value=True)
     loops: dict[str, Any] = {}
 
     def capture(coro: Any, name: str | None = None) -> MagicMock:
@@ -613,3 +614,76 @@ async def test_a_failed_lowering_write_is_no_lift(night):
     assert await coordinator._set_ac_charge_limit_w(1000) is False
 
     assert coordinator._grid_switch_suspended is False
+
+
+@pytest.mark.asyncio
+async def test_the_verifier_does_not_raise_a_floor_the_poll_held_back(night):
+    """Codex on #38: the poll held the floor back for a limit it could not write;
+    the min SOC verification found the old floor and wrote the new one anyway."""
+    hass, coordinator, clock = night
+    await coordinator._on_window_start(WINDOW_START)
+    coordinator.initial_calculated_soc = 43.1
+    device = hass.services.async_call.side_effect
+
+    async def modbus(domain: str, service: str, data: dict[str, Any], **kwargs: Any) -> None:
+        if service == "set_value" and data.get("entity_id") == AC_LIMIT:
+            raise HomeAssistantError("Modbus timeout")
+        await device(domain, service, data, **kwargs)
+
+    hass.services.async_call = AsyncMock(side_effect=modbus)
+    _fresh(hass, clock)
+    await coordinator._async_update_data()
+    await coordinator._verify_and_restore_min_soc()
+
+    assert ("number", "set_value", {"entity_id": MIN_SOC, "value": 43.1}) not in [
+        c.args for c in hass.services.async_call.await_args_list
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_lapse_that_acknowledged_keepalives_do_not_cure_is_verified(night):
+    """Codex on #38: an adapter can acknowledge a write the inverter drops. A
+    lapse still read 75 s after the first keepalive saw it is verified then,
+    not up to 15 minutes later; one stale reading is not enough."""
+    from custom_components.inverter_charge_night.coordinator import KEEPALIVE_LAPSE_GRACE_S
+
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+    hass.states.get(AC_LIMIT).state = "22027.836"  # lapsed
+    hass.services.async_call = AsyncMock()  # acknowledged, dropped
+    coordinator._verify_ac_charge_limit = AsyncMock()
+
+    await coordinator._keep_charge_limit_alive()
+    clock.now += timedelta(seconds=40)
+    await coordinator._keep_charge_limit_alive()
+    assert coordinator._verify_ac_charge_limit.await_count == 0
+
+    clock.now += timedelta(seconds=KEEPALIVE_LAPSE_GRACE_S - 30)
+    await coordinator._keep_charge_limit_alive()
+    assert coordinator._verify_ac_charge_limit.await_count == 1
+
+
+@pytest.mark.parametrize(("platform", "kept"), [("kostal_kore", True), ("modbus", False), (None, False)])
+@pytest.mark.asyncio
+async def test_only_an_expiring_control_is_kept_alive(mock_hass, platform, kept):
+    """Codex on #38: a setting that persists does not need a write every 20 s -
+    1080 writes a night of traffic and wear. KostalKore's 1038 lapses; others do not."""
+    from homeassistant.helpers import entity_registry as er
+
+    coordinator = _make_coordinator(mock_hass, CONFIG)
+    coordinator.is_active = coordinator.is_enabled = True
+    registry = MagicMock()
+    registry.async_get.return_value = SimpleNamespace(platform=platform) if platform else None
+    mock_hass.data[er.DATA_REGISTRY] = registry
+    names: list[str] = []
+
+    def capture(coro: Any, name: str | None = None) -> MagicMock:
+        names.append(name or "")
+        coro.close()
+        return MagicMock()
+
+    mock_hass.async_create_background_task = MagicMock(side_effect=capture)
+    await coordinator._start_periodic_verification()
+
+    assert ("inverter_charge_night_charge_limit_keepalive" in names) is kept
+    registry.async_get.assert_called_with(AC_LIMIT)

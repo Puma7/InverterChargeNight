@@ -67,7 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     own 22 kW for the seconds in between (the spike at 23:01). A floor above the battery
     level now goes on only after the planned limit, and not at all in a poll where that limit
     could not be written; the next poll tries again (Codex on #38). A plan that writes nothing on
-    purpose, or a limit already reported as not held, does not hold the floor back.
+    purpose, or a limit already reported as not held, does not hold the floor back. The min SOC
+    verification between polls holds it back the same way (Codex on #38).
 - **The charge limit is kept alive while the battery can draw from the grid.** The Kostal hands
   battery control back to its own management unless the Modbus values are written again within
   its timeout (30-60 s): 1000 W written and confirmed at 23:01:05, about 8 kW charging at 23:12,
@@ -81,7 +82,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would have been written twice a night and lapsed for the rest of it. A limit someone else has
   lowered (the user, evcc) is left alone, as the verification does (CodeRabbit on #38). A
   keepalive that is not delivered while the inverter no longer reads the limit runs the
-  verification at once, not up to 15 minutes later (Codex on #39).
+  verification at once, not up to 15 minutes later (Codex on #39); so does a lapse the reading
+  still shows 75 s after the keepalive first saw it, although the writes were acknowledged
+  (Codex on #38). Only a control whose value lapses is kept alive - KostalKore's; a setting that
+  persists is not written every 20 s all night (Codex on #38).
 
 ### Changed
 - **The evening rescue acts only when switched on, holding included** (Pascal's decision of

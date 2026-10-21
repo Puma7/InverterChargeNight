@@ -24,6 +24,7 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
     async_track_time_change,
 )
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.recorder import DATA_INSTANCE, get_instance
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -242,6 +243,12 @@ LIMIT_FEEDBACK_WAIT_S = 12
 # third of it is left for the write and the event loop (Codex on #38).
 KOSTAL_MODBUS_TIMEOUT_MIN_S = 30
 CHARGE_LIMIT_KEEPALIVE_S = 20
+# Only controls whose value lapses are kept alive: a persistent setting written
+# every 20 s all night is traffic and wear for nothing (Codex on #38)
+EXPIRING_LIMIT_PLATFORMS = frozenset({"kostal_kore"})
+# A lapse the reading still shows this long after the first keepalive saw it,
+# writes acknowledged or not, is verified: two of KORE's slow polls and more
+KEEPALIVE_LAPSE_GRACE_S = 75
 SKIP_NEXT_DURATION = timedelta(hours=24)
 # A bridge longer than this means the sunrise or the window end is off; the plan
 # is still made, but it is worth a warning in the log.
@@ -466,6 +473,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._inverter_min_soc_listener: CALLBACK_TYPE | None = None
         self._verification_task: asyncio.Task[None] | None = None
         self._keepalive_task: asyncio.Task[None] | None = None
+        self._keepalive_lapse_since: datetime | None = None
         self._verifying_min_soc = False
         self._min_soc_write_lock = asyncio.Lock()
         self._ac_charge_limit_write_lock = asyncio.Lock()
@@ -3039,15 +3047,32 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Lowered by someone else - the user, evcc. The verification leaves
             # a lower limit alone, and so does the keepalive (CodeRabbit on #38)
             return
+        lapsed_s: float | None = None
+        if actual is not None and actual > written + PLANNED_POWER_WRITE_THRESHOLD_W:
+            now = dt_util.now()
+            if self._keepalive_lapse_since is None:
+                self._keepalive_lapse_since = now
+            lapsed_s = elapsed_seconds(now, self._keepalive_lapse_since)
+        else:
+            self._keepalive_lapse_since = None
         if self._ac_charge_limit_write_lock.locked():
             return  # a writer is at it right now
         async with self._ac_charge_limit_write_lock:
             if not self.is_active or self._ending or self._unloading:
                 return
-            if await self._write_ac_charge_limit(
+            delivered = await self._write_ac_charge_limit(
                 target[0], target[1], written, "Keep AC charge limit", keepalive=True,
-            ):
-                return
+            )
+        if delivered:
+            if lapsed_s is not None and lapsed_s >= KEEPALIVE_LAPSE_GRACE_S:
+                # Acknowledged, but the reading has not come back for minutes:
+                # an adapter can accept a write the inverter drops (Codex on #38)
+                _LOGGER.warning(
+                    "The AC charge limit still reads %.0f W, %.0f s after its keepalive of "
+                    "%.0f W began - verifying it now", actual, lapsed_s, written,
+                )
+                await self._verify_ac_charge_limit()
+            return
         actual = self._get_ac_charge_limit_w(target[0])
         if actual is None or abs(actual - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
             # KORE's exact readback of the Kostal's float: the limit holds
@@ -3060,6 +3085,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "verifying it now", written, actual,
         )
         await self._verify_ac_charge_limit()
+
+    def _charge_limit_expires(self) -> bool:
+        """Whether the charge-limit control lapses unless written again."""
+        target = self._ac_charge_limit_target()
+        registry = self.hass.data.get(er.DATA_REGISTRY)
+        if target is None or registry is None:
+            return False
+        entry = registry.async_get(target[0])
+        return entry is not None and entry.platform in EXPIRING_LIMIT_PLATFORMS
 
     async def _limit_reads_back(self, entity_id: str, before_value: str | None, power_w: float) -> bool:
         """True when the reading moved to within 100 W of ``power_w`` after the write.
@@ -3177,6 +3211,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         self._grid_limit_last_write = dt_util.now()
         self._planned_setpoint_written_w = float(power_w)
+        self._plan_limit_write_failed = False
         if power_w == 0 and self.is_active and self._grid_limit_configured():
             await self._pause_grid_charge("no confirmed connection headroom")
         return True
@@ -6914,9 +6949,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 except Exception as e:
                     _LOGGER.error("Error keeping the charge limit alive: %s", e, exc_info=True)
 
-        self._keepalive_task = self.hass.async_create_background_task(
-            _keepalive_loop(), "inverter_charge_night_charge_limit_keepalive",
-        )
+        if self._charge_limit_expires():
+            self._keepalive_task = self.hass.async_create_background_task(
+                _keepalive_loop(), "inverter_charge_night_charge_limit_keepalive",
+            )
         _LOGGER.debug("Started periodic verification task (interval: %d seconds)",
                      self.config.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
 
@@ -7133,8 +7169,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Cannot verify min SOC - %s is not a usable number", min_soc_entity)
                 return
 
+            # Not without the planned limit: the poll that could not write it
+            # held the floor back, and so does this (Codex on #38)
+            held_back = (self._plan_limit_write_failed and floor_soc > current_inverter_soc + 0.5
+                         and floor_soc > (self._current_battery_soc() or 0.0))
+            if held_back:
+                _LOGGER.debug("Planned charge limit not written - not raising the min SOC here either")
             # Check if inverter min SOC doesn't match the floor (with tolerance)
-            if abs(current_inverter_soc - floor_soc) > 0.5:
+            elif abs(current_inverter_soc - floor_soc) > 0.5:
                 _LOGGER.warning(
                     "Inverter min SOC (%.1f%%) doesn't match our target (%.1f%%), restoring to target",
                     current_inverter_soc,
