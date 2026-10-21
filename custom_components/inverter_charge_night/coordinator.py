@@ -6550,6 +6550,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Revalidate permission after awaited writes/delays, at the activation sink."""
         if self._grid_switch_suspended:
             _LOGGER.debug("Grid charge switch suspended for this window - not switching it on")
+            # Restored after a restart, its last turn_off may never have
+            # arrived: a switch not reading off is stopped again (Codex on #38)
+            await self._pause_grid_charge("grid charging is suspended for this window")
             return False
         if not self._charge_permission_current():
             await self._pause_grid_charge("window ended or charging permission was withdrawn")
