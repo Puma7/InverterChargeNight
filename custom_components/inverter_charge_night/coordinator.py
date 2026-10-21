@@ -4076,6 +4076,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         if duration >= AUTO_TEST_MAX_DURATION_S:
             return True
+        if self._auto_meter_start is not None:
+            # The per-minute losses come from the power sensors, the result
+            # from the meters: their error says nothing about the meters'
+            # resolution, so a metered trial runs to its longest (CodeRabbit on #39)
+            return False
         error = self._auto_loss_standard_error()
         return error is not None and error <= AUTO_TEST_TARGET_SE
 
@@ -4290,11 +4295,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         history = dict(data.get("history", {}))
         history[str(power_w)] = loss
         data["history"] = history
-        error = self._auto_loss_standard_error()
+        error = None if self._auto_meter_start is not None else self._auto_loss_standard_error()
+        uncertainty = dict(data.get("uncertainty", {}))
         if error is not None:
-            uncertainty = dict(data.get("uncertainty", {}))
             uncertainty[str(power_w)] = error
-            data["uncertainty"] = uncertainty
+        else:
+            uncertainty.pop(str(power_w), None)  # not one from an earlier trial either
+        data["uncertainty"] = uncertainty
         self._record_band_sample(data, power_w, loss)
         data["bounds_w"] = [
             int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000)),
@@ -4456,6 +4463,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         soc = self._current_battery_soc()
         if target is None or soc is None:
             return False
+        now = dt_util.now()
+        if elapsed_seconds(self._window_end_datetime(now), now) < AUTO_TEST_SETTLE_S + AUTO_TEST_MIN_DURATION_S:
+            return False  # the window end would cut it short (CodeRabbit on #39)
         capacity_wh = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)) * 1000.0
         missing_wh = max(0.0, target - soc) / 100.0 * capacity_wh
         efficiency = float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY))

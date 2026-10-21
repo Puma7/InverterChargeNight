@@ -101,6 +101,20 @@ async def test_no_trial_the_target_would_cut_short(night):
     assert coordinator._auto_wait_reason == "not_enough_charge_left"
 
 
+@pytest.mark.asyncio
+async def test_no_trial_the_window_end_would_cut_short(night):
+    """CodeRabbit on #39: enough charge left, but the window ends in five
+    minutes - the settling and the minimum need seven."""
+    hass, coordinator = night
+    end = coordinator._window_end_datetime(START)
+
+    with patch(NOW, return_value=end - timedelta(minutes=5)):
+        await coordinator._handle_auto_charge()
+
+    coordinator._start_auto_test.assert_not_awaited()
+    assert coordinator._auto_wait_reason == "not_enough_charge_left"
+
+
 def _noisy(spread_w: float, count: int, seed: int = 7) -> list[tuple[float, float]]:
     rng = random.Random(seed)
     return [(10000, 9000 + rng.uniform(-spread_w, spread_w)) for _ in range(count)]

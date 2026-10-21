@@ -23,10 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   control's maximum are not asked for.
 - **A trial measures until its loss is known.** Besides the five minutes and 0.3 kWh, the loss is
   taken per minute and the trial ends once the standard error of those is below 0.15 percentage
-  points, or after 20 minutes. The error is stored with each result
-  (`uncertainty_by_power_pct`).
-- **A trial starts only when the window has enough left to charge to finish it**
-  (`not_enough_charge_left`): one cut short by the target is discarded.
+  points, or after 20 minutes. The error is stored with each result (`uncertainty_by_power_pct`).
+  A trial measured with energy meters runs the 20 minutes and stores no error: the per-minute
+  losses come from the power sensors and say nothing about the meters' resolution (CodeRabbit
+  on #39).
+- **A trial starts only when the window has enough charge and time left to finish it**
+  (`not_enough_charge_left`). One the target still ends past the minimum is kept, with the
+  uncertainty it reached; the window end no longer cuts one short (CodeRabbit on #39).
 
 ### Lab
 - **New lab campaign: efficiency over the floor.** Real HA, real KORE, the emulated Kostal with

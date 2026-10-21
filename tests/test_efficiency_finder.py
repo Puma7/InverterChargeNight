@@ -763,3 +763,26 @@ def test_missing_configured_counter_never_falls_back_to_guessed_power_energy(met
     metered._begin_auto_measurement(START)
     assert not metered._auto_test_active
     assert metered._auto_meter_start is None
+
+
+def test_a_metered_trial_runs_to_its_longest_and_stores_no_sensor_error(mock_hass, metered):
+    """CodeRabbit on #39: the per-minute losses come from the power sensors,
+    the result from the meters. A steady power sensor ended a metered trial at
+    five minutes with an error that says nothing about the meters' resolution,
+    and filed that error with the meter result."""
+    from custom_components.inverter_charge_night.const import AUTO_TEST_MAX_DURATION_S
+
+    end = _measure(metered, mock_hass, power_w=10000, samples=[(10000, 9000)] * 10, minutes=6)
+    _meters(mock_hass, 101.0, 90.9)
+    with patch(NOW, return_value=end):
+        assert metered._auto_measurement_is_complete() is False
+
+    longest = START + timedelta(seconds=AUTO_TEST_SETTLE_S + AUTO_TEST_MAX_DURATION_S + 1)
+    _meters(mock_hass, 103.3, 92.97)
+    with patch(NOW, return_value=longest):
+        assert metered._auto_measurement_is_complete() is True
+        metered._finalize_auto_test()
+
+    data = metered.get_auto_efficiency_data()
+    assert data["history"]["10000"] == pytest.approx(0.1)
+    assert "10000" not in data.get("uncertainty", {})
