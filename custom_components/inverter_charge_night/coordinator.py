@@ -16,6 +16,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.event import (
     EventStateChangedData,
     async_call_later,
@@ -23,6 +24,7 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
     async_track_time_change,
 )
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.recorder import DATA_INSTANCE, get_instance
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -221,6 +223,26 @@ AC_LIMIT_MAX_REWRITES = 2
 # regular poll, sending turn_off at most this many more times per window; the
 # window-end reset, with its own bounded ladder, takes it from there.
 GRID_STOP_MAX_RETRIES = 2
+# KORE polls the charge limit with its slow registers, about every 30 s: a
+# recheck after switching grid charging on sees a reading made after it
+SWITCH_ON_RECHECK_S = 45
+# How long a write KORE reports as unconfirmed waits for its fresh reading.
+# The write itself makes KORE's next poll (5 s) read the register.
+LIMIT_FEEDBACK_WAIT_S = 12
+# The Kostal hands battery control back to its own management unless the
+# Modbus values are written again within its timeout (30-60 s; 20/21 October:
+# 1000 W written at 23:01, about 8 kW charging at 23:12). KORE and evcc write
+# them cyclically; so does a window that can draw from the grid, at this interval.
+# Sleep plus the write itself must stay inside the shortest timeout, 30 s: a
+# third of it is left for the write and the event loop (Codex on #38).
+KOSTAL_MODBUS_TIMEOUT_MIN_S = 30
+CHARGE_LIMIT_KEEPALIVE_S = 20
+# Only controls whose value lapses are kept alive: a persistent setting written
+# every 20 s all night is traffic and wear for nothing (Codex on #38)
+EXPIRING_LIMIT_PLATFORMS = frozenset({"kostal_kore"})
+# A lapse the reading still shows this long after the first keepalive saw it,
+# writes acknowledged or not, is verified: two of KORE's slow polls and more
+KEEPALIVE_LAPSE_GRACE_S = 75
 SKIP_NEXT_DURATION = timedelta(hours=24)
 # A bridge longer than this means the sunrise or the window end is off; the plan
 # is still made, but it is worth a warning in the log.
@@ -331,6 +353,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _ac_limit_rewrites: int = 0
     _ac_limit_not_held: bool = False
     _ac_limit_window: str | None = None
+    _grid_switch_suspended: bool = False
     _grid_stop_pending: bool = False
     _grid_stop_retries: int = 0
     _last_trusted_soc: tuple[float, datetime] | None = None
@@ -428,6 +451,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ac_limit_not_held = False
         # Which window spent them: a restart inside it resumes, any other starts over
         self._ac_limit_window: str | None = None
+        # The charge limit did not hold with grid charging switched on: the
+        # switch stays off for the rest of the window, the floor still charges
+        self._grid_switch_suspended = False
         # Reaching the target asked for a grid-charge stop that was not confirmed off
         self._grid_stop_pending = False
         self._grid_stop_retries = 0
@@ -435,10 +461,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The inverter's own min SOC as last reported, for the same question
         self._last_trusted_min_soc: tuple[float, datetime] | None = None
         self._reset_retry_unsub: CALLBACK_TYPE | None = None
+        self._switch_on_recheck_unsub: CALLBACK_TYPE | None = None
         self._reset_retry_count = 0
         self._battery_soc_listener: CALLBACK_TYPE | None = None
         self._inverter_min_soc_listener: CALLBACK_TYPE | None = None
         self._verification_task: asyncio.Task[None] | None = None
+        self._keepalive_task: asyncio.Task[None] | None = None
+        self._keepalive_lapse_since: datetime | None = None
+        # turn_off commands sent by _pause_grid_charge, to tell whether a call
+        # in between has already paused
+        self._grid_pause_requests = 0
         self._verifying_min_soc = False
         self._min_soc_write_lock = asyncio.Lock()
         self._ac_charge_limit_write_lock = asyncio.Lock()
@@ -479,6 +511,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # worth showing in every mode, but a number that looks like a command
         # and is not would be the worse kind of wrong (see the sensor).
         self.planned_power_is_applied = False
+        # The last plan tried to write its limit and the write failed - not
+        # the same as a plan that writes nothing on purpose
+        self._plan_limit_write_failed = False
         self._pv_crossover: datetime | None = None
         self._original_discharge_limit: float | None = None  # raw value in the entity's unit
         self._planned_setpoint_written_w: float | None = None
@@ -702,6 +737,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "ac_limit_rewrites": self._ac_limit_rewrites,
             "ac_limit_not_held": self._ac_limit_not_held,
             "ac_limit_window": self._ac_limit_window,
+            "grid_switch_suspended": self._grid_switch_suspended,
             "hands_off_until": (
                 self._hands_off_until.isoformat() if self._hands_off_until else None
             ),
@@ -775,6 +811,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ac_limit_not_held = state.get("ac_limit_not_held") is True
         window_raw = state.get("ac_limit_window")
         self._ac_limit_window = window_raw if isinstance(window_raw, str) else None
+        self._grid_switch_suspended = state.get("grid_switch_suspended") is True
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
             self.snow_nights = snow_raw
@@ -1885,6 +1922,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 sunset=sunset,
                 forecast_kwh_today=forecast_kwh,
                 forecast_available=forecast_available,
+                forecast_error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
             )
         except (ValueError, TypeError) as err:
             _LOGGER.error("Could not work out the evening outlook: %s", err)
@@ -2193,6 +2231,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if await self._set_ac_charge_limit_w(int(setpoint)):
             self._planned_setpoint_written_w = setpoint
             self.planned_power_is_applied = True
+        elif not self._ac_limit_not_held:
+            # Refused on purpose once the inverter was found not to hold the
+            # limit this window: the floor charges as before, not never
+            self._plan_limit_write_failed = True
 
     # Discharge block (plan 006, step 5) --------------------------------------
 
@@ -2892,6 +2934,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _write_ac_charge_limit(
         self, entity_id: str, domain: str, power_w: float, what: str, *, restore: bool = False,
+        keepalive: bool = False,
     ) -> bool:
         """Write ``power_w`` to the AC charge limit entity in its own unit; report success.
 
@@ -2938,6 +2981,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
         if restore:
             value = _within_entity_range(state, value, entity_id, what)
+        before_value = state.state if state is not None else None
         try:
             await self.hass.services.async_call(
                 domain,
@@ -2946,10 +2990,150 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 blocking=True,
             )
         except Exception as e:
+            if keepalive:
+                # The same value once more: KORE's exact readback says nothing
+                # new, and the verification judges what the inverter holds
+                _LOGGER.debug("%s to %.3f: %s", what, value, e)
+                return False
+            if (not restore and not isinstance(e, ServiceValidationError)
+                    and await self._limit_reads_back(entity_id, before_value, power_w)):
+                # KORE compares its readback exactly, and the Kostal answers a
+                # written 1000 W with 997.9 to 999.9 W. Treating that as a failed
+                # write paused grid charging, and the next poll switched it on
+                # again - every 15 minutes, all night (20 October 2026).
+                _LOGGER.info(
+                    "%s to %.3f (%s): %s, but a fresh reading is within %d W of it",
+                    what, value, unit or "unitless", e, PLANNED_POWER_WRITE_THRESHOLD_W,
+                )
+                return True
             _LOGGER.error("Error writing AC charge limit (%s): %s", what, e, exc_info=True)
             return False
-        _LOGGER.info("%s to %.3f (%s)", what, value, unit or "unitless")
+        if keepalive:
+            _LOGGER.debug("%s to %.3f (%s)", what, value, unit or "unitless")
+        else:
+            _LOGGER.info("%s to %.3f (%s)", what, value, unit or "unitless")
         return True
+
+    async def _keep_charge_limit_alive(self) -> None:
+        """Write the charge limit in force again, so the Kostal does not drop it.
+
+        Only while this window holds a limit it wrote and the battery could
+        draw from the grid. Nothing is captured, recorded or paused here: the
+        verification and its bounded rewrites judge what the inverter holds.
+        """
+        if (not self.is_active or self._ending or self._unloading or self.is_discharge_mode
+                or self._ac_limit_not_held or self._original_ac_charge_power is None):
+            return
+        target = self._ac_charge_limit_target()
+        written = (
+            float(self._auto_test_power_w)
+            if self._auto_test_active and self._auto_test_power_w is not None
+            else self._planned_setpoint_written_w
+        )
+        if target is None or written is None or self._is_backup_active():
+            return
+        if self._battery_idle_on_grid():
+            return
+        actual = self._get_ac_charge_limit_w(target[0])
+        if actual is not None and actual < written - PLANNED_POWER_WRITE_THRESHOLD_W:
+            # Lowered by someone else - the user, evcc. The verification leaves
+            # a lower limit alone, and so does the keepalive (CodeRabbit on #38)
+            self._keepalive_lapse_since = None  # no lapse to time (Codex on #38)
+            return
+        lapsed_s: float | None = None
+        if actual is not None and actual > written + PLANNED_POWER_WRITE_THRESHOLD_W:
+            now = dt_util.now()
+            if self._keepalive_lapse_since is None:
+                self._keepalive_lapse_since = now
+            lapsed_s = elapsed_seconds(now, self._keepalive_lapse_since)
+        else:
+            self._keepalive_lapse_since = None
+        if self._ac_charge_limit_write_lock.locked():
+            return  # a writer is at it right now
+        async with self._ac_charge_limit_write_lock:
+            if not self.is_active or self._ending or self._unloading:
+                return
+            delivered = await self._write_ac_charge_limit(
+                target[0], target[1], written, "Keep AC charge limit", keepalive=True,
+            )
+        if delivered:
+            if lapsed_s is not None and lapsed_s >= KEEPALIVE_LAPSE_GRACE_S:
+                # Acknowledged, but the reading has not come back for minutes:
+                # an adapter can accept a write the inverter drops (Codex on #38)
+                _LOGGER.warning(
+                    "The AC charge limit still reads %.0f W, %.0f s after its keepalive of "
+                    "%.0f W began - verifying it now", actual, lapsed_s, written,
+                )
+                await self._verify_ac_charge_limit()
+            return
+        actual = self._get_ac_charge_limit_w(target[0])
+        if actual is None or abs(actual - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
+            # KORE's exact readback of the Kostal's float: the limit holds
+            return
+        # Not delivered, and the inverter no longer reads the limit: it drops it
+        # within a minute, the verification would come up to 15 minutes later
+        # (Codex on #39). It judges the reading and acts, with its bounded rewrites.
+        _LOGGER.warning(
+            "Keeping the AC charge limit at %.0f W failed and the inverter reads %.0f W - "
+            "verifying it now", written, actual,
+        )
+        await self._verify_ac_charge_limit()
+
+    async def _rewrite_limit_if_lifted(self) -> None:
+        """Write the limit in force again when the inverter reads it higher.
+
+        A plan within 100 W of the written setpoint writes nothing, and the
+        Kostal may have dropped that limit since: the floor about to rise would
+        charge at its own 22 kW (Codex on #38). A failed rewrite holds it back.
+        """
+        target = self._ac_charge_limit_target()
+        written = self._planned_setpoint_written_w
+        if target is None or written is None or self._ac_limit_not_held:
+            return
+        actual = self._get_ac_charge_limit_w(target[0])
+        if actual is None or actual <= written + PLANNED_POWER_WRITE_THRESHOLD_W:
+            return
+        if not await self._set_ac_charge_limit_w(int(written)):
+            self._plan_limit_write_failed = True
+
+    def _charge_limit_expires(self) -> bool:
+        """Whether the charge-limit control lapses unless written again."""
+        target = self._ac_charge_limit_target()
+        registry = self.hass.data.get(er.DATA_REGISTRY)
+        if target is None or registry is None:
+            return False
+        entry = registry.async_get(target[0])
+        return entry is not None and entry.platform in EXPIRING_LIMIT_PLATFORMS
+
+    async def _limit_reads_back(self, entity_id: str, before_value: str | None, power_w: float) -> bool:
+        """True when the reading moved to within 100 W of ``power_w`` after the write.
+
+        KORE reads the charge limit with its slow registers; the write makes its
+        next poll include it, so the new reading may take a few seconds. Every
+        poll in between publishes the retained old value with a new timestamp,
+        so only a changed value is evidence. A value written again over itself
+        cannot be confirmed this way and counts as unconfirmed - the safe side
+        for the check after switching grid charging on.
+        """
+        def fresh() -> bool:
+            feedback = self.hass.states.get(entity_id)
+            return feedback is not None and feedback.state != before_value
+
+        if not fresh():
+            try:
+                await self.hass.services.async_call(
+                    "homeassistant", "update_entity", {"entity_id": entity_id}, blocking=True,
+                )
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Cannot refresh the AC charge limit feedback: %s", entity_id)
+                return False
+            for _ in range(LIMIT_FEEDBACK_WAIT_S):
+                if fresh() or self._unloading:
+                    break
+                await asyncio.sleep(1)
+        reading = self._get_ac_charge_limit_w(entity_id)
+        return (fresh() and reading is not None
+                and abs(reading - float(power_w)) <= PLANNED_POWER_WRITE_THRESHOLD_W)
 
     async def _set_ac_charge_limit_w(self, power_w: int) -> bool:
         """Serialize actuator writes and keep verification out of an in-flight command."""
@@ -3023,11 +3207,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not await self._write_ac_charge_limit(
             entity_id, domain, power_w, "Set AC charge limit"
         ):
-            if self.is_active and self._grid_limit_configured():
+            # A forced charge reads above the limit; a Modbus timeout does not,
+            # and must not cost an inverter that needs the switch its night
+            # (CodeRabbit on #39)
+            # Above anything written here, too: a failed lowering write leaves
+            # the earlier, higher limit in the reading (Codex on #39)
+            reading = self._get_ac_charge_limit_w(entity_id)
+            reference = max(float(power_w), self._planned_setpoint_written_w or 0.0)
+            if reading is not None and reading > reference + PLANNED_POWER_WRITE_THRESHOLD_W:
+                self._suspend_grid_switch_if_on()
+            if self.is_active and (self._grid_switch_suspended or self._grid_limit_configured()):
                 await self._pause_grid_charge("protective charge-limit write failed")
             return False
         self._grid_limit_last_write = dt_util.now()
         self._planned_setpoint_written_w = float(power_w)
+        self._plan_limit_write_failed = False
         if power_w == 0 and self.is_active and self._grid_limit_configured():
             await self._pause_grid_charge("no confirmed connection headroom")
         return True
@@ -4115,7 +4309,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         grid_on = False
         if grid_charge_switch:
             state = self.hass.states.get(grid_charge_switch)
-            grid_on = state is not None and state.state == "on"
+            # Suspended after a forced charge, it is off whatever KORE's state
+            # still shows: no trial starts on that stale "on"
+            grid_on = (state is not None and state.state == "on"
+                       and not self._grid_switch_suspended)
 
         if not grid_on or self.target_reached:
             self._set_auto_wait_reason("target_reached" if self.target_reached else "grid_charge_not_confirmed")
@@ -4722,6 +4919,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ", ".join(changed),
         )
         await self._on_window_end(dt_util.now())
+        if {CONF_GRID_CHARGE_SWITCH, CONF_CHARGE_POWER_ENTITY} & set(changed):
+            # The suspension is evidence about the old switch and limit; the
+            # window restarted on the new ones keeps the same identity and
+            # would otherwise inherit it (Codex on #38)
+            self._grid_switch_suspended = False
+            self._keepalive_lapse_since = None
+            self._persist_state()
 
     async def _maybe_rescue_the_evening(self) -> None:
         """Act on a shortfall the outlook has already worked out (plan 013).
@@ -4742,6 +4946,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         cheapest place for that energy to be, and the window ends when the
         period starts anyway.
         """
+        await self.async_end_evening_rescue_if_off()
+        if not self.evening_rescue_charge:
+            # Only on request (21 October 2026): held at 35 % from the morning
+            # on, the min SOC went back up every time it was set by hand
+            return
         outlook = self.last_evening_outlook
         if outlook is None or outlook.missing_kwh <= 0:
             return
@@ -4754,7 +4963,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         now = dt_util.now()
         close_enough = (outlook.zone_start - now) <= timedelta(hours=EVENING_RESCUE_CHARGE_LEAD_H)
-        stage = 2 if (self.evening_rescue_charge and close_enough) else 1
+        stage = 2 if close_enough else 1
         if stage <= self._rescue_stage:
             return
 
@@ -4779,6 +4988,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             allow_grid_charge=stage == 2,
         ):
             self._rescue_stage = stage
+
+    async def async_end_evening_rescue_if_off(self) -> None:
+        """Release a rescue window once the rescue is switched off.
+
+        A window the rescue opened before it became opt-in, persisted across
+        the update, ends here too.
+        """
+        if (self.evening_rescue_charge or self._adhoc_until is None
+                or self._adhoc_reason != ADHOC_REASON_EVENING_RESCUE):
+            return
+        _LOGGER.info("The evening rescue is switched off - releasing its window")
+        await self._on_window_end(dt_util.now())
 
     async def async_charge_to(self, target_soc: float, duration: timedelta) -> bool:
         """Charge to a level from the grid, for the ``charge_to`` action.
@@ -5926,6 +6147,24 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as e:
                 _LOGGER.error("Error preparing min SOC: %s", e, exc_info=True)
 
+        if (need_to_set_min_soc and min_soc_entity and current_soc is not None
+                and floor_soc > current_soc):
+            # A floor above the SOC makes a Kostal charge from the grid at once,
+            # at whatever limit stands - its own is 22 kW. The planned limit goes
+            # on first, not seconds later (20 October 2026, 23:01).
+            self._plan_limit_write_failed = False
+            await self._plan_charge_power(target_soc)
+            if not self._plan_limit_write_failed:
+                await self._rewrite_limit_if_lifted()
+            if self._plan_limit_write_failed:
+                # Not without it: the next poll tries again (Codex on #38)
+                _LOGGER.warning(
+                    "The planned charge limit could not be written - not raising the min SOC "
+                    "to %.1f%% this poll, the inverter would charge at its own limit",
+                    floor_soc,
+                )
+                return
+
         # CRITICAL: Send commands together to avoid double DC checks
         # If both min SOC and grid charge need to be set, send them with minimal delay (0.1s)
         # so the inverter processes them together and only does DC checks once
@@ -5979,6 +6218,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             blocking=True,
                         )
                         _LOGGER.info("Turned on the grid charge switch (immediately after min SOC)")
+                        await self._confirm_limit_after_switch_on()
                     elif state and state.state == "on":
                         _LOGGER.debug("Grid charge switch already on")
                 except Exception as e:
@@ -5997,6 +6237,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         blocking=True,
                     )
                     _LOGGER.info("Turned on the grid charge switch")
+                    await self._confirm_limit_after_switch_on()
                 elif state and state.state == "on":
                     _LOGGER.debug("Grid charge switch already on")
             except Exception as e:
@@ -6010,20 +6251,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """A stop on reaching the current target still waits for off feedback."""
         return self._grid_stop_pending and self.target_reached and not self.is_discharge_mode
 
-    async def _pause_grid_charge(self, reason: str) -> None:
+    async def _pause_grid_charge(self, reason: str, *, assume_on: bool = False) -> None:
         """Request a stop while retaining captures and protective power limits.
 
         While a stop on reaching the target is pending, every turn_off counts
         against the same per-window bound, whichever path asks for it - the
         outage guard refreshes every 15 seconds (CodeRabbit on #37).
+
+        ``assume_on``: this integration switched it on a moment ago, and KORE
+        publishes the switch only with its next settings poll - an "off" in
+        Home Assistant then says nothing about the inverter.
         """
         entity_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         state = self.hass.states.get(entity_id) if entity_id else None
-        if entity_id and (state is None or state.state != "off"):
+        if entity_id and (assume_on or state is None or state.state != "off"):
             if self._stop_pending_for_this_target():
                 if self._grid_stop_retries >= GRID_STOP_MAX_RETRIES:
                     return
                 self._grid_stop_retries += 1
+            self._grid_pause_requests += 1
             try:
                 await self.hass.services.async_call(
                     "switch", "turn_off", {"entity_id": entity_id},
@@ -6043,8 +6289,140 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return elapsed_seconds(self._adhoc_until, now) > 0
         return self._scheduled_window_is_open(now)
 
+    def _suspend_grid_switch_if_on(self, *, switched_on: bool = False) -> None:
+        """Keep the grid switch off for the window once a limit failed with it on.
+
+        A Kostal treats Battery:ManualCharge as a forced charge: within a second
+        of switching it on the charge limit read 22.3 kW instead of the 6.7 kW
+        written, the write counted as failed, grid charging was paused - and the
+        next poll switched it on again. Every 15 minutes, all night, each time
+        a grid draw of up to 12 kW for a few seconds (20/21 October 2026).
+        """
+        if not self.is_active or self.is_discharge_mode or self._grid_switch_suspended:
+            return
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        state = self.hass.states.get(str(switch_id)) if switch_id else None
+        if not switched_on and (state is None or state.state != "on"):
+            return
+        self._grid_switch_suspended = True
+        self._persist_state()
+        _LOGGER.warning(
+            "The charge limit did not hold with %s switched on - grid charging stays off "
+            "for the rest of this window. The raised min SOC still applies; an inverter "
+            "that charges up to it does so under the charge limit",
+            switch_id,
+        )
+
+    async def _confirm_limit_after_switch_on(self) -> None:
+        """Check the charge limit right after switching grid charging on.
+
+        The forced charge lifts the limit within seconds; the verification
+        would only notice it at the next poll, up to 15 minutes later. The
+        limit is written again at once and read again SWITCH_ON_RECHECK_S
+        later. If it was lifted, the switch goes off again, stays off for the
+        window, and the planned limit is written back for the floor that keeps
+        charging.
+        """
+        target = self._ac_charge_limit_target()
+        written = self._planned_setpoint_written_w
+        if target is None or written is None:
+            return
+        window = self._window_started_at
+        pauses = self._grid_pause_requests
+        # Written once more: KORE reads the register back directly, while Home
+        # Assistant sees it only every 30 s. A forced charge fails this write
+        # within a second, and the setter suspends the switch and pauses.
+        if not await self._set_ac_charge_limit_w(int(written)):
+            # Switched on a moment ago, whatever Home Assistant shows yet: the
+            # lab caught KORE's switch still reading "off" here, and with it
+            # neither the suspension nor the pause took effect. Whether the
+            # setter paused is counted, not read from that state: read before
+            # the write, it sent a second turn_off (lab, after dark).
+            paused = self._grid_pause_requests > pauses
+            self._suspend_grid_switch_if_on(switched_on=True)
+            if not paused:
+                await self._pause_grid_charge(
+                    "the charge limit did not hold with grid charging switched on", assume_on=True,
+                )
+            # Off again, the Kostal holds a limit: the floor charges under it
+            # now, not under its own 22 kW until the next poll
+            await self._restore_limit_after_switch_off(written, window)
+            return
+        if await self._limit_lifted_by_switch_on() or self._unloading:
+            return
+        self._cancel_switch_on_recheck()
+
+        async def _recheck(_now: datetime) -> None:
+            self._switch_on_recheck_unsub = None
+            # Commanded on 45 s ago: KORE may still show "off" (Codex on #38)
+            await self._limit_lifted_by_switch_on(commanded_on=True)
+
+        self._switch_on_recheck_unsub = async_call_later(self.hass, SWITCH_ON_RECHECK_S, _recheck)
+
+    def _cancel_switch_on_recheck(self) -> None:
+        if self._switch_on_recheck_unsub:
+            self._switch_on_recheck_unsub()
+            self._switch_on_recheck_unsub = None
+
+    async def _restore_limit_after_switch_off(self, written: float, window: datetime | None) -> None:
+        """Write the planned limit back for the floor, in the same window only.
+
+        A window that ended meanwhile has restored the user's limit; writing
+        the plan over it would leave the inverter limited after the window
+        (Codex on #38). A failed write holds a higher floor back, like any
+        failed planned-limit write.
+        """
+        if not self.is_active or self._ending or self._unloading or self._window_started_at != window:
+            return
+        if not await self._set_ac_charge_limit_w(int(written)):
+            self._plan_limit_write_failed = True
+            _LOGGER.warning(
+                "Could not write the charge limit of %.0f W back after switching grid charging "
+                "off - the min SOC is not raised further until it holds", written,
+            )
+
+    async def _limit_lifted_by_switch_on(self, *, commanded_on: bool = False) -> bool:
+        """Handle a charge limit lifted while grid charging is on; True if it was.
+
+        ``commanded_on``: the recheck after this integration switched it on -
+        the switch is on whatever KORE's retained state shows.
+        """
+        target = self._ac_charge_limit_target()
+        written = self._planned_setpoint_written_w
+        if (target is None or written is None or not self.is_active or self._ending
+                or self._unloading or self._grid_switch_suspended):
+            return False
+        window = self._window_started_at
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        switch = self.hass.states.get(str(switch_id)) if switch_id else None
+        if not commanded_on and (switch is None or switch.state != "on"):
+            return False
+        actual = self._get_ac_charge_limit_w(target[0])
+        if actual is None or actual <= written + PLANNED_POWER_WRITE_THRESHOLD_W:
+            return False
+        _LOGGER.warning(
+            "Switching grid charging on lifted the charge limit to %.0f W (written: %.0f W)",
+            actual, written,
+        )
+        self._suspend_grid_switch_if_on(switched_on=commanded_on)
+        # Off whether or not the house connection limit is configured: a
+        # suspended switch left on is a forced charge to the target (Codex and
+        # CodeRabbit on #38)
+        if self._grid_switch_suspended or self._grid_limit_configured():
+            await self._pause_grid_charge(
+                "the charge limit did not hold with grid charging switched on", assume_on=commanded_on,
+            )
+        await self._restore_limit_after_switch_off(written, window)
+        return True
+
     async def _grid_charge_activation_safe(self, target_soc: float) -> bool:
         """Revalidate permission after awaited writes/delays, at the activation sink."""
+        if self._grid_switch_suspended:
+            _LOGGER.debug("Grid charge switch suspended for this window - not switching it on")
+            # Restored after a restart, its last turn_off may never have
+            # arrived: a switch not reading off is stopped again (Codex on #38)
+            await self._pause_grid_charge("grid charging is suspended for this window")
+            return False
         if not self._charge_permission_current():
             await self._pause_grid_charge("window ended or charging permission was withdrawn")
             return False
@@ -6489,6 +6867,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _periodic_verification_loop(),
             "inverter_charge_night_periodic_verification",
         )
+
+        async def _keepalive_loop() -> None:
+            while self.is_active and self.is_enabled:
+                try:
+                    await asyncio.sleep(CHARGE_LIMIT_KEEPALIVE_S)
+                    if self.is_active and self.is_enabled:
+                        await self._keep_charge_limit_alive()
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    _LOGGER.error("Error keeping the charge limit alive: %s", e, exc_info=True)
+
+        if self._charge_limit_expires():
+            self._keepalive_task = self.hass.async_create_background_task(
+                _keepalive_loop(), "inverter_charge_night_charge_limit_keepalive",
+            )
         _LOGGER.debug("Started periodic verification task (interval: %d seconds)",
                      self.config.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
 
@@ -6499,14 +6893,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ``is_active`` check could otherwise write the night target back to
         the inverter after the window-end reset (finding F11).
         """
-        task = self._verification_task
-        self._verification_task = None
-        if task is None or task.done():
-            return
-        task.cancel()
-        if task is asyncio.current_task():
-            return  # cancelling ourselves; the loop exits on its own
-        await asyncio.gather(task, return_exceptions=True)
+        for name in ("_verification_task", "_keepalive_task"):
+            task: asyncio.Task[None] | None = getattr(self, name)
+            setattr(self, name, None)
+            if task is None or task.done():
+                continue
+            task.cancel()
+            if task is asyncio.current_task():
+                continue  # cancelling ourselves; the loop exits on its own
+            await asyncio.gather(task, return_exceptions=True)
+        # A lapse is timed within one run of the keepalive (Codex on #38)
+        self._keepalive_lapse_since = None
         _LOGGER.debug("Stopped periodic verification task")
 
     async def _verify_ac_charge_limit(self) -> None:
@@ -6567,7 +6964,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 written,
             )
             return
-        if self._grid_limit_configured():
+        self._suspend_grid_switch_if_on()
+        if self._grid_switch_suspended or self._grid_limit_configured():
             await self._pause_grid_charge("inverter readback exceeds the protective charge limit")
         if self._battery_idle_on_grid():
             _LOGGER.debug(
@@ -6598,7 +6996,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._ac_limit_rewrites,
             AC_LIMIT_MAX_REWRITES,
         )
-        await self._set_ac_charge_limit_w(int(written))
+        if not await self._set_ac_charge_limit_w(int(written)):
+            # The min SOC verification right after this must not raise the
+            # floor under the lifted limit (Codex on #38)
+            self._plan_limit_write_failed = True
 
     def _window_identity(self, now: datetime) -> str | None:
         """Name the window that is starting: an ad-hoc deadline or the scheduled end."""
@@ -6648,6 +7049,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _clear_ac_limit_not_held(self) -> None:
         """Give every window its own bounded rewrites."""
         self._ac_limit_rewrites = 0
+        self._grid_switch_suspended = False
+        self._keepalive_lapse_since = None
         if not self._ac_limit_not_held:
             return
         self._ac_limit_not_held = False
@@ -6702,8 +7105,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Cannot verify min SOC - %s is not a usable number", min_soc_entity)
                 return
 
+            # Not without the planned limit: the poll that could not write it
+            # held the floor back, and so does this (Codex on #38)
+            held_back = (self._plan_limit_write_failed and floor_soc > current_inverter_soc + 0.5
+                         and floor_soc > (self._current_battery_soc() or 0.0))
+            if held_back:
+                _LOGGER.debug("Planned charge limit not written - not raising the min SOC here either")
             # Check if inverter min SOC doesn't match the floor (with tolerance)
-            if abs(current_inverter_soc - floor_soc) > 0.5:
+            elif abs(current_inverter_soc - floor_soc) > 0.5:
                 _LOGGER.warning(
                     "Inverter min SOC (%.1f%%) doesn't match our target (%.1f%%), restoring to target",
                     current_inverter_soc,

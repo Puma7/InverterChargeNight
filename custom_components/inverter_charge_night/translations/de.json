@@ -46,7 +46,7 @@
           "user_min_soc": "Kleinster erlaubter Ladestand in Prozent. Der Zielladestand geht nie darunter.",
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
           "default_min_soc": "ICN stellt normalerweise den vor dem Laden gelesenen Mindestladestand wieder her. Nur wenn dieser ursprüngliche Wert fehlt, wird dieser Rückfallwert verwendet. Bei neuer Einrichtung zunächst gleich der gewählten Ziel-Untergrenze, z. B. 8 %.",
-          "forecast_error_margin": "Erhöht den angesetzten PV-Ertrag um diesen Prozentsatz. Beispiel: 10 kWh Prognose plus 10 % ergeben 11 kWh freizuhaltenden Platz. Mehr PV-Freiraum kann das Nachtladeziel senken. Zusätzliche Energie für den Morgen lässt sich über die Überbrückungsreserve einplanen.",
+          "forecast_error_margin": "Wie weit die PV-Prognose danebenliegen kann, in Prozent, jeweils zur sicheren Seite: Für den freizuhaltenden Platz wird so viel mehr Sonne angenommen (10 kWh plus 10 % halten Platz für 11 kWh frei), für den Abend, den der Akku tragen muss, so viel weniger (9 kWh). Zusätzliche Energie für den Morgen lässt sich über die Überbrückungsreserve einplanen.",
           "planner_mode": "Überbrückung: plant zusätzlich Energie vom Ladefensterende bis zu ausreichendem PV-Ertrag ein. Verwendet gelernten Hausverbrauch bzw. den Mittelwert und Sonnenaufgang plus Verzögerung aus Erweitert. PV-Freiraum: reserviert nur Platz für die Prognose; der Verbrauch am Morgen wird dabei nicht zusätzlich gedeckt.",
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
@@ -204,7 +204,7 @@
           "user_min_soc": "Kleinster erlaubter Ladestand in Prozent. Der Zielladestand geht nie darunter.",
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
           "default_min_soc": "ICN stellt normalerweise den vor dem Laden gelesenen Mindestladestand wieder her. Nur wenn dieser ursprüngliche Wert fehlt, wird dieser Rückfallwert verwendet. Bei neuer Einrichtung zunächst gleich der gewählten Ziel-Untergrenze, z. B. 8 %.",
-          "forecast_error_margin": "Erhöht den angesetzten PV-Ertrag um diesen Prozentsatz. Beispiel: 10 kWh Prognose plus 10 % ergeben 11 kWh freizuhaltenden Platz. Mehr PV-Freiraum kann das Nachtladeziel senken. Zusätzliche Energie für den Morgen lässt sich über die Überbrückungsreserve einplanen.",
+          "forecast_error_margin": "Wie weit die PV-Prognose danebenliegen kann, in Prozent, jeweils zur sicheren Seite: Für den freizuhaltenden Platz wird so viel mehr Sonne angenommen (10 kWh plus 10 % halten Platz für 11 kWh frei), für den Abend, den der Akku tragen muss, so viel weniger (9 kWh). Zusätzliche Energie für den Morgen lässt sich über die Überbrückungsreserve einplanen.",
           "planner_mode": "Überbrückung: plant zusätzlich Energie vom Ladefensterende bis zu ausreichendem PV-Ertrag ein. Verwendet gelernten Hausverbrauch bzw. den Mittelwert und Sonnenaufgang plus Verzögerung aus Erweitert. PV-Freiraum: reserviert nur Platz für die Prognose; der Verbrauch am Morgen wird dabei nicht zusätzlich gedeckt.",
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
@@ -447,7 +447,7 @@
         },
         "data_description": {
           "planner_mode": "Überbrückung plant zusätzlich Hausverbrauch vom Ladefensterende bis zum erwarteten PV-Beitrag ein. Dafür die Verbrauchs- und Verzögerungsfelder auf dieser Seite verwenden. PV-Freiraum reserviert Platz für die Prognose, ohne den Morgenverbrauch zusätzlich einzuplanen.",
-          "forecast_error_margin": "Erhöht den angesetzten PV-Ertrag um diesen Prozentsatz. Beispiel: 10 kWh Prognose plus 10 % ergeben 11 kWh freizuhaltenden Platz. Mehr PV-Freiraum kann das Nachtladeziel senken. Zusätzliche Energie für den Morgen lässt sich über die Überbrückungsreserve einplanen.",
+          "forecast_error_margin": "Wie weit die PV-Prognose danebenliegen kann, in Prozent, jeweils zur sicheren Seite: Für den freizuhaltenden Platz wird so viel mehr Sonne angenommen (10 kWh plus 10 % halten Platz für 11 kWh frei), für den Abend, den der Akku tragen muss, so viel weniger (9 kWh). Zusätzliche Energie für den Morgen lässt sich über die Überbrückungsreserve einplanen.",
           "default_min_soc": "ICN stellt normalerweise den vor dem Laden gelesenen Mindestladestand wieder her. Nur wenn dieser ursprüngliche Wert fehlt, wird dieser Rückfallwert verwendet. Bei neuer Einrichtung zunächst gleich der gewählten Ziel-Untergrenze, z. B. 8 %.",
           "pv_forecast_today_entity": "Tagesenergie-Prognose für HEUTE in kWh. Verbessert die Zuordnung nach Mitternacht. Nicht mit dem tatsächlich erzeugten Tagesertrag verwechseln.",
           "house_load_entity": "Optional: kWh-Zähler des Hausverbrauchs. Der Überbrückungs-Planer lernt daraus aus den letzten 14 Tagen ein Tagesprofil; ohne ihn gilt der Mittelwert darunter.",
@@ -759,7 +759,7 @@
           "user_min_soc": "Kleinster erlaubter Ladestand in Prozent. Der Zielladestand geht nie darunter.",
           "user_max_soc": "Größter erlaubter Ladestand in Prozent. Der Zielladestand geht nie darüber.",
           "default_min_soc": "ICN stellt normalerweise den vor dem Laden gelesenen Mindestladestand wieder her. Nur wenn dieser ursprüngliche Wert fehlt, wird dieser Rückfallwert verwendet. Bei neuer Einrichtung zunächst gleich der gewählten Ziel-Untergrenze, z. B. 8 %.",
-          "forecast_error_margin": "Erhöht den angesetzten PV-Ertrag um diesen Prozentsatz. Beispiel: 10 kWh Prognose plus 10 % ergeben 11 kWh freizuhaltenden Platz. Mehr PV-Freiraum kann das Nachtladeziel senken. Zusätzliche Energie für den Morgen lässt sich über die Überbrückungsreserve einplanen.",
+          "forecast_error_margin": "Wie weit die PV-Prognose danebenliegen kann, in Prozent, jeweils zur sicheren Seite: Für den freizuhaltenden Platz wird so viel mehr Sonne angenommen (10 kWh plus 10 % halten Platz für 11 kWh frei), für den Abend, den der Akku tragen muss, so viel weniger (9 kWh). Zusätzliche Energie für den Morgen lässt sich über die Überbrückungsreserve einplanen.",
           "planner_mode": "Überbrückung: plant zusätzlich Energie vom Ladefensterende bis zu ausreichendem PV-Ertrag ein. Verwendet gelernten Hausverbrauch bzw. den Mittelwert und Sonnenaufgang plus Verzögerung aus Erweitert. PV-Freiraum: reserviert nur Platz für die Prognose; der Verbrauch am Morgen wird dabei nicht zusätzlich gedeckt.",
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
@@ -998,7 +998,7 @@
         },
         "data_description": {
           "planner_mode": "Überbrückung plant zusätzlich Hausverbrauch vom Ladefensterende bis zum erwarteten PV-Beitrag ein. Dafür die Verbrauchs- und Verzögerungsfelder auf dieser Seite verwenden. PV-Freiraum reserviert Platz für die Prognose, ohne den Morgenverbrauch zusätzlich einzuplanen.",
-          "forecast_error_margin": "Erhöht den angesetzten PV-Ertrag um diesen Prozentsatz. Beispiel: 10 kWh Prognose plus 10 % ergeben 11 kWh freizuhaltenden Platz. Mehr PV-Freiraum kann das Nachtladeziel senken. Zusätzliche Energie für den Morgen lässt sich über die Überbrückungsreserve einplanen.",
+          "forecast_error_margin": "Wie weit die PV-Prognose danebenliegen kann, in Prozent, jeweils zur sicheren Seite: Für den freizuhaltenden Platz wird so viel mehr Sonne angenommen (10 kWh plus 10 % halten Platz für 11 kWh frei), für den Abend, den der Akku tragen muss, so viel weniger (9 kWh). Zusätzliche Energie für den Morgen lässt sich über die Überbrückungsreserve einplanen.",
           "default_min_soc": "ICN stellt normalerweise den vor dem Laden gelesenen Mindestladestand wieder her. Nur wenn dieser ursprüngliche Wert fehlt, wird dieser Rückfallwert verwendet. Bei neuer Einrichtung zunächst gleich der gewählten Ziel-Untergrenze, z. B. 8 %.",
           "pv_forecast_today_entity": "Tagesenergie-Prognose für HEUTE in kWh. Verbessert die Zuordnung nach Mitternacht. Nicht mit dem tatsächlich erzeugten Tagesertrag verwechseln.",
           "house_load_entity": "Optional: kWh-Zähler des Hausverbrauchs. Der Überbrückungs-Planer lernt daraus aus den letzten 14 Tagen ein Tagesprofil; ohne ihn gilt der Mittelwert darunter.",
@@ -1336,7 +1336,7 @@
         "name": "Nächstes Fenster überspringen (24 h)"
       },
       "evening_rescue_charge": {
-        "name": "Abendrettung: aus dem Netz nachladen"
+        "name": "Abendrettung (festhalten und nachladen)"
       }
     },
     "select": {

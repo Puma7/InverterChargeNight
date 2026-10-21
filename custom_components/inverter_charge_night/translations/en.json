@@ -46,7 +46,7 @@
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "default_min_soc": "ICN normally restores the minimum SOC read before charging. This fallback is used only when that original value is unavailable. New setups initially use the chosen target minimum, e.g. 8%.",
-          "forecast_error_margin": "Increases assumed PV yield by this percentage. Example: a 10 kWh forecast plus 10% reserves space for 11 kWh. More PV headroom can lower the night charging target. Use bridge reserve to allow additional morning energy.",
+          "forecast_error_margin": "How far the PV forecast may be off, in percent, applied on the safe side: the space kept free for the sun assumes this much more (10 kWh plus 10 % keeps room for 11 kWh), the evening the battery has to carry assumes this much less (9 kWh). Use bridge reserve to allow additional morning energy.",
           "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
@@ -204,7 +204,7 @@
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "default_min_soc": "ICN normally restores the minimum SOC read before charging. This fallback is used only when that original value is unavailable. New setups initially use the chosen target minimum, e.g. 8%.",
-          "forecast_error_margin": "Increases assumed PV yield by this percentage. Example: a 10 kWh forecast plus 10% reserves space for 11 kWh. More PV headroom can lower the night charging target. Use bridge reserve to allow additional morning energy.",
+          "forecast_error_margin": "How far the PV forecast may be off, in percent, applied on the safe side: the space kept free for the sun assumes this much more (10 kWh plus 10 % keeps room for 11 kWh), the evening the battery has to carry assumes this much less (9 kWh). Use bridge reserve to allow additional morning energy.",
           "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
@@ -447,7 +447,7 @@
         },
         "data_description": {
           "planner_mode": "Bridge mode also plans house consumption from the window ending until expected PV supply. Use the load and delay fields on this page. PV headroom reserves space for forecast generation without additionally planning morning use.",
-          "forecast_error_margin": "Increases assumed PV yield by this percentage. Example: a 10 kWh forecast plus 10% reserves space for 11 kWh. More PV headroom can lower the night charging target. Use bridge reserve to allow additional morning energy.",
+          "forecast_error_margin": "How far the PV forecast may be off, in percent, applied on the safe side: the space kept free for the sun assumes this much more (10 kWh plus 10 % keeps room for 11 kWh), the evening the battery has to carry assumes this much less (9 kWh). Use bridge reserve to allow additional morning energy.",
           "default_min_soc": "ICN normally restores the minimum SOC read before charging. This fallback is used only when that original value is unavailable. New setups initially use the chosen target minimum, e.g. 8%.",
           "pv_forecast_today_entity": "Today’s full-day energy forecast in kWh. Improves matching after midnight. Different from measured generation today.",
           "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
@@ -759,7 +759,7 @@
           "user_min_soc": "Minimum allowed SOC percentage (0-100). Target SOC will not go below this.",
           "user_max_soc": "Maximum allowed SOC percentage (0-100). Target SOC will not go above this.",
           "default_min_soc": "ICN normally restores the minimum SOC read before charging. This fallback is used only when that original value is unavailable. New setups initially use the chosen target minimum, e.g. 8%.",
-          "forecast_error_margin": "Increases assumed PV yield by this percentage. Example: a 10 kWh forecast plus 10% reserves space for 11 kWh. More PV headroom can lower the night charging target. Use bridge reserve to allow additional morning energy.",
+          "forecast_error_margin": "How far the PV forecast may be off, in percent, applied on the safe side: the space kept free for the sun assumes this much more (10 kWh plus 10 % keeps room for 11 kWh), the evening the battery has to carry assumes this much less (9 kWh). Use bridge reserve to allow additional morning energy.",
           "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
@@ -998,7 +998,7 @@
         },
         "data_description": {
           "planner_mode": "Bridge mode also plans house consumption from the window ending until expected PV supply. Use the load and delay fields on this page. PV headroom reserves space for forecast generation without additionally planning morning use.",
-          "forecast_error_margin": "Increases assumed PV yield by this percentage. Example: a 10 kWh forecast plus 10% reserves space for 11 kWh. More PV headroom can lower the night charging target. Use bridge reserve to allow additional morning energy.",
+          "forecast_error_margin": "How far the PV forecast may be off, in percent, applied on the safe side: the space kept free for the sun assumes this much more (10 kWh plus 10 % keeps room for 11 kWh), the evening the battery has to carry assumes this much less (9 kWh). Use bridge reserve to allow additional morning energy.",
           "default_min_soc": "ICN normally restores the minimum SOC read before charging. This fallback is used only when that original value is unavailable. New setups initially use the chosen target minimum, e.g. 8%.",
           "pv_forecast_today_entity": "Today’s full-day energy forecast in kWh. Improves matching after midnight. Different from measured generation today.",
           "house_load_entity": "Optional: cumulative energy meter (kWh) of the house consumption. The Bridge planner learns an hourly load profile from the last 14 days of recorder statistics; without it the average load below is used.",
@@ -1336,7 +1336,7 @@
         "name": "Skip the next window (24 h)"
       },
       "evening_rescue_charge": {
-        "name": "Evening rescue: charge from the grid"
+        "name": "Evening rescue (hold and charge)"
       }
     },
     "select": {

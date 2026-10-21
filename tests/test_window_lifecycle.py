@@ -150,6 +150,7 @@ async def _start_and_apply(mock_hass, coordinator) -> float:
 
 @pytest.mark.asyncio
 async def test_window_start_calculates_target_and_arms_listeners(mock_hass, coordinator):
+    coordinator._charge_limit_expires = MagicMock(return_value=True)  # KostalKore's 1038
     await coordinator._on_window_start(WINDOW_START)
 
     assert coordinator.is_active is True
@@ -164,7 +165,8 @@ async def test_window_start_calculates_target_and_arms_listeners(mock_hass, coor
     assert coordinator._inverter_min_soc_listener is not None
     assert coordinator._verification_task is not None
     assert not coordinator._verification_task.done()
-    mock_hass.async_create_background_task.assert_called_once()
+    assert coordinator._keepalive_task is not None
+    assert mock_hass.async_create_background_task.call_count == 2  # verification, keepalive
 
     # Window start itself only schedules the refresh; the refresh does the work
     coordinator.async_request_refresh.assert_awaited_once()
@@ -1189,8 +1191,12 @@ async def test_planned_power_two_kwh_in_four_hours_writes_556_w(mock_hass, power
     assert mock_hass.services.async_call.await_args_list == [
         # The scheduled night writes the calculated floor, never the initial 40%.
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 28.9}, blocking=True),
+        # The limit goes on before a floor above the SOC makes the inverter charge
+        call("number", "set_value", {"entity_id": AC_LIMIT, "value": 3000.0}, blocking=True),
         call("number", "set_value", {"entity_id": MIN_SOC, "value": 60.0}, blocking=True),
         call("switch", "turn_on", {"entity_id": GRID}, blocking=True),
+        # ...and once more after switching on: KORE reads it back directly, so
+        # a forced charge that lifts it shows at once
         call("number", "set_value", {"entity_id": AC_LIMIT, "value": 3000.0}, blocking=True),
     ]
     assert powered._original_ac_charge_power == 6000.0

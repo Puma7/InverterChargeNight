@@ -28,6 +28,14 @@ from custom_components.inverter_charge_night.const import (
 
 
 @pytest.fixture(autouse=True)
+def _no_feedback_wait():
+    """A write KORE reports as unconfirmed waits for its fresh reading in real
+    seconds; a test that wants the wait sets the constant itself."""
+    with patch("custom_components.inverter_charge_night.coordinator.LIMIT_FEEDBACK_WAIT_S", 0):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _no_frame_report():
     """Silence HA's frame helper, which the MagicMock hass never sets up.
 

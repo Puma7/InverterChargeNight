@@ -5,6 +5,91 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.8] - 2026-10-21
+
+### Fixed
+- **Grid charging is no longer switched on and off every 15 minutes all night.** The night of
+  20/21 October, from the field log: each poll switched `Battery:ManualCharge` on, and a
+  second later switched it off again - 28 relay switchings, each with a grid draw of up to
+  12 kW for a few seconds. Three causes worked together:
+  - KORE compares its readback exactly, and the Kostal answers a written 1000 W with 997.9 to
+    999.9 W. Every write counted as failed, and a failed protective write pauses grid
+    charging. A write KORE calls unconfirmed now counts as held when the next reading has
+    moved to within 100 W of it. KORE republishes the old value with a new timestamp on every
+    fast poll, so only a changed value is evidence; the reading may take a few seconds
+    (`LIMIT_FEEDBACK_WAIT_S`).
+  - On the Kostal, `Battery:ManualCharge` is a forced charge: within a second of switching it
+    on the charge limit read 22.3 kW, a limit written while it is on is ignored, and the min SOC
+    register read one point higher for a minute or two (the 44/45 % steps every 15 minutes in
+    the history - the integration wrote the min SOC three times that night). The limit
+    is now written again right after switching on - KORE reads that one back directly - and
+    rechecked `SWITCH_ON_RECHECK_S` later. If switching on lifted it, grid charging goes off at
+    once, stays off for the rest of the window (a restart inside it included), and the
+    planned limit is written back. The raised min SOC keeps charging the battery, under that
+    limit, as it did through the whole of that night. Right after the switch-on KORE may still
+    show the switch as off - it publishes it with its next settings poll - so the switch-off
+    there does not rely on that state (found in the lab), nor does the recheck 45 s later
+    (Codex on #38); the switch-off is sent once, not again by a check that read the state from
+    before the write. A suspended switch is off for the efficiency search too, whatever KORE still
+    shows - after dark the lab saw it start a trial on that stale "on". A planned limit written
+    back after the switch-off, or by the verification, that fails holds a higher floor back, and
+    none is written back once the window has ended (Codex on #38). A suspension restored after a
+    restart stops a switch that does not read off again; one belonging to a switch or limit the
+    options replace mid-window does not carry over to the new ones (both Codex on #38). The switch-off does not depend on the
+    optional house connection limit either: without it, the switch was suspended but left on,
+    and the forced charge ran on to the target (Codex and CodeRabbit on #38). Only evidence of a
+    forced charge suspends the switch - a reading above the limit, or a failed rewrite right after
+    switching on; a write lost to a Modbus timeout no longer costs an inverter that needs the
+    switch its night (CodeRabbit on #39). The reading has to be above anything written, not only
+    the new limit: a failed lowering write leaves the earlier, higher limit in it (Codex on #39).
+  - The min SOC was raised before the charge limit was written, so the Kostal charged at its
+    own 22 kW for the seconds in between (the spike at 23:01). A floor above the battery
+    level now goes on only after the planned limit, and not at all in a poll where that limit
+    could not be written; the next poll tries again (Codex on #38). A plan that writes nothing on
+    purpose, or a limit already reported as not held, does not hold the floor back. The min SOC
+    verification between polls holds it back the same way (Codex on #38). A plan that has nothing
+    new to write reads the limit first: one the inverter dropped or someone raised is written
+    again before the floor rises (Codex on #38).
+- **The charge limit is kept alive while the battery can draw from the grid.** The Kostal hands
+  battery control back to its own management unless the Modbus values are written again within
+  its timeout (30-60 s): 1000 W written and confirmed at 23:01:05, about 8 kW charging at 23:12,
+  and nobody else wrote the register in between. KORE and evcc write it cyclically; the window
+  now does too, every `CHARGE_LIMIT_KEEPALIVE_S` (20 s - a third of the shortest timeout is left
+  for the write itself; 30 s let the limit lapse for a moment every cycle, Codex on #38), while it holds a limit it wrote and the
+  battery is not provably idle. The keepalive captures, records and pauses nothing - the
+  verification and its bounded rewrites still judge what the inverter holds - and it stops with
+  the window: after the window end nothing reaches the inverter. Before, the limit was rewritten every 15 minutes
+  only by accident, because every write counted as failed; with the readback fixed above it
+  would have been written twice a night and lapsed for the rest of it. A limit someone else has
+  lowered (the user, evcc) is left alone, as the verification does (CodeRabbit on #38). A
+  keepalive that is not delivered while the inverter no longer reads the limit runs the
+  verification at once, not up to 15 minutes later (Codex on #39); so does a lapse the reading
+  still shows 75 s after the keepalive first saw it, although the writes were acknowledged
+  (Codex on #38). Only a control whose value lapses is kept alive - KostalKore's; a setting that
+  persists is not written every 20 s all night (Codex on #38).
+
+### Changed
+- **The evening rescue acts only when switched on, holding included** (Pascal's decision of
+  21 October). That morning the min SOC sat at 35 % and went back up every time it was set by
+  hand - most likely the rescue holding the battery for the 16:30 period: an integration for the
+  night changing the inverter in the middle of the day. `switch.…_evening_rescue_charge` is now "Evening rescue (hold and
+  charge)", off by default; switching it off ends a running rescue at once, and a rescue window
+  persisted from before the update ends at the next poll.
+- **The forecast error margin takes the safe side for the evening.** It still widens the room
+  kept free for tomorrow's sun, but the evening the battery has to carry now counts on the
+  forecast *less* the margin. On 20 October the evening was credited 12.0 kWh of sun for a
+  10.9 kWh forecast, and the night bought too little for it. The afternoon outlook that drives
+  the evening rescue counts the rest of today's sun the same way (Codex on #38).
+
+### Lab
+- **New lab campaign: forced charge.** The night through real HA, real KORE and the emulated
+  Kostal with all three quirks - float readback, a forced charge behind `ManualCharge` and a
+  limit that lapses unless written again - and the efficiency search on, as in the field: the
+  switch goes on at most once and off in the same poll, the limit precedes the floor and is
+  kept alive, the battery charges no faster than the planned limit allows, no repair issue,
+  and nothing reaches the inverter after the window end. Without the keepalive the same night
+  draws 4.4 instead of at most 3.0 kWh.
+
 ## [3.10.7] - 2026-10-20
 
 ### Fixed

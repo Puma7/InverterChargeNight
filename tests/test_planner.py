@@ -227,10 +227,24 @@ def test_a_dull_day_buys_the_evening_at_the_cheap_tariff():
 
 
 def test_a_partly_covered_evening_buys_only_the_rest():
-    # 5.5 kWh with margin against 4 kWh of daytime load: 1.5 kWh surplus
+    # The evening counts on the forecast less the margin: 4.5 kWh against 4 kWh
+    # of daytime load leaves 0.5 kWh for it
     plan = plan_target_soc(_plan_input(forecast_kwh_next_day=5.0, high_price_window=EVENING))
-    surplus = 5.0 * 1.1 - DAYTIME_LOAD_KWH
+    surplus = 5.0 * 0.9 - DAYTIME_LOAD_KWH
     assert plan.evening_shortfall_kwh == pytest.approx(max(0.0, EVENING_KWH - surplus))
+
+
+def test_the_margin_takes_the_safe_side_for_each_bound():
+    """21 October 2026: 10.9 kWh forecast, 10 % margin - the evening was credited
+    12.0 kWh of sun and the night bought too little. The margin now narrows the
+    sun the evening counts on and still widens the room kept free for it."""
+    sure = plan_target_soc(_plan_input(forecast_kwh_next_day=5.0, high_price_window=EVENING,
+                                       error_margin_pct=0.0))
+    unsure = plan_target_soc(_plan_input(forecast_kwh_next_day=5.0, high_price_window=EVENING,
+                                         error_margin_pct=10.0))
+    assert unsure.evening_shortfall_kwh > sure.evening_shortfall_kwh
+    assert unsure.lower_bound_soc > sure.lower_bound_soc
+    assert unsure.upper_bound_soc <= sure.upper_bound_soc
 
 
 def test_the_margin_allows_for_an_evening_above_the_average():
@@ -796,3 +810,15 @@ def test_a_zero_load_period_is_not_a_price_decision():
         )
     )
     assert dropped.evening_reserve_dropped is True
+
+
+def test_the_outlook_counts_the_forecast_less_its_margin():
+    """Codex on #38: the night plan credits the evening the forecast less its
+    margin, the afternoon outlook credited all of it. A forecast 20 % too good
+    is inside a 20 % margin - and hid the shortfall the rescue is there for."""
+    trusting = _outlook(current_soc=20.0, forecast_kwh_today=8.0)
+    cautious = _outlook(current_soc=20.0, forecast_kwh_today=8.0, forecast_error_margin_pct=20.0)
+
+    assert cautious.pv_to_come_kwh == pytest.approx(trusting.pv_to_come_kwh * 0.8)
+    assert trusting.missing_kwh == 0.0
+    assert cautious.missing_kwh > 0.0

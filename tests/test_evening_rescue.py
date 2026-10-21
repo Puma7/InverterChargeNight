@@ -64,7 +64,7 @@ CONFIG = {
 }
 
 
-def _make_coordinator(mock_hass, extra=None):
+def _make_coordinator(mock_hass, extra=None, *, rescue=True):
     entry = MagicMock()
     entry.entry_id = "entry_1"
     entry.title = "Test"
@@ -86,6 +86,8 @@ def _make_coordinator(mock_hass, extra=None):
     coordinator._start_periodic_verification = AsyncMock()
     coordinator._stop_periodic_verification = AsyncMock()
     coordinator._house_load_profile = AsyncMock(return_value=[0.5] * 24)
+    # Opt-in since 21 October 2026; the tests here are about what it does when on
+    coordinator.evening_rescue_charge = rescue
     return coordinator
 
 
@@ -164,16 +166,38 @@ async def test_no_outlook_changes_nothing(mock_hass):
 # Stage two: buy -----------------------------------------------------------------
 
 
+@pytest.mark.parametrize("now", [EARLY, LATE], ids=["early", "late"])
 @pytest.mark.asyncio
-async def test_without_the_switch_it_only_ever_holds(mock_hass):
-    """Pascal's decision: blocking is automatic, buying is not."""
+async def test_without_the_switch_it_does_nothing_at_all(mock_hass, now):
+    """Pascal's decision of 21 October 2026: only on request, the hold included.
+
+    Held at 35 % from the morning on, the min SOC went back up every time it
+    was set by hand - an integration for the night changing the inverter in
+    the middle of the day.
+    """
+    coordinator = _make_coordinator(mock_hass, rescue=False)
+
+    await _rescue(coordinator, _short(), now=now)
+
+    assert coordinator._rescue_stage == 0
+    assert coordinator.is_active is False
+    mock_hass.services.async_call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_rescue_window_from_before_the_update_ends_when_it_is_off(mock_hass):
+    """The window of the morning of 21 October was persisted: it must not hold on."""
     coordinator = _make_coordinator(mock_hass)
-    coordinator.evening_rescue_charge = False
+    await _rescue(coordinator, _short())
+    assert coordinator.is_active is True
+    coordinator.evening_rescue_charge = False  # what an updated install starts with
+    mock_hass.services.async_call.reset_mock()
 
-    await _rescue(coordinator, _short(), now=LATE)
+    await _rescue(coordinator, _short())
 
-    assert coordinator._rescue_stage == 1
-    assert coordinator._adhoc_allow_grid_charge is False
+    assert coordinator.is_active is False
+    assert coordinator._adhoc_until is None
+    assert coordinator.original_min_soc is None  # the inverter's own floor is back
 
 
 @pytest.mark.asyncio
@@ -283,7 +307,7 @@ async def test_the_rescue_ends_when_the_period_starts(mock_hass):
 async def test_the_switch_survives_a_restart(mock_hass):
     from custom_components.inverter_charge_night.switch import EveningRescueChargeSwitch
 
-    coordinator = _make_coordinator(mock_hass)
+    coordinator = _make_coordinator(mock_hass, rescue=False)
     switch = EveningRescueChargeSwitch(coordinator, coordinator.entry)
     switch.async_write_ha_state = MagicMock()
 
@@ -296,22 +320,22 @@ async def test_the_switch_survives_a_restart(mock_hass):
 
 
 @pytest.mark.asyncio
-async def test_switching_it_off_leaves_a_running_rescue_to_finish(mock_hass):
-    """It bought that energy for an evening that has not happened yet."""
+async def test_switching_it_off_ends_a_running_rescue(mock_hass):
+    """Off means off: the user takes the inverter back at once."""
     from custom_components.inverter_charge_night.switch import EveningRescueChargeSwitch
 
     coordinator = _make_coordinator(mock_hass)
-    coordinator.evening_rescue_charge = True
     await _rescue(coordinator, _short(), now=LATE)
     assert coordinator._adhoc_allow_grid_charge is True
 
     switch = EveningRescueChargeSwitch(coordinator, coordinator.entry)
     switch.async_write_ha_state = MagicMock()
-    await switch.async_turn_off()
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=LATE):
+        await switch.async_turn_off()
 
     assert coordinator.evening_rescue_charge is False
-    assert coordinator.is_active is True
-    assert coordinator._adhoc_allow_grid_charge is True
+    assert coordinator.is_active is False
+    assert coordinator._adhoc_until is None
 
 
 @pytest.mark.asyncio

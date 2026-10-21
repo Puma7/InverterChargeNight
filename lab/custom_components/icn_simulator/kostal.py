@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import secrets
 import struct
+import time
 
 from aiohttp import web
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -38,6 +39,16 @@ class KostalEmulator:
         self.rest_online = True
         self.modbus_online = True
         self.modbus_delay_s = 0
+        # Field quirks of 20/21 October 2026: the charge limit reads back as a
+        # float a little below what was written, and Battery:ManualCharge is a
+        # forced charge that lifts the limit to the inverter's own value
+        self.readback_offset_w = 0.0
+        self.manual_charge_limit_w: float | None = None
+        # ...and a limit on 1038 lapses back to the inverter's own value unless
+        # it is written again within this many seconds (23:01 -> 8 kW at 23:12)
+        self.limit_fallback_s: float | None = None
+        self.native_charge_limit_w = 0.0
+        self._limit_written_at = 0.0
 
     async def start(self, http_port=80, modbus_port=1502):
         host = inverter_host()
@@ -182,6 +193,8 @@ class KostalEmulator:
                 self.lab.audit(key, value, accepted=not self.lab.plant.reject_writes)
                 if not self.lab.plant.reject_writes:
                     setattr(self.lab.plant, key, value)
+                    if key == "grid_charge" and value and self.manual_charge_limit_w is not None:
+                        self.lab.plant.charge_limit = self.manual_charge_limit_w
             self.lab.publish()
             return web.json_response([])
         for kind, catalog in (("settings", self.settings()), ("processdata", self.process())):
@@ -253,7 +266,13 @@ class KostalEmulator:
             return web.json_response({"sessionId": session})
         return web.json_response({"message": "Invalid authentication request"}, status=400)
 
+    def apply_limit_fallback(self):
+        if (self.limit_fallback_s is not None
+                and time.monotonic() - self._limit_written_at > self.limit_fallback_s):
+            self.lab.plant.charge_limit = self.native_charge_limit_w
+
     def registers(self):
+        self.apply_limit_fallback()
         p = self.lab.plant
         values = {}
 
@@ -271,7 +290,8 @@ class KostalEmulator:
             150: 50, 158: 230, 164: 230, 170: 230, 178: p.pv_power, 190: p.battery_power / 400,
             194: 100, 200: p.battery_power / 400, 210: p.soc, 214: 22, 216: 400,
             252: p.grid_power, 260: p.pv_string_power(1), 270: p.pv_string_power(2),
-            1034: 0, 1038: p.charge_limit, 1040: p.discharge_limit,
+            1034: 0, 1038: p.charge_limit - self.readback_offset_w if p.charge_limit else 0.0,
+            1040: p.discharge_limit,
             1042: p.min_soc, 1044: 100.0,
             1046: p.stored_energy * 1000, 1048: p.discharged_energy * 1000,
             1068: p.capacity * 1000, 1076: 10000, 1078: 10000,
@@ -324,10 +344,15 @@ class KostalEmulator:
                         value = struct.unpack(">H" if count == 1 else ">f", packet[6:])[0]
                         maximum = 100 if key == "min_soc" else 20000
                         if 0 <= value <= maximum:
-                            refused = self.lab.plant.reject_writes or (key == "charge_limit" and self.lab.plant.reject_charge_limit)
+                            refused = self.lab.plant.reject_writes or (key == "charge_limit" and (
+                                self.lab.plant.reject_charge_limit
+                                # A forced charge acknowledges a limit and ignores it
+                                or (self.manual_charge_limit_w is not None and self.lab.plant.grid_charge)))
                             self.lab.audit(key, value, accepted=not refused)
                             if not refused:
                                 setattr(self.lab.plant, key, float(value))
+                                if key == "charge_limit":
+                                    self._limit_written_at = time.monotonic()
                             self.lab.publish()
                             response = struct.pack(">BHH", 16, address, count)
                         else:

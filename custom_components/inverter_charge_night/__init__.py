@@ -372,5 +372,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConf
         coordinator._cancel_skip_next_expiry()
         # A pending reset stays persisted and is retried after the next setup
         coordinator._cancel_reset_retry()
+        coordinator._cancel_switch_on_recheck()
 
     return unload_ok
