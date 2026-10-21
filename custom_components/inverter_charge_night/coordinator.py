@@ -56,6 +56,12 @@ from .const import (
     AUTO_TEST_MAX_PLAUSIBLE_LOSS,
     AUTO_TEST_MIN_DURATION_S,
     AUTO_TEST_MIN_ENERGY_WH,
+    AUTO_TEST_BLOCK_S,
+    AUTO_TEST_MIN_BLOCKS,
+    AUTO_TEST_TARGET_SE,
+    AUTO_TEST_MAX_DURATION_S,
+    EFFICIENCY_COARSE_STEP_W,
+    EFFICIENCY_FINE_STEP_W,
     AUTO_TEST_MIN_FOLLOW_RATIO,
     AUTO_TEST_SETTLE_S,
     AUTO_TEST_STATE_FINISHED,
@@ -494,6 +500,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The state of charge the running measurement started at, so its loss
         # can be filed under the part of the battery it was measured in.
         self._auto_start_soc: float | None = None
+        # Per-block losses of the running trial, and the block being collected
+        self._auto_block_losses: list[float] = []
+        self._auto_block_start: datetime | None = None
+        self._auto_block_sent_wh = 0.0
+        self._auto_block_received_wh = 0.0
         self._auto_missing_entities_logged = False
         self._auto_wait_reason: str | None = "not_evaluated"
         # Planner v2 (plan 006)
@@ -3589,14 +3600,30 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return int(round(value_w / step_w) * step_w)
 
     def _select_next_auto_test_power_w(self) -> int | None:
-        """Golden-section search using valid measurements only.
+        """Coarse to fine, using valid measurements only.
+
+        First a coarse pass upwards, EFFICIENCY_COARSE_STEP_W apart, until the
+        loss has risen twice in a row, each time against the point before; then
+        the gap between the best power so far and its nearest
+        measured neighbour is halved, on either side, until both gaps are no
+        wider than EFFICIENCY_FINE_STEP_W. A golden-section search
+        assumed one clean minimum and narrowed on two noisy samples; the coarse
+        pass sees the whole curve first. Neighbours within the measured
+        uncertainty of the best end the search early: the optimum is flat there.
 
         Transient failures defer the search until another charging window.
-        They never prove that neighbouring, unmeasured powers are inefficient.
+        They never prove that neighbouring, unmeasured powers are inefficient,
+        so a refinement point that could not be measured keeps the search open.
         """
         self._auto_search_deferred = False
         min_w = int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000))
         max_w = int(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000))
+        target = self._ac_charge_limit_target()
+        control_max_w = self._control_max_w(target[0]) if target is not None else None
+        if control_max_w is not None:
+            # A trial above the control's maximum is never started (it would
+            # be written as the maximum); the search does not ask for one
+            max_w = min(max_w, int(control_max_w))
         if min_w >= max_w:
             if not self._auto_range_warned:
                 _LOGGER.warning(
@@ -3608,68 +3635,82 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._auto_range_warned = True
             return None
 
-        step_w = 100  # 0.1 kW precision
         data = self.get_auto_efficiency_data()
-        history = {int(k): v for k, v in data.get("history", {}).items()}
+        history = {int(k): float(v) for k, v in data.get("history", {}).items()}
+        uncertainty = {int(k): float(v) for k, v in dict(data.get("uncertainty", {})).items()}
         failed = {int(k): int(v) for k, v in dict(data.get("failed", {})).items()}
         # Retries are bounded per window; failure never counts as a loss sample.
         unmeasurable = {p for p, n in failed.items() if n >= AUTO_TEST_MAX_ATTEMPTS}
-        range_min = int(data.get("range_min_w", min_w))
-        range_max = int(data.get("range_max_w", max_w))
-        range_min = max(min_w, range_min)
-        range_max = min(max_w, range_max)
-        if range_max - range_min < step_w:
+
+        def snap(power: float) -> int:
+            return max(min_w, min(max_w, self._round_power_step(power, 50)))
+
+        coarse = sorted({snap(min_w + i * EFFICIENCY_COARSE_STEP_W)
+                         for i in range((max_w - min_w) // EFFICIENCY_COARSE_STEP_W + 1)} | {max_w})
+        # Upwards until the loss has risen twice in a row, each time against the
+        # point before: the curve has turned, and the rest of the range is not
+        # worth a trial. A loss that falls again starts the count over - worse
+        # than the best is not a rise (Codex on #39).
+        previous: int | None = None
+        rises_in_row = 0
+        for power in coarse:
+            if power in history:
+                if (previous is not None and history[power] > history[previous]
+                        and not self._losses_indistinguishable(power, previous, history, uncertainty)):
+                    rises_in_row += 1
+                    if rises_in_row >= 2:
+                        break
+                else:
+                    rises_in_row = 0
+                previous = power
+                continue
+            if power not in unmeasurable:
+                return power
+        measured = {p: loss for p, loss in history.items() if min_w <= p <= max_w}
+        if not measured:
+            # Nothing could be measured yet: another window may manage
+            self._auto_search_deferred = any(p in unmeasurable for p in coarse)
             return None
 
-        phi = (math.sqrt(5) - 1) / 2  # golden ratio
-        # Each round removes at least one step from the interval, so this
-        # terminates; the bound is only a guard against a mistake in the
-        # arithmetic above.
-        for _ in range((max_w - min_w) // step_w + 2):
-            if range_max - range_min < step_w:
-                return None
-            c = self._round_power_step(range_max - phi * (range_max - range_min), step_w)
-            d = self._round_power_step(range_min + phi * (range_max - range_min), step_w)
-            c = max(range_min, min(range_max, c))
-            d = max(range_min, min(range_max, d))
-            if c == d:
-                d = min(range_max, c + step_w)
-
-            def _narrow(new_min: int, new_max: int) -> bool:
-                """Store the new interval; False when it did not actually shrink."""
-                if (new_min, new_max) == (
-                    int(data.get("range_min_w", min_w)),
-                    int(data.get("range_max_w", max_w)),
-                ):
-                    return False
-                data["range_min_w"] = new_min
-                data["range_max_w"] = new_max
-                self._save_auto_efficiency_data(data)
-                return True
-
-            if c in unmeasurable or d in unmeasurable:
-                # A full/cold battery, BMS taper or a busy connection says
-                # nothing about losses at neighbouring powers. Never narrow
-                # the search using a failed measurement. Retry next window.
-                for point in (c, d):
-                    if point not in history and point not in unmeasurable:
-                        return point
-                self._auto_search_deferred = True
-                return None
-            if c in history and d in history:
-                if history[c] <= history[d]:
-                    range_max = d
-                else:
-                    range_min = c
-                if not _narrow(range_min, range_max):
-                    # The two points have converged on the interval bounds:
-                    # there is no third point between them left to ask for.
-                    return None
+        # Bracketing: the best power lies between its nearest measured
+        # neighbours, and each trial halves one of those two gaps
+        blocked = False
+        best = min(measured, key=lambda p: measured[p])
+        left = max((p for p in measured if p < best), default=None)
+        right = min((p for p in measured if p > best), default=None)
+        if (left is not None and right is not None
+                and self._losses_indistinguishable(best, left, measured, uncertainty)
+                and self._losses_indistinguishable(best, right, measured, uncertainty)):
+            return None  # flat around the best: a finer step cannot tell them apart
+        # A side without a measured neighbour, where a coarse power could not
+        # be measured, is unexplored, not worse (Codex on #39)
+        if left is None and any(p in unmeasurable for p in coarse if p < best):
+            blocked = True
+        if right is None and any(p in unmeasurable for p in coarse if p > best):
+            blocked = True
+        for neighbour in (left, right):
+            if neighbour is None or abs(best - neighbour) <= EFFICIENCY_FINE_STEP_W:
                 continue
-            if c not in history:
-                return c
-            return d
+            power = snap((best + neighbour) / 2)
+            if power in (best, neighbour) or power in history:
+                continue
+            if power in unmeasurable:
+                blocked = True
+                continue
+            return power
+        # Finished, unless a point next to the best could not be measured
+        self._auto_search_deferred = blocked
         return None
+
+    @staticmethod
+    def _losses_indistinguishable(
+        a: int, b: int, losses: dict[int, float], uncertainty: dict[int, float]
+    ) -> bool:
+        """Two measured losses that differ by less than twice their combined error."""
+        if a not in uncertainty or b not in uncertainty:
+            return False
+        combined = math.sqrt(uncertainty[a] ** 2 + uncertainty[b] ** 2)
+        return abs(losses[a] - losses[b]) <= 2 * combined
 
     def _reset_auto_test_state(self) -> None:
         """Reset current auto test state."""
@@ -3686,6 +3727,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
         self._auto_start_soc = None
+        self._auto_block_losses = []
+        self._auto_block_start = None
+        self._auto_block_sent_wh = 0.0
+        self._auto_block_received_wh = 0.0
 
     async def _limit_the_efficiency_finder(self) -> None:
         """Hold the finder's setpoint inside what the connection carries.
@@ -3780,11 +3825,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_energy_received_wh = 0.0
         self._setup_auto_sample_listener()
         _LOGGER.info(
-            "Efficiency test started at %d W (%d s to settle, then at least %d s and %.1f kWh)",
+            "Efficiency test started at %d W (%d s to settle, then %d-%d s and at least %.1f kWh, "
+            "until the loss is known to %.2f %%)",
             power_w,
             AUTO_TEST_SETTLE_S,
             AUTO_TEST_MIN_DURATION_S,
+            AUTO_TEST_MAX_DURATION_S,
             AUTO_TEST_MIN_ENERGY_WH / 1000.0,
+            AUTO_TEST_TARGET_SE * 100.0,
         )
 
     @property
@@ -3815,7 +3863,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 round(float(data["best_loss"]) * 100.0, 2) if data.get("best_loss") is not None else None
             ),
             "loss_by_power_pct": history,
-            "search_range_w": [data.get("range_min_w"), data.get("range_max_w")],
+            # How sure each of those is: the standard error, in percentage points
+            "uncertainty_by_power_pct": {
+                k: round(float(v) * 100.0, 2) for k, v in dict(data.get("uncertainty", {})).items()
+            },
+            "search_range_w": [
+                int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000)),
+                int(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000)),
+            ],
             "measured_energy_kwh": round(self._auto_energy_sent_wh / 1000.0, 3),
             "last_result": self._auto_last_result,
             "deferred_until_next_window": self._auto_search_deferred,
@@ -3901,6 +3956,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_last_sample_time = now
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
+        self._auto_block_losses = []
+        self._auto_block_start = now
+        self._auto_block_sent_wh = 0.0
+        self._auto_block_received_wh = 0.0
         self._auto_last_sent_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_SENT_ENTITY))
         self._auto_last_received_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY))
         if self._auto_last_sent_w is None or self._auto_last_received_w is None:
@@ -3980,6 +4039,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._auto_energy_sent_wh += mean_sent * delta_h
         self._auto_energy_received_wh += mean_received * delta_h
+        self._auto_block_sent_wh += mean_sent * delta_h
+        self._auto_block_received_wh += mean_received * delta_h
+        if self._auto_block_start is None:
+            self._auto_block_start = now
+        elif elapsed_seconds(now, self._auto_block_start) >= AUTO_TEST_BLOCK_S:
+            if self._auto_block_sent_wh > 0:
+                self._auto_block_losses.append(
+                    1.0 - self._auto_block_received_wh / self._auto_block_sent_wh
+                )
+            self._auto_block_start = now
+            self._auto_block_sent_wh = 0.0
+            self._auto_block_received_wh = 0.0
         self._auto_last_sample_time = now
         self._auto_last_sent_w = sent_w
         self._auto_last_received_w = received_w
@@ -4011,16 +4082,37 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._auto_sample_listener = None
 
     def _auto_measurement_is_complete(self) -> bool:
-        """True once the running measurement has enough time and energy behind it."""
+        """True once the running measurement is long enough and sure enough.
+
+        The minimum time and energy always; then either the standard error of
+        the per-block losses below AUTO_TEST_TARGET_SE, or the longest trial.
+        """
         if not self._auto_test_active or self._auto_measure_start is None:
             return False
         duration = elapsed_seconds(self._efficiency_now(), self._auto_measure_start)
         if duration < AUTO_TEST_MIN_DURATION_S:
             return False
         measured = self._measured_energy_wh()
-        if measured is None:
+        if measured is None or measured[0] < AUTO_TEST_MIN_ENERGY_WH:
             return False
-        return measured[0] >= AUTO_TEST_MIN_ENERGY_WH
+        if duration >= AUTO_TEST_MAX_DURATION_S:
+            return True
+        if self._auto_meter_start is not None:
+            # The per-minute losses come from the power sensors, the result
+            # from the meters: their error says nothing about the meters'
+            # resolution, so a metered trial runs to its longest (CodeRabbit on #39)
+            return False
+        error = self._auto_loss_standard_error()
+        return error is not None and error <= AUTO_TEST_TARGET_SE
+
+    def _auto_loss_standard_error(self) -> float | None:
+        """Standard error of the mean per-block loss; None below the minimum blocks."""
+        losses = self._auto_block_losses
+        if len(losses) < AUTO_TEST_MIN_BLOCKS:
+            return None
+        mean = sum(losses) / len(losses)
+        variance = sum((loss - mean) ** 2 for loss in losses) / (len(losses) - 1)
+        return math.sqrt(variance / len(losses))
 
     def _measured_energy_wh(self) -> tuple[float, float] | None:
         """The energy of the current measurement as (sent, received) in Wh.
@@ -4224,6 +4316,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         history = dict(data.get("history", {}))
         history[str(power_w)] = loss
         data["history"] = history
+        error = None if self._auto_meter_start is not None else self._auto_loss_standard_error()
+        uncertainty = dict(data.get("uncertainty", {}))
+        if error is not None:
+            uncertainty[str(power_w)] = error
+        else:
+            uncertainty.pop(str(power_w), None)  # not one from an earlier trial either
+        data["uncertainty"] = uncertainty
         self._record_band_sample(data, power_w, loss)
         data["bounds_w"] = [
             int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000)),
@@ -4255,6 +4354,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_last_result = {
             "power_w": power_w,
             "loss": round(loss, 4),
+            "uncertainty": round(error, 4) if error is not None else None,
             "energy_sent_kwh": round(sent_wh / 1000.0, 3),
             "energy_received_kwh": round(received_wh / 1000.0, 3),
             "minutes": round(duration / 60.0, 1),
@@ -4313,6 +4413,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # still shows: no trial starts on that stale "on"
             grid_on = (state is not None and state.state == "on"
                        and not self._grid_switch_suspended)
+        if not grid_on and self._charging_under_the_floor():
+            # The switch is a forced charge on this inverter and stays off; the
+            # raised min SOC does the grid charging, under the trial's limit
+            grid_on = True
 
         if not grid_on or self.target_reached:
             self._set_auto_wait_reason("target_reached" if self.target_reached else "grid_charge_not_confirmed")
@@ -4355,7 +4459,42 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     _LOGGER.info("Auto efficient charge finder completed, disabling switch")
             return
 
+        if not self._enough_charge_left_for(candidate):
+            # A trial the target cuts short is discarded: wait for a night
+            # with more to charge rather than spend this one on nothing
+            self._set_auto_wait_reason("not_enough_charge_left")
+            return
+
         await self._start_auto_test(candidate)
+
+    def _charging_under_the_floor(self) -> bool:
+        """The inverter charges from the grid up to a raised min SOC, switch off.
+
+        Only where the grid switch was found to be a forced charge and is kept
+        off for the window: there the floor is how grid charging happens.
+        """
+        if not self._grid_switch_suspended or not self.is_active or self.is_discharge_mode:
+            return False
+        soc = self._current_battery_soc()
+        min_soc_id = self.config.get(CONF_MIN_SOC_ENTITY)
+        state = self.hass.states.get(str(min_soc_id)) if min_soc_id else None
+        floor = _as_float(state.state) if state is not None else None
+        return soc is not None and floor is not None and floor >= soc + 1.0
+
+    def _enough_charge_left_for(self, power_w: int) -> bool:
+        """Whether the rest of this window's charge carries a whole trial at ``power_w``."""
+        target = self.current_target_soc()
+        soc = self._current_battery_soc()
+        if target is None or soc is None:
+            return False
+        now = dt_util.now()
+        if elapsed_seconds(self._window_end_datetime(now), now) < AUTO_TEST_SETTLE_S + AUTO_TEST_MIN_DURATION_S:
+            return False  # the window end would cut it short (CodeRabbit on #39)
+        capacity_wh = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)) * 1000.0
+        missing_wh = max(0.0, target - soc) / 100.0 * capacity_wh
+        efficiency = float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY))
+        trial_wh = power_w * (AUTO_TEST_SETTLE_S + AUTO_TEST_MIN_DURATION_S) / 3600.0 * efficiency
+        return missing_wh >= trial_wh
 
     def _is_time_between(
         self, check_time: time, start_time: time, end_time: time

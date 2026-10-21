@@ -206,6 +206,8 @@ async def main():
             await asyncio.wait_for(check_min_soc_recovery(hass, lab, planner, entry, check), 180)
             from efficiency_campaign import check_efficiency
             await asyncio.wait_for(check_efficiency(hass, lab, planner, entry, check), 180)
+            from efficiency_floor_campaign import check_efficiency_over_the_floor
+            await asyncio.wait_for(check_efficiency_over_the_floor(hass, lab, planner, entry, check), 300)
             await hass.config_entries.async_unload(planner.entry_id)
             check("KORE unloads cleanly", await hass.config_entries.async_unload(entry.entry_id))
         finally:
