@@ -870,3 +870,20 @@ async def test_the_switch_is_turned_off_once_when_its_state_arrives_during_the_w
 
     assert _calls(hass).count(("switch", "turn_off", GRID)) == 1
     assert coordinator._grid_switch_suspended is True
+
+
+@pytest.mark.parametrize("shown", ["on", "off"])
+@pytest.mark.asyncio
+async def test_a_suspended_switch_found_on_is_stopped_again(night, shown):
+    """Codex on #38: restarted inside the window with the suspension restored,
+    the switch may still be on - its turn_off unconfirmed, or the process gone
+    before it ran. The refused activation stops it again; one that reads off
+    gets nothing."""
+    hass, coordinator, clock = night
+    coordinator.is_active = True
+    coordinator._grid_switch_suspended = True
+    hass.states.get(GRID).state = shown
+
+    assert await coordinator._grid_charge_activation_safe(44.0) is False
+
+    assert (("switch", "turn_off", GRID) in _calls(hass)) is (shown == "on")

@@ -33,7 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     before the write. A suspended switch is off for the efficiency search too, whatever KORE still
     shows - after dark the lab saw it start a trial on that stale "on". A planned limit written
     back after the switch-off, or by the verification, that fails holds a higher floor back, and
-    none is written back once the window has ended (Codex on #38). The switch-off does not depend on the
+    none is written back once the window has ended (Codex on #38). A suspension restored after a
+    restart stops a switch that does not read off again (Codex on #38). The switch-off does not depend on the
     optional house connection limit either: without it, the switch was suspended but left on,
     and the forced charge ran on to the target (Codex and CodeRabbit on #38). Only evidence of a
     forced charge suspends the switch - a reading above the limit, or a failed rewrite right after
