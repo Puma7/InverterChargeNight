@@ -20,7 +20,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_CAPACITY,
 )
 from custom_components.inverter_charge_night.coordinator import InverterChargeNightCoordinator
-from tests.test_efficiency_finder import NOW, START, _measure
+from tests.test_efficiency_finder import NOW, START, _make, _measure
 from tests.test_efficiency_min_soc import BATTERY, MIN_SOC, NIGHT, night  # noqa: F401
 
 NEXT_NIGHT = START + timedelta(days=1)
@@ -133,3 +133,69 @@ async def test_one_ignored_start_is_tried_again(night):  # noqa: F811
 
     assert coordinator._set_ac_charge_limit_w.await_count == 2
     assert coordinator._auto_test_active
+
+
+@pytest.mark.asyncio
+async def test_a_late_start_that_charges_now_is_not_idle(night):  # noqa: F811
+    """Codex on #40: four minutes at 0 W, then one at 500 W of 1000 W - the
+    average is about 100 W, but the battery is charging now."""
+    hass, coordinator = night
+    end = _measure(coordinator, hass, power_w=1000,
+                   samples=[(0, 0)] * 4 + [(500, 450)], minutes=5.5)
+
+    with patch(NOW, return_value=end):
+        await coordinator._handle_auto_charge()
+
+    assert coordinator._auto_test_active
+    assert coordinator._auto_search_stopped() is None
+
+
+@pytest.mark.asyncio
+async def test_only_failed_starts_in_a_row_stop_the_search(night):  # noqa: F811
+    """Codex on #40: an accepted start in between clears the count."""
+    hass, coordinator = night
+    start = InverterChargeNightCoordinator._start_auto_test.__get__(coordinator)
+    coordinator._set_ac_charge_limit_w = AsyncMock(side_effect=[False, True, False, False])
+
+    with patch(NOW, return_value=START):
+        await start(1000)
+        await start(1000)
+        coordinator._reset_auto_test_state()  # that trial ended
+        await start(3000)
+        assert coordinator._auto_search_stopped() is None
+        await start(3000)
+        assert coordinator._auto_search_stopped() == "charge_limit_not_taken"
+
+
+@pytest.mark.asyncio
+async def test_a_restart_inside_the_window_keeps_the_stop(night):  # noqa: F811
+    """Codex on #40: a reload must not start the trials over."""
+    hass, coordinator = night
+    with patch(NOW, return_value=START):
+        coordinator._stop_auto_search_for_window("battery_not_charging")
+
+    restarted = _make(hass, NIGHT)
+    restarted.entry.options = coordinator.entry.options
+    restarted._restore_state()
+
+    with patch(NOW, return_value=START + timedelta(minutes=30)):
+        assert restarted._auto_search_stopped() == "battery_not_charging"
+    with patch(NOW, return_value=NEXT_NIGHT):
+        assert restarted._auto_search_stopped() is None
+
+
+@pytest.mark.asyncio
+async def test_no_trial_the_window_end_cuts_short_of_its_energy(night):  # noqa: F811
+    """CodeRabbit on #40: 0.3 kWh at 1 kW takes 18 minutes after settling;
+    ten minutes before the end is not enough, twenty-five are."""
+    hass, coordinator = night
+    end = coordinator._window_end_datetime(START)
+
+    with patch(NOW, return_value=end - timedelta(minutes=10)):
+        await coordinator._handle_auto_charge()
+    coordinator._start_auto_test.assert_not_awaited()
+    assert coordinator._auto_wait_reason == "not_enough_charge_left"
+
+    with patch(NOW, return_value=end - timedelta(minutes=25)):
+        await coordinator._handle_auto_charge()
+    coordinator._start_auto_test.assert_awaited_once_with(1000)

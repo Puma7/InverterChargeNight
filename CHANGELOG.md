@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lowered the limit now ends the search for the window (`inverter_lowered_limit`), and so do two
   trial starts the inverter did not take (`charge_limit_not_taken`). One failed start is tried
   again: at 23:01 a start right after ManualCharge went off failed once and the next went through.
+- Review of #40: a trial that started late but charges now is not taken for idle, whatever its
+  average so far; only failed starts in a row count; the stop for the window survives a restart
+  inside it; and a trial starts only when the window has time for its minimum energy, not just
+  for its five minutes (18 minutes after settling at 1 kW) (Codex and CodeRabbit on #40).
 
 ### Docs
 - `docs/kostal-kore.md`: a min SOC only 1 % above the battery did not make the Kostal charge.
