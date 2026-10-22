@@ -363,6 +363,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _ac_limit_window: str | None = None
     _floor_released_soc: float | None = None
     _auto_stopped: tuple[str, str] | None = None
+    _auto_start_failures: tuple[str, int] | None = None
     _grid_switch_suspended: bool = False
     _grid_stop_pending: bool = False
     _grid_stop_retries: int = 0
@@ -517,7 +518,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # (window key, reason) once trials can only write to the inverter in
         # vain this window, and the trial starts it did not take, per window
         self._auto_stopped = None
-        self._auto_start_failures: tuple[str, int] | None = None
+        self._auto_start_failures = None
         # Planner v2 (plan 006)
         self.last_plan: PlanResult | None = None  # result of the last bridge plan this window
         # The evening outlook belongs to the day, not to a window, so it is
@@ -636,7 +637,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A pending reset is not a reason: its retry timer owns the next
             # attempt, and a refresh every 15 s only persisted state for nothing.
             # Nor is its "write_unconfirmed" in the health monitor (CodeRabbit on #36).
-            if self._auto_measurement_is_complete() or self._communication_faults() or (
+            # An idle trial ends at its minimum, not at the next 15-minute poll
+            # (Codex on #41)
+            if (self._auto_measurement_is_complete()
+                    or self._auto_idle_average_w() is not None
+                    or self._communication_faults()) or (
                 self._communication is not None
                 and any(fault != "write_unconfirmed" for fault in self._communication.faults)
             ):
@@ -762,6 +767,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "ac_limit_window": self._ac_limit_window,
             "grid_switch_suspended": self._grid_switch_suspended,
             "auto_search_stopped": list(self._auto_stopped) if self._auto_stopped else None,
+            "auto_start_failures": (
+                list(self._auto_start_failures) if self._auto_start_failures else None
+            ),
             "hands_off_until": (
                 self._hands_off_until.isoformat() if self._hands_off_until else None
             ),
@@ -847,6 +855,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             (stopped[0], stopped[1])
             if isinstance(stopped, list) and len(stopped) == 2
             and all(isinstance(part, str) for part in stopped)
+            else None
+        )
+        failures = state.get("auto_start_failures")
+        self._auto_start_failures = (
+            (failures[0], failures[1])
+            if isinstance(failures, list) and len(failures) == 2
+            and isinstance(failures[0], str) and isinstance(failures[1], int)
+            and not isinstance(failures[1], bool)
             else None
         )
         snow_raw = state.get("snow_nights")
@@ -3861,13 +3877,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             previous = self._auto_start_failures
             failures = previous[1] + 1 if previous is not None and previous[0] == key else 1
             self._auto_start_failures = (key, failures)
+            self._persist_state()  # a reload must not start the count over (Codex on #41)
             if failures >= AUTO_TEST_MAX_START_FAILURES:
                 # The Kostal held its own 51 W and ignored 1000 W every 15
                 # minutes, all night (21/22 October 2026)
                 self._stop_auto_search_for_window("charge_limit_not_taken")
             return
         # Failures in a row count, not all of a window's (Codex on #40)
-        self._auto_start_failures = None
+        if self._auto_start_failures is not None:
+            self._auto_start_failures = None
+            self._persist_state()
         self._auto_wait_reason = None
         self._auto_test_active = True
         self._auto_test_power_w = power_w
