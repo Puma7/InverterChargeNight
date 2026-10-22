@@ -18,10 +18,22 @@ from custom_components.inverter_charge_night.const import (
     AUTO_TEST_MAX_START_FAILURES,
     CONF_AUTO_EFFICIENCY_DATA,
     CONF_BATTERY_CAPACITY,
+    CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
+    CONF_CHARGE_ENERGY_SENT_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
 )
 from custom_components.inverter_charge_night.coordinator import InverterChargeNightCoordinator
-from tests.test_efficiency_finder import NOW, RECEIVED, SENT, START, _make, _measure
+from tests.test_efficiency_finder import (
+    METER_RECEIVED,
+    METER_SENT,
+    NOW,
+    RECEIVED,
+    SENT,
+    START,
+    _make,
+    _measure,
+    _meters,
+)
 from tests.test_efficiency_min_soc import BATTERY, MIN_SOC, NIGHT, night  # noqa: F401
 
 NEXT_NIGHT = START + timedelta(days=1)
@@ -413,3 +425,75 @@ async def test_replacing_the_measurement_entities_lifts_the_window_stop(night): 
     assert persisted["auto_search_stopped"] is None
     assert persisted["auto_start_failures"] is None
     assert persisted["auto_telemetry_losses"] is None
+
+
+def _with_meters(hass, coordinator):
+    _meters(hass, 100.0, 90.0)
+    coordinator.config = {
+        **coordinator.config,
+        CONF_CHARGE_ENERGY_SENT_ENTITY: METER_SENT,
+        CONF_CHARGE_ENERGY_RECEIVED_ENTITY: METER_RECEIVED,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_metered_trial_gets_the_time_and_charge_for_its_longest_run(night):  # noqa: F811
+    """Codex on #40: with energy counters a trial runs its full 20 minutes.
+    At 10 kW the power sensors need 2 + 5 minutes and 1.2 kWh; the meters
+    need 2 + 20 minutes and 3.7 kWh."""
+    hass, coordinator = night
+    end = coordinator._window_end_datetime(START)
+    coordinator.config = {**coordinator.config, CONF_BATTERY_CAPACITY: 36.25}  # 4 kWh to go
+
+    with patch(NOW, return_value=end - timedelta(minutes=15)):
+        assert coordinator._enough_charge_left_for(10000)
+        _with_meters(hass, coordinator)
+        assert not coordinator._enough_charge_left_for(10000)
+    with patch(NOW, return_value=end - timedelta(minutes=25)):
+        assert coordinator._enough_charge_left_for(10000)
+
+    coordinator.config = {**coordinator.config, CONF_BATTERY_CAPACITY: 18.2}  # 2 kWh to go
+    with patch(NOW, return_value=end - timedelta(minutes=60)):
+        assert not coordinator._enough_charge_left_for(10000)
+
+
+@pytest.mark.asyncio
+async def test_trials_lost_to_energy_counters_dropping_out_stop_the_search(night):  # noqa: F811
+    """Codex on #40: counters that are there at every start and drop out
+    during every measurement count like lost power readings."""
+    hass, coordinator = night
+    hass.states.async_set("sun.sun", "below_horizon")
+    _with_meters(hass, coordinator)
+
+    for attempt in range(AUTO_TEST_MAX_START_FAILURES):
+        _meters(hass, 100.0, 90.0)
+        end = _measure(coordinator, hass, power_w=1000, samples=[(1000, 950)], minutes=1)
+        assert coordinator._auto_meter_start is not None
+        hass.states.async_set(METER_SENT, "unavailable")
+        with patch(NOW, return_value=end + timedelta(seconds=10)):
+            coordinator._accumulate_auto_energy()
+        assert not coordinator._auto_test_active
+        assert "counters" in coordinator._auto_last_result["discarded"]
+        with patch(NOW, return_value=START):
+            stopped = coordinator._auto_search_stopped()
+        assert stopped == (None if attempt == 0 else "power_telemetry_lost")
+
+
+@pytest.mark.asyncio
+async def test_replacing_the_measurement_entities_ends_a_running_trial(night):  # noqa: F811
+    """Codex on #40: a trial measured on the old sensors must not go on
+    against the new ones and file its sample under their signature."""
+    hass, coordinator = night
+    hass.states.async_set("sun.sun", "below_horizon")
+    _measure(coordinator, hass, power_w=1000, samples=[(1000, 950)], minutes=2)
+    assert coordinator._auto_test_active
+    before = coordinator._efficiency_signature()
+
+    coordinator.forget_auto_search_after_rebinding(before)
+    assert coordinator._auto_test_active  # nothing replaced, nothing ended
+
+    coordinator.config = {**coordinator.config, CONF_CHARGE_POWER_SENT_ENTITY: "sensor.new_sent"}
+    coordinator.forget_auto_search_after_rebinding(before)
+    assert not coordinator._auto_test_active
+    assert coordinator._auto_last_result["discarded"] == "the measurement entities were replaced"
+    assert coordinator.get_auto_efficiency_data()["history"] == {}

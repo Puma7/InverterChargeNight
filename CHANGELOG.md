@@ -80,6 +80,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     no longer counted as a start the inverter refused.
   - Replacing the charge limit or a power/energy entity in the options lifts the window's stop
     and its counts, which the old entity earned.
+- Third Codex review of #40:
+  - Replacing a measurement entity also ends a running trial. Its listener, meter baseline and
+    SOC band belong to the old entities, and it would have filed a corrupt sample under the
+    new signature.
+  - With energy meters a trial runs its full 20 minutes, and the checks before it now budget that
+    time and the charge it takes. Before, a 10 kW trial could start eight minutes before the end.
+  - Energy meters that reset or drop out during a measurement count toward
+    `power_telemetry_lost` like the power readings.
 
 ### Docs
 - `docs/kostal-kore.md`: a min SOC only 1 % above the battery did not make the Kostal charge.
