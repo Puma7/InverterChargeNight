@@ -52,8 +52,10 @@ from .const import (
     CONF_MIN_CHARGE_POWER_W,
     CONF_MAX_CHARGE_POWER_W,
     CONF_CHARGE_POWER_ENTITY,
+    AUTO_TEST_IDLE_RATIO,
     AUTO_TEST_MAX_ATTEMPTS,
     AUTO_TEST_MAX_PLAUSIBLE_LOSS,
+    AUTO_TEST_MAX_START_FAILURES,
     AUTO_TEST_MIN_DURATION_S,
     AUTO_TEST_MIN_ENERGY_WH,
     AUTO_TEST_BLOCK_S,
@@ -507,6 +509,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_block_received_wh = 0.0
         self._auto_missing_entities_logged = False
         self._auto_wait_reason: str | None = "not_evaluated"
+        # (window key, reason) once trials can only write to the inverter in
+        # vain this window, and the trial starts it did not take, per window
+        self._auto_stopped: tuple[str, str] | None = None
+        self._auto_start_failures: tuple[str, int] | None = None
         # Planner v2 (plan 006)
         self.last_plan: PlanResult | None = None  # result of the last bridge plan this window
         # The evening outlook belongs to the day, not to a window, so it is
@@ -3810,6 +3816,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # The next poll offers the candidate again.
             _LOGGER.debug("Efficiency test at %d W not started: the setpoint did not arrive", power_w)
             self._set_auto_wait_reason("charge_limit_write_failed")
+            key = self._efficiency_window_key()
+            previous = self._auto_start_failures
+            failures = previous[1] + 1 if previous is not None and previous[0] == key else 1
+            self._auto_start_failures = (key, failures)
+            if failures >= AUTO_TEST_MAX_START_FAILURES:
+                # The Kostal held its own 51 W and ignored 1000 W every 15
+                # minutes, all night (21/22 October 2026)
+                self._stop_auto_search_for_window("charge_limit_not_taken")
             return
         self._auto_wait_reason = None
         self._auto_test_active = True
@@ -4363,6 +4377,35 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._save_auto_efficiency_data(data)
         self._reset_auto_test_state()
 
+    def _stop_auto_search_for_window(self, reason: str) -> None:
+        """No more trials in this window: each one would only write in vain."""
+        self._auto_stopped = (self._efficiency_window_key(), reason)
+        self._set_auto_wait_reason(reason)
+
+    def _auto_search_stopped(self) -> str | None:
+        """Why trials are over for this window, or None while they may run."""
+        stopped = self._auto_stopped
+        if stopped is None or stopped[0] != self._efficiency_window_key():
+            return None
+        return stopped[1]
+
+    def _auto_idle_average_w(self) -> float | None:
+        """The average draw of a trial that measured its minimum and barely drew.
+
+        None while the battery charges, or before the minimum duration. From
+        the integrated power sensors, which are sampled whatever else is
+        configured: a kWh meter does not resolve a few minutes at 1 kW.
+        """
+        power_w = self._auto_test_power_w
+        start = self._auto_measure_start
+        if not self._auto_test_active or power_w is None or start is None:
+            return None
+        duration = elapsed_seconds(self._efficiency_now(), start)
+        if duration < AUTO_TEST_MIN_DURATION_S:
+            return None
+        average_w = self._auto_energy_sent_wh / (duration / 3600.0)
+        return average_w if average_w < AUTO_TEST_IDLE_RATIO * power_w else None
+
     def _set_auto_wait_reason(self, reason: str) -> None:
         """Retain why a trial did not start and log changes once."""
         if self._auto_wait_reason != reason:
@@ -4426,13 +4469,31 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if self._auto_test_active:
             self._accumulate_auto_energy()
-            if not self._auto_measurement_is_complete():
+            idle_w = self._auto_idle_average_w()
+            if idle_w is not None:
+                # 21/22 October 2026: a min SOC 1 % above the battery, 1000 W
+                # written, 0 W drawn for half an hour. Not the power's fault, so
+                # no failed attempt; but the night will not charge either.
+                self._discard_auto_test(
+                    "the battery drew %.0f W on average at %s W - the inverter is not charging, "
+                    "no more trials in this window",
+                    idle_w,
+                    self._auto_test_power_w,
+                )
+                self._stop_auto_search_for_window("battery_not_charging")
+                return
+            if not self._auto_test_active or not self._auto_measurement_is_complete():
                 return
             # Enough time and energy at this power: record it and spend the
             # rest of the window on the next candidate. A search that took one
             # sample per night needed a week and a half of nights; this way it
             # usually finishes inside one window.
             self._finalize_auto_test()
+
+        stopped = self._auto_search_stopped()
+        if stopped is not None:
+            self._set_auto_wait_reason(stopped)
+            return
 
         candidate = self._select_next_auto_test_power_w()
         if self._auto_search_deferred:
@@ -4493,8 +4554,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         capacity_wh = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)) * 1000.0
         missing_wh = max(0.0, target - soc) / 100.0 * capacity_wh
         efficiency = float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY))
-        trial_wh = power_w * (AUTO_TEST_SETTLE_S + AUTO_TEST_MIN_DURATION_S) / 3600.0 * efficiency
-        return missing_wh >= trial_wh
+        # The settling, then the minimum time AND the minimum energy: 0.29 kWh
+        # left could never finish a trial that needs 0.3 kWh measured, yet one
+        # started and measured nothing for half an hour (21/22 October 2026)
+        sent_wh = power_w * AUTO_TEST_SETTLE_S / 3600.0 + max(
+            power_w * AUTO_TEST_MIN_DURATION_S / 3600.0, AUTO_TEST_MIN_ENERGY_WH
+        )
+        return missing_wh >= sent_wh * efficiency
 
     def _is_time_between(
         self, check_time: time, start_time: time, end_time: time
@@ -7094,6 +7160,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if 0 <= pending_s < AUTO_TEST_SETTLE_S:
                         return
                 self._discard_auto_test("inverter limit fell below the efficiency trial setpoint")
+                # The inverter holds a lower limit of its own; writing the next
+                # trial over it every poll changes nothing (21/22 October 2026)
+                self._stop_auto_search_for_window("inverter_lowered_limit")
                 return
             # Someone or something is charging less than we asked for. That is
             # never a danger, so it is noted and left alone.

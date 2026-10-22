@@ -45,6 +45,10 @@ async def test_downward_trial_drift_discards_measurement_without_recording_loss(
     assert "fell below" in active_trial._auto_last_result["discarded"]
     assert active_trial._auto_last_result["loss"] is None
     assert _ac_writes(mock_hass) == []
+    # The inverter holds a lower limit of its own: no trial is written over it
+    # again in this window (21/22 October 2026)
+    with patch(NOW, return_value=INSIDE):
+        assert active_trial._auto_search_stopped() == "inverter_lowered_limit"
 
 
 @pytest.mark.asyncio

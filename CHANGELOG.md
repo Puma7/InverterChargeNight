@@ -5,6 +5,31 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.10] - 2026-10-22
+
+### Fixed
+- **No efficiency trial without room for its minimum energy.** The check before a trial counted
+  the settling and the five minutes, but not the 0.3 kWh a trial has to measure. On 21/22 October
+  0.29 kWh were left to the 21.8 % target, a trial at 1000 W started and could never finish. A
+  trial now starts only when the charge left covers the settling plus the larger of five
+  minutes and 0.3 kWh.
+- **A trial on a battery that does not charge ends after its minimum duration.** The same night
+  the Kostal did not charge at all under a min SOC 1 % above the battery: 0 W for half an hour at
+  a 1000 W limit. Drawing less than a quarter of the setpoint after five minutes ends the trial
+  without a failed attempt against that power (`battery_not_charging`), and no further trial
+  runs in this window.
+- **No trials written over a limit the inverter lowered itself.** From 23:31 the Kostal held its
+  charge limit at 51 W, and the search wrote 1000 W to register 1038 every 15 minutes until
+  05:00: 22 writes, each ignored, each an ERROR in the log. A trial discarded because the inverter
+  lowered the limit now ends the search for the window (`inverter_lowered_limit`), and so do two
+  trial starts the inverter did not take (`charge_limit_not_taken`). One failed start is tried
+  again: at 23:01 a start right after ManualCharge went off failed once and the next went through.
+
+### Docs
+- `docs/kostal-kore.md`: a min SOC only 1 % above the battery did not make the Kostal charge.
+- `docs/kostalkore-wishlist.md`: the nightly 03:10 inverter fault published as 0 % SoC, 0 Hz and
+  0 V, and the negative-home-power warnings (Puma7/KostalKore#85).
+
 ## [3.10.9] - 2026-10-21
 
 ### Changed

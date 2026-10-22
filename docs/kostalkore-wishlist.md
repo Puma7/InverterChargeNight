@@ -100,7 +100,23 @@ or attributes, and the battery-management timeout that applies to 1034/1038/1040
 inverter offers it, so integrations can choose their keepalive interval from the device rather
 than guess.
 
-## 7. Emulator and tests
+## 7. Nightly 03:10 fault and log noise (Puma7/KostalKore#85)
+
+**Seen.** At about 03:10 every night the inverter answers some reads with *Server device
+failure* (`exc=0x04`) for a few seconds, and KORE publishes zeros as readings: the battery SoC
+drops to 0 % for one sample, and 0 Hz / 0 V raise two FIRE SAFETY [HIGH] alerts. The cycle
+reports success. Separately, `safe_home_power_w` logs a WARNING for every negative
+`home_from_grid` value - measurement noise between -0.07 and -12.75 W - three times per poll:
+2202 lines in 12.7 hours.
+
+**Change.** Hold the last good value (or report unavailable) for physically impossible samples
+in a cycle that saw `exc=0x04`; raise the grid alerts only when the condition persists. Clamp
+small negative home power silently and log a real one once, rate-limited.
+
+**Why ICN cares.** The planner and the efficiency search read the battery SoC; a single 0 %
+sample at 03:10 is a battery that looks empty.
+
+## 8. Emulator and tests
 
 Extend the KostalKore test emulator with the three field quirks, each behind a flag: float
 readback offset on 1038, `ManualCharge` lifting 1038 to the inverter's own value and ignoring

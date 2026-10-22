@@ -486,13 +486,20 @@ while charging from the grid, it works through the charge power range:
 
 Because it takes several measurements per window, a six-hour window is usually enough to find
 the optimum; it does not need a week of nights. A trial starts only when the window still has
-enough to charge to finish it (`waiting_reason: not_enough_charge_left` otherwise): one the
-target cuts short is discarded, so it waits for a night with more to charge.
+enough to charge to finish it - the settling plus five minutes and at least 0.3 kWh
+(`waiting_reason: not_enough_charge_left` otherwise): one the target cuts short is discarded, so
+it waits for a night with more to charge.
+
+**It does not write in vain.** A trial whose battery draws less than a quarter of its power
+after five minutes ends without counting against that power (`battery_not_charging`); a trial the
+inverter cut short by lowering the limit itself (`inverter_lowered_limit`), or two trial starts
+the inverter did not take (`charge_limit_not_taken`), end the search for this window. The next
+window tries again.
 
 **Over the min SOC.** On an inverter whose grid charge switch is a forced charge - the Kostal's
 `Battery Manual Charge` - the switch stays off for the window (3.10.8), and the raised min SOC
 charges the battery from the grid under the written limit. The search measures there as well:
-the trial's power is the charge limit, kept alive every 30 seconds.
+the trial's power is the charge limit, kept alive every 20 seconds.
 
 **What it refuses to record**, because a wrong sample steers every later night:
 
