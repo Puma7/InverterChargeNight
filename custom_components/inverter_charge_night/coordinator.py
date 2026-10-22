@@ -4014,6 +4014,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return (actual_w is not None and requested_w is not None
                 and abs(actual_w - requested_w) <= PLANNED_POWER_WRITE_THRESHOLD_W)
 
+    def _discard_auto_test_for_its_limit(self, reason: str) -> None:
+        """Discard a trial whose limit feedback no longer matches.
+
+        Only once the limit was confirmed: a reading below the trial's power is
+        then the inverter holding a lower limit of its own, as the verification
+        sees it, and no further trial is written over it this window, whichever
+        of the two noticed first (CodeRabbit on #40). An unreadable limit is
+        only a discarded trial.
+        """
+        actual_w = self._get_ac_charge_limit_w(self.config.get(CONF_CHARGE_POWER_ENTITY))
+        requested_w = self._auto_test_power_w
+        lowered = (self._auto_test_limit_confirmed
+                   and actual_w is not None and requested_w is not None
+                   and actual_w < requested_w - PLANNED_POWER_WRITE_THRESHOLD_W)
+        if lowered:
+            self._discard_auto_test("inverter limit fell below the efficiency trial setpoint")
+            self._stop_auto_search_for_window("inverter_lowered_limit")
+            return
+        self._discard_auto_test(reason)
+
     def _begin_auto_measurement(self, now: datetime) -> None:
         """Start counting: the inverter has had its settling time."""
         if not self._auto_limit_matches_feedback():
@@ -4073,7 +4093,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._begin_auto_measurement(now)
             return
         if not self._auto_test_limit_confirmed or not self._auto_limit_matches_feedback():
-            self._discard_auto_test("charge limit changed or became unavailable during measurement")
+            self._discard_auto_test_for_its_limit(
+                "charge limit changed or became unavailable during measurement"
+            )
             return
         sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
         received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
