@@ -3,8 +3,8 @@
 A to-do list for an agent working on the KostalKore repository (`Puma7/KostalKore`). Each item
 names what was seen in the field on a PLENTICORE G3 (KostalKore 3.0.13, Home Assistant 2026.10,
 night of 20/21 October 2026), what to change, and how to know it is done. Inverter Charge Night
-(ICN) 3.10.8 works around all of them on its side; with these changes the workarounds become
-unnecessary.
+(ICN) 3.10.8 works around items 1-6 on its side; with these changes the workarounds become
+unnecessary. Item 7 is not worked around: ICN takes a 0 % SoC sample at face value.
 
 ## 1. Readback tolerance for float power registers
 
@@ -113,8 +113,21 @@ reports success. Separately, `safe_home_power_w` logs a WARNING for every negati
 in a cycle that saw `exc=0x04`; raise the grid alerts only when the condition persists. Clamp
 small negative home power silently and log a real one once, rate-limited.
 
-**Why ICN cares.** The planner and the efficiency search read the battery SoC; a single 0 %
-sample at 03:10 is a battery that looks empty.
+The thresholds are KORE's to choose; the issue suggests -50 W for the noise band and two
+consecutive valid cycles before a grid alert.
+
+**Done when.**
+- An emulated cycle in which 586 and 1076 raise `exc=0x04` and the frequency, phase voltage and
+  SoC read 0 publishes none of those zeros: each entity keeps its previous value or reports
+  unavailable.
+- That cycle raises no FIRE SAFETY alert.
+- 100 polls with `home_from_grid` slightly negative, inside KORE's noise band, log no WARNING
+  and give a home power of 0 W.
+- One poll far outside the band logs exactly one WARNING.
+
+**Why ICN cares.** The planner and the efficiency search read the battery SoC, and ICN accepts
+0 % as a valid reading. A single 0 % sample at 03:10 is a battery that looks empty to whichever
+of them runs in that cycle (CodeRabbit on #41).
 
 ## 8. Emulator and tests
 
