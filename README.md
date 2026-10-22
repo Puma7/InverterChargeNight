@@ -493,8 +493,9 @@ it waits for a night with more to charge.
 **It does not write in vain.** A trial whose battery draws less than a quarter of its power
 after five minutes ends without counting against that power (`battery_not_charging`); a trial the
 inverter cut short by lowering the limit itself (`inverter_lowered_limit`), or two trial starts
-the inverter did not take (`charge_limit_not_taken`), end the search for this window. The next
-window tries again.
+the inverter did not take (`charge_limit_not_taken`), or two trials lost to stale or missing
+power readings (`power_telemetry_lost`) end the search for this window. The next window tries
+again.
 
 **Over the min SOC.** On an inverter whose grid charge switch is a forced charge - the Kostal's
 `Battery Manual Charge` - the switch stays off for the window (3.10.8), and the raised min SOC

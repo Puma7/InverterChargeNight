@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A limit the inverter lowers during a measurement stops the search for the window even when the
   power sampler notices it before the verification does. Before, the sampler discarded the trial
   without stopping the search (CodeRabbit on #40).
+- Two trials lost to stale, missing or interrupted power readings end the search for the
+  window (`power_telemetry_lost`), counted across a reload. Before, a sensor that reports 0 W
+  only when it changes made every poll write a new trial (CodeRabbit on #40).
 
 ### Docs
 - `docs/kostal-kore.md`: a min SOC only 1 % above the battery did not make the Kostal charge.
