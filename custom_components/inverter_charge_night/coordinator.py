@@ -361,6 +361,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _ac_limit_rewrites: int = 0
     _ac_limit_not_held: bool = False
     _ac_limit_window: str | None = None
+    _floor_released_soc: float | None = None
     _grid_switch_suspended: bool = False
     _grid_stop_pending: bool = False
     _grid_stop_retries: int = 0
@@ -457,6 +458,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # bounded by AC_LIMIT_MAX_REWRITES, then a repair issue instead.
         self._ac_limit_rewrites = 0
         self._ac_limit_not_held = False
+        # The min SOC this window was taken down to because the connection
+        # needed a lower charge limit than the inverter could be made to hold
+        self._floor_released_soc: float | None = None
         # Which window spent them: a restart inside it resumes, any other starts over
         self._ac_limit_window: str | None = None
         # The charge limit did not hold with grid charging switched on: the
@@ -753,6 +757,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Bounded per window, a restart inside the window included (Codex on #36)
             "ac_limit_rewrites": self._ac_limit_rewrites,
             "ac_limit_not_held": self._ac_limit_not_held,
+            "floor_released_soc": self._floor_released_soc,
             "ac_limit_window": self._ac_limit_window,
             "grid_switch_suspended": self._grid_switch_suspended,
             "hands_off_until": (
@@ -826,6 +831,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if isinstance(rewrites, int) and not isinstance(rewrites, bool) and rewrites > 0:
             self._ac_limit_rewrites = rewrites
         self._ac_limit_not_held = state.get("ac_limit_not_held") is True
+        released = state.get("floor_released_soc")
+        self._floor_released_soc = (
+            float(released)
+            if isinstance(released, (int, float)) and not isinstance(released, bool)
+            else None
+        )
         window_raw = state.get("ac_limit_window")
         self._ac_limit_window = window_raw if isinstance(window_raw, str) else None
         self._grid_switch_suspended = state.get("grid_switch_suspended") is True
@@ -1024,12 +1035,30 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         soc = self._current_battery_soc()
         if soc is None:
             return None
+        released = self._floor_released_soc
+        if released is not None:
+            # The connection could not be protected this window: the floor
+            # stays where it was taken down to, it does not charge again
+            return min(released, self._representable_min_soc(floor, round_up=False) or released)
         # Only an actual charging request may round upwards. A hold must not
         # create a new grid-energy demand just to reach the next input step.
         return self._representable_min_soc(floor, round_up=(soc < target_soc and not self.target_reached))
 
     def inverter_floor_soc(self, target_soc: float | None = None) -> float | None:
-        """The minimum SOC written to the inverter.
+        """The minimum SOC written to the inverter, capped where it was taken down.
+
+        Once the connection could not be protected this window, the floor stays
+        at what it was taken down to - for the writers, the verification, the
+        min SOC listener and the idle check alike.
+        """
+        floor = self._planned_floor_soc(target_soc)
+        released = self._floor_released_soc
+        if floor is None or released is None or not self.is_active or self.is_discharge_mode:
+            return floor
+        return min(floor, released)
+
+    def _planned_floor_soc(self, target_soc: float | None = None) -> float | None:
+        """The minimum SOC the plan asks the inverter for.
 
         Scheduled nights use the planned charge target, so energy above it can
         supply the house. Only an explicit ad-hoc reservation may preserve a
@@ -2252,6 +2281,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Refused on purpose once the inverter was found not to hold the
             # limit this window: the floor charges as before, not never
             self._plan_limit_write_failed = True
+            await self._protect_connection_by_floor(setpoint, "the write failed")
 
     # Discharge block (plan 006, step 5) --------------------------------------
 
@@ -3189,6 +3219,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Not writing %d W to %s: the inverter does not hold it", power_w, entity_id)
             if self.is_active and self._grid_limit_configured():
                 await self._pause_grid_charge("the inverter does not hold the protective charge limit")
+                await self._protect_connection_by_floor(float(power_w), "the inverter does not hold it")
             return False
         limited_w = int(self._grid_limited_setpoint(float(power_w)))
         if limited_w < power_w:
@@ -3771,7 +3802,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             self._reset_auto_test_state()
         # The setter records what the control took, clamped to its maximum
-        await self._set_ac_charge_limit_w(int(allowed))
+        if not await self._set_ac_charge_limit_w(int(allowed)):
+            await self._protect_connection_by_floor(allowed, "the write failed")
 
     def _efficiency_now(self) -> datetime:
         """Measurement wall clock; durations are converted to UTC elapsed time."""
@@ -6382,6 +6414,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if (not self.is_active or self._ending or self._unloading
                             or self._window_started_at != window_started_at):
                         return
+                    released = self._floor_released_soc
+                    if released is not None and floor_soc > released:
+                        return  # taken down for the connection while this poll ran
                     await self.hass.services.async_call(
                         "number",
                         "set_value",
@@ -6628,6 +6663,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # arrived: a switch not reading off is stopped again (Codex on #38)
             await self._pause_grid_charge("grid charging is suspended for this window")
             return False
+        if self._floor_released_soc is not None:
+            # The connection could not be protected this window: no grid charge
+            await self._pause_grid_charge("the min SOC was taken down for the house connection")
+            return False
         if not self._charge_permission_current():
             await self._pause_grid_charge("window ended or charging permission was withdrawn")
             return False
@@ -6657,6 +6696,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if current > allowed:
                 if not await self._set_ac_charge_limit_w(int(allowed)):
                     await self._pause_grid_charge("protective charge-limit write failed")
+                    await self._protect_connection_by_floor(allowed, "the write failed")
                     return False
             readback = self._get_ac_charge_limit_w(target[0])
             if readback is None or readback > allowed:
@@ -7185,6 +7225,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if self._ac_limit_rewrites >= AC_LIMIT_MAX_REWRITES:
             self._report_ac_limit_not_held(target[0], actual_w, written)
+            await self._protect_connection_by_floor(written, "the inverter does not hold it")
             return
         latest = (float(self._auto_test_power_w)
                   if self._auto_test_active and self._auto_test_power_w is not None
@@ -7208,6 +7249,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # The min SOC verification right after this must not raise the
             # floor under the lifted limit (Codex on #38)
             self._plan_limit_write_failed = True
+            await self._protect_connection_by_floor(written, "rewriting it failed")
 
     def _window_identity(self, now: datetime) -> str | None:
         """Name the window that is starting: an ad-hoc deadline or the scheduled end."""
@@ -7254,9 +7296,76 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             },
         )
 
+    async def _protect_connection_by_floor(self, wanted_w: float, reason: str) -> None:
+        """Take the min SOC down to the battery when throttling has failed.
+
+        Pascal, 22 October 2026: when the house connection needs a lower charge
+        limit and the inverter cannot be made to hold it, safety comes first.
+        A raised min SOC makes a Kostal charge from the grid at whatever limit
+        it holds - 22 kW of its own. Taking it down to the current SOC, rounded
+        down, ends that charge without letting the battery discharge, which
+        the user's own minimum would; it stays there for the rest of the
+        window, and the window end restores the original as always.
+
+        Only when the connection needs the throttling (``_grid_limited``) and
+        the inverter's limit reads above what was wanted, or cannot be read.
+        """
+        if (not self.is_active or self._ending or self._unloading or self.is_discharge_mode
+                or self._floor_released_soc is not None or not self._grid_limit_configured()
+                or not self._grid_limited):
+            return
+        target = self._ac_charge_limit_target()
+        actual_w = self._get_ac_charge_limit_w(target[0]) if target is not None else None
+        if actual_w is not None and actual_w <= wanted_w + PLANNED_POWER_WRITE_THRESHOLD_W:
+            return  # the inverter is at or below what the connection needs
+        min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+        if not min_soc_entity:
+            return
+        soc = self._current_battery_soc()
+        value = (
+            self._representable_min_soc(math.floor(soc), round_up=False) if soc is not None else None
+        )
+        if value is not None and value < float(self.config.get(CONF_USER_MIN_SOC, 8.0)):
+            value = None  # never below the user's own minimum
+        if value is None:
+            # SOC unknown, or below the user's minimum: the user's own floor is
+            # the lowest this integration writes, and it charges no further
+            value = (
+                self.original_min_soc
+                if self.original_min_soc is not None
+                else float(self.config.get(CONF_USER_MIN_SOC, 8.0))
+            )
+        self._floor_released_soc = value
+        self._persist_state()
+        state = self.hass.states.get(str(min_soc_entity))
+        current = _as_float(state.state) if state is not None else None
+        _LOGGER.error(
+            "House connection limit: the inverter holds %s, not the %.0f W the connection needs "
+            "(%s) - taking the min SOC down to %.0f%% for the rest of this window, so the "
+            "battery stops charging from the grid",
+            f"{actual_w:.0f} W" if actual_w is not None else "an unreadable limit",
+            wanted_w,
+            reason,
+            value,
+        )
+        if current is not None and current <= value + 0.5:
+            return  # already there; the cap keeps it from being raised again
+        try:
+            await self.hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": min_soc_entity, "value": value},
+                blocking=True,
+            )
+            self._last_soc_set = value
+        except Exception:  # pylint: disable=broad-except
+            # The verification writes the capped floor again on its next run
+            _LOGGER.exception("Could not take the min SOC down to %.0f%%", value)
+
     def _clear_ac_limit_not_held(self) -> None:
         """Give every window its own bounded rewrites."""
         self._ac_limit_rewrites = 0
+        self._floor_released_soc = None
         self._grid_switch_suspended = False
         self._keepalive_lapse_since = None
         if not self._ac_limit_not_held:
@@ -7555,6 +7664,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not await self._set_ac_charge_limit_w(int(allowed)):
             # The limit did not reach the inverter. Leave the reference alone so
             # the next reading tries again instead of assuming it is capped.
+            await self._protect_connection_by_floor(allowed, "the write failed")
             return
         # What stands on the inverter is the reference for the next reading, so
         # an unchanged load does not write the same value over and over. The
@@ -7754,6 +7864,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             limited,
         )
         if not await self._set_ac_charge_limit_w(int(limited)):
+            await self._protect_connection_by_floor(limited, "the write failed")
             return
         self.planned_charge_power_w = self._planned_setpoint_written_w
         self.planned_power_is_applied = True

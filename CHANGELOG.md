@@ -5,6 +5,21 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.11] - 2026-10-22
+
+### Added
+- **When the house connection cannot be protected, the min SOC comes down** (Pascal: safety
+  first). A raised min SOC makes a Kostal charge from the grid at whatever limit it holds - 22 kW
+  of its own. Two wallboxes at 33 kW plus that would run well over a 63 A connection for hours.
+  When the connection needs a lower charge limit (`_grid_limited`) and the inverter's limit reads
+  above it or cannot be read, after a failed write, a failed rewrite or a limit the inverter does
+  not hold, the min SOC goes down to the current SOC, rounded down (never below the user's
+  minimum), for the rest of the window. The current SOC rather than the original 8 %: the battery
+  stops charging and does not discharge either. The floor is capped there for the window, a
+  restart included; grid charging is not switched on again; the window end restores the original
+  min SOC; the next window starts over. Logged as an error, and shown as
+  `min_soc_released_for_connection` on the status sensor and in the diagnostics.
+
 ## [3.10.10] - 2026-10-22
 
 ### Fixed
