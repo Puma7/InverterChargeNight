@@ -3869,6 +3869,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # this power - the same poisoning as a connection-limited test.
             self._set_auto_wait_reason("charge_limit_above_control_maximum")
             return
+        was_active, window = self.is_active, self._window_started_at
         if not await self._set_ac_charge_limit_w(power_w):
             # The battery would charge at whatever stands on the inverter -
             # usually the previous test's higher value, which the follow check
@@ -3876,7 +3877,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # The next poll offers the candidate again.
             _LOGGER.debug("Efficiency test at %d W not started: the setpoint did not arrive", power_w)
             self._set_auto_wait_reason("charge_limit_write_failed")
-            self._count_failed_start()
+            if not (self._unloading or (was_active and (
+                not self.is_active or self._ending or self._window_started_at != window
+            ))):
+                # The setter's own lifecycle check: a window that ended or an
+                # entry that unloads while the write waited for the lock is no
+                # start the inverter refused (Codex on #40)
+                self._count_failed_start()
             return
         self._auto_wait_reason = None
         self._auto_test_active = True
@@ -4052,6 +4059,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_last_received_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY))
         if self._auto_last_sent_w is None or self._auto_last_received_w is None:
             self._discard_auto_test("power telemetry is unavailable at measurement start")
+            # Otherwise every poll writes a new trial for as long as the
+            # sensor is gone (Codex and CodeRabbit on #40/#41)
+            self._count_trial_lost_to_telemetry()
             return
         meters = self._energy_meter_entities()
         if meters is not None:
@@ -4059,6 +4069,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             start_received = self._read_energy_wh(meters[1])
             if start_sent is None or start_received is None:
                 self._discard_auto_test("configured energy counters are unavailable")
+                self._count_trial_lost_to_telemetry()
                 return
             self._auto_meter_start = (start_sent, start_received)
         _LOGGER.debug(
@@ -4505,6 +4516,24 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._persist_state()
         self._set_auto_wait_reason(reason)
 
+    def forget_auto_search_after_rebinding(self, previous_signature: str) -> None:
+        """A stop or count earned by replaced entities says nothing about the new ones.
+
+        The options may swap a faulty charge limit or power sensor inside the
+        window, whose key does not change with them (Codex on #40). Called
+        after the configuration swap with the signature from before it.
+        """
+        if previous_signature == self._efficiency_signature():
+            return
+        if self._auto_stopped is None and self._auto_start_failures is None \
+                and self._auto_telemetry_losses is None:
+            return
+        self._auto_stopped = None
+        self._auto_start_failures = None
+        self._auto_telemetry_losses = None
+        self._auto_wait_reason = "not_evaluated"
+        self._persist_state()
+
     def _auto_search_stopped(self) -> str | None:
         """Why trials are over for this window, or None while they may run."""
         stopped = self._auto_stopped
@@ -4678,9 +4707,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return False
         now = dt_util.now()
         # The settling, then the minimum time or the time the minimum energy
-        # takes at this power, whichever is longer (CodeRabbit on #39 and #40)
+        # takes at this power, whichever is longer (CodeRabbit on #39 and #40).
+        # At the lowest draw a trial still counts with: a battery taking 800 W
+        # of 1000 W needs 22.5 minutes for its 0.3 kWh, not 18 (Codex on #40).
+        lowest_draw_w = max(1.0, power_w * AUTO_TEST_MIN_FOLLOW_RATIO)
         trial_s = AUTO_TEST_SETTLE_S + max(
-            float(AUTO_TEST_MIN_DURATION_S), AUTO_TEST_MIN_ENERGY_WH * 3600.0 / max(1, power_w)
+            float(AUTO_TEST_MIN_DURATION_S), AUTO_TEST_MIN_ENERGY_WH * 3600.0 / lowest_draw_w
         )
         if elapsed_seconds(self._window_end_datetime(now), now) < trial_s:
             return False  # the window end would cut it short

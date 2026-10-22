@@ -275,6 +275,7 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     # Captured before the swap below: afterwards it is the new value, and the
     # listener that watches the old entity would never be re-armed.
     old_battery_soc_entity = coordinator.config.get(CONF_BATTERY_SOC_ENTITY)
+    old_efficiency_signature = coordinator._efficiency_signature()
 
     # The mode owns the window: a window still running in the old mode has to be
     # torn down before the new mode takes over, otherwise the options dialog
@@ -298,6 +299,7 @@ async def async_update_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     coordinator.auto_efficient_charge = entry.data.get(CONF_AUTO_EFFICIENT_CHARGE, False)
     coordinator._auto_missing_entities_logged = False
     coordinator._house_load_cache = None  # the meter or the average may have changed
+    coordinator.forget_auto_search_after_rebinding(old_efficiency_signature)
 
     # Update coordinator polling interval
     coordinator.update_interval = timedelta(

@@ -70,6 +70,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   register still showed the previous, lower trial, counts as a start the inverter did not take.
   Only a confirmed limit clears that count, so an accepted write that never reads back cannot
   restart the trials every poll (CI on #41).
+- Second Codex review of #40:
+  - A power sensor or energy counter that is missing when the settling ends counts toward
+    `power_telemetry_lost`. Before, every poll wrote a new trial for as long as it was gone
+    (also CodeRabbit on #41).
+  - The time check budgets the lowest draw a trial still counts with (80 % of the setpoint):
+    22.5 minutes after settling at 1 kW, not 18.
+  - A start cancelled because the window ended or the entry unloads while the write waited is
+    no longer counted as a start the inverter refused.
+  - Replacing the charge limit or a power/energy entity in the options lifts the window's stop
+    and its counts, which the old entity earned.
 
 ### Docs
 - `docs/kostal-kore.md`: a min SOC only 1 % above the battery did not make the Kostal charge.
