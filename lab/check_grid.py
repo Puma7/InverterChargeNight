@@ -92,12 +92,17 @@ async def main():
                     async with session.get("http://127.0.0.1:7073/api/state") as response:
                         response.raise_for_status()
                         return await response.json()
-                for _ in range(100):
+                # evcc answers /api/state before it has set up its circuits:
+                # wait for the loadpoints and the circuit, not only for an
+                # answer (CI on #40: KeyError 'circuits')
+                for _ in range(300):
                     try:
                         state = await evcc_state()
-                        break
+                        if state.get("circuits") and len(state.get("loadpoints") or []) == 2:
+                            break
                     except Exception:
-                        await asyncio.sleep(0.1)
+                        pass
+                    await asyncio.sleep(0.1)
                 else:
                     raise AssertionError("evcc did not start")
                 check("official evcc has two 32 A loadpoints and shared circuit",
