@@ -88,6 +88,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     time and the charge it takes. Before, a 10 kW trial could start eight minutes before the end.
   - Energy meters that reset or drop out during a measurement count toward
     `power_telemetry_lost` like the power readings.
+- Fourth Codex review of #40:
+  - One idle trial no longer ends the window. Its power is left out for the rest of the window
+    and the search tries the next one; a second idle trial ends it (`battery_not_charging`).
+    An inverter or BMS with a minimum charge rate that idles at 1 kW but charges at 3 kW kept
+    the search stuck on 1 kW night after night. The idle count survives a reload.
+  - Extending a running ad-hoc window moves its stop, counts and left-out powers to the new
+    end. They are keyed to the window end, so an extension started the futile trials over.
 
 ### Docs
 - `docs/kostal-kore.md`: a min SOC only 1 % above the battery did not make the Kostal charge.

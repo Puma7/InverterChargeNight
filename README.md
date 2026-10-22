@@ -492,12 +492,14 @@ the full 20 minutes (`waiting_reason: not_enough_charge_left` otherwise): one th
 short is discarded, so it waits for a night with more to charge.
 
 **It does not write in vain.** A trial whose battery draws less than a quarter of its power
-after five minutes ends without counting against that power (`battery_not_charging`); a trial the
+after five minutes ends, and that power is left out for the rest of the window (an inverter
+with a minimum charge rate may idle at 1 kW and charge at 3 kW); a second such trial at another
+power says the night does not charge (`battery_not_charging`). Neither counts as a loss. A trial the
 inverter cut short by lowering the limit itself (`inverter_lowered_limit`), or two trial starts
 the inverter did not take (`charge_limit_not_taken`), or two trials lost to stale or missing
 power readings or energy meters (`power_telemetry_lost`) end the search for this window. The next
 window tries again, and so does this one once you replace the charge limit or a measurement
-entity in the options.
+entity in the options. Extending an ad-hoc window keeps its stop.
 
 **Over the min SOC.** On an inverter whose grid charge switch is a forced charge - the Kostal's
 `Battery Manual Charge` - the switch stays off for the window (3.10.8), and the raised min SOC

@@ -365,6 +365,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _auto_stopped: tuple[str, str] | None = None
     _auto_start_failures: tuple[str, int] | None = None
     _auto_telemetry_losses: tuple[str, int] | None = None
+    _auto_idle_trials: tuple[str, int] | None = None
     _grid_switch_suspended: bool = False
     _grid_stop_pending: bool = False
     _grid_stop_retries: int = 0
@@ -774,6 +775,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "auto_telemetry_losses": (
                 list(self._auto_telemetry_losses) if self._auto_telemetry_losses else None
             ),
+            "auto_idle_trials": (
+                list(self._auto_idle_trials) if self._auto_idle_trials else None
+            ),
             "hands_off_until": (
                 self._hands_off_until.isoformat() if self._hands_off_until else None
             ),
@@ -859,6 +863,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._auto_start_failures = self._restore_window_count(state, "auto_start_failures")
         self._auto_telemetry_losses = self._restore_window_count(state, "auto_telemetry_losses")
+        self._auto_idle_trials = self._restore_window_count(state, "auto_idle_trials")
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
             self.snow_nights = snow_raw
@@ -4509,6 +4514,55 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if losses >= AUTO_TEST_MAX_START_FAILURES:
             self._stop_auto_search_for_window("power_telemetry_lost")
 
+    def _count_idle_trial(self, idle_w: float) -> None:
+        """A trial whose battery barely drew; two in a window end the search.
+
+        One may be the power's fault - an inverter or BMS with a minimum
+        charge rate idles at 1 kW and charges at 3 kW - so that power is left
+        out for the rest of the window and the search goes on (Codex on #40).
+        It is no loss sample and the next window offers it again. A second
+        idle trial, at another power, says the night does not charge.
+        """
+        power_w = self._auto_test_power_w
+        key = self._efficiency_window_key()
+        previous = self._auto_idle_trials
+        idle = previous[1] + 1 if previous is not None and previous[0] == key else 1
+        self._auto_idle_trials = (key, idle)
+        last = idle >= AUTO_TEST_MAX_START_FAILURES
+        self._discard_auto_test(
+            "the battery drew %.0f W on average at %s W - %s",
+            idle_w,
+            power_w,
+            "the inverter is not charging, no more trials in this window" if last
+            else "trying another power",
+        )
+        if power_w is not None:
+            for _ in range(AUTO_TEST_MAX_ATTEMPTS):  # out for this window only
+                self._record_failed_attempt(power_w, too_short=False)
+        self._persist_state()
+        if last:
+            self._stop_auto_search_for_window("battery_not_charging")
+
+    def _carry_auto_search_to(self, new_key: str) -> None:
+        """Keep the window's stop and counts when its end moves (an extended ad-hoc window).
+
+        The key is the window end, so without this an extension would start
+        the futile trials over in the same window (Codex on #40).
+        """
+        old_key = self._efficiency_window_key()
+        if old_key == new_key:
+            return
+        if self._auto_stopped is not None and self._auto_stopped[0] == old_key:
+            self._auto_stopped = (new_key, self._auto_stopped[1])
+        for name in ("_auto_start_failures", "_auto_telemetry_losses", "_auto_idle_trials"):
+            count: tuple[str, int] | None = getattr(self, name)
+            if count is not None and count[0] == old_key:
+                setattr(self, name, (new_key, count[1]))
+        data = self.get_auto_efficiency_data()
+        if data.get("failed") and data.get("failed_window") == old_key:
+            data["failed_window"] = new_key
+            self._save_auto_efficiency_data(data)
+
     def _stop_auto_search_for_window(self, reason: str) -> None:
         """No more trials in this window: each one would only write in vain.
 
@@ -4534,11 +4588,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the new signature (Codex on #40)
             self._discard_auto_test("the measurement entities were replaced")
         if self._auto_stopped is None and self._auto_start_failures is None \
-                and self._auto_telemetry_losses is None:
+                and self._auto_telemetry_losses is None and self._auto_idle_trials is None:
             return
         self._auto_stopped = None
         self._auto_start_failures = None
         self._auto_telemetry_losses = None
+        self._auto_idle_trials = None
         self._auto_wait_reason = "not_evaluated"
         self._persist_state()
 
@@ -4637,15 +4692,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             idle_w = self._auto_idle_average_w()
             if idle_w is not None:
                 # 21/22 October 2026: a min SOC 1 % above the battery, 1000 W
-                # written, 0 W drawn for half an hour. Not the power's fault, so
-                # no failed attempt; but the night will not charge either.
-                self._discard_auto_test(
-                    "the battery drew %.0f W on average at %s W - the inverter is not charging, "
-                    "no more trials in this window",
-                    idle_w,
-                    self._auto_test_power_w,
-                )
-                self._stop_auto_search_for_window("battery_not_charging")
+                # written, 0 W drawn for half an hour.
+                self._count_idle_trial(idle_w)
                 return
             if not self._auto_test_active or not self._auto_measurement_is_complete():
                 return
@@ -5492,6 +5540,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._ac_limit_window == f"adhoc:{self._adhoc_until.isoformat()}":
                 # Extending is the same window: its spent rewrites stay spent
                 self._ac_limit_window = f"adhoc:{until.isoformat()}"
+            # ... and so does its efficiency search's stop and counts
+            self._carry_auto_search_to(until.isoformat())
             self._adhoc_until = until
             self._adhoc_target_soc = target_soc
             self._adhoc_allow_grid_charge = allow_grid_charge
