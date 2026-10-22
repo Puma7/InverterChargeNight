@@ -4093,6 +4093,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if self._auto_meter_start is not None and self._measured_energy_wh() is None:
             self._discard_auto_test("energy counters were reset or became unavailable")
+            # Like the power readings: a counter that drops out in every trial
+            # would otherwise have each poll write another one (Codex on #40)
+            self._count_trial_lost_to_telemetry()
             return
         last_time = self._auto_last_sample_time
         if last_time is None:
@@ -4497,6 +4500,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if previous_signature == self._efficiency_signature():
             return
+        if self._auto_test_active:
+            # Its listener, baseline and SOC band belong to the old entities;
+            # read against the new ones it would file a corrupt sample under
+            # the new signature (Codex on #40)
+            self._discard_auto_test("the measurement entities were replaced")
         if self._auto_stopped is None and self._auto_start_failures is None \
                 and self._auto_telemetry_losses is None:
             return
@@ -4683,8 +4691,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # At the lowest draw a trial still counts with: a battery taking 800 W
         # of 1000 W needs 22.5 minutes for its 0.3 kWh, not 18 (Codex on #40).
         lowest_draw_w = max(1.0, power_w * AUTO_TEST_MIN_FOLLOW_RATIO)
+        # A metered trial always runs to its longest: the meters' resolution
+        # has no standard error to stop it earlier (Codex on #40)
+        measured_s = float(
+            AUTO_TEST_MAX_DURATION_S if self._energy_meter_entities() is not None
+            else AUTO_TEST_MIN_DURATION_S
+        )
         trial_s = AUTO_TEST_SETTLE_S + max(
-            float(AUTO_TEST_MIN_DURATION_S), AUTO_TEST_MIN_ENERGY_WH * 3600.0 / lowest_draw_w
+            measured_s, AUTO_TEST_MIN_ENERGY_WH * 3600.0 / lowest_draw_w
         )
         if elapsed_seconds(self._window_end_datetime(now), now) < trial_s:
             return False  # the window end would cut it short
@@ -4695,7 +4709,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # left could never finish a trial that needs 0.3 kWh measured, yet one
         # started and measured nothing for half an hour (21/22 October 2026)
         sent_wh = power_w * AUTO_TEST_SETTLE_S / 3600.0 + max(
-            power_w * AUTO_TEST_MIN_DURATION_S / 3600.0, AUTO_TEST_MIN_ENERGY_WH
+            power_w * measured_s / 3600.0, AUTO_TEST_MIN_ENERGY_WH
         )
         return missing_wh >= sent_wh * efficiency
 
