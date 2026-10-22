@@ -131,6 +131,7 @@ async def async_get_config_entry_diagnostics(
                 "reset_pending": coordinator._pending_reset,
                 "reset_abandoned": coordinator._reset_abandoned,
                 "charge_limit_not_held": coordinator._ac_limit_not_held,
+                "min_soc_released_for_connection": coordinator._floor_released_soc,
                 "charge_limit_rewrites": coordinator._ac_limit_rewrites,
                 "planned_power_w": coordinator.planned_charge_power_w,
                 "planned_power_is_applied": coordinator.planned_power_is_applied,

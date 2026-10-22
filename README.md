@@ -605,6 +605,16 @@ The limit is a protection, not an optimisation, so it behaves accordingly:
   Then the integration stops writing, files a repair issue and leaves grid charging off: it is
   only switched on once the limit reads back. Some inverters fall back to their own value
   shortly after an external write (a Kostal reported its 22 kW again after every 0 W).
+- **When throttling fails, the min SOC comes down.** A raised min SOC makes the inverter charge
+  from the grid at whatever limit it holds - a Kostal's own is 22 kW. So when the connection
+  needs a lower charge limit and the inverter cannot be made to hold it (the write fails, it does
+  not hold the limit, or it keeps reading higher), the min SOC goes down to the current state of
+  charge, rounded down, for the rest of the window. The battery stops charging from the grid but
+  does not discharge either, which the original min SOC would allow; never below your own
+  minimum. Grid charging stays off, the window end restores the original min SOC as always, and
+  the next window starts over. It is logged as an error and shown as
+  `min_soc_released_for_connection` on the status sensor and in the diagnostics. Nothing happens
+  while the inverter already holds a limit at or below what the connection needs.
 - Between the regular polls a listener on the grid import sensor lowers the setpoint within
   about 30 seconds when the house load rises. It only ever lowers; raising it again waits for
   the next poll, so a load that drops for a moment does not push the battery straight back up.
