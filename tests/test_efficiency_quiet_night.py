@@ -20,7 +20,7 @@ from custom_components.inverter_charge_night.const import (
     CONF_BATTERY_CAPACITY,
 )
 from custom_components.inverter_charge_night.coordinator import InverterChargeNightCoordinator
-from tests.test_efficiency_finder import NOW, START, _make, _measure
+from tests.test_efficiency_finder import NOW, RECEIVED, SENT, START, _make, _measure
 from tests.test_efficiency_min_soc import BATTERY, MIN_SOC, NIGHT, night  # noqa: F401
 
 NEXT_NIGHT = START + timedelta(days=1)
@@ -263,3 +263,33 @@ async def test_an_unreadable_limit_during_the_measurement_only_discards(night): 
         coordinator._accumulate_auto_energy()
         assert coordinator._auto_search_stopped() is None
     assert not coordinator._auto_test_active
+
+
+@pytest.mark.asyncio
+async def test_trials_lost_to_stale_power_readings_stop_the_search(night):  # noqa: F811
+    """CodeRabbit on #40: a sensor that reports 0 W only on change goes stale
+    before the idle check, with the 15-s check still sampling it; two such
+    trials end the window's search, and a reload does not start the count over."""
+    hass, coordinator = night
+
+    def lose_a_trial(co):
+        end = _measure(co, hass, power_w=1000, samples=[(0, 0)] * 2, minutes=2)
+        for entity in (SENT, RECEIVED):
+            hass.states.get(entity).last_reported = end  # and never again
+        for step in range(1, 6):
+            with patch(NOW, return_value=end + timedelta(seconds=15 * step)):
+                co._accumulate_auto_energy()
+        assert not co._auto_test_active
+        assert "stale" in co._auto_last_result["discarded"]
+
+    lose_a_trial(coordinator)
+    with patch(NOW, return_value=START):
+        assert coordinator._auto_search_stopped() is None
+
+    restarted = _make(hass, NIGHT)
+    restarted.entry.options = coordinator.entry.options
+    restarted._restore_state()
+    lose_a_trial(restarted)
+    with patch(NOW, return_value=START):
+        assert restarted._auto_search_stopped() == "power_telemetry_lost"
+    restarted._remove_auto_sample_listener()

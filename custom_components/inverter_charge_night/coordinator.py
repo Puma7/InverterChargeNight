@@ -364,6 +364,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _floor_released_soc: float | None = None
     _auto_stopped: tuple[str, str] | None = None
     _auto_start_failures: tuple[str, int] | None = None
+    _auto_telemetry_losses: tuple[str, int] | None = None
     _grid_switch_suspended: bool = False
     _grid_stop_pending: bool = False
     _grid_stop_retries: int = 0
@@ -770,6 +771,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "auto_start_failures": (
                 list(self._auto_start_failures) if self._auto_start_failures else None
             ),
+            "auto_telemetry_losses": (
+                list(self._auto_telemetry_losses) if self._auto_telemetry_losses else None
+            ),
             "hands_off_until": (
                 self._hands_off_until.isoformat() if self._hands_off_until else None
             ),
@@ -853,14 +857,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and all(isinstance(part, str) for part in stopped)
             else None
         )
-        failures = state.get("auto_start_failures")
-        self._auto_start_failures = (
-            (failures[0], failures[1])
-            if isinstance(failures, list) and len(failures) == 2
-            and isinstance(failures[0], str) and isinstance(failures[1], int)
-            and not isinstance(failures[1], bool)
-            else None
-        )
+        self._auto_start_failures = self._restore_window_count(state, "auto_start_failures")
+        self._auto_telemetry_losses = self._restore_window_count(state, "auto_telemetry_losses")
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
             self.snow_nights = snow_raw
@@ -920,6 +918,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning("Ignoring invalid persisted skip_next_until %r", until_raw)
 
         _LOGGER.debug("Restored runtime state: %s", state)
+
+    @staticmethod
+    def _restore_window_count(state: dict[str, Any], key: str) -> tuple[str, int] | None:
+        """A persisted (window key, count) pair, or None when it is not one."""
+        raw = state.get(key)
+        if (isinstance(raw, list) and len(raw) == 2 and isinstance(raw[0], str)
+                and isinstance(raw[1], int) and not isinstance(raw[1], bool)):
+            return raw[0], raw[1]
+        return None
 
     def _restore_soc(self, state: dict[str, Any], key: str) -> float | None:
         """Return a persisted SOC percentage, or None when it is not a usable one.
@@ -4106,9 +4113,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             age = self._state_age_s(state, dt_util.now())
             if age is not None and (age < -5 or age > 60):
                 self._discard_auto_test("power telemetry is stale; retrying after recovery")
+                self._count_trial_lost_to_telemetry()
                 return
         if sent_w is None or received_w is None:
             self._discard_auto_test("power telemetry is unavailable; retrying after recovery")
+            self._count_trial_lost_to_telemetry()
             return
         if self._auto_meter_start is not None and self._measured_energy_wh() is None:
             self._discard_auto_test("energy counters were reset or became unavailable")
@@ -4122,6 +4131,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         delta_h = elapsed_seconds(now, last_time) / 3600.0
         if delta_h < 0 or (delta_h > 60 / 3600 and self._auto_meter_start is None):
             self._discard_auto_test("measurement clock or sample continuity was interrupted")
+            self._count_trial_lost_to_telemetry()
             return
         if delta_h == 0:
             return
@@ -4456,6 +4466,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
         self._save_auto_efficiency_data(data)
         self._reset_auto_test_state()
+
+    def _count_trial_lost_to_telemetry(self) -> None:
+        """Two trials lost to stale, missing or interrupted power readings end the search.
+
+        A sensor that reports 0 W only on change goes stale before the idle
+        check can judge the trial, and every poll would write a new one
+        (CodeRabbit on #40). Persisted like the failed starts.
+        """
+        key = self._efficiency_window_key()
+        previous = self._auto_telemetry_losses
+        losses = previous[1] + 1 if previous is not None and previous[0] == key else 1
+        self._auto_telemetry_losses = (key, losses)
+        self._persist_state()
+        if losses >= AUTO_TEST_MAX_START_FAILURES:
+            self._stop_auto_search_for_window("power_telemetry_lost")
 
     def _stop_auto_search_for_window(self, reason: str) -> None:
         """No more trials in this window: each one would only write in vain.
