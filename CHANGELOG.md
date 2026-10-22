@@ -65,6 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two trials lost to stale, missing or interrupted power readings end the search for the
   window (`power_telemetry_lost`), counted across a reload. Before, a sensor that reports 0 W
   only when it changes made every poll write a new trial (CodeRabbit on #40).
+- Only a trial whose limit was confirmed and then fell stops the search as
+  `inverter_lowered_limit`. A trial never confirmed after its settling, for instance because a slow
+  register still showed the previous, lower trial, counts as a start the inverter did not take.
+  Only a confirmed limit clears that count, so an accepted write that never reads back cannot
+  restart the trials every poll (CI on #41).
 
 ### Docs
 - `docs/kostal-kore.md`: a min SOC only 1 % above the battery did not make the Kostal charge.
