@@ -18,6 +18,7 @@ from custom_components.inverter_charge_night.const import (
     AUTO_TEST_MAX_START_FAILURES,
     CONF_AUTO_EFFICIENCY_DATA,
     CONF_BATTERY_CAPACITY,
+    CONF_CHARGE_POWER_SENT_ENTITY,
 )
 from custom_components.inverter_charge_night.coordinator import InverterChargeNightCoordinator
 from tests.test_efficiency_finder import NOW, RECEIVED, SENT, START, _make, _measure
@@ -329,3 +330,86 @@ async def test_a_trial_never_confirmed_is_a_start_not_taken_not_a_lowered_limit(
         coordinator._auto_test_start = INSIDE - timedelta(minutes=3)
         await coordinator._verify_ac_charge_limit()
         assert coordinator._auto_search_stopped() == "charge_limit_not_taken"
+
+
+@pytest.mark.asyncio
+async def test_no_trial_the_window_end_cuts_short_at_the_lowest_accepted_draw(night):  # noqa: F811
+    """Codex on #40: a trial counts down to 800 W of 1000 W, and 0.3 kWh at
+    800 W takes 22.5 minutes after the settling - 23 minutes are too few."""
+    hass, coordinator = night
+    end = coordinator._window_end_datetime(START)
+
+    with patch(NOW, return_value=end - timedelta(minutes=23)):
+        await coordinator._handle_auto_charge()
+    coordinator._start_auto_test.assert_not_awaited()
+    assert coordinator._auto_wait_reason == "not_enough_charge_left"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lifecycle", ["window_ended", "unloading"])
+async def test_a_start_cancelled_by_the_lifecycle_is_no_failed_start(night, lifecycle):  # noqa: F811
+    """Codex on #40: the setter returns False when the window ends or the entry
+    unloads while the write waits for the lock. The inverter refused nothing."""
+    hass, coordinator = night
+
+    async def cancelled(power_w: int) -> bool:
+        if lifecycle == "unloading":
+            coordinator._unloading = True
+        else:
+            coordinator.is_active = False
+        return False
+
+    coordinator._set_ac_charge_limit_w = AsyncMock(side_effect=cancelled)
+    with patch(NOW, return_value=START):
+        await InverterChargeNightCoordinator._start_auto_test(coordinator, 1000)
+
+    coordinator._set_ac_charge_limit_w.assert_awaited_once_with(1000)
+    assert coordinator._auto_start_failures is None
+    assert not coordinator._auto_test_active
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", [SENT, RECEIVED])
+async def test_trials_lost_to_missing_telemetry_at_their_start_stop_the_search(night, missing):  # noqa: F811
+    """Codex and CodeRabbit on #40/#41: a power sensor that is gone as the
+    settling ends discards the trial; two such trials end the window's search."""
+    hass, coordinator = night
+    hass.states.async_set("sun.sun", "below_horizon")
+
+    for attempt in range(AUTO_TEST_MAX_START_FAILURES):
+        _measure(coordinator, hass, power_w=1000, samples=[(1000, 950)], minutes=0, settle=False)
+        hass.states.async_set(missing, "unavailable")
+        with patch(NOW, return_value=START + timedelta(minutes=2, seconds=1)):
+            coordinator._accumulate_auto_energy()
+        assert not coordinator._auto_test_active
+        assert "unavailable at measurement start" in coordinator._auto_last_result["discarded"]
+        with patch(NOW, return_value=START):
+            stopped = coordinator._auto_search_stopped()
+        assert stopped == (None if attempt == 0 else "power_telemetry_lost")
+
+
+@pytest.mark.asyncio
+async def test_replacing_the_measurement_entities_lifts_the_window_stop(night):  # noqa: F811
+    """Codex on #40: a stop earned on a faulty sensor says nothing about the
+    healthy one the options put in its place inside the same window."""
+    hass, coordinator = night
+    with patch(NOW, return_value=START):
+        coordinator._stop_auto_search_for_window("power_telemetry_lost")
+        coordinator._count_failed_start()
+        coordinator._count_trial_lost_to_telemetry()
+
+    unchanged = coordinator._efficiency_signature()
+    coordinator.forget_auto_search_after_rebinding(unchanged)
+    with patch(NOW, return_value=START):
+        assert coordinator._auto_search_stopped() == "power_telemetry_lost"
+
+    coordinator.config = {**coordinator.config, CONF_CHARGE_POWER_SENT_ENTITY: "sensor.new_sent"}
+    coordinator.forget_auto_search_after_rebinding(unchanged)
+    with patch(NOW, return_value=START):
+        assert coordinator._auto_search_stopped() is None
+    assert coordinator._auto_start_failures is None
+    assert coordinator._auto_telemetry_losses is None
+    persisted = coordinator.entry.options["runtime_state"]
+    assert persisted["auto_search_stopped"] is None
+    assert persisted["auto_start_failures"] is None
+    assert persisted["auto_telemetry_losses"] is None

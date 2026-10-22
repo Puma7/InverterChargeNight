@@ -62,3 +62,23 @@ async def test_async_update_entry_backup_listener_error(mock_hass, mock_config_e
 
     assert "Error updating time triggers" in caplog.text
     assert not coordinator.async_request_refresh.called
+
+
+@pytest.mark.asyncio
+async def test_async_update_entry_hands_the_old_measurement_path_to_the_search(
+    mock_hass, mock_config_entry,
+):
+    """Codex on #40: the search learns which entities its window stop was earned on."""
+    coordinator = MagicMock()
+    coordinator.config = {}
+    coordinator._efficiency_signature.return_value = "before the swap"
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.async_apply_operation_mode = AsyncMock()
+    coordinator.async_release_changed_entities = AsyncMock()
+    coordinator._reconfiguring = False
+    mock_config_entry.runtime_data = coordinator
+
+    await async_update_entry(mock_hass, mock_config_entry)
+
+    coordinator.forget_auto_search_after_rebinding.assert_called_once_with("before the swap")
+    assert coordinator.config is mock_config_entry.data
