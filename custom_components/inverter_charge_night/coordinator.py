@@ -7402,6 +7402,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             value = self._representable_min_soc(user_min, round_up=True) or user_min
         self._floor_released_soc = value
         self._persist_state()
+        # Whichever path got here: a grid charge switch that is on - a forced
+        # charge on this inverter - goes off as well (CodeRabbit on #41)
+        await self._pause_grid_charge("the house connection cannot be protected")
         state = self.hass.states.get(str(min_soc_entity))
         current = _as_float(state.state) if state is not None else None
         _LOGGER.error(

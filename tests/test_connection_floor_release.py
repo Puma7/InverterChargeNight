@@ -266,11 +266,13 @@ async def test_an_unreadable_charge_limit_takes_the_floor_down(mock_hass):
     coordinator = await _charging_night(mock_hass)
     coordinator._grid_limited = True
     mock_hass.states.async_set(AC_LIMIT, "unavailable", {"unit_of_measurement": "W"})
+    mock_hass.states.async_set(GRID, "on")  # a forced charge on this inverter
 
     await coordinator._verify_ac_charge_limit()
 
     assert coordinator._floor_released_soc == 40
     assert _min_soc_writes(mock_hass) == [40]
+    assert ("switch", "turn_off", GRID) in _service_calls(mock_hass)  # CodeRabbit on #41
     await coordinator._stop_periodic_verification()
 
 
