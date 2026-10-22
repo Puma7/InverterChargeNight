@@ -5,6 +5,74 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.10] - 2026-10-22
+
+### Fixed
+- **No efficiency trial without room for its minimum energy.** The check before a trial counted
+  the settling and the five minutes, but not the 0.3 kWh a trial has to measure. On 21/22 October
+  0.29 kWh were left to the 21.8 % target, a trial at 1000 W started and could never finish. A
+  trial now starts only when the charge left covers the settling plus the larger of five
+  minutes and 0.3 kWh.
+- **A trial on a battery that does not charge ends after its minimum duration.** The same night
+  the Kostal did not charge at all under a min SOC 1 % above the battery: 0 W for half an hour at
+  a 1000 W limit. Drawing less than a quarter of the setpoint after five minutes ends the trial
+  without a failed attempt against that power (`battery_not_charging`), and no further trial
+  runs in this window.
+- **No trials written over a limit the inverter lowered itself.** From 23:31 the Kostal held its
+  charge limit at 51 W, and the search wrote 1000 W to register 1038 every 15 minutes until
+  05:00: 22 writes, each ignored, each an ERROR in the log. A trial discarded because the inverter
+  lowered the limit now ends the search for the window (`inverter_lowered_limit`), and so do two
+  trial starts the inverter did not take (`charge_limit_not_taken`). One failed start is tried
+  again: at 23:01 a start right after ManualCharge went off failed once and the next went through.
+- Review of #40: a trial that started late but charges now is not taken for idle, whatever its
+  average so far; only failed starts in a row count; the stop for the window survives a restart
+  inside it; and a trial starts only when the window has time for its minimum energy, not just
+  for its five minutes (18 minutes after settling at 1 kW) (Codex and CodeRabbit on #40).
+- Review of #41: the failed-start count survives a reload inside the window, and the 15-second
+  check asks for a refresh once an idle trial reaches its five minutes, so it ends then and not
+  at the next 15-minute poll (Codex on #41).
+- A limit the inverter lowers during a measurement stops the search for the window even when the
+  power sampler notices it before the verification does. Before, the sampler discarded the trial
+  without stopping the search (CodeRabbit on #40).
+- Two trials lost to stale, missing or interrupted power readings end the search for the
+  window (`power_telemetry_lost`), counted across a reload. Before, a sensor that reports 0 W
+  only when it changes made every poll write a new trial (CodeRabbit on #40).
+- Only a trial whose limit was confirmed and then fell stops the search as
+  `inverter_lowered_limit`. A trial never confirmed after its settling, for instance because a slow
+  register still showed the previous, lower trial, counts as a start the inverter did not take.
+  Only a confirmed limit clears that count, so an accepted write that never reads back cannot
+  restart the trials every poll (CI on #41).
+- Second Codex review of #40:
+  - A power sensor or energy counter that is missing when the settling ends counts toward
+    `power_telemetry_lost`. Before, every poll wrote a new trial for as long as it was gone
+    (also CodeRabbit on #41).
+  - The time check budgets the lowest draw a trial still counts with (80 % of the setpoint):
+    22.5 minutes after settling at 1 kW, not 18.
+  - A start cancelled because the window ended or the entry unloads while the write waited is
+    no longer counted as a start the inverter refused.
+  - Replacing the charge limit or a power/energy entity in the options lifts the window's stop
+    and its counts, which the old entity earned.
+- Third Codex review of #40:
+  - Replacing a measurement entity also ends a running trial. Its listener, meter baseline and
+    SOC band belong to the old entities, and it would have filed a corrupt sample under the
+    new signature.
+  - With energy meters a trial runs its full 20 minutes, and the checks before it now budget that
+    time and the charge it takes. Before, a 10 kW trial could start eight minutes before the end.
+  - Energy meters that reset or drop out during a measurement count toward
+    `power_telemetry_lost` like the power readings.
+- Fourth Codex review of #40:
+  - One idle trial no longer ends the window. Its power is left out for the rest of the window
+    and the search tries the next one; a second idle trial ends it (`battery_not_charging`).
+    An inverter or BMS with a minimum charge rate that idles at 1 kW but charges at 3 kW kept
+    the search stuck on 1 kW night after night. The idle count survives a reload.
+  - Extending a running ad-hoc window moves its stop, counts and left-out powers to the new
+    end. They are keyed to the window end, so an extension started the futile trials over.
+
+### Docs
+- `docs/kostal-kore.md`: a min SOC only 1 % above the battery did not make the Kostal charge.
+- `docs/kostalkore-wishlist.md`: the nightly 03:10 inverter fault published as 0 % SoC, 0 Hz and
+  0 V, and the negative-home-power warnings (Puma7/KostalKore#85).
+
 ## [3.10.9] - 2026-10-21
 
 ### Changed

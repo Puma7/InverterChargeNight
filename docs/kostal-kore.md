@@ -64,7 +64,10 @@ compare the sensor against your meter while a wallbox is charging.
 **`Battery Manual Charge` can be a forced charge.** On a PLENTICORE G3 (October 2026) the
 charge limit on register 1038 read the inverter's own 22.3 kW within a second of switching
 `Battery:ManualCharge` on, and a limit written while it was on was ignored. Raising the min SOC
-alone made the same inverter charge from the grid up to it, under the written limit. Inverter
+alone made the same inverter charge from the grid up to it, under the written limit - but not
+when the min SOC is only 1 % above the battery: on 21/22 October a 22 % min SOC over a 21 %
+battery charged nothing all night (0 W at a 1000 W limit), and from 23:31 the Kostal read its
+charge limit as 51 W and ignored writes. Inverter
 Charge Night writes the limit again right after switching on and rechecks it shortly after; if
 the switch lifted it, grid charging goes off again for the rest of the window and the raised min
 SOC does the charging. Expect one short switch-on per night and the warning

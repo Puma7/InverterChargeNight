@@ -202,6 +202,13 @@ async def main():
                                                      blocking=True, return_response=True)
             check("recovery receipt and proxy error counters retained", proxy.communication_diagnostics()["failed_requests"] > 0
                   and any(v.get("modbus", {}).get("incidents", 0) for v in snapshot.values()))
+            # A key that failed while the inverter was offline stays failed in
+            # the proxy until that same key is read again. Wait for evcc's own
+            # reads to clear them, or the loss below is the outage's leftover and
+            # one read of register 252 cannot clear it (CI on #40).
+            check("evcc's own reads clear the recovery failures",
+                  await until(lambda: proxy.communication.snapshot()["state"] == "healthy", timeout=35),
+                  proxy.communication.snapshot()["faults"])
             process.terminate()
             await asyncio.to_thread(process.wait, 10)
             process = None

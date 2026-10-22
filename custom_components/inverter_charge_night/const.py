@@ -157,6 +157,13 @@ AUTO_TEST_MIN_ENERGY_WH = 300.0  # ... and this much energy, so 20 kW is measura
 AUTO_TEST_MIN_FOLLOW_RATIO = 0.8  # the inverter has to draw what it was told to draw
 AUTO_TEST_MAX_PLAUSIBLE_LOSS = 0.5  # above this the sensors are wrong, not the inverter
 AUTO_TEST_MAX_ATTEMPTS = 2  # after this many failures a power counts as unmeasurable
+# A trial whose battery draws less than this share of the setpoint is not
+# charging at all - a Kostal ignores a min SOC only 1 % above the battery
+# (21/22 October 2026). That is the night's fault, not the power's.
+AUTO_TEST_IDLE_RATIO = 0.25
+# Trial starts whose setpoint the inverter did not take before the search
+# stops for the window: each further one is a Modbus write that changes nothing
+AUTO_TEST_MAX_START_FAILURES = 2
 # How long a trial measures is set by how sure it is, not by the clock alone:
 # the loss is taken per block, and the trial ends once the standard error of
 # their mean is below the target - or at the longest trial, whichever is first.

@@ -486,13 +486,25 @@ while charging from the grid, it works through the charge power range:
 
 Because it takes several measurements per window, a six-hour window is usually enough to find
 the optimum; it does not need a week of nights. A trial starts only when the window still has
-enough to charge to finish it (`waiting_reason: not_enough_charge_left` otherwise): one the
-target cuts short is discarded, so it waits for a night with more to charge.
+enough time and charge to finish it - the settling plus five minutes and at least 0.3 kWh, the
+time counted at the lowest draw a trial still accepts (80 % of its power), and with energy meters
+the full 20 minutes (`waiting_reason: not_enough_charge_left` otherwise): one the target cuts
+short is discarded, so it waits for a night with more to charge.
+
+**It does not write in vain.** A trial whose battery draws less than a quarter of its power
+after five minutes ends, and that power is left out for the rest of the window (an inverter
+with a minimum charge rate may idle at 1 kW and charge at 3 kW); a second such trial at another
+power says the night does not charge (`battery_not_charging`). Neither counts as a loss. A trial the
+inverter cut short by lowering the limit itself (`inverter_lowered_limit`), or two trial starts
+the inverter did not take (`charge_limit_not_taken`), or two trials lost to stale or missing
+power readings or energy meters (`power_telemetry_lost`) end the search for this window. The next
+window tries again, and so does this one once you replace the charge limit or a measurement
+entity in the options. Extending an ad-hoc window keeps its stop.
 
 **Over the min SOC.** On an inverter whose grid charge switch is a forced charge - the Kostal's
 `Battery Manual Charge` - the switch stays off for the window (3.10.8), and the raised min SOC
 charges the battery from the grid under the written limit. The search measures there as well:
-the trial's power is the charge limit, kept alive every 30 seconds.
+the trial's power is the charge limit, kept alive every 20 seconds.
 
 **What it refuses to record**, because a wrong sample steers every later night:
 
