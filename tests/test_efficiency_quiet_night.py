@@ -160,6 +160,7 @@ async def test_only_failed_starts_in_a_row_stop_the_search(night):  # noqa: F811
     with patch(NOW, return_value=START):
         await start(1000)
         await start(1000)
+        coordinator._confirm_auto_test_limit()  # the inverter read it back
         coordinator._reset_auto_test_state()  # that trial ended
         await start(3000)
         assert coordinator._auto_search_stopped() is None
@@ -293,3 +294,38 @@ async def test_trials_lost_to_stale_power_readings_stop_the_search(night):  # no
     with patch(NOW, return_value=START):
         assert restarted._auto_search_stopped() == "power_telemetry_lost"
     restarted._remove_auto_sample_listener()
+
+
+@pytest.mark.asyncio
+async def test_a_trial_never_confirmed_is_a_start_not_taken_not_a_lowered_limit(mock_hass):
+    """CI on #41: after the settling the slow register still showed the previous,
+    lower trial. That is a start the inverter has not taken - retried once,
+    counted with the failed starts - not an inverter holding a lower limit."""
+    from tests.test_electrical_safety import AC_LIMIT, INSIDE, _make, _register
+    from tests.test_electrical_safety import NOW as SAFETY_NOW, GRID
+    with patch(SAFETY_NOW, return_value=INSIDE):
+        _register(mock_hass)
+        mock_hass.states.async_set(GRID, "on")
+        coordinator = _make(mock_hass)
+        coordinator.is_active = True
+        coordinator.auto_efficient_charge = True
+        coordinator._planned_setpoint_written_w = 13000
+        coordinator._auto_test_active = True
+        coordinator._auto_test_power_w = 13000
+        coordinator._auto_test_start = INSIDE - timedelta(minutes=3)
+        coordinator._auto_test_limit_confirmed = False
+        mock_hass.states.async_set(AC_LIMIT, "11000", {"unit_of_measurement": "W"})
+
+        await coordinator._verify_ac_charge_limit()
+        assert not coordinator._auto_test_active
+        assert coordinator._auto_search_stopped() is None
+        assert coordinator._auto_start_failures is not None and coordinator._auto_start_failures[1] == 1
+
+        # Accepted again but still not read back: the count stands, or a
+        # setpoint the inverter never shows would be written every poll
+        coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
+        await coordinator._start_auto_test(13000)
+        assert coordinator._auto_start_failures[1] == 1
+        coordinator._auto_test_start = INSIDE - timedelta(minutes=3)
+        await coordinator._verify_ac_charge_limit()
+        assert coordinator._auto_search_stopped() == "charge_limit_not_taken"

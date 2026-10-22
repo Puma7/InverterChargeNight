@@ -3848,20 +3848,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # The next poll offers the candidate again.
             _LOGGER.debug("Efficiency test at %d W not started: the setpoint did not arrive", power_w)
             self._set_auto_wait_reason("charge_limit_write_failed")
-            key = self._efficiency_window_key()
-            previous = self._auto_start_failures
-            failures = previous[1] + 1 if previous is not None and previous[0] == key else 1
-            self._auto_start_failures = (key, failures)
-            self._persist_state()  # a reload must not start the count over (Codex on #41)
-            if failures >= AUTO_TEST_MAX_START_FAILURES:
-                # The Kostal held its own 51 W and ignored 1000 W every 15
-                # minutes, all night (21/22 October 2026)
-                self._stop_auto_search_for_window("charge_limit_not_taken")
+            self._count_failed_start()
             return
-        # Failures in a row count, not all of a window's (Codex on #40)
-        if self._auto_start_failures is not None:
-            self._auto_start_failures = None
-            self._persist_state()
         self._auto_wait_reason = None
         self._auto_test_active = True
         self._auto_test_power_w = power_w
@@ -4017,8 +4005,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Start counting: the inverter has had its settling time."""
         if not self._auto_limit_matches_feedback():
             self._discard_auto_test("charge limit has no matching feedback after settling")
+            self._count_failed_start()  # never confirmed: a start not taken
             return
-        self._auto_test_limit_confirmed = True
+        self._confirm_auto_test_limit()
         self._auto_measure_start = now
         # Where on the battery this measurement is taken. A loss measured from
         # a third full is not the loss measured near the top, and until now
@@ -4438,6 +4427,30 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
         self._save_auto_efficiency_data(data)
         self._reset_auto_test_state()
+
+    def _count_failed_start(self) -> None:
+        """A trial whose setpoint the inverter did not take; two in a row end the search.
+
+        Not taken means never confirmed: a write the inverter refused, or one it
+        accepted whose reading never arrived. Only a confirmed limit clears the
+        count - failures in a row count, not all of a window's (Codex on #40).
+        """
+        key = self._efficiency_window_key()
+        previous = self._auto_start_failures
+        failures = previous[1] + 1 if previous is not None and previous[0] == key else 1
+        self._auto_start_failures = (key, failures)
+        self._persist_state()  # a reload must not start the count over (Codex on #41)
+        if failures >= AUTO_TEST_MAX_START_FAILURES:
+            # The Kostal held its own 51 W and ignored 1000 W every 15
+            # minutes, all night (21/22 October 2026)
+            self._stop_auto_search_for_window("charge_limit_not_taken")
+
+    def _confirm_auto_test_limit(self) -> None:
+        """The inverter reads the trial's setpoint: the start counts as taken."""
+        self._auto_test_limit_confirmed = True
+        if self._auto_start_failures is not None:
+            self._auto_start_failures = None
+            self._persist_state()
 
     def _count_trial_lost_to_telemetry(self) -> None:
         """Two trials lost to stale, missing or interrupted power readings end the search.
@@ -7236,7 +7249,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if abs(actual_w - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
             if self._auto_test_active:
-                self._auto_test_limit_confirmed = True
+                self._confirm_auto_test_limit()
             # The rewrite budget is not refilled here: a Kostal holds the limit
             # for a while and then drops it, and every refill would hand it
             # two more writes (Codex on #36). Only a new window starts over.
@@ -7247,10 +7260,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # new setpoint. Give initial feedback the existing settling
                 # interval, then reject it; never record an unconfirmed trial.
                 # Once matched, a lower value is real drift and ends it now.
-                if not self._auto_test_limit_confirmed and self._auto_test_start is not None:
-                    pending_s = elapsed_seconds(self._efficiency_now(), self._auto_test_start)
-                    if 0 <= pending_s < AUTO_TEST_SETTLE_S:
-                        return
+                if not self._auto_test_limit_confirmed:
+                    if self._auto_test_start is not None:
+                        pending_s = elapsed_seconds(self._efficiency_now(), self._auto_test_start)
+                        if 0 <= pending_s < AUTO_TEST_SETTLE_S:
+                            return
+                    # Never confirmed: a slow register may still show the
+                    # previous, lower trial (CI on #41). A start not taken.
+                    self._discard_auto_test("charge limit was never confirmed for this trial")
+                    self._count_failed_start()
+                    return
                 self._discard_auto_test("inverter limit fell below the efficiency trial setpoint")
                 # The inverter holds a lower limit of its own; writing the next
                 # trial over it every poll changes nothing (21/22 October 2026)
