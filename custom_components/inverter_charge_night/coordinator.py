@@ -362,6 +362,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _ac_limit_not_held: bool = False
     _ac_limit_window: str | None = None
     _floor_released_soc: float | None = None
+    _auto_stopped: tuple[str, str] | None = None
     _grid_switch_suspended: bool = False
     _grid_stop_pending: bool = False
     _grid_stop_retries: int = 0
@@ -515,7 +516,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_wait_reason: str | None = "not_evaluated"
         # (window key, reason) once trials can only write to the inverter in
         # vain this window, and the trial starts it did not take, per window
-        self._auto_stopped: tuple[str, str] | None = None
+        self._auto_stopped = None
         self._auto_start_failures: tuple[str, int] | None = None
         # Planner v2 (plan 006)
         self.last_plan: PlanResult | None = None  # result of the last bridge plan this window
@@ -760,6 +761,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "floor_released_soc": self._floor_released_soc,
             "ac_limit_window": self._ac_limit_window,
             "grid_switch_suspended": self._grid_switch_suspended,
+            "auto_search_stopped": list(self._auto_stopped) if self._auto_stopped else None,
             "hands_off_until": (
                 self._hands_off_until.isoformat() if self._hands_off_until else None
             ),
@@ -840,6 +842,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         window_raw = state.get("ac_limit_window")
         self._ac_limit_window = window_raw if isinstance(window_raw, str) else None
         self._grid_switch_suspended = state.get("grid_switch_suspended") is True
+        stopped = state.get("auto_search_stopped")
+        self._auto_stopped = (
+            (stopped[0], stopped[1])
+            if isinstance(stopped, list) and len(stopped) == 2
+            and all(isinstance(part, str) for part in stopped)
+            else None
+        )
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
             self.snow_nights = snow_raw
@@ -3857,6 +3866,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # minutes, all night (21/22 October 2026)
                 self._stop_auto_search_for_window("charge_limit_not_taken")
             return
+        # Failures in a row count, not all of a window's (Codex on #40)
+        self._auto_start_failures = None
         self._auto_wait_reason = None
         self._auto_test_active = True
         self._auto_test_power_w = power_w
@@ -4410,8 +4421,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._reset_auto_test_state()
 
     def _stop_auto_search_for_window(self, reason: str) -> None:
-        """No more trials in this window: each one would only write in vain."""
+        """No more trials in this window: each one would only write in vain.
+
+        Persisted, so a restart inside the window does not start them over
+        (Codex on #40).
+        """
         self._auto_stopped = (self._efficiency_window_key(), reason)
+        self._persist_state()
         self._set_auto_wait_reason(reason)
 
     def _auto_search_stopped(self) -> str | None:
@@ -4435,8 +4451,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         duration = elapsed_seconds(self._efficiency_now(), start)
         if duration < AUTO_TEST_MIN_DURATION_S:
             return None
+        idle_w = AUTO_TEST_IDLE_RATIO * power_w
         average_w = self._auto_energy_sent_wh / (duration / 3600.0)
-        return average_w if average_w < AUTO_TEST_IDLE_RATIO * power_w else None
+        latest_w = self._auto_last_sent_w
+        if latest_w is not None and latest_w >= idle_w:
+            # A late start is charging now, whatever the average says (Codex on #40)
+            return None
+        return average_w if average_w < idle_w else None
 
     def _set_auto_wait_reason(self, reason: str) -> None:
         """Retain why a trial did not start and log changes once."""
@@ -4581,8 +4602,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if target is None or soc is None:
             return False
         now = dt_util.now()
-        if elapsed_seconds(self._window_end_datetime(now), now) < AUTO_TEST_SETTLE_S + AUTO_TEST_MIN_DURATION_S:
-            return False  # the window end would cut it short (CodeRabbit on #39)
+        # The settling, then the minimum time or the time the minimum energy
+        # takes at this power, whichever is longer (CodeRabbit on #39 and #40)
+        trial_s = AUTO_TEST_SETTLE_S + max(
+            float(AUTO_TEST_MIN_DURATION_S), AUTO_TEST_MIN_ENERGY_WH * 3600.0 / max(1, power_w)
+        )
+        if elapsed_seconds(self._window_end_datetime(now), now) < trial_s:
+            return False  # the window end would cut it short
         capacity_wh = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)) * 1000.0
         missing_wh = max(0.0, target - soc) / 100.0 * capacity_wh
         efficiency = float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY))

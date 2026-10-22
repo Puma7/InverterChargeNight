@@ -431,6 +431,7 @@ def test_persist_state_round_trip_next_to_auto_efficiency_data(mock_hass):
         "floor_released_soc": None,
         "ac_limit_window": None,
         "grid_switch_suspended": False,
+        "auto_search_stopped": None,
         "snow_nights": 3,
         "pv_yield": first._pv_yield.snapshot(),
         "hands_off_until": None,
