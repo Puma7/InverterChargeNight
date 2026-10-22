@@ -72,6 +72,9 @@ async def test_room_for_the_minimum_energy_starts_the_trial(night):  # noqa: F81
 
 @pytest.mark.asyncio
 async def test_a_battery_that_does_not_charge_ends_the_trial_and_the_night(night):  # noqa: F811
+    """One idle trial leaves its power out for this window (Codex on #40: an
+    inverter with a minimum charge rate idles at 1 kW and charges at 3 kW);
+    a second idle trial at another power ends the window's search."""
     hass, coordinator = night
     end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 6, minutes=6)
 
@@ -79,19 +82,76 @@ async def test_a_battery_that_does_not_charge_ends_the_trial_and_the_night(night
         await coordinator._handle_auto_charge()
 
     assert not coordinator._auto_test_active
+    assert "trying another power" in coordinator._auto_last_result["discarded"]
+    with patch(NOW, return_value=end):
+        assert coordinator._auto_search_stopped() is None
+        await coordinator._handle_auto_charge()  # the next poll
+    coordinator._start_auto_test.assert_awaited_once_with(3000)
+    coordinator._start_auto_test.reset_mock()
+
+    end = _measure(coordinator, hass, power_w=3000, samples=[(0, 0)] * 6, minutes=6)
+    with patch(NOW, return_value=end):
+        await coordinator._handle_auto_charge()
     assert "not charging" in coordinator._auto_last_result["discarded"]
     assert coordinator._auto_wait_reason == "battery_not_charging"
-    # The night's fault, not the power's: no failed attempt against 1000 W
-    assert "failed" not in coordinator.entry.options.get(CONF_AUTO_EFFICIENCY_DATA, {})
     coordinator._start_auto_test.assert_not_awaited()
 
     with patch(NOW, return_value=end + timedelta(minutes=15)):
         await coordinator._handle_auto_charge()
     coordinator._start_auto_test.assert_not_awaited()
 
+    # Neither power is a loss sample, and the next window offers 1 kW again
+    assert coordinator.get_auto_efficiency_data()["history"] == {}
     with patch(NOW, return_value=NEXT_NIGHT):
         await coordinator._handle_auto_charge()
     coordinator._start_auto_test.assert_awaited_once_with(1000)
+
+
+@pytest.mark.asyncio
+async def test_a_restart_keeps_the_idle_trial_count(night):  # noqa: F811
+    """An idle trial, a reload, another idle trial: two in the window, the search stops."""
+    hass, coordinator = night
+    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 6, minutes=6)
+    with patch(NOW, return_value=end):
+        await coordinator._handle_auto_charge()
+
+    restarted = _make(hass, NIGHT)
+    restarted.entry.options = coordinator.entry.options
+    restarted._restore_state()
+    restarted.is_active = True
+    restarted.auto_efficient_charge = True
+    restarted._grid_switch_suspended = True
+    restarted.initial_calculated_soc = 44.0
+    restarted._start_auto_test = AsyncMock()
+    end = _measure(restarted, hass, power_w=3000, samples=[(0, 0)] * 6, minutes=6)
+    with patch(NOW, return_value=end):
+        await restarted._handle_auto_charge()
+        assert restarted._auto_search_stopped() == "battery_not_charging"
+    restarted._remove_auto_sample_listener()
+
+
+@pytest.mark.asyncio
+async def test_extending_an_adhoc_window_keeps_the_search_stop(night):  # noqa: F811
+    """Codex on #40: the key is the window end, which an extension moves.
+    The stop, the counts and the window's left-out powers move with it."""
+    hass, coordinator = night
+    until = START + timedelta(hours=1)
+    coordinator._adhoc_until = until  # a running ad-hoc window
+    coordinator._calculate_initial_soc = AsyncMock()
+    with patch(NOW, return_value=START):
+        assert coordinator._efficiency_window_key() == until.isoformat()
+        coordinator._stop_auto_search_for_window("charge_limit_not_taken")
+        coordinator._count_trial_lost_to_telemetry()
+        coordinator._record_failed_attempt(1000, too_short=False)
+
+        assert await coordinator.async_open_adhoc_window(
+            until=until + timedelta(hours=2), target_soc=60.0, allow_grid_charge=True,
+            reason="test",
+        )
+        assert coordinator._efficiency_window_key() == (until + timedelta(hours=2)).isoformat()
+        assert coordinator._auto_search_stopped() == "charge_limit_not_taken"
+        assert coordinator._auto_telemetry_losses[1] == 1
+        assert coordinator.get_auto_efficiency_data()["failed"] == {"1000": 1}
 
 
 @pytest.mark.asyncio
