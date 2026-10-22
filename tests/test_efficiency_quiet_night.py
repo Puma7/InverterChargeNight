@@ -199,3 +199,41 @@ async def test_no_trial_the_window_end_cuts_short_of_its_energy(night):  # noqa:
     with patch(NOW, return_value=end - timedelta(minutes=25)):
         await coordinator._handle_auto_charge()
     coordinator._start_auto_test.assert_awaited_once_with(1000)
+
+
+@pytest.mark.asyncio
+async def test_a_reload_keeps_the_failed_start_count(night):  # noqa: F811
+    """Codex on #41: one ignored start, a reload, one more ignored start - that
+    is two in a row, and the search stops."""
+    hass, coordinator = night
+    coordinator._set_ac_charge_limit_w = AsyncMock(return_value=False)
+    with patch(NOW, return_value=START):
+        await InverterChargeNightCoordinator._start_auto_test(coordinator, 1000)
+
+    restarted = _make(hass, NIGHT)
+    restarted.entry.options = coordinator.entry.options
+    restarted._restore_state()
+    restarted._set_ac_charge_limit_w = AsyncMock(return_value=False)
+    with patch(NOW, return_value=START + timedelta(minutes=15)):
+        await InverterChargeNightCoordinator._start_auto_test(restarted, 1000)
+        assert restarted._auto_search_stopped() == "charge_limit_not_taken"
+    restarted._remove_auto_sample_listener()
+
+
+@pytest.mark.asyncio
+async def test_an_idle_trial_asks_for_a_refresh_at_its_minimum(night):  # noqa: F811
+    """Codex on #41: the 15-s check refreshes at the five minutes, not only
+    for a complete trial, so the idle stop does not wait for the next poll."""
+    hass, coordinator = night
+    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 6, minutes=6)
+    coordinator.async_request_refresh = AsyncMock()
+    module = "custom_components.inverter_charge_night.coordinator"
+    with patch(f"{module}.async_track_time_interval") as interval, \
+            patch(f"{module}.async_track_state_change_event"):
+        coordinator.setup_communication_listener()
+    check = interval.call_args.args[1]
+
+    with patch(NOW, return_value=end):
+        await check(end)
+
+    coordinator.async_request_refresh.assert_awaited_once()

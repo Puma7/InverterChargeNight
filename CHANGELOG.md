@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   average so far; only failed starts in a row count; the stop for the window survives a restart
   inside it; and a trial starts only when the window has time for its minimum energy, not just
   for its five minutes (18 minutes after settling at 1 kW) (Codex and CodeRabbit on #40).
+- Review of #41: the failed-start count survives a reload inside the window, and the 15-second
+  check asks for a refresh once an idle trial reaches its five minutes, so it ends then and not
+  at the next 15-minute poll (Codex on #41).
 
 ### Docs
 - `docs/kostal-kore.md`: a min SOC only 1 % above the battery did not make the Kostal charge.
