@@ -237,3 +237,29 @@ async def test_an_idle_trial_asks_for_a_refresh_at_its_minimum(night):  # noqa: 
         await check(end)
 
     coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_limit_lowered_during_the_measurement_stops_the_search(night):  # noqa: F811
+    """CodeRabbit on #40: the power sampler can see the Kostal's 51 W before the
+    verification does; it stops the search for the window all the same."""
+    hass, coordinator = night
+    end = _measure(coordinator, hass, power_w=1000, samples=[(1000, 950)] * 4, minutes=4)
+    hass.states.async_set("number.ac_limit", "51", {"unit_of_measurement": "W"})
+
+    with patch(NOW, return_value=end):
+        coordinator._accumulate_auto_energy()
+        assert coordinator._auto_search_stopped() == "inverter_lowered_limit"
+    assert not coordinator._auto_test_active
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_limit_during_the_measurement_only_discards(night):  # noqa: F811
+    hass, coordinator = night
+    end = _measure(coordinator, hass, power_w=1000, samples=[(1000, 950)] * 4, minutes=4)
+    hass.states.async_set("number.ac_limit", "unavailable", {"unit_of_measurement": "W"})
+
+    with patch(NOW, return_value=end):
+        coordinator._accumulate_auto_energy()
+        assert coordinator._auto_search_stopped() is None
+    assert not coordinator._auto_test_active

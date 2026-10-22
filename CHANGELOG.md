@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Review of #41: the failed-start count survives a reload inside the window, and the 15-second
   check asks for a refresh once an idle trial reaches its five minutes, so it ends then and not
   at the next 15-minute poll (Codex on #41).
+- A limit the inverter lowers during a measurement stops the search for the window even when the
+  power sampler notices it before the verification does. Before, the sampler discarded the trial
+  without stopping the search (CodeRabbit on #40).
 
 ### Docs
 - `docs/kostal-kore.md`: a min SOC only 1 % above the battery did not make the Kostal charge.
