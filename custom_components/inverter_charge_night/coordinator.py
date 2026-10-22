@@ -5208,6 +5208,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._grid_switch_suspended = False
             self._keepalive_lapse_since = None
             self._persist_state()
+        if {CONF_MIN_SOC_ENTITY, CONF_CHARGE_POWER_ENTITY} & set(changed):
+            # The release is evidence about the old limit and floor as well
+            # (Codex on #41)
+            self._floor_released_soc = None
+            self._persist_state()
 
     async def _maybe_rescue_the_evening(self) -> None:
         """Act on a shortfall the outlook has already worked out (plan 013).
@@ -7226,6 +7231,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         actual_w = self._get_ac_charge_limit_w(target[0])
         if actual_w is None:
+            # No feedback while the connection needs the throttling: the raised
+            # floor may be charging at any limit (Codex on #41)
+            await self._protect_connection_by_floor(written, "the charge limit cannot be read")
             return
         if abs(actual_w - written) <= PLANNED_POWER_WRITE_THRESHOLD_W:
             if self._auto_test_active:
@@ -7373,13 +7381,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if value is not None and value < float(self.config.get(CONF_USER_MIN_SOC, 8.0)):
             value = None  # never below the user's own minimum
         if value is None:
-            # SOC unknown, or below the user's minimum: the user's own floor is
-            # the lowest this integration writes, and it charges no further
-            value = (
-                self.original_min_soc
-                if self.original_min_soc is not None
-                else float(self.config.get(CONF_USER_MIN_SOC, 8.0))
-            )
+            # SOC unknown, or below the user's minimum: the user's own minimum
+            # is the lowest this integration writes. Not the captured original,
+            # which can lie well above the battery (Codex on #41)
+            user_min = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
+            value = self._representable_min_soc(user_min, round_up=True) or user_min
         self._floor_released_soc = value
         self._persist_state()
         state = self.hass.states.get(str(min_soc_entity))
@@ -7393,19 +7399,48 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             reason,
             value,
         )
-        if current is not None and current <= value + 0.5:
-            return  # already there; the cap keeps it from being raised again
+        if current is None or current > value + 0.5:
+            # At once, not behind the min SOC lock: the verification that may
+            # have called this holds it
+            await self._write_released_floor(str(min_soc_entity), value)
+        # A poll that was already writing its raised floor can land after
+        # this; once every in-flight writer is done, it is put right
+        # (Codex on #41)
+        self.hass.async_create_background_task(
+            self._confirm_released_floor(), "inverter_charge_night_released_floor"
+        )
+
+    async def _write_released_floor(self, entity_id: str, value: float) -> None:
         try:
             await self.hass.services.async_call(
                 "number",
                 "set_value",
-                {"entity_id": min_soc_entity, "value": value},
+                {"entity_id": entity_id, "value": value},
                 blocking=True,
             )
             self._last_soc_set = value
         except Exception:  # pylint: disable=broad-except
             # The verification writes the capped floor again on its next run
             _LOGGER.exception("Could not take the min SOC down to %.0f%%", value)
+
+    async def _confirm_released_floor(self) -> None:
+        """Write the released floor again if a writer raised it in the meantime."""
+        async with self._min_soc_write_lock:
+            released = self._floor_released_soc
+            min_soc_entity = self.config.get(CONF_MIN_SOC_ENTITY)
+            if (released is None or not min_soc_entity or not self.is_active
+                    or self._ending or self._unloading):
+                return
+            state = self.hass.states.get(str(min_soc_entity))
+            current = _as_float(state.state) if state is not None else None
+            if current is not None and current <= released + 0.5:
+                return
+            _LOGGER.warning(
+                "The min SOC reads %s after it was taken down to %.0f%% - writing it again",
+                f"{current:.0f}%" if current is not None else "nothing usable",
+                released,
+            )
+            await self._write_released_floor(str(min_soc_entity), released)
 
     def _clear_ac_limit_not_held(self) -> None:
         """Give every window its own bounded rewrites."""

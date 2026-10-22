@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from custom_components.inverter_charge_night.const import CONF_RUNTIME_STATE
+from custom_components.inverter_charge_night.const import CONF_CHARGE_POWER_ENTITY, CONF_RUNTIME_STATE
 from custom_components.inverter_charge_night.coordinator import AC_LIMIT_MAX_REWRITES
 from tests.test_electrical_safety import (
     AC_LIMIT,
@@ -177,10 +177,11 @@ async def test_a_limit_the_inverter_does_not_hold_takes_the_floor_down(mock_hass
 
 
 @pytest.mark.asyncio
-async def test_a_battery_below_the_user_minimum_falls_back_to_the_original(mock_hass):
-    """5 % cannot be written within the user's 8 %; the original floor charges no further."""
+async def test_a_battery_below_the_user_minimum_falls_back_to_the_user_minimum(mock_hass):
+    """5 % cannot be written within the user's 8 %. Not the captured original
+    either: it can lie well above the battery (Codex on #41)."""
     coordinator = await _charging_night(mock_hass, battery="5")
-    coordinator.original_min_soc = 8.0
+    coordinator.original_min_soc = 50.0
 
     await coordinator._react_to_grid_import()
 
@@ -226,4 +227,62 @@ async def test_after_the_target_the_floor_comes_down_the_same_way(mock_hass):
 
     assert coordinator._floor_released_soc == 40
     assert _min_soc_writes(mock_hass) == [40]
+    await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_battery_falls_back_to_the_user_minimum(mock_hass):
+    coordinator = await _charging_night(mock_hass, battery="unavailable")
+    coordinator.original_min_soc = 50.0
+
+    await coordinator._react_to_grid_import()
+
+    assert _min_soc_writes(mock_hass) == [8.0]
+    await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_a_raised_floor_landing_after_the_release_is_put_right(mock_hass):
+    """Codex on #41: a poll holding the min SOC lock was writing 60 % when the
+    connection failed; its write lands after the release."""
+    coordinator = await _charging_night(mock_hass)
+    await coordinator._min_soc_write_lock.acquire()
+
+    await coordinator._react_to_grid_import()
+    assert _min_soc_writes(mock_hass) == [40]
+    mock_hass.states.async_set(MIN_SOC, "60")  # the poll's late write
+    coordinator._min_soc_write_lock.release()
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+    assert _min_soc_writes(mock_hass) == [40, 40]
+    assert mock_hass.states.get(MIN_SOC).state == "40"
+    await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_charge_limit_takes_the_floor_down(mock_hass):
+    """Codex on #41: no feedback while the connection needs throttling."""
+    coordinator = await _charging_night(mock_hass)
+    coordinator._grid_limited = True
+    mock_hass.states.async_set(AC_LIMIT, "unavailable", {"unit_of_measurement": "W"})
+
+    await coordinator._verify_ac_charge_limit()
+
+    assert coordinator._floor_released_soc == 40
+    assert _min_soc_writes(mock_hass) == [40]
+    await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_replacing_the_controls_clears_the_release(mock_hass):
+    """Codex on #41: the release is evidence about the old controls."""
+    coordinator = await _charging_night(mock_hass)
+    await coordinator._react_to_grid_import()
+    new_config = {**coordinator.config, CONF_CHARGE_POWER_ENTITY: "number.new_limit"}
+
+    await coordinator.async_release_changed_entities(new_config)
+
+    assert coordinator._floor_released_soc is None
+    assert coordinator.entry.options[CONF_RUNTIME_STATE]["floor_released_soc"] is None
     await coordinator._stop_periodic_verification()

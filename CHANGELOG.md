@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restart included; grid charging is not switched on again; the window end restores the original
   min SOC; the next window starts over. Logged as an error, and shown as
   `min_soc_released_for_connection` on the status sensor and in the diagnostics.
+- Review of #41 (Codex):
+  - An unreadable charge limit while the connection needs throttling counts as failed throttling.
+  - With the SOC unknown or below the user's minimum, the fallback is the user's minimum. It is
+    no longer the captured original, which can lie well above the battery.
+  - A poll that was already writing its raised floor when the release came is put right once it
+    is done.
+  - Replacing the min SOC or charge-limit control clears the release.
 
 ## [3.10.10] - 2026-10-22
 
