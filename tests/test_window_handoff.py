@@ -253,3 +253,31 @@ async def test_restart_while_reset_is_pending_keeps_floor_until_real_feedback(mo
     mock_hass.services.async_call.assert_awaited_with(
         "number", "set_value", {"entity_id": "number.min_soc", "value": original}, blocking=True
     )
+
+
+@pytest.mark.asyncio
+async def test_a_restore_waits_out_kore_s_refresh_cooldown(mock_hass):
+    """CI on #41: the floor was taken down to 20 % for the connection, and
+    100 ms later the window ended. KORE refreshes through a debouncer with a
+    10 s cooldown, so the restore's feedback arrived seconds later - and the
+    reset was reported as failed."""
+    coordinator = _make_coordinator(mock_hass)
+    coordinator.original_min_soc = 8
+    mock_hass.states.async_set("number.min_soc", "20")
+    mock_hass.services.async_call = AsyncMock()  # accepted, not yet published
+    sleeps = 0
+
+    async def cooldown(_seconds):
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 3:
+            mock_hass.states.async_set("number.min_soc", "8")
+
+    with patch(f"{COORDINATOR}.LIMIT_FEEDBACK_WAIT_S", 12), \
+            patch(f"{COORDINATOR}.asyncio.sleep", new=cooldown), \
+            patch(f"{COORDINATOR}.async_call_later"):
+        assert await coordinator._reset_settings()
+
+    assert sleeps == 3
+    assert coordinator.original_min_soc is None
+    assert not coordinator._pending_reset

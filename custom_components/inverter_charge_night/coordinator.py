@@ -5864,6 +5864,24 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             or feedback.last_reported != before_reported
                         )
                     if not fresh or restored_soc is None or abs(restored_soc - reset_min_soc) > 0.5:
+                        # KORE refreshes through a debouncer with a 10 s cooldown:
+                        # a min SOC written seconds earlier - the floor taken down
+                        # for the connection - holds this write's feedback back
+                        # until the cooldown ends (CI on #41)
+                        for _ in range(LIMIT_FEEDBACK_WAIT_S):
+                            if self._unloading:
+                                break
+                            await asyncio.sleep(1)
+                            feedback = self.hass.states.get(min_soc_entity)
+                            restored_soc = _as_float(feedback.state) if feedback is not None else None
+                            fresh = feedback is not None and (
+                                feedback is not state or feedback.state != before_value
+                                or feedback.last_reported != before_reported
+                            )
+                            if (fresh and restored_soc is not None
+                                    and abs(restored_soc - reset_min_soc) <= 0.5):
+                                break
+                    if not fresh or restored_soc is None or abs(restored_soc - reset_min_soc) > 0.5:
                         _LOGGER.error("Min SOC restore to %.1f%% has no matching feedback", reset_min_soc)
                         ok = False
                     else:

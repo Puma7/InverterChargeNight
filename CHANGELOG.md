@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A poll that was already writing its raised floor when the release came is put right once it
     is done.
   - Replacing the min SOC or charge-limit control clears the release.
+- **A min SOC restore waits out KostalKore's refresh cooldown.** KostalKore publishes a write
+  through a debouncer with a 10-second cooldown. When the floor had been taken down seconds
+  before the window ended, the restore to 8 % was published only after that cooldown, and the
+  reset counted as failed. CI `check_grid` caught it: island mode came 100 ms after the release.
+  When the feedback does not match yet, the restore now waits for it, as long as the charge-limit
+  confirmation does (12 s).
 
 ## [3.10.10] - 2026-10-22
 
