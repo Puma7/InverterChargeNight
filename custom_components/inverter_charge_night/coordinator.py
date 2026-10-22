@@ -7422,13 +7422,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # which can lie well above the battery (Codex on #41)
             user_min = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
             value = self._representable_min_soc(user_min, round_up=True) or user_min
+        state = self.hass.states.get(str(min_soc_entity))
+        current = _as_float(state.state) if state is not None else None
+        if current is not None and current < value:
+            # A floor already below the battery charges nothing: it is kept,
+            # never raised to the SOC by a later write (CodeRabbit on #41)
+            value = current
         self._floor_released_soc = value
         self._persist_state()
         # Whichever path got here: a grid charge switch that is on - a forced
         # charge on this inverter - goes off as well (CodeRabbit on #41)
         await self._pause_grid_charge("the house connection cannot be protected")
-        state = self.hass.states.get(str(min_soc_entity))
-        current = _as_float(state.state) if state is not None else None
         _LOGGER.error(
             "House connection limit: the inverter holds %s, not the %.0f W the connection needs "
             "(%s) - taking the min SOC down to %.0f%% for the rest of this window, so the "

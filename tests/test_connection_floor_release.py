@@ -298,3 +298,19 @@ def test_an_unusable_persisted_release_is_dropped(mock_hass, persisted):
     coordinator._restore_state()
 
     assert coordinator._floor_released_soc is None
+
+
+@pytest.mark.asyncio
+async def test_a_floor_already_below_the_battery_is_kept_not_raised(mock_hass):
+    """CodeRabbit on #41: 8 % under a 40.7 % battery charges nothing. The
+    release keeps 8 %; recording 40 % would let a later write raise it."""
+    coordinator = await _charging_night(mock_hass)
+    mock_hass.states.async_set(MIN_SOC, "8")
+
+    await coordinator._react_to_grid_import()
+    await coordinator._verify_and_restore_min_soc()
+
+    assert coordinator._floor_released_soc == 8
+    assert _min_soc_writes(mock_hass) == []
+    assert mock_hass.states.get(MIN_SOC).state == "8"
+    await coordinator._stop_periodic_verification()
