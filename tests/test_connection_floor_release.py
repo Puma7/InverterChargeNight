@@ -286,3 +286,13 @@ async def test_replacing_the_controls_clears_the_release(mock_hass):
     assert coordinator._floor_released_soc is None
     assert coordinator.entry.options[CONF_RUNTIME_STATE]["floor_released_soc"] is None
     await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.parametrize("persisted", [float("nan"), float("inf"), -5.0, 140.0, "40%", True])
+def test_an_unusable_persisted_release_is_dropped(mock_hass, persisted):
+    """CodeRabbit on #41: a non-finite or out-of-range value must not cap the floor."""
+    coordinator = _make(mock_hass, options={CONF_RUNTIME_STATE: {"floor_released_soc": persisted}})
+
+    coordinator._restore_state()
+
+    assert coordinator._floor_released_soc is None

@@ -841,12 +841,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if isinstance(rewrites, int) and not isinstance(rewrites, bool) and rewrites > 0:
             self._ac_limit_rewrites = rewrites
         self._ac_limit_not_held = state.get("ac_limit_not_held") is True
-        released = state.get("floor_released_soc")
-        self._floor_released_soc = (
-            float(released)
-            if isinstance(released, (int, float)) and not isinstance(released, bool)
-            else None
-        )
+        # Validated like every other persisted SOC (CodeRabbit on #41)
+        self._floor_released_soc = self._restore_soc(state, "floor_released_soc")
         window_raw = state.get("ac_limit_window")
         self._ac_limit_window = window_raw if isinstance(window_raw, str) else None
         self._grid_switch_suspended = state.get("grid_switch_suspended") is True
