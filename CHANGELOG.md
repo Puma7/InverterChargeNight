@@ -39,7 +39,8 @@ fix for the modelled day.
 - **Logo and icon redrawn** as clean vectors, with a variant for the dark theme and a logo with
   wordmark (`brand/`: `icon`, `dark_icon`, `logo`, `dark_logo`, each also `@2x`). Drawn by
   `scripts/docs_graphics/make_brand.py`.
-- The help text of *Operation Mode* links to the morning discharge page in the reader's language.
+- The help text of *Operation Mode* names the documentation page *Morning discharge* instead of
+  the old file path. Home Assistant does not allow URLs in translations (hassfest).
 - `quality_scale.yaml` points to the new pages and counts the documented actions
   (`docs-actions`: done).
 

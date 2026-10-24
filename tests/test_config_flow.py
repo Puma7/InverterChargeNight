@@ -588,6 +588,28 @@ def test_the_german_translation_covers_every_string():
     assert german == english
 
 
+def _strings(value):
+    """Every leaf string of a translation file."""
+    if isinstance(value, dict):
+        for child in value.values():
+            yield from _strings(child)
+    elif isinstance(value, str):
+        yield value
+
+
+@pytest.mark.parametrize("name", ["strings.json", "translations/de.json"])
+def test_no_translation_carries_a_url(name):
+    """hassfest refuses URLs in translations (description placeholders instead).
+
+    3.11.1 linked the morning discharge page from the operation mode help and
+    turned hassfest red; this keeps that rule in the fast checks.
+    """
+    import re
+
+    offending = [s[:60] for s in _strings(_load(name)) if re.search(r"https?://", s)]
+    assert offending == []
+
+
 def test_every_step_labels_exactly_its_fields():
     strings = _load("strings.json")
     for (section, step_id), schema_name in STEP_SCHEMAS.items():
