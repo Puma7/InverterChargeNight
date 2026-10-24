@@ -81,6 +81,8 @@ CONF_HOUSE_LOAD_ENTITY = "house_load_entity"  # cumulative kWh meter of the hous
 CONF_AVG_HOUSE_LOAD_KW = "avg_house_load_kw"  # fallback without a meter: average load in kW
 CONF_PV_CROSSOVER_DELAY_MIN = "pv_crossover_delay_min"  # minutes after sunrise until PV > load
 CONF_BRIDGE_RESERVE_KWH = "bridge_reserve_kwh"  # safety reserve added to the bridge energy
+# Plan 015 stage A: carried above the lower bound, capped at the upper one
+CONF_SAFETY_BUFFER_KWH = "safety_buffer_kwh"
 CONF_CHARGE_EFFICIENCY = "charge_efficiency"  # 0.80-1.0, default 0.90
 # The other direction. Energy leaving the battery passes through the inverter
 # too, so the battery has to hold more than the house will draw - which is what
@@ -94,6 +96,43 @@ DEFAULT_PLANNER_MODE = PLANNER_MODE_HEADROOM
 DEFAULT_AVG_HOUSE_LOAD_KW = 0.5
 DEFAULT_PV_CROSSOVER_DELAY_MIN = 90
 DEFAULT_BRIDGE_RESERVE_KWH = 0.5
+DEFAULT_SAFETY_BUFFER_KWH = 0.0
+# Plan 015 stage C: which hourly load the night target is bought for. The mean
+# was the only answer until 3.11; an evening above it is exactly the one the
+# battery runs short in.
+CONF_LOAD_SAFETY_LEVEL = "load_safety_level"
+LOAD_SAFETY_MEAN = "mean"
+LOAD_SAFETY_P75 = "p75"
+LOAD_SAFETY_P90 = "p90"
+LOAD_SAFETY_LEVELS = (LOAD_SAFETY_MEAN, LOAD_SAFETY_P75, LOAD_SAFETY_P90)
+LOAD_SAFETY_QUANTILES = {LOAD_SAFETY_P75: 0.75, LOAD_SAFETY_P90: 0.90}
+DEFAULT_LOAD_SAFETY_LEVEL = LOAD_SAFETY_MEAN
+# Fewer days than this in an hour of the day and its quantile is noise: the
+# mean is used for that hour instead
+LOAD_QUANTILE_MIN_SAMPLES = 7
+# Plan 015 stage D: a colder day than the fortnight the profile is from draws
+# more where a heat pump runs. All optional; without a weather entity nothing
+# changes.
+CONF_WEATHER_ENTITY = "weather_entity"
+CONF_OUTDOOR_TEMPERATURE_ENTITY = "outdoor_temperature_entity"
+CONF_HEATING_LIMIT_C = "heating_limit_c"
+DEFAULT_HEATING_LIMIT_C = 15.0
+WEATHER_FORECAST_CACHE_S = 1800  # 30 minutes
+# A weather integration that hangs must not hold up the poll that steers the
+# inverter (CodeRabbit on #42)
+WEATHER_SERVICE_TIMEOUT_S = 10
+OUTDOOR_TEMPERATURE_CACHE_S = 3600
+# Plan 015 stage B: the bridge as a balance of load and the forecast PV curve
+# instead of "load until sunrise + a fixed delay". Opt-in: it changes targets.
+CONF_BRIDGE_MODEL = "bridge_model"
+BRIDGE_MODEL_FIXED_DELAY = "fixed_delay"
+BRIDGE_MODEL_MODELLED = "modelled"
+BRIDGE_MODELS = (BRIDGE_MODEL_FIXED_DELAY, BRIDGE_MODEL_MODELLED)
+DEFAULT_BRIDGE_MODEL = BRIDGE_MODEL_FIXED_DELAY
+# The PV curve learned from the daily PV meter: days below this yield say
+# nothing about the shape, and fewer days than this are not a shape yet
+PV_SHAPE_MIN_DAY_KWH = 1.0
+PV_SHAPE_MIN_DAYS = 5
 DEFAULT_CHARGE_EFFICIENCY = 0.90
 DEFAULT_DISCHARGE_EFFICIENCY = 0.95
 HOUSE_LOAD_PROFILE_DAYS = 14  # history used to learn the hourly load profile

@@ -130,7 +130,13 @@
           "curtailment_limit_w": "Einspeisegrenze",
           "curtailment_feed_in_entity": "Einspeiseleistung",
           "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
-          "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag"
+          "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag",
+          "safety_buffer_kwh": "Sicherheitspuffer",
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
+          "weather_entity": "Wettervorhersage-Entität",
+          "outdoor_temperature_entity": "Außentemperatur-Sensor",
+          "heating_limit_c": "Heizgrenztemperatur",
+          "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -156,7 +162,13 @@
           "curtailment_limit_w": "Optional: was deine Anlage höchstens ins Netz geben darf, in Watt — die 60-%- oder 70-%-Begrenzung am Netzverknüpfungspunkt. Trag die Grenze selbst ein, nicht den Prozentsatz: 0,60 × Anlagenleistung in Watt, bei 15 kWp und 60 % also 9000. Leer lassen, wenn du nicht begrenzt bist. Gedrosselt wird davon nichts; es zeigt nur, wie viel Mittagssonne die Grenze wegwirft, weil der Speicher schon voll war.",
           "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch.",
           "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
-          "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt."
+          "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt.",
+          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
+          "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
+          "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       },
       "reconfigure": {
@@ -288,7 +300,13 @@
           "curtailment_limit_w": "Einspeisegrenze",
           "curtailment_feed_in_entity": "Einspeiseleistung",
           "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
-          "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag"
+          "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag",
+          "safety_buffer_kwh": "Sicherheitspuffer",
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
+          "weather_entity": "Wettervorhersage-Entität",
+          "outdoor_temperature_entity": "Außentemperatur-Sensor",
+          "heating_limit_c": "Heizgrenztemperatur",
+          "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -314,7 +332,13 @@
           "curtailment_limit_w": "Optional: was deine Anlage höchstens ins Netz geben darf, in Watt — die 60-%- oder 70-%-Begrenzung am Netzverknüpfungspunkt. Trag die Grenze selbst ein, nicht den Prozentsatz: 0,60 × Anlagenleistung in Watt, bei 15 kWp und 60 % also 9000. Leer lassen, wenn du nicht begrenzt bist. Gedrosselt wird davon nichts; es zeigt nur, wie viel Mittagssonne die Grenze wegwirft, weil der Speicher schon voll war.",
           "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch.",
           "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
-          "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt."
+          "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt.",
+          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
+          "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
+          "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       },
       "review": {
@@ -574,7 +598,7 @@
       },
       "setup": {
         "title": "Einrichtung",
-        "description": "**ICN 3.10 · Einrichtungsübersicht**\n\nFür den Start nur **1. Wechselrichter und Batterie** und **2. Ladezeiten** ausfüllen. Danach prüfen und übernehmen. Grundangaben vorhanden: **{core_count}/6**.\n\nJede bestätigte Seite wird als Entwurf gespeichert und führt hierher zurück. Öffne einen Bereich erneut, um zurückzugehen und etwas zu ändern. „Entwurf speichern und schließen“ unterbricht die Einrichtung; später über dieselbe Einrichtung fortsetzen. Entwürfe bleiben 30 Tage erhalten. Noch nicht abgesendete Eingaben werden nicht gespeichert. Erst „Einstellungen jetzt übernehmen“ verändert die laufende Konfiguration.\n\nHome-Assistant-Zeitzone: **{timezone}**.",
+        "description": "**ICN 3.11 · Einrichtungsübersicht**\n\nFür den Start nur **1. Wechselrichter und Batterie** und **2. Ladezeiten** ausfüllen. Danach prüfen und übernehmen. Grundangaben vorhanden: **{core_count}/6**.\n\nJede bestätigte Seite wird als Entwurf gespeichert und führt hierher zurück. Öffne einen Bereich erneut, um zurückzugehen und etwas zu ändern. „Entwurf speichern und schließen“ unterbricht die Einrichtung; später über dieselbe Einrichtung fortsetzen. Entwürfe bleiben 30 Tage erhalten. Noch nicht abgesendete Eingaben werden nicht gespeichert. Erst „Einstellungen jetzt übernehmen“ verändert die laufende Konfiguration.\n\nHome-Assistant-Zeitzone: **{timezone}**.",
         "menu_options": {
           "basics": "1 · Wechselrichter und Batterie",
           "schedule": "2 · Ladezeiten und Ladezustand",
@@ -604,9 +628,9 @@
           "evening": "Reserve für die teuren Abendstunden",
           "season": "Aktive Jahreszeit",
           "pv_shortfall": "Sehr geringen PV-Ertrag berücksichtigen",
-          "pv_shortfall_off": "PV-Ertragsausfall-Erkennung ausschalten",
           "prices": "Strompreise berücksichtigen",
-          "setup": "Zurück zur Übersicht"
+          "setup": "Zurück zur Übersicht",
+          "reserve": "Sicherheitspuffer, Sicherheitsniveau und Wetter"
         }
       },
       "advanced_features": {
@@ -673,6 +697,26 @@
       "charging_off": {
         "title": "Ladeleistungssteller entfernen",
         "description": "Zuerst Effizienzsuche und Hausanschluss-Begrenzung ausschalten. Ohne Watt-Steller können diese Funktionen nicht regeln. Mit „Weiter“ zurück zur Funktionsauswahl gehen. Die aktive Konfiguration bleibt bis zum abschließenden Übernehmen unverändert."
+      },
+      "reserve": {
+        "title": "Sicherheitspuffer, Sicherheitsniveau und Wetter",
+        "description": "Wie viel das Nachtziel über den geplanten Bedarf hinaus mitträgt, wie vorsichtig es den Hausverbrauch plant und ob das Wetter von morgen es verändert. Der Puffer nutzt nur Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen.",
+        "data": {
+          "safety_buffer_kwh": "Sicherheitspuffer",
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
+          "weather_entity": "Wettervorhersage-Entität",
+          "outdoor_temperature_entity": "Außentemperatur-Sensor",
+          "heating_limit_c": "Heizgrenztemperatur",
+          "bridge_model": "Wie Morgen und Tag überbrückt werden"
+        },
+        "data_description": {
+          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
+          "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
+          "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
+        }
       }
     },
     "error": {
@@ -843,7 +887,13 @@
           "curtailment_limit_w": "Einspeisegrenze",
           "curtailment_feed_in_entity": "Einspeiseleistung",
           "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
-          "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag"
+          "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag",
+          "safety_buffer_kwh": "Sicherheitspuffer",
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
+          "weather_entity": "Wettervorhersage-Entität",
+          "outdoor_temperature_entity": "Außentemperatur-Sensor",
+          "heating_limit_c": "Heizgrenztemperatur",
+          "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -869,7 +919,13 @@
           "curtailment_limit_w": "Optional: was deine Anlage höchstens ins Netz geben darf, in Watt — die 60-%- oder 70-%-Begrenzung am Netzverknüpfungspunkt. Trag die Grenze selbst ein, nicht den Prozentsatz: 0,60 × Anlagenleistung in Watt, bei 15 kWp und 60 % also 9000. Leer lassen, wenn du nicht begrenzt bist. Gedrosselt wird davon nichts; es zeigt nur, wie viel Mittagssonne die Grenze wegwirft, weil der Speicher schon voll war.",
           "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch.",
           "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
-          "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt."
+          "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt.",
+          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
+          "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
+          "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       },
       "review": {
@@ -1125,7 +1181,7 @@
       },
       "setup": {
         "title": "Einrichtung",
-        "description": "**ICN 3.10 · Einrichtungsübersicht**\n\nFür den Start nur **1. Wechselrichter und Batterie** und **2. Ladezeiten** ausfüllen. Danach prüfen und übernehmen. Grundangaben vorhanden: **{core_count}/6**.\n\nJede bestätigte Seite wird als Entwurf gespeichert und führt hierher zurück. Öffne einen Bereich erneut, um zurückzugehen und etwas zu ändern. „Entwurf speichern und schließen“ unterbricht die Einrichtung; später über dieselbe Einrichtung fortsetzen. Entwürfe bleiben 30 Tage erhalten. Noch nicht abgesendete Eingaben werden nicht gespeichert. Erst „Einstellungen jetzt übernehmen“ verändert die laufende Konfiguration.\n\nHome-Assistant-Zeitzone: **{timezone}**.",
+        "description": "**ICN 3.11 · Einrichtungsübersicht**\n\nFür den Start nur **1. Wechselrichter und Batterie** und **2. Ladezeiten** ausfüllen. Danach prüfen und übernehmen. Grundangaben vorhanden: **{core_count}/6**.\n\nJede bestätigte Seite wird als Entwurf gespeichert und führt hierher zurück. Öffne einen Bereich erneut, um zurückzugehen und etwas zu ändern. „Entwurf speichern und schließen“ unterbricht die Einrichtung; später über dieselbe Einrichtung fortsetzen. Entwürfe bleiben 30 Tage erhalten. Noch nicht abgesendete Eingaben werden nicht gespeichert. Erst „Einstellungen jetzt übernehmen“ verändert die laufende Konfiguration.\n\nHome-Assistant-Zeitzone: **{timezone}**.",
         "menu_options": {
           "basics": "1 · Wechselrichter und Batterie",
           "schedule": "2 · Ladezeiten und Ladezustand",
@@ -1155,9 +1211,9 @@
           "evening": "Reserve für die teuren Abendstunden",
           "season": "Aktive Jahreszeit",
           "pv_shortfall": "Sehr geringen PV-Ertrag berücksichtigen",
-          "pv_shortfall_off": "PV-Ertragsausfall-Erkennung ausschalten",
           "prices": "Strompreise berücksichtigen",
-          "setup": "Zurück zur Übersicht"
+          "setup": "Zurück zur Übersicht",
+          "reserve": "Sicherheitspuffer, Sicherheitsniveau und Wetter"
         }
       },
       "advanced_features": {
@@ -1224,6 +1280,26 @@
       "charging_off": {
         "title": "Ladeleistungssteller entfernen",
         "description": "Zuerst Effizienzsuche und Hausanschluss-Begrenzung ausschalten. Ohne Watt-Steller können diese Funktionen nicht regeln. Mit „Weiter“ zurück zur Funktionsauswahl gehen. Die aktive Konfiguration bleibt bis zum abschließenden Übernehmen unverändert."
+      },
+      "reserve": {
+        "title": "Sicherheitspuffer, Sicherheitsniveau und Wetter",
+        "description": "Wie viel das Nachtziel über den geplanten Bedarf hinaus mitträgt, wie vorsichtig es den Hausverbrauch plant und ob das Wetter von morgen es verändert. Der Puffer nutzt nur Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen.",
+        "data": {
+          "safety_buffer_kwh": "Sicherheitspuffer",
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
+          "weather_entity": "Wettervorhersage-Entität",
+          "outdoor_temperature_entity": "Außentemperatur-Sensor",
+          "heating_limit_c": "Heizgrenztemperatur",
+          "bridge_model": "Wie Morgen und Tag überbrückt werden"
+        },
+        "data_description": {
+          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
+          "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
+          "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
+        }
       }
     },
     "error": {
@@ -1285,6 +1361,19 @@
         "ct_per_kwh": "Cent pro kWh",
         "eur_per_kwh": "Euro pro kWh",
         "eur_per_mwh": "Euro pro MWh"
+      }
+    },
+    "load_safety_level": {
+      "options": {
+        "mean": "Durchschnitt (wie bisher)",
+        "p75": "Sicher (75. Perzentil)",
+        "p90": "Sehr sicher (90. Perzentil)"
+      }
+    },
+    "bridge_model": {
+      "options": {
+        "fixed_delay": "Feste Verzögerung nach Sonnenaufgang (wie bisher)",
+        "modelled": "Modelliert aus Prognose und Verbrauch"
       }
     }
   },

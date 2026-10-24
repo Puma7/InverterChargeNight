@@ -29,9 +29,11 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from .const import (
+    BRIDGE_MODEL_FIXED_DELAY,
+    BRIDGE_MODEL_MODELLED,
     CURTAILMENT_INTEGRATION_STEP_MIN,
     DEFAULT_GRID_CONTINUOUS_PCT,
     DEFAULT_GRID_VOLTAGE_V,
@@ -45,6 +47,8 @@ REASON_HEADROOM = "headroom"
 REASON_CONFLICT_BRIDGE_WINS = "conflict_bridge_wins"
 REASON_CONFLICT_HEADROOM_WINS = "conflict_headroom_wins"
 REASON_FALLBACK = "fallback"
+
+BALANCE_STEP_S = 300  # plan 015 stage B: the balance's time step
 
 
 @dataclass(frozen=True)
@@ -82,6 +86,24 @@ class PlanInput:
     # was configured for.
     window_price_ct: float | None = None
     evening_price_ct: float | None = None
+    # Plan 015 stage A: carried on top of the lower bound, but only into room
+    # the upper bound leaves - a buffer must never make the sun spill. Bought
+    # once and carried: each night plans from the battery as it finds it.
+    safety_buffer_kwh: float = 0.0
+    # Plan 015 stage C: ``house_load_kw_profile`` is what the night target is
+    # bought for, and may be set above the mean. The room kept free for the sun
+    # must not be: a high load estimate there means less room, and the battery
+    # spills. This is the mean the room is reckoned with; None means the same
+    # profile as the need, which is what a caller that predates it gets.
+    room_load_kw_profile: Sequence[float] | None = None
+    # Plan 015 stage B. With ``modelled``, a sunrise and a forecast, the bridge
+    # is no longer "load until sunrise + delay" but a balance, every five
+    # minutes from the window end, of the load against tomorrow's PV curve -
+    # the clear-sky bell, or ``pv_hourly_shape`` (24 fractions of the day's
+    # yield, learned from the PV meter) where there is one.
+    bridge_model: str = BRIDGE_MODEL_FIXED_DELAY
+    sunrise: datetime | None = None
+    pv_hourly_shape: Sequence[float] | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +130,13 @@ class PlanResult:
     # True when prices said the evening is cheap enough that holding energy
     # back for it costs more than buying it then.
     evening_reserve_dropped: bool = False
+    # The safety buffer the target carries above the lower bound, in SOC
+    # points, and whether the upper bound cut it short.
+    buffer_soc: float = 0.0
+    buffer_capped: bool = False
+    # Plan 015 stage B: when the forecast PV first carries the planned load,
+    # or None where the fixed delay decided it
+    pv_crossover: datetime | None = None
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -165,6 +194,51 @@ def evening_reserve_kwh(p: PlanInput) -> float:
     return load_kwh * (1 + max(0.0, p.reserve_margin_pct) / 100.0)
 
 
+def _room_profile(p: PlanInput) -> Sequence[float]:
+    """The load the room for tomorrow's sun is reckoned with (plan 015 stage C)."""
+    return p.room_load_kw_profile if p.room_load_kw_profile is not None else p.house_load_kw_profile
+
+
+def quantile(values: Sequence[float], q: float) -> float:
+    """The ``q`` quantile of ``values``, interpolated between neighbours.
+
+    The same rule as numpy's default: position ``q * (n - 1)`` in the sorted
+    values. Raises ValueError for an empty sequence.
+    """
+    if not values:
+        raise ValueError("No values for a quantile")
+    ordered = sorted(values)
+    position = _clamp(q, 0.0, 1.0) * (len(ordered) - 1)
+    low = math.floor(position)
+    high = min(low + 1, len(ordered) - 1)
+    return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
+
+
+def need_profile(
+    samples: Sequence[Sequence[float]],
+    mean_profile: Sequence[float],
+    q: float | None,
+    min_samples: int,
+) -> list[float]:
+    """The hourly load the night target is bought for (plan 015 stage C).
+
+    ``q`` None is the mean. Otherwise each hour of the day takes the ``q``
+    quantile of its days, but never less than the mean - an hour whose days
+    are skewed low must not buy less than before - and an hour with fewer
+    than ``min_samples`` days keeps the mean.
+
+    Summed over the hours, per-hour quantiles lie above the quantile of the
+    daily total. For a safety level that is the point, not a flaw.
+    """
+    result = [float(value) for value in mean_profile]
+    if q is None:
+        return result
+    for hour, values in enumerate(samples[: len(result)]):
+        if len(values) >= min_samples:
+            result[hour] = max(result[hour], quantile(values, q))
+    return result
+
+
 def surplus_kwh(p: PlanInput, *, cautious: bool = False) -> float:
     """Tomorrow's forecast (with margin) minus the load it has to cover first.
 
@@ -177,7 +251,11 @@ def surplus_kwh(p: PlanInput, *, cautious: bool = False) -> float:
     21 October 2026 the evening was credited the larger forecast too - 12.0
     instead of 10.9 kWh - and the night bought too little for it.
     """
-    daytime_load_kwh = integrate_load(p.house_load_kw_profile, p.pv_crossover, p.sunset)
+    # Both directions are the safe one: the room kept free for the sun takes
+    # the mean load (less self-use, more room), the evening the higher need
+    # (less surplus credited to it).
+    profile = p.house_load_kw_profile if cautious else _room_profile(p)
+    daytime_load_kwh = integrate_load(profile, p.pv_crossover, p.sunset)
     margin = max(0.0, p.error_margin_pct) / 100.0
     factor = max(0.0, 1 - margin) if cautious else 1 + margin
     forecast_with_margin = max(0.0, p.forecast_kwh_next_day) * factor
@@ -234,6 +312,128 @@ def evening_reserve_soc(p: PlanInput) -> float:
     )
 
 
+@dataclass(frozen=True)
+class DayBalance:
+    """The modelled day behind a plan (plan 015 stage B); battery-side kWh."""
+
+    required_kwh: float     # the lowest the balance falls: what the battery must hold
+    bridge_kwh: float       # of that, what is drawn before the PV first carries the load
+    crossover: datetime     # when it first does, or the evening start if it never does
+    rise_kwh: float         # the highest the room balance climbs: what the sun puts in
+    surplus_kwh: float      # house side: what the PV gives beyond the room load
+
+
+def _pv_kw(
+    p: PlanInput, sunrise: datetime, when: datetime, local: datetime, solar_day: date,
+    daily_kwh: float,
+) -> float:
+    shape = p.pv_hourly_shape
+    if shape is not None:
+        # A fraction of the day's yield in that clock hour is its mean power in
+        # kW - on the forecast's own day only: an evening period that runs past
+        # midnight must not be credited the next morning's sun (Codex on #42)
+        if local.date() != solar_day:
+            return 0.0
+        return max(0.0, daily_kwh) * float(shape[local.hour])
+    return pv_power_kw_at(sunrise, p.sunset, when, daily_kwh)
+
+
+def _evening(p: PlanInput) -> tuple[datetime, datetime] | None:
+    """The high-price period the night buys for, or None when it does not."""
+    if p.high_price_window is None:
+        return None
+    if not evening_reserve_pays(
+        p.window_price_ct, p.evening_price_ct, p.charge_efficiency, RESERVE_DROP_MARGIN_CT
+    ):
+        return None
+    return p.high_price_window
+
+
+def day_balance(p: PlanInput) -> DayBalance | None:
+    """Run the planned day in five-minute steps (plan 015 stage B).
+
+    The need side - the higher load, the cautious forecast (less sun) - says
+    how low the battery falls between the window end and the end of the
+    high-price period: that is what it has to hold. The room side - the mean
+    load, the generous forecast (more sun) - says how high the sun lifts it
+    before sunset: that is what has to stay free. Both are the safe direction
+    for what they decide.
+
+    Energy out of the battery is grossed up by the discharge efficiency;
+    PV into it is credited one to one, as the surplus always has been (a
+    DC-coupled battery sees the panels before the AC conversion).
+
+    None where the model cannot run: no sunrise, no forecast, a profile of the
+    wrong length, or a day that ends before the window does.
+    """
+    if (p.bridge_model != BRIDGE_MODEL_MODELLED or p.sunrise is None
+            or not p.forecast_available):
+        return None
+    if len(p.house_load_kw_profile) != 24 or len(_room_profile(p)) != 24:
+        return None
+    if p.pv_hourly_shape is not None and len(p.pv_hourly_shape) != 24:
+        return None
+    evening = _evening(p)
+    end = evening[1] if evening is not None else p.sunset
+    cutoff = evening[0] if evening is not None and evening[0] < p.sunset else p.sunset
+    if end <= p.window_end:
+        return None
+    margin = max(0.0, p.error_margin_pct) / 100.0
+    forecast = max(0.0, p.forecast_kwh_next_day)
+    low_kwh, high_kwh = forecast * max(0.0, 1 - margin), forecast * (1 + margin)
+    evening_factor = 1 + max(0.0, p.reserve_margin_pct) / 100.0
+    efficiency = min(1.0, max(0.01, p.discharge_efficiency))
+    room = _room_profile(p)
+    zone = p.window_end.tzinfo
+    step = timedelta(seconds=BALANCE_STEP_S)
+    need_level = room_level = 0.0
+    lowest = highest = 0.0
+    surplus = 0.0
+    crossover: datetime | None = None
+    bridge = 0.0
+    cursor = p.window_end.astimezone(UTC) if zone is not None else p.window_end
+    finish = end.astimezone(UTC) if zone is not None else end
+    sunrise = p.sunrise.astimezone(UTC) if zone is not None else p.sunrise
+    solar_day = (p.sunrise.astimezone(zone) if zone is not None else p.sunrise).date()
+    # The room side runs to sunset whatever the period: PV after a period that
+    # ends early still has to fit (Codex on #42)
+    sunset = p.sunset.astimezone(UTC) if zone is not None else p.sunset
+    last = max(finish, sunset)
+    while cursor < last:
+        # Steps end on the clock's five-minute marks, so every step lies in one
+        # hour of the profile and the evening starts on a step boundary
+        into_step = (cursor.minute * 60 + cursor.second + cursor.microsecond / 1e6) % BALANCE_STEP_S
+        bound = finish if cursor < finish else last
+        span = min(step - timedelta(seconds=into_step), bound - cursor)
+        hours = span.total_seconds() / 3600.0
+        middle = cursor + span / 2
+        local = middle.astimezone(zone) if zone is not None else middle
+        if cursor < finish:
+            in_evening = evening is not None and evening[0] <= local < evening[1]
+            need = float(p.house_load_kw_profile[local.hour]) * (
+                evening_factor if in_evening else 1.0
+            )
+            pv_low = _pv_kw(p, sunrise, middle, local, solar_day, low_kwh)
+            net = (pv_low - need) * hours
+            need_level += net if net >= 0 else net / efficiency
+            lowest = min(lowest, need_level)
+            if crossover is None and middle >= sunrise and pv_low >= need > 0:
+                start = cursor.astimezone(zone) if zone is not None else cursor
+                crossover = start
+                bridge = -lowest
+        pv_high = _pv_kw(p, sunrise, middle, local, solar_day, high_kwh)
+        excess = (pv_high - float(room[local.hour])) * hours
+        surplus += max(0.0, excess)
+        room_level += excess if excess >= 0 else excess / efficiency
+        highest = max(highest, room_level)
+        cursor += span
+    required = -lowest
+    if crossover is None:
+        crossover = cutoff
+        bridge = required
+    return DayBalance(required, bridge, crossover, highest, surplus)
+
+
 def plan_target_soc(p: PlanInput) -> PlanResult:
     """Derive the target SOC from the bridge and surplus bounds.
 
@@ -275,17 +475,48 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
         p.user_min_soc,
         p.user_max_soc,
     )
+    # The bridge as the room sees it: the mean morning, so that a high need
+    # estimate cannot pretend the battery will be emptier when the sun comes
+    room_bridge_kwh = _from_battery_kwh(
+        integrate_load(_room_profile(p), p.window_end, p.pv_crossover),
+        p.discharge_efficiency,
+    ) + max(0.0, float(p.reserve_kwh))
     upper = _clamp(
-        (1.0 - max(0.0, surplus - bridge_kwh) / capacity) * 100.0,
+        (1.0 - max(0.0, surplus - room_bridge_kwh) / capacity) * 100.0,
         p.user_min_soc,
         p.user_max_soc,
     )
 
+    modelled_crossover: datetime | None = None
+    balance = day_balance(p)
+    if balance is not None:
+        # Plan 015 stage B: the balance replaces both bounds. The reserve is
+        # held on top of what the day draws, and is no room for the sun.
+        reserve = max(0.0, float(p.reserve_kwh))
+        bridge_kwh = balance.bridge_kwh + reserve
+        evening_shortfall = max(0.0, balance.required_kwh - balance.bridge_kwh)
+        surplus = balance.surplus_kwh
+        lower = _clamp(
+            (balance.required_kwh + reserve + capacity * p.user_min_soc / 100.0)
+            / capacity * 100.0,
+            p.user_min_soc,
+            p.user_max_soc,
+        )
+        upper = _clamp(
+            (1.0 - balance.rise_kwh / capacity) * 100.0, p.user_min_soc, p.user_max_soc
+        )
+        modelled_crossover = balance.crossover
+
+    buffer_soc = max(0.0, float(p.safety_buffer_kwh)) / capacity * 100.0
+
     if not p.forecast_available:
         # Same protection as the headroom formula: never charge to the maximum
-        # on a missing forecast, use the safe fallback instead.
+        # on a missing forecast, use the safe fallback instead. Without a
+        # forecast there is no upper bound to cap the buffer at, so it simply
+        # rides on the lower bound; the fallback already assumes a dull day.
+        buffered = lower + buffer_soc
         target = _clamp(
-            max(DEFAULT_SAFE_FALLBACK_SOC, lower), p.user_min_soc, p.user_max_soc
+            max(DEFAULT_SAFE_FALLBACK_SOC, buffered), p.user_min_soc, p.user_max_soc
         )
         return PlanResult(
             round(target, 1),
@@ -297,10 +528,21 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
             evening_kwh,
             evening_shortfall,
             evening_dropped,
+            # The lift to the safe fallback is no buffer anybody configured
+            # (CodeRabbit on #42)
+            round(min(buffer_soc, max(0.0, target - lower)), 1),
+            target < buffered,
+            modelled_crossover,
         )
 
+    applied_buffer = 0.0
+    buffer_capped = False
     if lower <= upper:
-        target, reason = lower, REASON_BRIDGE
+        # The buffer fills room the sun will not need, and no more: capped at
+        # the upper bound, it can never make the battery spill PV tomorrow.
+        target, reason = min(lower + buffer_soc, upper), REASON_BRIDGE
+        applied_buffer = target - lower
+        buffer_capped = buffer_soc > 0 and lower + buffer_soc > upper
     elif p.prices_ct is None:
         target, reason = lower, REASON_CONFLICT_BRIDGE_WINS
     else:
@@ -317,9 +559,12 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
         else:
             target, reason = upper, REASON_CONFLICT_HEADROOM_WINS
 
-    target = _clamp(target, p.user_min_soc, p.user_max_soc)
+    clamped = _clamp(target, p.user_min_soc, p.user_max_soc)
+    if clamped < target:
+        buffer_capped = buffer_capped or applied_buffer > 0
+        applied_buffer = max(0.0, applied_buffer - (target - clamped))
     return PlanResult(
-        round(target, 1),
+        round(clamped, 1),
         bridge_kwh,
         surplus,
         round(lower, 1),
@@ -328,6 +573,9 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
         evening_kwh,
         evening_shortfall,
         evening_dropped,
+        round(applied_buffer, 1),
+        buffer_capped,
+        modelled_crossover,
     )
 
 

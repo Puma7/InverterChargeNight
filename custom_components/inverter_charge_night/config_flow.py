@@ -43,6 +43,12 @@ from .const import (
     CONF_BATTERY_CAPACITY,
     CONF_BATTERY_SOC_ENTITY,
     CONF_BRIDGE_RESERVE_KWH,
+    CONF_SAFETY_BUFFER_KWH,
+    CONF_LOAD_SAFETY_LEVEL,
+    CONF_WEATHER_ENTITY,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_HEATING_LIMIT_C,
+    CONF_BRIDGE_MODEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
@@ -87,6 +93,12 @@ from .const import (
     DEFAULT_ACTIVE_RANGE_YEARLY,
     DEFAULT_AVG_HOUSE_LOAD_KW,
     DEFAULT_BRIDGE_RESERVE_KWH,
+    DEFAULT_SAFETY_BUFFER_KWH,
+    DEFAULT_LOAD_SAFETY_LEVEL,
+    LOAD_SAFETY_LEVELS,
+    DEFAULT_HEATING_LIMIT_C,
+    DEFAULT_BRIDGE_MODEL,
+    BRIDGE_MODELS,
     DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_COMMAND_DELAY,
@@ -199,6 +211,12 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_AVG_HOUSE_LOAD_KW,
     CONF_PV_CROSSOVER_DELAY_MIN,
     CONF_BRIDGE_RESERVE_KWH,
+    CONF_SAFETY_BUFFER_KWH,
+    CONF_LOAD_SAFETY_LEVEL,
+    CONF_WEATHER_ENTITY,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_HEATING_LIMIT_C,
+    CONF_BRIDGE_MODEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
     CONF_NIGHT_PRICE_CT,
@@ -292,6 +310,8 @@ _ENTITY_KEYS_TO_VALIDATE = [
     CONF_GRID_IMPORT_ENTITY,
     CONF_DISCHARGE_BLOCK_SWITCH,
     CONF_CURTAILMENT_FEED_IN_ENTITY,
+    CONF_WEATHER_ENTITY,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
 ]
 
 
@@ -620,6 +640,30 @@ def _mode_selector() -> Any:
     )
 
 
+def _bridge_model_selector() -> Any:
+    return cast(
+        Any,
+        selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=list(BRIDGE_MODELS),
+                translation_key="bridge_model",
+            )
+        ),
+    )
+
+
+def _load_safety_level_selector() -> Any:
+    return cast(
+        Any,
+        selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=list(LOAD_SAFETY_LEVELS),
+                translation_key="load_safety_level",
+            )
+        ),
+    )
+
+
 def _planner_mode_selector() -> Any:
     return cast(
         Any,
@@ -819,6 +863,24 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
                 CONF_BRIDGE_RESERVE_KWH, defaults, DEFAULT_BRIDGE_RESERVE_KWH
             ): _number_selector(0, 50, 0.1, "kWh"),
             _required(
+                CONF_SAFETY_BUFFER_KWH, defaults, DEFAULT_SAFETY_BUFFER_KWH
+            ): _number_selector(0, 50, 0.5, "kWh"),
+            _required(
+                CONF_LOAD_SAFETY_LEVEL, defaults, DEFAULT_LOAD_SAFETY_LEVEL
+            ): _load_safety_level_selector(),
+            _optional(
+                CONF_WEATHER_ENTITY, defaults.get(CONF_WEATHER_ENTITY)
+            ): _entity_selector("weather"),
+            _optional(
+                CONF_OUTDOOR_TEMPERATURE_ENTITY, defaults.get(CONF_OUTDOOR_TEMPERATURE_ENTITY)
+            ): _entity_selector("sensor", "temperature"),
+            _required(
+                CONF_HEATING_LIMIT_C, defaults, DEFAULT_HEATING_LIMIT_C
+            ): _number_selector(5, 25, 0.5, "°C"),
+            _required(
+                CONF_BRIDGE_MODEL, defaults, DEFAULT_BRIDGE_MODEL
+            ): _bridge_model_selector(),
+            _required(
                 CONF_CHARGE_EFFICIENCY, defaults, DEFAULT_CHARGE_EFFICIENCY
             ): _number_selector(0.5, 1.0, 0.01),
             _required(
@@ -927,6 +989,9 @@ _GUIDED_GROUPS: dict[str, tuple[str, ...]] = {
     "planning": (CONF_PLANNER_MODE, CONF_FORECAST_ERROR_MARGIN, CONF_DEFAULT_MIN_SOC,
                  CONF_PV_FORECAST_TODAY_ENTITY, CONF_HOUSE_LOAD_ENTITY,
                  CONF_AVG_HOUSE_LOAD_KW, CONF_PV_CROSSOVER_DELAY_MIN, CONF_BRIDGE_RESERVE_KWH),
+    # Plan 015: how much the night target carries beyond the bare need
+    "reserve": (CONF_SAFETY_BUFFER_KWH, CONF_LOAD_SAFETY_LEVEL, CONF_BRIDGE_MODEL,
+                CONF_WEATHER_ENTITY, CONF_OUTDOOR_TEMPERATURE_ENTITY, CONF_HEATING_LIMIT_C),
     "evening": (CONF_HIGH_PRICE_START, CONF_HIGH_PRICE_END, CONF_HIGH_PRICE_MARGIN_PCT,
                 CONF_DISCHARGE_BLOCK_MODE, CONF_DISCHARGE_BLOCK_SWITCH),
     "season": (CONF_ACTIVE_START_DATE, CONF_ACTIVE_END_DATE, CONF_ACTIVE_RANGE_YEARLY),
@@ -1049,7 +1114,7 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
 
     async def async_step_planning_features(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="planning_features", menu_options=[
-            "planning", "evening", "season", "pv_shortfall", "pv_shortfall_off", "prices", "setup"])
+            "planning", "reserve", "evening", "season", "pv_shortfall", "prices", "setup"])
 
     async def async_step_advanced_features(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="advanced_features", menu_options=[
@@ -1194,6 +1259,9 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
 
     async def async_step_planning(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self._guided_form("planning", user_input)
+
+    async def async_step_reserve(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._guided_form("reserve", user_input)
 
     async def async_step_evening(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return await self._guided_form("evening", user_input)

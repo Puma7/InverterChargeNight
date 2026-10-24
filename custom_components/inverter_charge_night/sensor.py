@@ -97,9 +97,13 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
             "surplus_kwh": data.get("surplus_kwh"),
             "lower_bound_soc": data.get("lower_bound_soc"),
             "upper_bound_soc": data.get("upper_bound_soc"),
+            "buffer_soc": data.get("buffer_soc"),
+            "buffer_capped": data.get("buffer_capped"),
             "pv_crossover": data.get("pv_crossover"),
             ATTR_SNOW_NIGHTS: self.coordinator.snow_nights,
             "pv_yield": self.coordinator.pv_yield_attributes(),
+            # Plan 015 stage D: what the weather made of the planned load
+            "weather": self.coordinator.weather_status,
             # Plan 009: why the inverter may show a higher min SOC than the
             # charge target while the window is open.
             ATTR_INVERTER_FLOOR_SOC: self.coordinator.inverter_floor_soc(),

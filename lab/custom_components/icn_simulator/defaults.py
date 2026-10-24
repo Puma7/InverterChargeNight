@@ -61,7 +61,7 @@ async def configure_planner(hass, data):
             continue
         if group not in ("basics", "schedule"):
             await choose("features")
-            if group in ("planning", "evening", "season", "pv_shortfall", "prices"):
+            if group in ("planning", "reserve", "evening", "season", "pv_shortfall", "prices"):
                 await choose("planning_features")
             elif group in ("meters", "backup", "hardware", "grid_fuse", "runtime"):
                 await choose("advanced_features")
