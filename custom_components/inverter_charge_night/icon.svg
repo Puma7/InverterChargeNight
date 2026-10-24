@@ -1,6 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-  <path fill="#4CAF50" d="M11.45 2 2 22h20L11.45 2zm0 4.41L18.28 20H4.62l6.83-13.59z"/>
-  <path fill="#FFC107" d="M10 14h3v2h-3zm0-5h3v4h-3z"/>
-  <rect fill="#2196F3" x="7" y="18" width="3" height="2" rx=".5"/>
-  <rect fill="#2196F3" x="14" y="18" width="3" height="2" rx=".5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <mask id="crescent">
+      <rect width="512" height="512" fill="#fff"/>
+      <circle cx="446" cy="88" r="74" fill="#000"/>
+    </mask>
+  </defs>
+  <rect x="64" y="124" width="240" height="352" rx="46" fill="#1C2541"/>
+  <rect x="136" y="84" width="96" height="56" rx="16" fill="#1C2541"/>
+  <rect x="96" y="268" width="176" height="176" rx="24" fill="#FFB020"/>
+  <path d="M206 282 L130 378 H178 L160 432 L240 330 H192 Z" fill="#1C2541"/>
+  <circle cx="400" cy="128" r="84" fill="#FFC94D" mask="url(#crescent)"/>
+  <path d="M300 40 l7 17 l17 7 l-17 7 l-7 17 l-7 -17 l-17 -7 l17 -7 Z" fill="#FFC94D"/>
 </svg>
