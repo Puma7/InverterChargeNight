@@ -1027,3 +1027,44 @@ def test_without_a_forecast_or_a_sunrise_the_fixed_delay_decides():
     assert day_balance(_modelled(forecast_available=False)) is None
     assert day_balance(_plan_input(bridge_model=BRIDGE_MODEL_MODELLED)) is None
     assert day_balance(_modelled(pv_hourly_shape=[0.1] * 3)) is None
+
+
+def test_the_room_runs_to_sunset_when_the_period_ends_before_it():
+    """Codex on #42: a 15:00-16:00 period, sunset at 21:00 and a west roof whose
+    yield comes at 18:00 - that sun still needs room."""
+    shape = [0.0] * 24
+    shape[18] = 1.0
+    late_sunset = datetime(2026, 1, 15, 21, 0)
+    balance = day_balance(
+        _modelled(
+            forecast_kwh_next_day=9.0,
+            sunset=late_sunset,
+            pv_hourly_shape=shape,
+            high_price_window=(datetime(2026, 1, 15, 15, 0), datetime(2026, 1, 15, 16, 0)),
+        )
+    )
+    assert balance is not None
+    # 05:59-18:00 at 0.5 kW out, then 9.9 kW for an hour against 0.5 kW in
+    assert balance.rise_kwh == pytest.approx(-0.5 * (12 + 1 / 60) + 9.4, rel=1e-9)
+
+
+def test_the_learned_shape_gives_no_sun_on_the_morning_after():
+    """Codex on #42: a period running past midnight into the next morning must
+    not be credited that morning's sun with today's forecast."""
+    shape = [0.0] * 24
+    shape[8] = 1.0
+    next_day = datetime(2026, 1, 16, 0, 0)
+
+    def required(until_hour):
+        balance = day_balance(
+            _modelled(
+                forecast_kwh_next_day=9.0,
+                pv_hourly_shape=shape,
+                high_price_window=(datetime(2026, 1, 15, 22, 0), next_day.replace(hour=until_hour)),
+            )
+        )
+        assert balance is not None
+        return balance.required_kwh
+
+    # 08:00-09:00 on the 16th is drawn from the battery like any other hour
+    assert required(9) - required(8) == pytest.approx(0.5, rel=1e-9)

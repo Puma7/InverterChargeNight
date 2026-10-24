@@ -11,6 +11,7 @@ import json
 import logging
 import math
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -210,6 +211,7 @@ from .planner import (
     PlanResult,
     allowed_charge_power_w,
     curtailment_outlook,
+    day_balance,
     need_profile,
     evening_outlook,
     evening_reserve_soc,
@@ -485,10 +487,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # forecast and recorder look-ups behind the temperature factor, and
         # what the last plan made of them
         self._temperature_log = TemperatureLog()
-        self._forecast_temp_cache: tuple[datetime, date, float | None] | None = None
-        self._outdoor_daily_cache: tuple[datetime, dict[date, float]] | None = None
+        # Each keyed by its source entity too: an options change that swaps the
+        # entity must not be answered from the old one's cache (Codex on #42)
+        self._forecast_temp_cache: tuple[datetime, str, date, float | None] | None = None
+        self._outdoor_daily_cache: tuple[datetime, str, dict[date, float]] | None = None
         # Plan 015 stage B: the PV curve learned from the daily PV meter
-        self._pv_shape_cache: tuple[datetime, list[float] | None] | None = None
+        self._pv_shape_cache: tuple[datetime, str, list[float] | None] | None = None
         self.weather_status: dict[str, Any] = {"status": STATUS_OFF}
         self.snow_nights: int = 0
         self._original_absolute_charge_power: float | None = None
@@ -1845,8 +1849,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         now = dt_util.utcnow()
         cached = self._pv_shape_cache
-        if cached is not None and (now - cached[0]).total_seconds() < HOUSE_LOAD_PROFILE_CACHE_S:
-            return cached[1]
+        if (cached is not None and cached[1] == str(entity_id)
+                and (now - cached[0]).total_seconds() < HOUSE_LOAD_PROFILE_CACHE_S):
+            return cached[2]
         from homeassistant.components.recorder.statistics import statistics_during_period
 
         start = (now - timedelta(days=HOUSE_LOAD_PROFILE_DAYS)).replace(
@@ -1882,7 +1887,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if len(days) >= PV_SHAPE_MIN_DAYS:
             shares = [[value / sum(hours) for value in hours] for hours in days]
             shape = [sum(day[hour] for day in shares) / len(shares) for hour in range(24)]
-        self._pv_shape_cache = (now, shape)
+        self._pv_shape_cache = (now, str(entity_id), shape)
         return shape
 
     def _observe_outdoor_temperature(self) -> None:
@@ -1921,9 +1926,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         entity_id = str(self.config.get(CONF_WEATHER_ENTITY))
         now = dt_util.utcnow()
         cached = self._forecast_temp_cache
-        if (cached is not None and cached[1] == day
+        if (cached is not None and cached[1] == entity_id and cached[2] == day
                 and (now - cached[0]).total_seconds() < WEATHER_FORECAST_CACHE_S):
-            return cached[2]
+            return cached[3]
         weather = self.hass.states.get(entity_id)
         unit = weather.attributes.get("temperature_unit") if weather is not None else None
         result: float | None = None
@@ -1946,7 +1951,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if value is not None:
                     result = to_celsius(value, unit if isinstance(unit, str) else None)
                     break
-        self._forecast_temp_cache = (now, day, result)
+        self._forecast_temp_cache = (now, entity_id, day, result)
         return result
 
     async def _daily_outdoor_c(self) -> dict[date, float]:
@@ -1962,8 +1967,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return days
         now = dt_util.utcnow()
         cached = self._outdoor_daily_cache
-        if cached is not None and (now - cached[0]).total_seconds() < OUTDOOR_TEMPERATURE_CACHE_S:
-            return {**days, **cached[1]}
+        if (cached is not None and cached[1] == str(sensor_id)
+                and (now - cached[0]).total_seconds() < OUTDOOR_TEMPERATURE_CACHE_S):
+            return {**days, **cached[2]}
         from homeassistant.components.recorder.statistics import statistics_during_period
 
         start = (now - timedelta(days=HOUSE_LOAD_PROFILE_DAYS + 1)).replace(
@@ -1987,7 +1993,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if isinstance(start_ts, (int, float)) and isinstance(mean, (int, float)):
                 local = dt_util.as_local(dt_util.utc_from_timestamp(start_ts))
                 learned[local.date()] = to_celsius(float(mean), unit if isinstance(unit, str) else None)
-        self._outdoor_daily_cache = (now, learned)
+        self._outdoor_daily_cache = (now, str(sensor_id), learned)
         return {**days, **learned}
 
     async def _weather_factor(self, day: date) -> float:
@@ -2147,52 +2153,59 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         high_price_window = self._high_price_window(window_end)
         bridge_model = str(self.config.get(CONF_BRIDGE_MODEL, DEFAULT_BRIDGE_MODEL))
-        return (
-            PlanInput(
-                capacity_kwh=capacity,
-                current_soc=current_soc if current_soc is not None else 0.0,
-                user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
-                user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
-                forecast_kwh_next_day=forecast_kwh,
-                forecast_available=forecast_available,
-                error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
-                window_end=window_end,
-                pv_crossover=pv_crossover,
-                sunset=sunset,
-                house_load_kw_profile=await self._house_load_need_profile(window_end.date()),
-                room_load_kw_profile=await self._house_load_profile(),
-                reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
-                charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
-                discharge_efficiency=float(
-                    self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)
-                ),
-                prices_ct=prices_ct,
-                # Measured from the window end: the evening the battery has to
-                # reach is the one on the solar day this window is planning for.
-                high_price_window=high_price_window,
-                reserve_margin_pct=float(
-                    self.config.get(CONF_HIGH_PRICE_MARGIN_PCT, DEFAULT_HIGH_PRICE_MARGIN_PCT)
-                ),
-                window_price_ct=window_ct,
-                evening_price_ct=(
-                    mean_price_ct(series, high_price_window[0], high_price_window[1])
-                    if high_price_window
-                    else None
-                ),
-                safety_buffer_kwh=float(
-                    self.config.get(CONF_SAFETY_BUFFER_KWH, DEFAULT_SAFETY_BUFFER_KWH)
-                ),
-                bridge_model=bridge_model,
-                sunrise=sunrise,
-                pv_hourly_shape=(
-                    await self._pv_hourly_shape()
-                    if bridge_model == BRIDGE_MODEL_MODELLED
-                    else None
-                ),
+        plan_input = PlanInput(
+            capacity_kwh=capacity,
+            current_soc=current_soc if current_soc is not None else 0.0,
+            user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
+            user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
+            forecast_kwh_next_day=forecast_kwh,
+            forecast_available=forecast_available,
+            error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
+            window_end=window_end,
+            pv_crossover=pv_crossover,
+            sunset=sunset,
+            house_load_kw_profile=await self._house_load_need_profile(window_end.date()),
+            room_load_kw_profile=await self._house_load_profile(),
+            reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
+            charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
+            discharge_efficiency=float(
+                self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)
             ),
-            pv_crossover,
-            prices_source,
+            prices_ct=prices_ct,
+            # Measured from the window end: the evening the battery has to
+            # reach is the one on the solar day this window is planning for.
+            high_price_window=high_price_window,
+            reserve_margin_pct=float(
+                self.config.get(CONF_HIGH_PRICE_MARGIN_PCT, DEFAULT_HIGH_PRICE_MARGIN_PCT)
+            ),
+            window_price_ct=window_ct,
+            evening_price_ct=(
+                mean_price_ct(series, high_price_window[0], high_price_window[1])
+                if high_price_window
+                else None
+            ),
+            safety_buffer_kwh=float(
+                self.config.get(CONF_SAFETY_BUFFER_KWH, DEFAULT_SAFETY_BUFFER_KWH)
+            ),
+            bridge_model=bridge_model,
+            sunrise=sunrise,
+            pv_hourly_shape=(
+                await self._pv_hourly_shape()
+                if bridge_model == BRIDGE_MODEL_MODELLED
+                else None
+            ),
         )
+        balance = day_balance(plan_input)
+        if balance is not None:
+            # The modelled day moves the crossover, and with it the stretch whose
+            # day price a conflict is decided on: price the bridge it models,
+            # not the fixed delay's (Codex on #42)
+            pv_crossover = balance.crossover
+            prices_ct, prices_source = self._conflict_prices(
+                window_ct, series, now, window_end, pv_crossover
+            )
+            plan_input = replace(plan_input, prices_ct=prices_ct)
+        return plan_input, pv_crossover, prices_source
 
     async def _evening_reserve_floor(
         self, forecast_kwh: float, forecast_available: bool

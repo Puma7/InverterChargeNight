@@ -29,7 +29,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from .const import (
     BRIDGE_MODEL_FIXED_DELAY,
@@ -323,11 +323,18 @@ class DayBalance:
     surplus_kwh: float      # house side: what the PV gives beyond the room load
 
 
-def _pv_kw(p: PlanInput, sunrise: datetime, when: datetime, local_hour: int, daily_kwh: float) -> float:
+def _pv_kw(
+    p: PlanInput, sunrise: datetime, when: datetime, local: datetime, solar_day: date,
+    daily_kwh: float,
+) -> float:
     shape = p.pv_hourly_shape
     if shape is not None:
-        # A fraction of the day's yield in that clock hour is its mean power in kW
-        return max(0.0, daily_kwh) * float(shape[local_hour])
+        # A fraction of the day's yield in that clock hour is its mean power in
+        # kW - on the forecast's own day only: an evening period that runs past
+        # midnight must not be credited the next morning's sun (Codex on #42)
+        if local.date() != solar_day:
+            return 0.0
+        return max(0.0, daily_kwh) * float(shape[local.hour])
     return pv_power_kw_at(sunrise, p.sunset, when, daily_kwh)
 
 
@@ -387,25 +394,34 @@ def day_balance(p: PlanInput) -> DayBalance | None:
     cursor = p.window_end.astimezone(UTC) if zone is not None else p.window_end
     finish = end.astimezone(UTC) if zone is not None else end
     sunrise = p.sunrise.astimezone(UTC) if zone is not None else p.sunrise
-    while cursor < finish:
+    solar_day = (p.sunrise.astimezone(zone) if zone is not None else p.sunrise).date()
+    # The room side runs to sunset whatever the period: PV after a period that
+    # ends early still has to fit (Codex on #42)
+    sunset = p.sunset.astimezone(UTC) if zone is not None else p.sunset
+    last = max(finish, sunset)
+    while cursor < last:
         # Steps end on the clock's five-minute marks, so every step lies in one
         # hour of the profile and the evening starts on a step boundary
         into_step = (cursor.minute * 60 + cursor.second + cursor.microsecond / 1e6) % BALANCE_STEP_S
-        span = min(step - timedelta(seconds=into_step), finish - cursor)
+        bound = finish if cursor < finish else last
+        span = min(step - timedelta(seconds=into_step), bound - cursor)
         hours = span.total_seconds() / 3600.0
         middle = cursor + span / 2
         local = middle.astimezone(zone) if zone is not None else middle
-        in_evening = evening is not None and evening[0] <= local < evening[1]
-        need = float(p.house_load_kw_profile[local.hour]) * (evening_factor if in_evening else 1.0)
-        pv_low = _pv_kw(p, sunrise, middle, local.hour, low_kwh)
-        net = (pv_low - need) * hours
-        need_level += net if net >= 0 else net / efficiency
-        lowest = min(lowest, need_level)
-        if crossover is None and middle >= sunrise and pv_low >= need > 0:
-            start = cursor.astimezone(zone) if zone is not None else cursor
-            crossover = start
-            bridge = -lowest
-        pv_high = _pv_kw(p, sunrise, middle, local.hour, high_kwh)
+        if cursor < finish:
+            in_evening = evening is not None and evening[0] <= local < evening[1]
+            need = float(p.house_load_kw_profile[local.hour]) * (
+                evening_factor if in_evening else 1.0
+            )
+            pv_low = _pv_kw(p, sunrise, middle, local, solar_day, low_kwh)
+            net = (pv_low - need) * hours
+            need_level += net if net >= 0 else net / efficiency
+            lowest = min(lowest, need_level)
+            if crossover is None and middle >= sunrise and pv_low >= need > 0:
+                start = cursor.astimezone(zone) if zone is not None else cursor
+                crossover = start
+                bridge = -lowest
+        pv_high = _pv_kw(p, sunrise, middle, local, solar_day, high_kwh)
         excess = (pv_high - float(room[local.hour])) * hours
         surplus += max(0.0, excess)
         room_level += excess if excess >= 0 else excess / efficiency

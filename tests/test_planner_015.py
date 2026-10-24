@@ -377,3 +377,48 @@ async def test_the_modelled_day_moves_the_crossover_and_the_target(mock_hass, ca
     assert "until 17:00" in caplog.text
     assert after.lower_bound_soc > before.lower_bound_soc
     assert fixed._pv_shape_cache is None  # the fixed delay never asks the recorder
+
+
+@pytest.mark.asyncio
+async def test_a_conflict_is_priced_on_the_modelled_bridge(mock_hass):
+    """Codex on #42: the day price of a conflict is the mean over the bridge the
+    plan decides on, so the modelled crossover, not sunrise plus the delay."""
+    coordinator = _coordinator(mock_hass, {CONF_BRIDGE_MODEL: "modelled"})
+    coordinator._conflict_prices = MagicMock(return_value=((20.0, 50.0, 8.0), "entity"))
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=NIGHT):
+        plan_input, crossover, source = await coordinator._build_plan_input(2.0, True)
+
+    assert crossover == SUN[1]  # a dull day: never carried
+    assert coordinator._conflict_prices.call_args.args[4] == crossover
+    assert plan_input.prices_ct == (20.0, 50.0, 8.0) and source == "entity"
+
+
+@pytest.mark.asyncio
+async def test_a_new_source_entity_is_asked_at_once(mock_hass):
+    """Codex on #42: swapping the weather entity, the temperature sensor or the
+    PV meter in the options must not be answered from the old one's cache."""
+    coordinator = _weather_coordinator(mock_hass, {CONF_OUTDOOR_TEMPERATURE_ENTITY: OUTDOOR,
+                                                   CONF_PV_ENERGY_TODAY_ENTITY: PV_METER,
+                                                   CONF_BRIDGE_MODEL: "modelled"})
+    _forecast_service(mock_hass, daily=[
+        {"datetime": "2026-01-15T11:00:00+00:00", "temperature": -1.0, "templow": -3.0},
+    ])
+    instance = MagicMock()
+    instance.async_add_executor_job = AsyncMock(return_value={})
+    mock_hass.data[DATA_INSTANCE] = instance
+
+    await coordinator._forecast_mean_temperature(PLAN_DAY)
+    await coordinator._daily_outdoor_c()
+    await coordinator._pv_hourly_shape()
+    asked = (mock_hass.services.async_call.await_count, instance.async_add_executor_job.await_count)
+
+    coordinator.config = {**coordinator.config, CONF_WEATHER_ENTITY: "weather.other",
+                          CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.other_outdoor",
+                          CONF_PV_ENERGY_TODAY_ENTITY: "sensor.other_pv"}
+    await coordinator._forecast_mean_temperature(PLAN_DAY)
+    await coordinator._daily_outdoor_c()
+    await coordinator._pv_hourly_shape()
+
+    assert mock_hass.services.async_call.await_count > asked[0]
+    assert instance.async_add_executor_job.await_count == asked[1] + 2
+    assert mock_hass.services.async_call.call_args.kwargs["target"] == {"entity_id": "weather.other"}
