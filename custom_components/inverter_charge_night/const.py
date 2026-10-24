@@ -97,6 +97,19 @@ DEFAULT_AVG_HOUSE_LOAD_KW = 0.5
 DEFAULT_PV_CROSSOVER_DELAY_MIN = 90
 DEFAULT_BRIDGE_RESERVE_KWH = 0.5
 DEFAULT_SAFETY_BUFFER_KWH = 0.0
+# Plan 015 stage C: which hourly load the night target is bought for. The mean
+# was the only answer until 3.11; an evening above it is exactly the one the
+# battery runs short in.
+CONF_LOAD_SAFETY_LEVEL = "load_safety_level"
+LOAD_SAFETY_MEAN = "mean"
+LOAD_SAFETY_P75 = "p75"
+LOAD_SAFETY_P90 = "p90"
+LOAD_SAFETY_LEVELS = (LOAD_SAFETY_MEAN, LOAD_SAFETY_P75, LOAD_SAFETY_P90)
+LOAD_SAFETY_QUANTILES = {LOAD_SAFETY_P75: 0.75, LOAD_SAFETY_P90: 0.90}
+DEFAULT_LOAD_SAFETY_LEVEL = LOAD_SAFETY_MEAN
+# Fewer days than this in an hour of the day and its quantile is noise: the
+# mean is used for that hour instead
+LOAD_QUANTILE_MIN_SAMPLES = 7
 DEFAULT_CHARGE_EFFICIENCY = 0.90
 DEFAULT_DISCHARGE_EFFICIENCY = 0.95
 HOUSE_LOAD_PROFILE_DAYS = 14  # history used to learn the hourly load profile

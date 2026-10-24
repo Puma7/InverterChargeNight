@@ -44,6 +44,7 @@ from .const import (
     CONF_BATTERY_SOC_ENTITY,
     CONF_BRIDGE_RESERVE_KWH,
     CONF_SAFETY_BUFFER_KWH,
+    CONF_LOAD_SAFETY_LEVEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
@@ -89,6 +90,8 @@ from .const import (
     DEFAULT_AVG_HOUSE_LOAD_KW,
     DEFAULT_BRIDGE_RESERVE_KWH,
     DEFAULT_SAFETY_BUFFER_KWH,
+    DEFAULT_LOAD_SAFETY_LEVEL,
+    LOAD_SAFETY_LEVELS,
     DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_COMMAND_DELAY,
@@ -202,6 +205,7 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_PV_CROSSOVER_DELAY_MIN,
     CONF_BRIDGE_RESERVE_KWH,
     CONF_SAFETY_BUFFER_KWH,
+    CONF_LOAD_SAFETY_LEVEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
     CONF_NIGHT_PRICE_CT,
@@ -623,6 +627,18 @@ def _mode_selector() -> Any:
     )
 
 
+def _load_safety_level_selector() -> Any:
+    return cast(
+        Any,
+        selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=list(LOAD_SAFETY_LEVELS),
+                translation_key="load_safety_level",
+            )
+        ),
+    )
+
+
 def _planner_mode_selector() -> Any:
     return cast(
         Any,
@@ -825,6 +841,9 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
                 CONF_SAFETY_BUFFER_KWH, defaults, DEFAULT_SAFETY_BUFFER_KWH
             ): _number_selector(0, 50, 0.5, "kWh"),
             _required(
+                CONF_LOAD_SAFETY_LEVEL, defaults, DEFAULT_LOAD_SAFETY_LEVEL
+            ): _load_safety_level_selector(),
+            _required(
                 CONF_CHARGE_EFFICIENCY, defaults, DEFAULT_CHARGE_EFFICIENCY
             ): _number_selector(0.5, 1.0, 0.01),
             _required(
@@ -934,7 +953,7 @@ _GUIDED_GROUPS: dict[str, tuple[str, ...]] = {
                  CONF_PV_FORECAST_TODAY_ENTITY, CONF_HOUSE_LOAD_ENTITY,
                  CONF_AVG_HOUSE_LOAD_KW, CONF_PV_CROSSOVER_DELAY_MIN, CONF_BRIDGE_RESERVE_KWH),
     # Plan 015: how much the night target carries beyond the bare need
-    "reserve": (CONF_SAFETY_BUFFER_KWH,),
+    "reserve": (CONF_SAFETY_BUFFER_KWH, CONF_LOAD_SAFETY_LEVEL),
     "evening": (CONF_HIGH_PRICE_START, CONF_HIGH_PRICE_END, CONF_HIGH_PRICE_MARGIN_PCT,
                 CONF_DISCHARGE_BLOCK_MODE, CONF_DISCHARGE_BLOCK_SWITCH),
     "season": (CONF_ACTIVE_START_DATE, CONF_ACTIVE_END_DATE, CONF_ACTIVE_RANGE_YEARLY),

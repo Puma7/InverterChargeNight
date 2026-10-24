@@ -131,7 +131,8 @@
           "curtailment_feed_in_entity": "Feed-in power entity",
           "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
           "pv_energy_today_entity": "Actual PV energy today",
-          "safety_buffer_kwh": "Safety buffer"
+          "safety_buffer_kwh": "Safety buffer",
+          "load_safety_level": "Safety level of the planned consumption"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -158,7 +159,8 @@
           "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
           "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
           "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today.",
-          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used."
+          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
+          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average."
         }
       },
       "reconfigure": {
@@ -291,7 +293,8 @@
           "curtailment_feed_in_entity": "Feed-in power entity",
           "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
           "pv_energy_today_entity": "Actual PV energy today",
-          "safety_buffer_kwh": "Safety buffer"
+          "safety_buffer_kwh": "Safety buffer",
+          "load_safety_level": "Safety level of the planned consumption"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -318,7 +321,8 @@
           "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
           "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
           "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today.",
-          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used."
+          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
+          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average."
         }
       },
       "review": {
@@ -682,10 +686,12 @@
         "title": "Safety buffer and reserves",
         "description": "How much the night target carries beyond what the plan needs. The buffer only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power.",
         "data": {
-          "safety_buffer_kwh": "Safety buffer"
+          "safety_buffer_kwh": "Safety buffer",
+          "load_safety_level": "Safety level of the planned consumption"
         },
         "data_description": {
-          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used."
+          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
+          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average."
         }
       }
     },
@@ -858,7 +864,8 @@
           "curtailment_feed_in_entity": "Feed-in power entity",
           "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
           "pv_energy_today_entity": "Actual PV energy today",
-          "safety_buffer_kwh": "Safety buffer"
+          "safety_buffer_kwh": "Safety buffer",
+          "load_safety_level": "Safety level of the planned consumption"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -885,7 +892,8 @@
           "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
           "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
           "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today.",
-          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used."
+          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
+          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average."
         }
       },
       "review": {
@@ -1245,10 +1253,12 @@
         "title": "Safety buffer and reserves",
         "description": "How much the night target carries beyond what the plan needs. The buffer only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power.",
         "data": {
-          "safety_buffer_kwh": "Safety buffer"
+          "safety_buffer_kwh": "Safety buffer",
+          "load_safety_level": "Safety level of the planned consumption"
         },
         "data_description": {
-          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used."
+          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
+          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average."
         }
       }
     },
@@ -1311,6 +1321,13 @@
         "ct_per_kwh": "Cents per kWh",
         "eur_per_kwh": "Euros per kWh",
         "eur_per_mwh": "Euros per MWh"
+      }
+    },
+    "load_safety_level": {
+      "options": {
+        "mean": "Average (as before)",
+        "p75": "Safe (75th percentile)",
+        "p90": "Very safe (90th percentile)"
       }
     }
   },

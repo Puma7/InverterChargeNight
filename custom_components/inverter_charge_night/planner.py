@@ -86,6 +86,12 @@ class PlanInput:
     # the upper bound leaves - a buffer must never make the sun spill. Bought
     # once and carried: each night plans from the battery as it finds it.
     safety_buffer_kwh: float = 0.0
+    # Plan 015 stage C: ``house_load_kw_profile`` is what the night target is
+    # bought for, and may be set above the mean. The room kept free for the sun
+    # must not be: a high load estimate there means less room, and the battery
+    # spills. This is the mean the room is reckoned with; None means the same
+    # profile as the need, which is what a caller that predates it gets.
+    room_load_kw_profile: Sequence[float] | None = None
 
 
 @dataclass(frozen=True)
@@ -173,6 +179,51 @@ def evening_reserve_kwh(p: PlanInput) -> float:
     return load_kwh * (1 + max(0.0, p.reserve_margin_pct) / 100.0)
 
 
+def _room_profile(p: PlanInput) -> Sequence[float]:
+    """The load the room for tomorrow's sun is reckoned with (plan 015 stage C)."""
+    return p.room_load_kw_profile if p.room_load_kw_profile is not None else p.house_load_kw_profile
+
+
+def quantile(values: Sequence[float], q: float) -> float:
+    """The ``q`` quantile of ``values``, interpolated between neighbours.
+
+    The same rule as numpy's default: position ``q * (n - 1)`` in the sorted
+    values. Raises ValueError for an empty sequence.
+    """
+    if not values:
+        raise ValueError("No values for a quantile")
+    ordered = sorted(values)
+    position = _clamp(q, 0.0, 1.0) * (len(ordered) - 1)
+    low = math.floor(position)
+    high = min(low + 1, len(ordered) - 1)
+    return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
+
+
+def need_profile(
+    samples: Sequence[Sequence[float]],
+    mean_profile: Sequence[float],
+    q: float | None,
+    min_samples: int,
+) -> list[float]:
+    """The hourly load the night target is bought for (plan 015 stage C).
+
+    ``q`` None is the mean. Otherwise each hour of the day takes the ``q``
+    quantile of its days, but never less than the mean - an hour whose days
+    are skewed low must not buy less than before - and an hour with fewer
+    than ``min_samples`` days keeps the mean.
+
+    Summed over the hours, per-hour quantiles lie above the quantile of the
+    daily total. For a safety level that is the point, not a flaw.
+    """
+    result = [float(value) for value in mean_profile]
+    if q is None:
+        return result
+    for hour, values in enumerate(samples[: len(result)]):
+        if len(values) >= min_samples:
+            result[hour] = max(result[hour], quantile(values, q))
+    return result
+
+
 def surplus_kwh(p: PlanInput, *, cautious: bool = False) -> float:
     """Tomorrow's forecast (with margin) minus the load it has to cover first.
 
@@ -185,7 +236,11 @@ def surplus_kwh(p: PlanInput, *, cautious: bool = False) -> float:
     21 October 2026 the evening was credited the larger forecast too - 12.0
     instead of 10.9 kWh - and the night bought too little for it.
     """
-    daytime_load_kwh = integrate_load(p.house_load_kw_profile, p.pv_crossover, p.sunset)
+    # Both directions are the safe one: the room kept free for the sun takes
+    # the mean load (less self-use, more room), the evening the higher need
+    # (less surplus credited to it).
+    profile = p.house_load_kw_profile if cautious else _room_profile(p)
+    daytime_load_kwh = integrate_load(profile, p.pv_crossover, p.sunset)
     margin = max(0.0, p.error_margin_pct) / 100.0
     factor = max(0.0, 1 - margin) if cautious else 1 + margin
     forecast_with_margin = max(0.0, p.forecast_kwh_next_day) * factor
@@ -283,8 +338,14 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
         p.user_min_soc,
         p.user_max_soc,
     )
+    # The bridge as the room sees it: the mean morning, so that a high need
+    # estimate cannot pretend the battery will be emptier when the sun comes
+    room_bridge_kwh = _from_battery_kwh(
+        integrate_load(_room_profile(p), p.window_end, p.pv_crossover),
+        p.discharge_efficiency,
+    ) + max(0.0, float(p.reserve_kwh))
     upper = _clamp(
-        (1.0 - max(0.0, surplus - bridge_kwh) / capacity) * 100.0,
+        (1.0 - max(0.0, surplus - room_bridge_kwh) / capacity) * 100.0,
         p.user_min_soc,
         p.user_max_soc,
     )

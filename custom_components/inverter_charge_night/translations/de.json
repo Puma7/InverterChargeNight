@@ -131,7 +131,8 @@
           "curtailment_feed_in_entity": "Einspeiseleistung",
           "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
           "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag",
-          "safety_buffer_kwh": "Sicherheitspuffer"
+          "safety_buffer_kwh": "Sicherheitspuffer",
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -158,7 +159,8 @@
           "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch.",
           "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
           "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt.",
-          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat."
+          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet."
         }
       },
       "reconfigure": {
@@ -291,7 +293,8 @@
           "curtailment_feed_in_entity": "Einspeiseleistung",
           "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
           "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag",
-          "safety_buffer_kwh": "Sicherheitspuffer"
+          "safety_buffer_kwh": "Sicherheitspuffer",
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -318,7 +321,8 @@
           "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch.",
           "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
           "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt.",
-          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat."
+          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet."
         }
       },
       "review": {
@@ -682,10 +686,12 @@
         "title": "Sicherheitspuffer und Reserven",
         "description": "Wie viel das Nachtziel über den geplanten Bedarf hinaus mitträgt. Der Puffer nutzt nur Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen.",
         "data": {
-          "safety_buffer_kwh": "Sicherheitspuffer"
+          "safety_buffer_kwh": "Sicherheitspuffer",
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs"
         },
         "data_description": {
-          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat."
+          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet."
         }
       }
     },
@@ -858,7 +864,8 @@
           "curtailment_feed_in_entity": "Einspeiseleistung",
           "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
           "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag",
-          "safety_buffer_kwh": "Sicherheitspuffer"
+          "safety_buffer_kwh": "Sicherheitspuffer",
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -885,7 +892,8 @@
           "curtailment_feed_in_entity": "Optional: ein Leistungssensor für das, was tatsächlich ins Netz geht. Die Grenze wirkt genau darauf, also ist das die einzige Messung, die den Wert oben gegen die Wirklichkeit halten kann — der Abregelungssensor stellt den gerechneten Überlauf neben den gemessenen. Ohne ihn rechnet der Sensor nur und sagt das auch.",
           "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
           "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt.",
-          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat."
+          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet."
         }
       },
       "review": {
@@ -1245,10 +1253,12 @@
         "title": "Sicherheitspuffer und Reserven",
         "description": "Wie viel das Nachtziel über den geplanten Bedarf hinaus mitträgt. Der Puffer nutzt nur Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen.",
         "data": {
-          "safety_buffer_kwh": "Sicherheitspuffer"
+          "safety_buffer_kwh": "Sicherheitspuffer",
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs"
         },
         "data_description": {
-          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat."
+          "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet."
         }
       }
     },
@@ -1311,6 +1321,13 @@
         "ct_per_kwh": "Cent pro kWh",
         "eur_per_kwh": "Euro pro kWh",
         "eur_per_mwh": "Euro pro MWh"
+      }
+    },
+    "load_safety_level": {
+      "options": {
+        "mean": "Durchschnitt (wie bisher)",
+        "p75": "Sicher (75. Perzentil)",
+        "p90": "Sehr sicher (90. Perzentil)"
       }
     }
   },

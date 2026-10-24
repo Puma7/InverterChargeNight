@@ -92,3 +92,21 @@ async def test_a_sunny_tomorrow_caps_the_buffer(mock_hass, caplog):
     assert plan.target_soc == plan.upper_bound_soc
     assert plan.buffer_capped
     assert "(capped)" in caplog.text
+
+
+# --- stage C: the safety level -------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_safety_level_raises_the_target_and_keeps_the_pv_room(mock_hass):
+    plain = _coordinator(mock_hass)
+    safe = _coordinator(mock_hass)
+    safe._house_load_need_profile = AsyncMock(return_value=[0.8] * 24)
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=NIGHT):
+        before = await plain._plan_target(9.0, True)
+        after = await safe._plan_target(9.0, True)
+
+    assert before is not None and after is not None
+    assert after.lower_bound_soc > before.lower_bound_soc
+    assert after.target_soc > before.target_soc
+    assert after.upper_bound_soc == before.upper_bound_soc

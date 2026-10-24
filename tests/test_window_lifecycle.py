@@ -1907,3 +1907,44 @@ async def test_the_refresh_at_the_teardown_does_not_restart_the_window_on_the_ol
         )
     finally:
         await coordinator._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("level", ["mean", "p75", "p90"])
+async def test_the_safety_level_plans_the_busier_evenings(mock_hass, level):
+    """Plan 015 stage C: ten days, three of them with the oven on at 18:00.
+    The mean buys for 1.6 kW, the 90 % level for nearly the busy evening."""
+    from custom_components.inverter_charge_night.const import CONF_LOAD_SAFETY_LEVEL
+
+    mock_hass.states.async_set(HOUSE_METER, "12345", {"unit_of_measurement": "kWh"})
+    busy_days = (10, 11, 12)
+
+    rows = []
+    for day in range(5, 15):
+        for hour in range(24):
+            start = datetime(2026, 1, day, hour, tzinfo=timezone.utc).timestamp()
+            change = (3.0 if day in busy_days else 1.0) if hour == 18 else 0.5
+            rows.append({"start": start, "end": start + 3600, "change": change})
+    _recorder(mock_hass, rows)
+    coordinator = _make_coordinator(
+        mock_hass,
+        {**BRIDGE_CONFIG, CONF_HOUSE_LOAD_ENTITY: HOUSE_METER, CONF_LOAD_SAFETY_LEVEL: level},
+    )
+
+    mean = await coordinator._house_load_profile()
+    need = await coordinator._house_load_need_profile()
+
+    assert mean[18] == pytest.approx(1.6)
+    expected = {"mean": 1.6, "p75": 2.5, "p90": 3.0}[level]
+    assert need[18] == pytest.approx(expected)
+    assert need[:18] == pytest.approx([0.5] * 18)
+    assert mean[:18] == pytest.approx([0.5] * 18)
+
+
+@pytest.mark.asyncio
+async def test_without_a_meter_the_safety_level_has_nothing_to_raise(mock_hass):
+    from custom_components.inverter_charge_night.const import CONF_LOAD_SAFETY_LEVEL
+
+    coordinator = _make_coordinator(mock_hass, {**BRIDGE_CONFIG, CONF_LOAD_SAFETY_LEVEL: "p90"})
+    coordinator._house_load_samples = [[(datetime(2026, 1, 1).date(), 9.0)] * 10] * 24  # stale
+    assert await coordinator._house_load_need_profile() == [0.5] * 24

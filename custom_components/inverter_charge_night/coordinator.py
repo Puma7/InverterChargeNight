@@ -105,6 +105,7 @@ from .const import (
     CONF_PV_CROSSOVER_DELAY_MIN,
     CONF_BRIDGE_RESERVE_KWH,
     CONF_SAFETY_BUFFER_KWH,
+    CONF_LOAD_SAFETY_LEVEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
     CONF_DISCHARGE_LIMIT_ENTITY,
@@ -118,6 +119,9 @@ from .const import (
     DEFAULT_PV_CROSSOVER_DELAY_MIN,
     DEFAULT_BRIDGE_RESERVE_KWH,
     DEFAULT_SAFETY_BUFFER_KWH,
+    DEFAULT_LOAD_SAFETY_LEVEL,
+    LOAD_QUANTILE_MIN_SAMPLES,
+    LOAD_SAFETY_QUANTILES,
     DEFAULT_CHARGE_EFFICIENCY,
     HOUSE_LOAD_PROFILE_DAYS,
     CURTAILMENT_PEAK_CACHE_S,
@@ -182,6 +186,7 @@ from .planner import (
     PlanResult,
     allowed_charge_power_w,
     curtailment_outlook,
+    need_profile,
     evening_outlook,
     evening_reserve_soc,
     grid_budget_w,
@@ -545,6 +550,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._original_discharge_limit: float | None = None  # raw value in the entity's unit
         self._planned_setpoint_written_w: float | None = None
         self._house_load_cache: tuple[datetime, list[float]] | None = None
+        # Plan 015 stage C: the days behind the cached profile, per hour of the
+        # day as (local date, kWh). Set whenever the profile is learned, so the
+        # two always describe the same fortnight; None without a meter.
+        self._house_load_samples: list[list[tuple[date, float]]] | None = None
         self._feed_in_peak_cache: tuple[datetime, list[float]] | None = None
         self._sun_fallback_logged = False
         # House connection limit (plan 008)
@@ -1693,6 +1702,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         flat = [avg_kw] * 24
         entity_id = self.config.get(CONF_HOUSE_LOAD_ENTITY)
         if not entity_id:
+            self._house_load_samples = None
             return flat
         now = dt_util.utcnow()
         if self._house_load_cache is not None:
@@ -1701,6 +1711,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return cached
         profile = await self._learn_house_load_profile(str(entity_id), avg_kw)
         if profile is None:
+            self._house_load_samples = None  # no fortnight behind a flat profile
             _LOGGER.debug(
                 "No usable consumption statistics for %s; using the flat %.2f kW profile",
                 entity_id,
@@ -1737,8 +1748,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             factor = 1000.0
         else:
             factor = 1.0  # kWh, or no unit: assume kWh
-        sums = [0.0] * 24
-        counts = [0] * 24
+        samples: list[list[tuple[date, float]]] = [[] for _ in range(24)]
         for row in rows.get(entity_id, []):
             start_ts = row.get("start")
             change = row.get("change")
@@ -1746,12 +1756,33 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             if change < 0:
                 continue  # meter reset
-            hour = dt_util.as_local(dt_util.utc_from_timestamp(start_ts)).hour
-            sums[hour] += float(change) * factor
-            counts[hour] += 1
-        if not any(counts):
+            local = dt_util.as_local(dt_util.utc_from_timestamp(start_ts))
+            samples[local.hour].append((local.date(), float(change) * factor))
+        if not any(samples):
+            self._house_load_samples = None
             return None
-        return [sums[hour] / counts[hour] if counts[hour] else avg_kw for hour in range(24)]
+        self._house_load_samples = samples
+        return [
+            sum(kwh for _, kwh in values) / len(values) if values else avg_kw
+            for values in samples
+        ]
+
+    async def _house_load_need_profile(self) -> list[float]:
+        """The hourly load the night target is bought for (plan 015 stage C).
+
+        The mean profile, or with a safety level each hour's upper quantile of
+        the same fortnight - never below the mean. The room kept free for the
+        sun keeps using :meth:`_house_load_profile`.
+        """
+        mean = await self._house_load_profile()
+        level = self.config.get(CONF_LOAD_SAFETY_LEVEL, DEFAULT_LOAD_SAFETY_LEVEL)
+        q = LOAD_SAFETY_QUANTILES.get(str(level))
+        samples = self._house_load_samples
+        if q is None or samples is None:
+            return list(mean)
+        return need_profile(
+            [[kwh for _, kwh in values] for values in samples], mean, q, LOAD_QUANTILE_MIN_SAMPLES
+        )
 
     async def _feed_in_peaks_by_hour(self) -> list[float] | None:
         """The highest feed-in power seen in each hour of the day, in W, or None.
@@ -1877,7 +1908,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 window_end=window_end,
                 pv_crossover=pv_crossover,
                 sunset=sunset,
-                house_load_kw_profile=await self._house_load_profile(),
+                house_load_kw_profile=await self._house_load_need_profile(),
+                room_load_kw_profile=await self._house_load_profile(),
                 reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
                 charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
                 discharge_efficiency=float(

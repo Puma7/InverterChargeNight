@@ -877,3 +877,57 @@ def test_the_buffer_stops_at_the_user_maximum():
     assert plan.target_soc == 40.0
     assert plan.buffer_capped
     assert plan.buffer_soc == pytest.approx(40.0 - plan.lower_bound_soc, abs=0.11)
+
+
+# --- plan 015 stage C: the safety level of the planned load ----------------
+
+
+def test_quantile_interpolates_like_numpy():
+    from custom_components.inverter_charge_night.planner import quantile
+
+    values = [1.0, 2.0, 3.0, 4.0, 10.0]
+    assert quantile(values, 0.5) == 3.0
+    assert quantile(values, 0.75) == 4.0
+    assert quantile(values, 0.9) == pytest.approx(7.6)  # 4 + 0.6 * 6
+    assert quantile([5.0], 0.9) == 5.0
+    with pytest.raises(ValueError):
+        quantile([], 0.5)
+
+
+def test_the_need_profile_keeps_the_mean_where_the_days_are_few_or_low():
+    from custom_components.inverter_charge_night.planner import need_profile
+
+    mean = [1.0, 1.0, 1.0]
+    samples = [
+        [0.5] * 6 + [4.0] * 4,  # ten days, a busy tail: its 90 % quantile wins
+        [0.2] * 10,             # quantile below the mean: the mean stays
+        [9.0] * 3,              # three days only: the mean stays
+    ]
+    assert need_profile(samples, mean, None, 7) == mean
+    result = need_profile(samples, mean, 0.9, 7)
+    assert result[0] == pytest.approx(4.0)
+    assert result[1:] == [1.0, 1.0]
+
+
+def test_a_higher_need_raises_the_lower_bound_and_leaves_the_room_alone():
+    """The room kept for the sun is reckoned with the mean, whatever the need."""
+    base = plan_target_soc(_plan_input(forecast_kwh_next_day=9.0))
+    safe = plan_target_soc(
+        _plan_input(
+            forecast_kwh_next_day=9.0,
+            house_load_kw_profile=[0.8] * 24,
+            room_load_kw_profile=FLAT_500W,
+        )
+    )
+    assert safe.lower_bound_soc > base.lower_bound_soc
+    assert safe.upper_bound_soc == base.upper_bound_soc
+    assert safe.surplus_kwh == pytest.approx(base.surplus_kwh)
+
+
+def test_without_a_room_profile_the_need_profile_is_the_room():
+    """A caller that predates stage C gets exactly what it got before."""
+    plan = plan_target_soc(_plan_input(house_load_kw_profile=[0.8] * 24))
+    same = plan_target_soc(
+        _plan_input(house_load_kw_profile=[0.8] * 24, room_load_kw_profile=[0.8] * 24)
+    )
+    assert plan == same
