@@ -118,6 +118,9 @@ CONF_OUTDOOR_TEMPERATURE_ENTITY = "outdoor_temperature_entity"
 CONF_HEATING_LIMIT_C = "heating_limit_c"
 DEFAULT_HEATING_LIMIT_C = 15.0
 WEATHER_FORECAST_CACHE_S = 1800  # 30 minutes
+# A weather integration that hangs must not hold up the poll that steers the
+# inverter (CodeRabbit on #42)
+WEATHER_SERVICE_TIMEOUT_S = 10
 OUTDOOR_TEMPERATURE_CACHE_S = 3600
 # Plan 015 stage B: the bridge as a balance of load and the forecast PV curve
 # instead of "load until sunrise + a fixed delay". Opt-in: it changes targets.

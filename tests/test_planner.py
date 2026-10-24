@@ -1068,3 +1068,13 @@ def test_the_learned_shape_gives_no_sun_on_the_morning_after():
 
     # 08:00-09:00 on the 16th is drawn from the battery like any other hour
     assert required(9) - required(8) == pytest.approx(0.5, rel=1e-9)
+
+
+def test_the_safe_fallback_is_not_reported_as_buffer():
+    """CodeRabbit on #42: no forecast, no buffer - the lift to 50 % is the
+    fallback's, not a buffer anybody configured."""
+    plan = plan_target_soc(_plan_input(forecast_available=False))
+    assert plan.target_soc == DEFAULT_SAFE_FALLBACK_SOC
+    assert plan.buffer_soc == 0.0
+    small = plan_target_soc(_plan_input(forecast_available=False, safety_buffer_kwh=0.5))
+    assert small.buffer_soc == pytest.approx(5.0)

@@ -528,7 +528,9 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
             evening_kwh,
             evening_shortfall,
             evening_dropped,
-            round(max(0.0, target - lower), 1),
+            # The lift to the safe fallback is no buffer anybody configured
+            # (CodeRabbit on #42)
+            round(min(buffer_soc, max(0.0, target - lower)), 1),
             target < buffered,
             modelled_crossover,
         )

@@ -422,3 +422,19 @@ async def test_a_new_source_entity_is_asked_at_once(mock_hass):
     assert mock_hass.services.async_call.await_count > asked[0]
     assert instance.async_add_executor_job.await_count == asked[1] + 2
     assert mock_hass.services.async_call.call_args.kwargs["target"] == {"entity_id": "weather.other"}
+
+
+@pytest.mark.asyncio
+async def test_a_hanging_weather_service_does_not_hold_up_the_plan(mock_hass):
+    """CodeRabbit on #42: the forecast call is bounded; a timeout is no forecast."""
+    import asyncio
+
+    coordinator = _weather_coordinator(mock_hass)
+
+    async def hang(*args, **kwargs):
+        await asyncio.sleep(3600)
+
+    mock_hass.services.async_call = AsyncMock(side_effect=hang)
+    with patch(f"{COORDINATOR}.WEATHER_SERVICE_TIMEOUT_S", 0.01):
+        assert await coordinator._forecast_mean_temperature(PLAN_DAY) is None
+    assert mock_hass.services.async_call.await_count == 2  # daily, then hourly

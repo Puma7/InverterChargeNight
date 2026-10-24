@@ -142,6 +142,7 @@ from .const import (
     LOAD_SAFETY_QUANTILES,
     DEFAULT_HEATING_LIMIT_C,
     WEATHER_FORECAST_CACHE_S,
+    WEATHER_SERVICE_TIMEOUT_S,
     OUTDOOR_TEMPERATURE_CACHE_S,
     BRIDGE_MODEL_MODELLED,
     DEFAULT_BRIDGE_MODEL,
@@ -1935,10 +1936,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for kind, parse in (("daily", daily_mean_from_forecast),
                             ("hourly", hourly_mean_from_forecast)):
             try:
-                response = await self.hass.services.async_call(
-                    "weather", "get_forecasts", {"type": kind},
-                    blocking=True, target={"entity_id": entity_id}, return_response=True,
-                )
+                async with asyncio.timeout(WEATHER_SERVICE_TIMEOUT_S):
+                    response = await self.hass.services.async_call(
+                        "weather", "get_forecasts", {"type": kind},
+                        blocking=True, target={"entity_id": entity_id}, return_response=True,
+                    )
             except Exception as err:  # pylint: disable=broad-except
                 # A provider without this kind raises; the other kind may do
                 _LOGGER.debug("No %s forecast from %s: %s", kind, entity_id, err)
