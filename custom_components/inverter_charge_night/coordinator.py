@@ -104,6 +104,7 @@ from .const import (
     CONF_AVG_HOUSE_LOAD_KW,
     CONF_PV_CROSSOVER_DELAY_MIN,
     CONF_BRIDGE_RESERVE_KWH,
+    CONF_SAFETY_BUFFER_KWH,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
     CONF_DISCHARGE_LIMIT_ENTITY,
@@ -116,6 +117,7 @@ from .const import (
     DEFAULT_AVG_HOUSE_LOAD_KW,
     DEFAULT_PV_CROSSOVER_DELAY_MIN,
     DEFAULT_BRIDGE_RESERVE_KWH,
+    DEFAULT_SAFETY_BUFFER_KWH,
     DEFAULT_CHARGE_EFFICIENCY,
     HOUSE_LOAD_PROFILE_DAYS,
     CURTAILMENT_PEAK_CACHE_S,
@@ -1894,6 +1896,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if high_price_window
                     else None
                 ),
+                safety_buffer_kwh=float(
+                    self.config.get(CONF_SAFETY_BUFFER_KWH, DEFAULT_SAFETY_BUFFER_KWH)
+                ),
             ),
             pv_crossover,
             prices_source,
@@ -2167,7 +2172,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pv_crossover = pv_crossover
         _LOGGER.info(
             "Bridge plan: target %.1f%% (%s), bridge %.2f kWh until %s, surplus %.2f kWh, "
-            "bounds %.1f-%.1f%%",
+            "bounds %.1f-%.1f%%, buffer %.1f%%%s",
             plan.target_soc,
             plan.reason,
             plan.bridge_kwh,
@@ -2175,6 +2180,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             plan.surplus_kwh,
             plan.lower_bound_soc,
             plan.upper_bound_soc,
+            plan.buffer_soc,
+            " (capped)" if plan.buffer_capped else "",
         )
         return plan
 
@@ -2218,6 +2225,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "evening_reserve_kwh": round(plan.evening_reserve_kwh, 2),
             "evening_shortfall_kwh": round(plan.evening_shortfall_kwh, 2),
             "evening_reserve_dropped": plan.evening_reserve_dropped,
+            # Plan 015 stage A: the safety buffer above the lower bound
+            "buffer_soc": plan.buffer_soc,
+            "buffer_capped": plan.buffer_capped,
             "planned_charge_power_w": self.planned_charge_power_w,
         }
 

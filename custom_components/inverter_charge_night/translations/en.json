@@ -130,7 +130,8 @@
           "curtailment_limit_w": "Feed-in cap",
           "curtailment_feed_in_entity": "Feed-in power entity",
           "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
-          "pv_energy_today_entity": "Actual PV energy today"
+          "pv_energy_today_entity": "Actual PV energy today",
+          "safety_buffer_kwh": "Safety buffer"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -156,7 +157,8 @@
           "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
           "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
           "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
-          "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today."
+          "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today.",
+          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used."
         }
       },
       "reconfigure": {
@@ -288,7 +290,8 @@
           "curtailment_limit_w": "Feed-in cap",
           "curtailment_feed_in_entity": "Feed-in power entity",
           "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
-          "pv_energy_today_entity": "Actual PV energy today"
+          "pv_energy_today_entity": "Actual PV energy today",
+          "safety_buffer_kwh": "Safety buffer"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -314,7 +317,8 @@
           "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
           "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
           "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
-          "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today."
+          "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today.",
+          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used."
         }
       },
       "review": {
@@ -604,9 +608,9 @@
           "evening": "Reserve for expensive evening hours",
           "season": "Active season",
           "pv_shortfall": "Account for very low PV yield",
-          "pv_shortfall_off": "Disable poor PV yield detection",
           "prices": "Account for electricity prices",
-          "setup": "Back to overview"
+          "setup": "Back to overview",
+          "reserve": "Safety buffer and reserves"
         }
       },
       "advanced_features": {
@@ -673,6 +677,16 @@
       "charging_off": {
         "title": "Remove charging power control",
         "description": "Disable efficiency search and house import limiting first. They require a watt control. Continue returns to feature selection. Active configuration changes only when finally applied."
+      },
+      "reserve": {
+        "title": "Safety buffer and reserves",
+        "description": "How much the night target carries beyond what the plan needs. The buffer only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power.",
+        "data": {
+          "safety_buffer_kwh": "Safety buffer"
+        },
+        "data_description": {
+          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used."
+        }
       }
     },
     "error": {
@@ -843,7 +857,8 @@
           "curtailment_limit_w": "Feed-in cap",
           "curtailment_feed_in_entity": "Feed-in power entity",
           "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
-          "pv_energy_today_entity": "Actual PV energy today"
+          "pv_energy_today_entity": "Actual PV energy today",
+          "safety_buffer_kwh": "Safety buffer"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -869,7 +884,8 @@
           "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
           "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
           "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
-          "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today."
+          "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today.",
+          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used."
         }
       },
       "review": {
@@ -1155,9 +1171,9 @@
           "evening": "Reserve for expensive evening hours",
           "season": "Active season",
           "pv_shortfall": "Account for very low PV yield",
-          "pv_shortfall_off": "Disable poor PV yield detection",
           "prices": "Account for electricity prices",
-          "setup": "Back to overview"
+          "setup": "Back to overview",
+          "reserve": "Safety buffer and reserves"
         }
       },
       "advanced_features": {
@@ -1224,6 +1240,16 @@
       "charging_off": {
         "title": "Remove charging power control",
         "description": "Disable efficiency search and house import limiting first. They require a watt control. Continue returns to feature selection. Active configuration changes only when finally applied."
+      },
+      "reserve": {
+        "title": "Safety buffer and reserves",
+        "description": "How much the night target carries beyond what the plan needs. The buffer only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power.",
+        "data": {
+          "safety_buffer_kwh": "Safety buffer"
+        },
+        "data_description": {
+          "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used."
+        }
       }
     },
     "error": {

@@ -822,3 +822,58 @@ def test_the_outlook_counts_the_forecast_less_its_margin():
     assert cautious.pv_to_come_kwh == pytest.approx(trusting.pv_to_come_kwh * 0.8)
     assert trusting.missing_kwh == 0.0
     assert cautious.missing_kwh > 0.0
+
+
+# --- plan 015 stage A: the safety buffer -----------------------------------
+
+
+def test_no_buffer_is_the_lower_bound_exactly():
+    plan = plan_target_soc(_plan_input())
+    assert plan.target_soc == _lower_bound(BRIDGE_KWH)
+    assert plan.buffer_soc == 0.0
+    assert not plan.buffer_capped
+
+
+def test_the_buffer_rides_on_the_lower_bound():
+    """Pascal's 23/24 October: 44 % on 35.8 kWh, 4 kWh buffer gives 55.2 %."""
+    base = plan_target_soc(_plan_input())
+    plan = plan_target_soc(_plan_input(safety_buffer_kwh=2.0))
+    assert plan.reason == REASON_BRIDGE
+    assert plan.target_soc == pytest.approx(base.target_soc + 20.0, abs=0.11)
+    assert plan.buffer_soc == pytest.approx(20.0, abs=0.11)
+    assert not plan.buffer_capped
+    assert plan.lower_bound_soc == base.lower_bound_soc  # the bound itself is unchanged
+
+
+def test_the_buffer_never_takes_the_room_the_sun_needs():
+    """Capped at the upper bound: a buffer may never make tomorrow's PV spill."""
+    # 9 kWh of forecast leave room for the surplus; the upper bound sits well below 100 %
+    plan = plan_target_soc(_plan_input(forecast_kwh_next_day=9.0, safety_buffer_kwh=8.0))
+    assert plan.target_soc == plan.upper_bound_soc
+    assert plan.buffer_capped
+    assert plan.buffer_soc == pytest.approx(plan.upper_bound_soc - plan.lower_bound_soc, abs=0.11)
+
+
+def test_a_conflict_carries_no_buffer():
+    """Lower above upper: there is no room for anything on top."""
+    plan = plan_target_soc(
+        _plan_input(forecast_kwh_next_day=14.0, safety_buffer_kwh=3.0, reserve_kwh=6.0)
+    )
+    assert plan.reason == REASON_CONFLICT_BRIDGE_WINS
+    assert plan.target_soc == plan.lower_bound_soc
+    assert plan.buffer_soc == 0.0
+
+
+def test_without_a_forecast_the_buffer_rides_on_the_lower_bound():
+    plan = plan_target_soc(_plan_input(forecast_available=False, reserve_kwh=4.0,
+                                       safety_buffer_kwh=2.0))
+    assert plan.reason == REASON_FALLBACK
+    assert plan.target_soc == pytest.approx(plan.lower_bound_soc + 20.0, abs=0.11)
+    assert plan.target_soc > DEFAULT_SAFE_FALLBACK_SOC
+
+
+def test_the_buffer_stops_at_the_user_maximum():
+    plan = plan_target_soc(_plan_input(user_max_soc=40.0, safety_buffer_kwh=5.0))
+    assert plan.target_soc == 40.0
+    assert plan.buffer_capped
+    assert plan.buffer_soc == pytest.approx(40.0 - plan.lower_bound_soc, abs=0.11)

@@ -81,6 +81,8 @@ CONF_HOUSE_LOAD_ENTITY = "house_load_entity"  # cumulative kWh meter of the hous
 CONF_AVG_HOUSE_LOAD_KW = "avg_house_load_kw"  # fallback without a meter: average load in kW
 CONF_PV_CROSSOVER_DELAY_MIN = "pv_crossover_delay_min"  # minutes after sunrise until PV > load
 CONF_BRIDGE_RESERVE_KWH = "bridge_reserve_kwh"  # safety reserve added to the bridge energy
+# Plan 015 stage A: carried above the lower bound, capped at the upper one
+CONF_SAFETY_BUFFER_KWH = "safety_buffer_kwh"
 CONF_CHARGE_EFFICIENCY = "charge_efficiency"  # 0.80-1.0, default 0.90
 # The other direction. Energy leaving the battery passes through the inverter
 # too, so the battery has to hold more than the house will draw - which is what
@@ -94,6 +96,7 @@ DEFAULT_PLANNER_MODE = PLANNER_MODE_HEADROOM
 DEFAULT_AVG_HOUSE_LOAD_KW = 0.5
 DEFAULT_PV_CROSSOVER_DELAY_MIN = 90
 DEFAULT_BRIDGE_RESERVE_KWH = 0.5
+DEFAULT_SAFETY_BUFFER_KWH = 0.0
 DEFAULT_CHARGE_EFFICIENCY = 0.90
 DEFAULT_DISCHARGE_EFFICIENCY = 0.95
 HOUSE_LOAD_PROFILE_DAYS = 14  # history used to learn the hourly load profile

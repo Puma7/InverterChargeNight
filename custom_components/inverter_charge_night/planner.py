@@ -82,6 +82,10 @@ class PlanInput:
     # was configured for.
     window_price_ct: float | None = None
     evening_price_ct: float | None = None
+    # Plan 015 stage A: carried on top of the lower bound, but only into room
+    # the upper bound leaves - a buffer must never make the sun spill. Bought
+    # once and carried: each night plans from the battery as it finds it.
+    safety_buffer_kwh: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -108,6 +112,10 @@ class PlanResult:
     # True when prices said the evening is cheap enough that holding energy
     # back for it costs more than buying it then.
     evening_reserve_dropped: bool = False
+    # The safety buffer the target carries above the lower bound, in SOC
+    # points, and whether the upper bound cut it short.
+    buffer_soc: float = 0.0
+    buffer_capped: bool = False
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -281,11 +289,16 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
         p.user_max_soc,
     )
 
+    buffer_soc = max(0.0, float(p.safety_buffer_kwh)) / capacity * 100.0
+
     if not p.forecast_available:
         # Same protection as the headroom formula: never charge to the maximum
-        # on a missing forecast, use the safe fallback instead.
+        # on a missing forecast, use the safe fallback instead. Without a
+        # forecast there is no upper bound to cap the buffer at, so it simply
+        # rides on the lower bound; the fallback already assumes a dull day.
+        buffered = lower + buffer_soc
         target = _clamp(
-            max(DEFAULT_SAFE_FALLBACK_SOC, lower), p.user_min_soc, p.user_max_soc
+            max(DEFAULT_SAFE_FALLBACK_SOC, buffered), p.user_min_soc, p.user_max_soc
         )
         return PlanResult(
             round(target, 1),
@@ -297,10 +310,18 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
             evening_kwh,
             evening_shortfall,
             evening_dropped,
+            round(max(0.0, target - lower), 1),
+            target < buffered,
         )
 
+    applied_buffer = 0.0
+    buffer_capped = False
     if lower <= upper:
-        target, reason = lower, REASON_BRIDGE
+        # The buffer fills room the sun will not need, and no more: capped at
+        # the upper bound, it can never make the battery spill PV tomorrow.
+        target, reason = min(lower + buffer_soc, upper), REASON_BRIDGE
+        applied_buffer = target - lower
+        buffer_capped = buffer_soc > 0 and lower + buffer_soc > upper
     elif p.prices_ct is None:
         target, reason = lower, REASON_CONFLICT_BRIDGE_WINS
     else:
@@ -317,9 +338,12 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
         else:
             target, reason = upper, REASON_CONFLICT_HEADROOM_WINS
 
-    target = _clamp(target, p.user_min_soc, p.user_max_soc)
+    clamped = _clamp(target, p.user_min_soc, p.user_max_soc)
+    if clamped < target:
+        buffer_capped = buffer_capped or applied_buffer > 0
+        applied_buffer = max(0.0, applied_buffer - (target - clamped))
     return PlanResult(
-        round(target, 1),
+        round(clamped, 1),
         bridge_kwh,
         surplus,
         round(lower, 1),
@@ -328,6 +352,8 @@ def plan_target_soc(p: PlanInput) -> PlanResult:
         evening_kwh,
         evening_shortfall,
         evening_dropped,
+        round(applied_buffer, 1),
+        buffer_capped,
     )
 
 
