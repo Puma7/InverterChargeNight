@@ -1,0 +1,97 @@
+# Inverter Charge Night - Beispielansicht für ein Dashboard
+#
+# Verwendet nur Karten, die mit Home Assistant ausgeliefert werden. Über
+# Dashboard bearbeiten -> drei Punkte -> Raw-Konfigurationseditor als ein Eintrag
+# unter "views:" einfügen, oder einzelne Karten kopieren. sensor.battery_soc durch
+# den eigenen Ladestandssensor des Akkus ersetzen.
+#
+# Die Entitäts-IDs unten erzeugt Home Assistant für das Gerät "Inverter Charge
+# Night", wenn die Systemsprache bei der Einrichtung Deutsch war. Mit Englisch
+# als Systemsprache entstehen englische IDs (dashboard.yaml), zum Beispiel
+# sensor.inverter_charge_night_zielladestand statt
+# sensor.inverter_charge_night_zielladestand. Die eigenen IDs stehen auf der
+# Geräteseite.
+title: Nachtladung
+path: nachtladung
+icon: mdi:battery-clock
+cards:
+  - type: vertical-stack
+    cards:
+      - type: gauge
+        name: Zielladestand für heute Nacht
+        entity: sensor.inverter_charge_night_zielladestand
+        min: 0
+        max: 100
+        severity:
+          green: 0
+          yellow: 70
+          red: 90
+      - type: entities
+        title: Heute Nacht
+        state_color: true
+        entities:
+          - entity: switch.inverter_charge_night_automatik
+            name: Automatik
+          - entity: binary_sensor.inverter_charge_night_fenster_aktiv
+            name: Fenster aktiv
+          - entity: select.inverter_charge_night_betriebsart
+            name: Betriebsart
+          - entity: sensor.inverter_charge_night_geplante_ladeleistung
+            name: Geplante Ladeleistung
+          - entity: sensor.inverter_charge_night_abendvorschau
+            name: Abendvorschau
+          - entity: sensor.inverter_charge_night_nachste_hochpreiszeit
+            name: Nächste Hochpreiszeit
+  - type: markdown
+    title: Warum dieses Ziel
+    # Literal-Block (|-): ein gefalteter Block (>-) würde die Tabellenzeilen zu
+    # einer Zeile zusammenziehen.
+    # Zahlen mit Dezimalkomma: replace('.', ',').
+    content: |-
+      {% set s = 'sensor.inverter_charge_night_zielladestand' %}
+      {% set crossover = state_attr(s, 'pv_crossover') %}
+      {% set reasons = {'bridge': 'Bedarf am Morgen', 'conflict_bridge_wins': 'Konflikt: der Morgen gewinnt',
+                        'conflict_headroom_wins': 'Konflikt: Platz für die PV', 'fallback': 'ohne Prognose'} %}
+      {% set weather = {'off': 'aus', 'learning': 'lernt', 'active': 'aktiv',
+                        'forecast_unavailable': 'keine Vorhersage'} %}
+      | Größe | Wert |
+      |---|---|
+      | Plan | {{ reasons.get(state_attr(s, 'plan_reason'), '-') }} |
+      | Untergrenze (Bedarf) | {{ state_attr(s, 'lower_bound_soc') | string | replace('.', ',') }} % |
+      | Obergrenze (Platz für PV) | {{ state_attr(s, 'upper_bound_soc') | string | replace('.', ',') }} % |
+      | Sicherheitspuffer | {{ (state_attr(s, 'buffer_soc') or 0) | string | replace('.', ',') }} % |
+      | Überbrückung bis PV | {{ state_attr(s, 'bridge_kwh') | string | replace('.', ',') }} kWh |
+      | PV versorgt das Haus ab | {{ (crossover | as_datetime | as_local).strftime('%H:%M') if crossover else '-' }} Uhr |
+      | Wetter | {{ weather.get((state_attr(s, 'weather') or {}).get('status'), '-') }} |
+  - type: history-graph
+    title: Akku und Ziel, letzte 48 h
+    hours_to_show: 48
+    entities:
+      - entity: sensor.battery_soc
+        name: Akku
+      - entity: sensor.inverter_charge_night_zielladestand
+        name: Ziel
+  - type: entities
+    title: Ausnahmen
+    show_header_toggle: false
+    entities:
+      - entity: switch.inverter_charge_night_nachstes_fenster_uberspringen_24_h
+        name: Nächstes Fenster überspringen (24 h)
+      - entity: number.inverter_charge_night_zielladestand_uberschreiben
+        name: Zielladestand überschreiben
+      - entity: number.inverter_charge_night_schnee_nachte
+        name: Schnee-Nächte
+      - entity: switch.inverter_charge_night_abendrettung_festhalten_und_nachladen
+        name: Abendrettung
+  # Beide Sensoren der Effizienzsuche sind standardmäßig deaktiviert: auf der
+  # Geräteseite aktivieren, oder diese Karte entfernen, wenn die Effizienzsuche
+  # nicht genutzt wird.
+  - type: entities
+    title: Effizienzsuche
+    entities:
+      - entity: switch.inverter_charge_night_effizienzsuche
+        name: Effizienzsuche
+      - entity: sensor.inverter_charge_night_effizienzsuche
+        name: Suchstatus
+      - entity: sensor.inverter_charge_night_effizienteste_ladeleistung
+        name: Effizienteste Ladeleistung

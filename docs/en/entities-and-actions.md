@@ -20,7 +20,7 @@ version, check the ids on the device page.
 | Skip the next window (24 h) | `switch.inverter_charge_night_skip_the_next_window_24_h` | Skips one window, then expires by itself. |
 | Evening rescue (hold and charge) | `switch.inverter_charge_night_evening_rescue_hold_and_charge` | Lets the [evening rescue](extras.md#evening-rescue) act. Off by default. |
 | Efficiency search | `switch.inverter_charge_night_efficiency_search` | Starts the [efficiency search](efficiency-search.md). Switches itself off when it is done. |
-| Operation Mode | `select.inverter_charge_night_operation_mode` | *Night Charge* or *Morning discharge (experimental)*. Switching during a window resets the inverter first. |
+| Operation mode | `select.inverter_charge_night_operation_mode` | *Night charge* or *Morning discharge (experimental)*. Switching during a window resets the inverter first. |
 | Target SOC override | `number.inverter_charge_night_target_soc_override` | Replaces the planner's target until the window ends. |
 | Snow nights | `number.inverter_charge_night_snow_nights` | Charges the next N nights to the maximum SOC. |
 

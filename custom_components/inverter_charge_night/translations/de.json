@@ -1380,16 +1380,132 @@
   "entity": {
     "sensor": {
       "calculated_soc": {
-        "name": "Zielladestand"
+        "name": "Zielladestand",
+        "state_attributes": {
+          "is_active": {
+            "name": "Fenster läuft"
+          },
+          "target_reached": {
+            "name": "Ziel erreicht"
+          },
+          "current_soc": {
+            "name": "Aktueller Ladestand"
+          },
+          "operation_mode": {
+            "name": "Betriebsart",
+            "state": {
+              "night_charge": "Nachtladung",
+              "morning_discharge": "Morgenentladung"
+            }
+          },
+          "skip_next": {
+            "name": "Nächstes Fenster überspringen"
+          },
+          "snow_nights": {
+            "name": "Schnee-Nächte"
+          },
+          "adhoc_reason": {
+            "name": "Laufendes Zusatzfenster",
+            "state": {
+              "service": "Aktion",
+              "evening_rescue": "Abendrettung"
+            }
+          },
+          "adhoc_until": {
+            "name": "Zusatzfenster bis"
+          },
+          "original_min_soc": {
+            "name": "Ursprünglicher Min-SOC"
+          },
+          "pending_reset": {
+            "name": "Zurücksetzen ausstehend"
+          },
+          "reset_abandoned": {
+            "name": "Zurücksetzen aufgegeben"
+          },
+          "charge_limit_not_held": {
+            "name": "Ladegrenze nicht gehalten"
+          },
+          "min_soc_released_for_connection": {
+            "name": "Min-SOC für den Hausanschluss gesenkt"
+          },
+          "plan_reason": {
+            "name": "Plan",
+            "state": {
+              "bridge": "Bedarf am Morgen",
+              "conflict_bridge_wins": "Konflikt: der Morgen gewinnt",
+              "conflict_headroom_wins": "Konflikt: der Platz für die PV gewinnt",
+              "fallback": "Rückfall ohne Prognose"
+            }
+          },
+          "bridge_kwh": {
+            "name": "Bedarf am Morgen"
+          },
+          "surplus_kwh": {
+            "name": "PV-Überschuss morgen"
+          },
+          "lower_bound_soc": {
+            "name": "Untergrenze"
+          },
+          "upper_bound_soc": {
+            "name": "Obergrenze"
+          },
+          "buffer_soc": {
+            "name": "Sicherheitspuffer"
+          },
+          "buffer_capped": {
+            "name": "Puffer durch Obergrenze gekürzt"
+          },
+          "pv_crossover": {
+            "name": "PV trägt das Haus ab"
+          },
+          "pv_yield": {
+            "name": "PV-Ausfallerkennung"
+          },
+          "weather": {
+            "name": "Wetter"
+          },
+          "inverter_floor_soc": {
+            "name": "Min-SOC am Wechselrichter"
+          },
+          "discharge_block": {
+            "name": "Akku gehalten über",
+            "state": {
+              "min_soc": "Min-SOC",
+              "off": "Aus",
+              "switch": "Schalter",
+              "limit": "Entladegrenze"
+            }
+          }
+        }
       },
       "best_charge_power": {
         "name": "Effizienteste Ladeleistung"
       },
       "planned_charge_power": {
-        "name": "Geplante Ladeleistung"
+        "name": "Geplante Ladeleistung",
+        "state_attributes": {
+          "applied": {
+            "name": "An den Wechselrichter geschrieben"
+          }
+        }
       },
       "grid_charge_headroom": {
-        "name": "Vom Hausanschluss freigelassene Ladeleistung"
+        "name": "Vom Hausanschluss freigelassene Ladeleistung",
+        "state_attributes": {
+          "budget_w": {
+            "name": "Budget"
+          },
+          "grid_import_w": {
+            "name": "Netzbezug"
+          },
+          "other_load_w": {
+            "name": "Andere Verbraucher"
+          },
+          "limited": {
+            "name": "Begrenzt"
+          }
+        }
       },
       "efficiency_search": {
         "name": "Effizienzsuche",
@@ -1399,13 +1515,85 @@
           "settling": "Einschwingen",
           "measuring": "Misst",
           "finished": "Abgeschlossen"
+        },
+        "state_attributes": {
+          "test_power_w": {
+            "name": "Testleistung"
+          },
+          "best_power_w": {
+            "name": "Beste Leistung"
+          },
+          "best_loss_pct": {
+            "name": "Verlust bei der besten Leistung"
+          },
+          "loss_by_power_pct": {
+            "name": "Verlust je Leistung"
+          },
+          "uncertainty_by_power_pct": {
+            "name": "Unsicherheit je Leistung"
+          },
+          "loss_by_band_pct": {
+            "name": "Verlust je Ladestand"
+          },
+          "search_range_w": {
+            "name": "Suchbereich"
+          },
+          "measured_energy_kwh": {
+            "name": "Gemessene Energie"
+          },
+          "last_result": {
+            "name": "Letztes Ergebnis"
+          },
+          "measurement_source": {
+            "name": "Gemessen mit"
+          },
+          "waiting_reason": {
+            "name": "Wartet, weil"
+          }
         }
       },
       "next_high_price_window": {
-        "name": "Nächste Hochpreiszeit"
+        "name": "Nächste Hochpreiszeit",
+        "state_attributes": {
+          "end": {
+            "name": "Ende"
+          },
+          "duration_h": {
+            "name": "Dauer"
+          },
+          "reserve_kwh": {
+            "name": "Reserve"
+          },
+          "bought_at_night_kwh": {
+            "name": "Nachts gekauft"
+          }
+        }
       },
       "evening_outlook": {
-        "name": "Abendvorschau"
+        "name": "Abendvorschau",
+        "state_attributes": {
+          "zone_start": {
+            "name": "Hochpreiszeit beginnt"
+          },
+          "zone_end": {
+            "name": "Hochpreiszeit endet"
+          },
+          "required_soc": {
+            "name": "Nötig zu Beginn"
+          },
+          "projected_soc": {
+            "name": "Erwartet zu Beginn"
+          },
+          "pv_to_come_kwh": {
+            "name": "Noch erwartete PV"
+          },
+          "load_to_come_kwh": {
+            "name": "Noch erwarteter Verbrauch"
+          },
+          "forecast_available": {
+            "name": "Prognose verfügbar"
+          }
+        }
       },
       "price_signal": {
         "name": "Preissignal"

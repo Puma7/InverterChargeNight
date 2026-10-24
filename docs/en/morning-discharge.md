@@ -34,7 +34,7 @@ reduced; here you *sell* when the grid is strained and the tariff is high.
 
 | | |
 |---|---|
-| **Force discharge switch** | Required. It is the only thing that actually discharges — without it the mode just raises the min SOC floor and waits. The setup refuses to save the mode without it, but the *Operation Mode* select does not check, so configure the switch first. |
+| **Force discharge switch** | Required. It is the only thing that actually discharges — without it the mode just raises the min SOC floor and waits. The setup refuses to save the mode without it, but the *Operation mode* select does not check, so configure the switch first. |
 | **A tariff that pays for it** | A dynamic tariff (Tibber, aWATTar, EPEX-based) or a feed-in arrangement worth more than what the energy cost you. At a flat feed-in rate the arithmetic usually does not work. |
 | **A summer-shaped forecast** | It only makes sense when the day's PV will cover the house *and* refill the battery. In winter this mode empties a battery you will want. |
 | **A window that matches your peak** | Start and end time are the same two fields as for night charge. 05:00–08:00 is a reasonable starting point for a German household; look at your own consumption first. |
