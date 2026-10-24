@@ -497,6 +497,24 @@ async def test_a_purchase_called_off_takes_the_floor_back_to_the_battery(mock_ha
 
 
 @pytest.mark.asyncio
+async def test_a_reset_by_hand_is_not_undone_by_the_next_poll(mock_hass):
+    """CodeRabbit on #44: reset_inverter hands the inverter back until the period."""
+    coordinator = _make_coordinator(mock_hass)
+    await _rescue(coordinator, _short())
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=EARLY
+    ):
+        await coordinator.async_reset_inverter()
+    assert coordinator.is_active is False
+    assert coordinator._hands_off_until == ZONE_START
+
+    await _rescue(coordinator, _short(), now=EARLY + timedelta(minutes=15))
+
+    assert coordinator.is_active is False
+    assert coordinator._rescue_stage == 0
+
+
+@pytest.mark.asyncio
 async def test_an_empty_battery_is_not_held(mock_hass):
     """Nothing above the minimum to keep, and a floor above it would buy."""
     coordinator = _make_coordinator(mock_hass)

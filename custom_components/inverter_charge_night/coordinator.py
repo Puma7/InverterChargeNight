@@ -5756,6 +5756,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # A configured window, or an ad-hoc one an action asked for
             return
         now = dt_util.now()
+        hands_off = self._hands_off_until
+        if hands_off is not None and elapsed_seconds(hands_off, now) > 0:
+            # reset_inverter handed the inverter back until the period starts;
+            # a shortfall that is still there must not take it again on the
+            # next poll (CodeRabbit on #44). An action asked for by hand still
+            # may - that is a new request, not this one coming back.
+            return
         capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
         spare_kwh = (outlook.projected_soc - outlook.required_soc) / 100.0 * capacity
         if rescuing and spare_kwh >= EVENING_RESCUE_RELEASE_KWH:

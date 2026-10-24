@@ -33,6 +33,8 @@ The evening rescue becomes the **high-price rescue** and holds only what the per
   off a purchase, the new minimum SOC is written in the same poll. Before, the update returned
   early with the target already met, and the old floor stayed until the next verification.
 - **An empty battery still buys when that pays.** Only holding is skipped at the minimum SOC.
+- **A reset by hand stays a reset.** After `reset_inverter` ends a running rescue, the rescue
+  does not open again before the period starts. Actions asked for by hand still work.
 - **A window opened by an action** (`block_discharge`, `charge_to`) is no longer taken over by
   the rescue.
 - **Renamed:** *High-price rescue (hold and charge)* / *Hochpreisrettung (festhalten und
