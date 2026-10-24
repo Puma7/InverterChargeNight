@@ -577,6 +577,42 @@ async def test_a_purchase_called_off_switches_grid_charging_off_in_the_same_poll
 
 
 @pytest.mark.asyncio
+async def test_a_hold_switches_off_grid_charging_left_on_below_its_target(mock_hass):
+    """CodeRabbit on #44: a battery a fraction below the hold skips the stop path."""
+    coordinator = _make_coordinator(mock_hass)
+    await _rescue(coordinator, _short())  # holds 30 %
+    mock_hass.states.async_set("sensor.soc", "29.8", {"unit_of_measurement": "%"})
+    mock_hass.states.async_set("switch.grid", "on")
+    mock_hass.services.async_call.reset_mock()
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=EARLY):
+        await coordinator._control_charge(30.0)
+
+    mock_hass.services.async_call.assert_any_await(
+        "switch", "turn_off", {"entity_id": "switch.grid"}, blocking=True
+    )
+    assert not any(
+        call.args[:2] == ("switch", "turn_on")
+        for call in mock_hass.services.async_call.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_hold_does_not_write_a_grid_switch_that_is_off(mock_hass):
+    coordinator = _make_coordinator(mock_hass)
+    await _rescue(coordinator, _short())
+    mock_hass.states.async_set("sensor.soc", "29.8", {"unit_of_measurement": "%"})
+    mock_hass.services.async_call.reset_mock()
+
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=EARLY):
+        await coordinator._control_charge(30.0)
+
+    assert not any(
+        call.args[0] == "switch" for call in mock_hass.services.async_call.await_args_list
+    )
+
+
+@pytest.mark.asyncio
 async def test_an_empty_battery_is_not_held(mock_hass):
     """Nothing above the minimum to keep, and a floor above it would buy."""
     coordinator = _make_coordinator(mock_hass)

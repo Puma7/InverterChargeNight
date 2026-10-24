@@ -6997,6 +6997,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Ad-hoc window (%s) does not allow grid charging", self._adhoc_reason
             )
             should_skip_charging = True
+            # ... and one left on by a purchase the window has since called off
+            # goes off: not switching it on is not the same as stopping it
+            # (CodeRabbit on #44). A switch that is already off is not written.
+            await self._pause_grid_charge("the ad-hoc window only holds")
 
         if battery_soc_entity:
             state = self.hass.states.get(battery_soc_entity)
