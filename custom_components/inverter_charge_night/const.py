@@ -370,8 +370,20 @@ EFFICIENCY_BAND_MAX_SPAN = 2
 # forecast hardly turns any more.
 EVENING_RESCUE_CHARGE_LEAD_H = 2.0
 # The ad-hoc window's reason, in one place: the outlook has to recognise the
-# rescue's own window, or stage one would lock stage two out.
+# rescue's own window, or stage one would lock stage two out. The key stayed
+# when the feature was renamed the high-price rescue (plan 016): it is
+# persisted, and a window running across the update has to be recognised.
 ADHOC_REASON_EVENING_RESCUE = "evening_rescue"
+# The high-price rescue lets go once the outlook clears the need by this much
+# (plan 016). It engages at any shortfall, so the two thresholds leave a band
+# in which nothing is written - the guard against a rescue that opens and
+# closes with every forecast update.
+EVENING_RESCUE_RELEASE_KWH = 0.5
+# A need that moves less than this keeps the running rescue's target.
+EVENING_RESCUE_RETARGET_SOC = 1.0
+# Buying for the period has to beat the period's price by this much after the
+# round trip through the battery, or the rescue only holds (plan 016).
+EVENING_RESCUE_BUY_MARGIN_CT = 2.0
 
 # Reading a price entity (plan 012, stage 3) ----------------------------------
 CONF_PRICE_ENTITY = "price_entity"

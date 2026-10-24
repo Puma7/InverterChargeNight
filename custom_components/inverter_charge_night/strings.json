@@ -50,7 +50,7 @@
           "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
-          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value."
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value. The high-price rescue reckons without it: it holds only what the period needs."
         }
       },
       "power": {
@@ -100,7 +100,7 @@
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
           "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
           "discharge_block_switch": "Optional. Only used to give back the state that a version before 3.10.6 changed; the integration no longer turns this switch on. The battery is held through the min SOC only.",
-          "discharge_block_mode": "Applies only to explicit reservations and the evening rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written."
+          "discharge_block_mode": "Applies only to explicit reservations and the high-price rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written."
         }
       },
       "advanced": {
@@ -220,7 +220,7 @@
           "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
-          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value."
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value. The high-price rescue reckons without it: it holds only what the period needs."
         }
       },
       "reconfigure_power": {
@@ -270,7 +270,7 @@
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
           "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
           "discharge_block_switch": "Optional. Only used to give back the state that a version before 3.10.6 changed; the integration no longer turns this switch on. The battery is held through the min SOC only.",
-          "discharge_block_mode": "Applies only to explicit reservations and the evening rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written."
+          "discharge_block_mode": "Applies only to explicit reservations and the high-price rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written."
         }
       },
       "reconfigure_advanced": {
@@ -493,8 +493,8 @@
         "data_description": {
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
-          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value.",
-          "discharge_block_mode": "Applies only to explicit reservations and the evening rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written.",
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value. The high-price rescue reckons without it: it holds only what the period needs.",
+          "discharge_block_mode": "Applies only to explicit reservations and the high-price rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written.",
           "discharge_block_switch": "Optional. Only used to give back the state that a version before 3.10.6 changed; the integration no longer turns this switch on. The battery is held through the min SOC only."
         }
       },
@@ -807,7 +807,7 @@
           "planner_mode": "Bridge: also plans energy from the end of the charging window until sufficient PV production, using learned/average household load and sunrise plus the delay in Advanced. PV headroom: only leaves room for the forecast; it does not additionally cover morning consumption.",
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
-          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value."
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value. The high-price rescue reckons without it: it holds only what the period needs."
         }
       },
       "power": {
@@ -857,7 +857,7 @@
           "grid_max_continuous_w": "Enter the continuous budget directly instead of the fuse size. Takes precedence when set.",
           "grid_headroom_w": "Distance kept below the budget, so a load the battery cannot see coming does not push the connection over the limit.",
           "discharge_block_switch": "Optional. Only used to give back the state that a version before 3.10.6 changed; the integration no longer turns this switch on. The battery is held through the min SOC only.",
-          "discharge_block_mode": "Applies only to explicit reservations and the evening rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written."
+          "discharge_block_mode": "Applies only to explicit reservations and the high-price rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written."
         }
       },
       "advanced": {
@@ -1076,8 +1076,8 @@
         "data_description": {
           "high_price_start": "Optional: the time from which buying from the grid costs more than usual — a §14a peak period, or the evening block of a dynamic tariff (often 18:00). The planner then makes sure the battery can carry the house through it: what the house will draw between these two times, minus what tomorrow's sun is forecast to put in, is bought in tonight's cheap window. Leave both empty if you have no such period.",
           "high_price_end": "The time the high-price period is over (often 21:00). May run past midnight. Either set both times or neither — one end alone says when it starts but never when it stops.",
-          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value.",
-          "discharge_block_mode": "Applies only to explicit reservations and the evening rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written.",
+          "high_price_margin_pct": "The reserve is worked out from the learned house load profile, which is an average of the last days — an evening with the oven and the washing machine lies above it. This adds that percentage on top. 0 % takes the average at face value. The high-price rescue reckons without it: it holds only what the period needs.",
+          "discharge_block_mode": "Applies only to explicit reservations and the high-price rescue: Automatic raises the min SOC to the level being held, Off keeps only the target min SOC. A scheduled night always sets only its planned target min SOC; battery energy above it may supply the house. A discharge block switch or a discharge limit is never written.",
           "discharge_block_switch": "Optional. Only used to give back the state that a version before 3.10.6 changed; the integration no longer turns this switch on. The battery is held through the min SOC only."
         }
       },
@@ -1408,7 +1408,7 @@
             "name": "Running extra window",
             "state": {
               "service": "Action",
-              "evening_rescue": "Evening rescue"
+              "evening_rescue": "High-price rescue"
             }
           },
           "adhoc_until": {
@@ -1613,7 +1613,7 @@
         "name": "Skip the next window (24 h)"
       },
       "evening_rescue_charge": {
-        "name": "Evening rescue (hold and charge)"
+        "name": "High-price rescue (hold and charge)"
       }
     },
     "select": {
@@ -1710,7 +1710,7 @@
   "services": {
     "allow_discharge": {
       "name": "Release the battery",
-      "description": "Ends a hold or a charge before its time is up and hands the inverter back. Only affects one started by an action or by the evening rescue — a configured window is the schedule doing its job, and ‘reset the inverter’ is what ends that.",
+      "description": "Ends a hold or a charge before its time is up and hands the inverter back. Only affects one started by an action or by the high-price rescue — a configured window is the schedule doing its job, and ‘reset the inverter’ is what ends that.",
       "fields": {
         "config_entry_id": {
           "name": "Inverter",
@@ -1720,7 +1720,7 @@
     },
     "block_discharge": {
       "name": "Hold the battery",
-      "description": "Keeps the battery from running the house for a while, without buying anything: the house draws from the sun, and from the grid when the sun is not enough. The same thing the evening rescue does by itself.",
+      "description": "Keeps the battery from running the house for a while, without buying anything: the house draws from the sun, and from the grid when the sun is not enough. The same thing the high-price rescue does by itself.",
       "fields": {
         "config_entry_id": {
           "name": "Inverter",

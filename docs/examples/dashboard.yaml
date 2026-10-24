@@ -77,8 +77,8 @@ cards:
         name: Target SOC override
       - entity: number.inverter_charge_night_snow_nights
         name: Snow nights
-      - entity: switch.inverter_charge_night_evening_rescue_hold_and_charge
-        name: Evening rescue
+      - entity: switch.inverter_charge_night_high_price_rescue_hold_and_charge
+        name: High-price rescue
   # Both efficiency search sensors are disabled by default: enable them on the
   # device page, or remove this card if you do not use the efficiency search.
   - type: entities

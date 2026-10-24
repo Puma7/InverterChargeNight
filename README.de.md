@@ -47,7 +47,7 @@ Sonne von morgen frei.
 - 🌡️ **Wetterbewusst.** Optional lernt sie, wie viel mehr eine Wärmepumpe an einem kalten Tag
   braucht.
 - 🌆 **Abendreserve.** Den Strom für eine teure Abendspitze kauft sie nachts. Dazu gibt es eine
-  optionale Abendrettung für Tage, die trüber werden als vorhergesagt.
+  optionale Hochpreisrettung für Tage, die trüber werden als vorhergesagt.
 - ⚡ **Schutz des Hausanschlusses.** Hängen Wallboxen am selben Anschluss, gibt der Akku nach,
   bevor die Hauptsicherung es tut.
 - 📉 **Effizienzsuche.** Sie misst, bei welcher Ladeleistung dein Wechselrichter am wenigsten
@@ -84,7 +84,7 @@ Schritt für Schritt: [Installation und Einrichtung](https://github.com/Puma7/In
 | [Alle Einstellungen](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/configuration.md) | Jede Einstellung mit Vorgabewert, dazu Empfehlungen |
 | [Sicherheit](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/safety.md) | Rückgabe der Einstellungen, Hausanschluss, Stromausfall, Kommunikationsverlust |
 | [Effizienzsuche](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/efficiency-search.md) | Die Ladeleistung mit dem geringsten Verlust finden |
-| [Ausnahmen und Extras](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/extras.md) | Aussetzen, Vorgabe von Hand, Schneenächte, Abendrettung, PV-Ausfall, Abregelung |
+| [Ausnahmen und Extras](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/extras.md) | Aussetzen, Vorgabe von Hand, Schneenächte, Hochpreisrettung, PV-Ausfall, Abregelung |
 | [Entitäten und Aktionen](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/entities-and-actions.md) | Alle Entitäten und Attribute, Aktionen, Beispiel-Automationen |
 | [Dashboard](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/dashboard.md) | Eine fertige Dashboard-Ansicht |
 | [Fehlersuche und FAQ](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/troubleshooting.md) | Reparaturhinweise, Debug-Protokolle, Diagnose, häufige Fragen |

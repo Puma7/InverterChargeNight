@@ -30,7 +30,7 @@ Bruchteil dessen, was der Strom gekostet hat.
    der Wechselrichter das Zurücksetzen nicht annimmt, steht unter [Sicherheit](safety.md).
 
 Außerhalb des Fensters steuert ICN den Wechselrichter überhaupt nicht. Ausnahmen sind die
-Abendrettung und die Aktionen `charge_to` / `block_discharge`. Sie laufen als eigene kurze Fenster
+Hochpreisrettung und die Aktionen `charge_to` / `block_discharge`. Sie laufen als eigene kurze Fenster
 mit demselben Sichern und Zurückgeben ([Extras](extras.md)).
 
 > **Das Zurücksetzen der Untergrenze leert den Akku nicht.** Eine Nacht von 23:00 bis 05:00 mit

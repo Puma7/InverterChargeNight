@@ -84,8 +84,8 @@ cards:
         name: Zielladestand überschreiben
       - entity: number.inverter_charge_night_schnee_nachte
         name: Schnee-Nächte
-      - entity: switch.inverter_charge_night_abendrettung_festhalten_und_nachladen
-        name: Abendrettung
+      - entity: switch.inverter_charge_night_hochpreisrettung_festhalten_und_nachladen
+        name: Hochpreisrettung
   # Beide Sensoren der Effizienzsuche sind standardmäßig deaktiviert: auf der
   # Geräteseite aktivieren, oder diese Karte entfernen, wenn die Effizienzsuche
   # nicht genutzt wird.

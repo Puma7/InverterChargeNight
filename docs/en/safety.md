@@ -16,7 +16,7 @@ when something goes wrong.
   Two things are written on purpose: a minimum SOC that someone else moved during the window is
   put back, and a KOSTAL KORE charge limit, which lapses on the inverter, is kept alive every
   20 seconds while the battery can draw from the grid.
-- **Outside the window it does nothing.** Only the evening rescue and the actions `charge_to` /
+- **Outside the window it does nothing.** Only the high-price rescue and the actions `charge_to` /
   `block_discharge` act outside the window, and they run as short windows with the same capture
   and restore.
 - **When in doubt, charge less.** A missing state of charge stops grid charging. A missing grid
@@ -32,7 +32,7 @@ the house down to 30 % and is only charged if it falls below. ICN does not switc
 block, does not write a discharge limit of zero and does not raise the floor to the starting
 level. Either would stop the battery from serving the house at all.
 
-A higher floor than the charge target belongs only to an **explicit reservation**: the evening
+A higher floor than the charge target belongs only to an **explicit reservation**: the high-price
 rescue or the action `block_discharge`. Even then the battery is held only through the minimum
 SOC (setting *Discharge block for reservations*: Automatic). The sensor attributes
 `inverter_floor_soc` and `discharge_block` show what is in force.

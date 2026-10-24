@@ -14,7 +14,7 @@
 
 - [Sicherheit](safety.md): Einstellungen zurückgeben, Hausanschluss, Stromausfall, Kommunikationsverlust.
 - [Effizienzsuche](efficiency-search.md): die Ladeleistung mit dem kleinsten Verlust.
-- [Ausnahmen und Extras](extras.md): Überspringen, Überschreiben, Schnee-Nächte, Abendrettung,
+- [Ausnahmen und Extras](extras.md): Überspringen, Überschreiben, Schnee-Nächte, Hochpreisrettung,
   geringer PV-Ertrag, Abregelung.
 - [Morgenentladung](morning-discharge.md): der experimentelle Gegenmodus.
 

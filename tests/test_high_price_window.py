@@ -358,16 +358,29 @@ async def test_the_outlook_sees_a_battery_that_will_not_make_the_evening(mock_ha
 
 
 @pytest.mark.asyncio
-async def test_the_outlook_takes_the_configured_forecast_margin(mock_hass):
-    """The same forecast margin as the night plan's evening (Codex on #38)."""
+async def test_the_outlook_is_tight_whatever_the_night_plan_margins(mock_hass):
+    """Plan 016: the high-price rescue aims at the need, not above it.
+
+    It used to take the night plan's forecast margin (Codex on #38) and the
+    period's load margin. Too much held there is carried past the period into
+    the cheap night, while too little costs only the difference between two
+    day tariffs, so the outlook that drives the rescue carries neither.
+    """
     coordinator = _outlook_coordinator(mock_hass)
     outlooks = []
     for margin in (0.0, 25.0):
-        coordinator.config = {**coordinator.config, CONF_FORECAST_ERROR_MARGIN: margin}
+        coordinator.config = {
+            **coordinator.config,
+            CONF_FORECAST_ERROR_MARGIN: margin,
+            CONF_HIGH_PRICE_MARGIN_PCT: margin,
+        }
         with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 6, 1, 14, 0)):
             outlooks.append(await coordinator.async_evening_outlook())
 
-    assert outlooks[1].pv_to_come_kwh == pytest.approx(outlooks[0].pv_to_come_kwh * 0.75)
+    assert outlooks[1].pv_to_come_kwh == pytest.approx(outlooks[0].pv_to_come_kwh)
+    assert outlooks[1].required_soc == outlooks[0].required_soc
+    # 3 h at 0.5 kW, out of the battery at 95 %, on 10 kWh above an 8 % floor
+    assert outlooks[0].required_soc == pytest.approx(8.0 + 1.5 / 0.95 / 10 * 100, abs=0.05)
 
 
 @pytest.mark.asyncio

@@ -33,25 +33,45 @@ Reparaturhinweis (*PV-Ertrag stark ausgefallen*) und die `pv_yield`-Attribute de
 *Zielladestand* erklären die Entscheidung. Geringer Ertrag kann Schnee, Verschattung, einen
 Strangfehler oder eine falsche Prognose bedeuten; ICN versucht nicht, das zu unterscheiden.
 
-## Abendrettung
+## Hochpreisrettung
 
 Der Nachtplan kauft für die Hochpreiszeit im Voraus ein. Die Rettung ist für den Fall, dass sich
 dieser Plan als zu optimistisch herausstellt, zum Beispiel bei Schnee, ohne dass Schnee-Nächte
 gesetzt sind. Der Sensor **Abendvorschau** zeigt den Fehlbetrag in kWh, normalerweise 0. Er
 braucht die Prognose für **heute**.
 
-Ist der Schalter **Abendrettung (festhalten und nachladen)** an und gibt es einen Fehlbetrag:
+Die Vorschau rechnet mit Absicht knapp: mit dem durchschnittlichen Verbrauch der Hochpreiszeit,
+ohne Zuschlag und mit der vollen Prognose. Was über den Bedarf hinaus gehalten wird, landet nach
+der Hochpreiszeit in der günstigen Nacht. Fehlt dagegen ein wenig, kostet das nur die letzte
+halbe Stunde der Hochpreiszeit zum Spitzentarif statt zum Tagtarif.
 
-1. **Die Entladung wird gesperrt**, indem der Min-SOC auf den aktuellen Stand angehoben wird. Das
-   Haus läuft dann mit der Sonne und, falls nötig, aus dem Netz zum Tagtarif, statt aus einem Akku,
-   der in wenigen Stunden zum Spitzentarif gebraucht wird.
-2. **Der Rest wird gekauft**, aber erst in den letzten zwei Stunden vor der Hochpreiszeit, wenn
-   sich die Prognose kaum noch ändert.
-3. **Zu Beginn der Hochpreiszeit** bekommt der Wechselrichter seine eigenen Einstellungen zurück,
-   und der Akku trägt den Abend.
+Ist der Schalter **Hochpreisrettung (festhalten und nachladen)** an, prüft ICN bei jeder
+Aktualisierung neu (standardmäßig alle 15 Minuten):
+
+1. **Bei einem Fehlbetrag wird gehalten, was die Hochpreiszeit braucht.** Der Min-SOC wird auf
+   den Bedarf angehoben oder auf den aktuellen Stand, wenn der Akku weniger enthält. Über dem
+   Bedarf versorgt der Akku weiter das Haus. Darunter folgt die Untergrenze der Sonne bis zum
+   Bedarf und nicht weiter. Der Min-SOC wird nie über den Stand des Akkus gesetzt, denn manche
+   Wechselrichter laden dann aus dem Netz.
+2. **Gekauft wird nur, wenn es sich rechnet.** In den letzten zwei Stunden vor der Hochpreiszeit
+   wird der Rest aus dem Netz geladen, aber nur mit einer
+   [Strompreis-Entität](configuration.md#strompreise-berücksichtigen), deren Preise die
+   Hochpreiszeit teurer machen als den Kauf jetzt samt Verlust durch den Akku (Lade- und
+   Entladewirkungsgrad), und zwar um mindestens 2 ct. Bei wenigen Cent Abstand zwischen Tag- und
+   Spitzentarif ist das nie der Fall, und die Rettung hält nur.
+3. **Losgelassen wird, wenn die Sonne reicht.** Zeigt die Vorschau, dass der Akku es mit 0,5 kWh
+   Luft schafft, bekommt der Wechselrichter seine eigenen Einstellungen zurück. Ein späterer
+   Fehlbetrag löst die Rettung erneut aus. Dazwischen wird nichts geschrieben.
+4. **Zu Beginn der Hochpreiszeit** bekommt der Wechselrichter seine Einstellungen in jedem Fall
+   zurück, und der Akku trägt den Abend.
+
+Ein Beispiel: 10 kWh im Akku, die Hochpreiszeit braucht 5 kWh, und der Nachmittag bleibt trüb.
+Der Akku versorgt das Haus, bis noch 5 kWh übrig sind, und hält diese für die Hochpreiszeit.
 
 Der Schalter ist mit Absicht standardmäßig aus: Beobachte den Vorschau-Sensor eine Weile, bevor du
-ihn handeln lässt. Ausschalten beendet eine laufende Rettung sofort.
+ihn handeln lässt. Ausschalten beendet eine laufende Rettung sofort. Bis Version 3.11 hieß die
+Funktion *Abendrettung*; Installationen aus dieser Zeit behalten die Entitäts-ID
+`switch.inverter_charge_night_abendrettung_festhalten_und_nachladen`.
 
 ## Abregelungsvorschau
 

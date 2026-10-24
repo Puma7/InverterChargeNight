@@ -14,7 +14,7 @@
 
 - [Safety](safety.md): restoring settings, house connection, power cut, lost communication.
 - [Efficiency search](efficiency-search.md): the charge power with the smallest loss.
-- [Exceptions and extras](extras.md): skip, override, snow nights, evening rescue, PV shortfall,
+- [Exceptions and extras](extras.md): skip, override, snow nights, high-price rescue, PV shortfall,
   curtailment.
 - [Morning discharge](morning-discharge.md): the experimental opposite mode.
 

@@ -15,6 +15,7 @@ import pytest
 from custom_components.inverter_charge_night.const import (
     PRICE_UNIT_CT_KWH,
     PRICE_UNIT_EUR_KWH,
+    EVENING_RESCUE_BUY_MARGIN_CT,
     PRICE_UNIT_EUR_MWH,
     RESERVE_DROP_MARGIN_CT,
 )
@@ -22,6 +23,7 @@ from custom_components.inverter_charge_night.prices import (
     evening_reserve_pays,
     mean_price_ct,
     parse_price_series,
+    rescue_purchase_pays,
 )
 
 TZ = ZoneInfo("Europe/Berlin")
@@ -448,3 +450,31 @@ def test_an_overlapping_day_is_counted_once():
     assert reason == ""
     assert series is not None
     assert len(series.intervals) == 24, "the same hour twice is one hour"
+
+
+# Buying for the high-price period (plan 016) -------------------------------------
+
+
+def test_buying_for_the_period_needs_the_whole_round_trip_and_the_margin():
+    # 30 ct through 90 % in and 95 % out costs 35.1 ct; with the margin 37.1
+    assert rescue_purchase_pays(30.0, 35.0, 0.90, 0.95, EVENING_RESCUE_BUY_MARGIN_CT) is False
+    assert rescue_purchase_pays(30.0, 37.0, 0.90, 0.95, EVENING_RESCUE_BUY_MARGIN_CT) is False
+    assert rescue_purchase_pays(30.0, 37.2, 0.90, 0.95, EVENING_RESCUE_BUY_MARGIN_CT) is True
+
+
+def test_the_discharge_loss_counts_too():
+    """The charge efficiency alone would call 33.4 ct cheaper than 35."""
+    assert rescue_purchase_pays(30.0, 35.0, 0.90, 1.0, 0.0) is True
+    assert rescue_purchase_pays(30.0, 35.0, 0.90, 0.95, 0.0) is False
+
+
+@pytest.mark.parametrize("before_ct,period_ct", [(None, 45.0), (20.0, None), (None, None)])
+def test_unknown_prices_buy_nothing(before_ct, period_ct):
+    """Unlike the reserve: buying is the one step that costs money for sure."""
+    assert rescue_purchase_pays(before_ct, period_ct, 0.90, 0.95, 0.0) is False
+
+
+@pytest.mark.parametrize("efficiency", [0.0, -1.0])
+def test_a_broken_efficiency_does_not_divide_by_zero(efficiency):
+    assert rescue_purchase_pays(20.0, 45.0, efficiency, efficiency, 0.0) is False
+

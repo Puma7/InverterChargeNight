@@ -5,6 +5,40 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.12.0] - 2026-10-24
+
+The evening rescue becomes the **high-price rescue** and holds only what the period needs
+(plan 016). It stays opt-in: nothing changes for anyone who has not switched it on.
+
+### Changed
+- **It holds what the high-price period needs, not the whole battery.** The minimum SOC goes to
+  the period's need, or to the battery's level when that is lower. The floor that follows the sun
+  stops at the need. Above it the battery keeps serving the house, instead of the house running
+  on day-tariff grid power while the battery carries its surplus past the period into the cheap
+  night. The minimum SOC is never set above the battery's level, which some inverters answer
+  with a grid charge.
+- **The need is reckoned tightly.** The outlook (and with it the *Evening outlook* sensor) uses
+  the period's average load without the allowance (`high_price_margin_pct`) and the full forecast
+  without the error margin. Both stay in the night plan, where a surplus is used up during the
+  day. Falling a little short costs the difference between two day tariffs for the last minutes
+  of the period; holding too much costs the night window.
+- **It buys only when that pays.** Stage two needs a price entity, and the period's mean price
+  has to beat the price before it divided by charge × discharge efficiency, plus 2 ct. Without a
+  price entity, or with a few cents between the tariffs, it only holds.
+- **It is judged afresh on every poll.** It lets go once the outlook shows the battery making it
+  with 0.5 kWh to spare, and engages again on a later shortfall. In the band between the two
+  nothing is written. A smaller need takes the held floor down with it. The stage used to only
+  ever rise within a day, so a sunny afternoon left the battery blocked until the period.
+- **A window opened by an action** (`block_discharge`, `charge_to`) is no longer taken over by
+  the rescue.
+- **Renamed:** *High-price rescue (hold and charge)* / *Hochpreisrettung (festhalten und
+  nachladen)*. Existing installations keep their entity ids; the internal key `evening_rescue`
+  and the persisted state are unchanged.
+
+### Docs
+- `docs/en|de/extras.md` describe the new rules with an example; configuration, entities,
+  safety and the example dashboards follow the new name. Plan 016 records the reasoning.
+
 ## [3.11.1] - 2026-10-24
 
 Documentation in English and German, a refreshed logo, translated sensor attributes, and one

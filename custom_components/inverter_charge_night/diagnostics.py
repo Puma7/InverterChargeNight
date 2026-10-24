@@ -91,6 +91,7 @@ async def async_get_config_entry_diagnostics(
             "adhoc_target_soc": coordinator._adhoc_target_soc,
             "adhoc_allow_grid_charge": coordinator._adhoc_allow_grid_charge,
             "rescue_stage": coordinator._rescue_stage,
+            "adhoc_floor_cap_soc": coordinator._adhoc_floor_cap_soc,
             "evening_rescue_charge": coordinator.evening_rescue_charge,
             # Display only in 3.7.0: the model has to be held against the
             # measurement for a season before anything throttles on it.

@@ -30,24 +30,43 @@ SOC, like a snow night. A repair warning and the `pv_yield` attributes of the *T
 explain the decision. Low yield can mean snow, shading, a string fault or a wrong forecast; ICN
 does not try to tell which.
 
-## Evening rescue
+## High-price rescue
 
 The night plan buys for the high-price period in advance. The rescue is for when that plan turns
 out too optimistic, for example snow with no snow nights set. The sensor **Evening outlook**
 shows the shortfall in kWh, normally 0. It needs the forecast for **today**.
 
-With the switch **Evening rescue (hold and charge)** on, and a shortfall:
+The outlook reckons tightly on purpose: the period's average load, no allowance, and the full
+forecast. Energy held beyond what the period needs is carried past it into the cheap night, while
+falling a little short costs only the last half hour of the period at the peak tariff instead of
+the day tariff.
 
-1. **The discharge is blocked** by raising the minimum SOC to the current level. The house then
-   runs from the sun and, if needed, from the grid at the day tariff, rather than from a battery
-   that is needed in a few hours at the peak tariff.
-2. **The rest is bought**, but only in the last two hours before the period, when the forecast
-   hardly changes any more.
-3. **At the start of the period** the inverter gets its own settings back, and the battery
-   carries the evening.
+With the switch **High-price rescue (hold and charge)** on, ICN looks again at every update
+(every 15 minutes by default):
+
+1. **A shortfall: hold what the period needs.** The minimum SOC is raised to what the period
+   needs, or to the current level if the battery holds less. Above the need the battery keeps
+   serving the house. Below it, the floor follows the sun up to the need and no further. The
+   minimum SOC is never set above the battery's level, which some inverters answer with a grid
+   charge.
+2. **Buy only if it pays.** In the last two hours before the period the rest is bought from the
+   grid, but only with a [price entity](configuration.md#account-for-electricity-prices) whose
+   prices make the period dearer than buying now plus the loss through the battery (charge and
+   discharge efficiency), by at least 2 ct. With a few cents between the day and the peak tariff
+   that never happens, and the rescue only holds.
+3. **Let go when the sun is enough.** Once the outlook shows the battery making it with 0.5 kWh to
+   spare, the inverter gets its own settings back. A later shortfall engages the rescue again.
+   Between the two nothing is written.
+4. **At the start of the period** the inverter gets its own settings back in any case, and the
+   battery carries the evening.
+
+An example: 10 kWh in the battery, the period needs 5 kWh, and the afternoon stays dull. The
+battery runs the house until 5 kWh are left and holds those for the period.
 
 The switch is off by default on purpose: watch the outlook sensor for a while before you let it
-act. Switching it off ends a running rescue at once.
+act. Switching it off ends a running rescue at once. Up to version 3.11 the feature was called
+the *evening rescue*; installations from then keep the entity id
+`switch.inverter_charge_night_evening_rescue_hold_and_charge`.
 
 ## Curtailment outlook
 
