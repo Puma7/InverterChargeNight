@@ -18,7 +18,7 @@ sich hält, und was es tut, wenn etwas schiefgeht.
   Fenster verstellt hat, wird zurückgesetzt. Und eine Ladegrenze bei KOSTAL KORE, die am
   Wechselrichter verfällt, wird alle 20 Sekunden aufgefrischt, solange der Akku aus dem Netz laden
   kann.
-- **Außerhalb des Fensters tut es nichts.** Nur die Abendrettung und die Aktionen `charge_to` /
+- **Außerhalb des Fensters tut es nichts.** Nur die Hochpreisrettung und die Aktionen `charge_to` /
   `block_discharge` wirken außerhalb des Fensters. Sie laufen als kurze Fenster mit demselben
   Sichern und Zurückgeben.
 - **Im Zweifel weniger laden.** Fehlt der Ladestand, stoppt das Netzladen. Fehlt der Messwert für
@@ -36,7 +36,7 @@ schreibt keine Entladegrenze von null und hebt die Untergrenze nicht auf den Anf
 davon würde den Akku daran hindern, das Haus überhaupt zu versorgen.
 
 Eine Untergrenze über dem Ladeziel gibt es nur bei einer **ausdrücklichen Reservierung**: der
-Abendrettung oder der Aktion `block_discharge`. Selbst dann wird der Akku nur über den Min-SOC
+Hochpreisrettung oder der Aktion `block_discharge`. Selbst dann wird der Akku nur über den Min-SOC
 gehalten (Einstellung *Entladesperre für Reservierungen*: Automatisch). Die Sensorattribute
 `inverter_floor_soc` und `discharge_block` zeigen, was gerade gilt.
 

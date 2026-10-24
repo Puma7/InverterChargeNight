@@ -189,7 +189,10 @@ from .const import (
     EFFICIENCY_BAND_MAX_SPAN,
     EFFICIENCY_BAND_MIN_SAMPLES,
     EFFICIENCY_BAND_WIDTH_PCT,
+    EVENING_RESCUE_BUY_MARGIN_CT,
     EVENING_RESCUE_CHARGE_LEAD_H,
+    EVENING_RESCUE_RELEASE_KWH,
+    EVENING_RESCUE_RETARGET_SOC,
     DEFAULT_HIGH_PRICE_MARGIN_PCT,
     DEFAULT_PRICE_SURCHARGE_CT,
     DEFAULT_PRICE_UNIT,
@@ -201,7 +204,7 @@ from .const import (
     GRID_LIMIT_MIN_WRITE_INTERVAL_S,
 )
 from .calculation import calculate_required_soc
-from .prices import PriceSeries, mean_price_ct, parse_price_series
+from .prices import PriceSeries, mean_price_ct, parse_price_series, rescue_purchase_pays
 from .planner import (
     REASON_CONFLICT_BRIDGE_WINS,
     REASON_CONFLICT_HEADROOM_WINS,
@@ -379,6 +382,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # discharge block switch had before this window turned it on, and the way
     # already announced in the log for this window.
     _window_floor_soc: float | None = None
+    _adhoc_floor_cap_soc: float | None = None
     _window_started_at: datetime | None = None
     _last_scheduled_end: datetime | None = None
     _communication: CommunicationState | None = None
@@ -466,8 +470,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._adhoc_reason: str | None = None
         self._adhoc_target_soc: float | None = None
         self._adhoc_allow_grid_charge = False
-        # The evening rescue: 0 nothing, 1 holding what is there, 2 also buying.
-        # Only ever raised within a day, so a poll cannot flap between stages.
+        # The highest floor an ad-hoc window may follow a rising battery to.
+        # The high-price rescue sets it to what the period needs (plan 016):
+        # the battery holds that much, and the sun above it serves the house.
+        # None for every other ad-hoc window, whose floor follows without limit.
+        self._adhoc_floor_cap_soc: float | None = None
+        # The high-price rescue: 0 nothing, 1 holding, 2 also buying. Worked
+        # out afresh on every poll since plan 016; the band between engaging
+        # and letting go keeps a poll from flapping.
         self._rescue_stage = 0
         # Buying for the evening costs money now and pays it back later, so it
         # waits for the user to switch it on. Blocking the discharge does not.
@@ -841,6 +851,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "adhoc_reason": self._adhoc_reason,
             "adhoc_target_soc": self._adhoc_target_soc,
             "adhoc_allow_grid_charge": self._adhoc_allow_grid_charge,
+            "adhoc_floor_cap_soc": self._adhoc_floor_cap_soc,
             "evening_rescue_charge": self.evening_rescue_charge,
             "snow_nights": self.snow_nights,
             "pv_yield": self._pv_yield.snapshot(),
@@ -942,6 +953,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
                     self._adhoc_target_soc = self._restore_soc(state, "adhoc_target_soc")
                     self._adhoc_allow_grid_charge = state.get("adhoc_allow_grid_charge") is True
+                    self._adhoc_floor_cap_soc = self._restore_soc(state, "adhoc_floor_cap_soc")
                     _LOGGER.info(
                         "Restored the ad-hoc window (%s) running until %s",
                         self._adhoc_reason,
@@ -2306,9 +2318,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 house_load_kw_profile=await self._house_load_profile(),
                 zone_start=zone[0],
                 zone_end=zone[1],
-                margin_pct=float(
-                    self.config.get(CONF_HIGH_PRICE_MARGIN_PCT, DEFAULT_HIGH_PRICE_MARGIN_PCT)
-                ),
+                # Tight on purpose (plan 016): the margin and the forecast
+                # discount belong to the night plan, where too much is used up
+                # during the day. Here too much is carried past the period into
+                # the cheap night, and too little costs only the difference
+                # between two day tariffs.
+                margin_pct=0.0,
                 charge_efficiency=float(
                     self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)
                 ),
@@ -2319,7 +2334,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 sunset=sunset,
                 forecast_kwh_today=forecast_kwh,
                 forecast_available=forecast_available,
-                forecast_error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
+                forecast_error_margin_pct=0.0,
             )
         except (ValueError, TypeError) as err:
             _LOGGER.error("Could not work out the evening outlook: %s", err)
@@ -2712,6 +2727,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current = self._current_battery_soc()
         if current is None:
             return
+        cap = self._adhoc_floor_cap_soc
+        if cap is not None:
+            # Only as far as the reservation needs (plan 016): above it the
+            # battery is free to serve the house
+            current = min(current, cap)
         previous = self._window_floor_soc
         if previous is not None and current <= previous:
             return
@@ -5691,23 +5711,30 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._persist_state()
 
     async def _maybe_rescue_the_evening(self) -> None:
-        """Act on a shortfall the outlook has already worked out (plan 013).
+        """Hold what the high-price period needs, and no more (plans 013, 016).
 
-        Two stages, and what separates them is what they cost:
+        Worked out afresh on every poll from the outlook, which answers one
+        question: with the battery free to serve the house from now on, will
+        it still hold what the period needs when the period starts?
 
-        1. **Block the discharge.** The house then runs from the sun, and from
-           the grid at the day tariff when the sun is not enough - rather than
-           from a battery that is needed in three hours at the peak tariff.
-           Nothing is spent that the same evening does not pay back, so this
-           runs by itself.
-        2. **Buy the rest.** Only with the switch on, and only once the period
-           is close enough that the forecast hardly turns any more: bought too
-           early is bought for a sun that might still have come.
+        - **Engage** at any shortfall. The floor is what the period needs, or
+          the battery's level when that is lower - never above the battery,
+          which on a Kostal is a forced grid charge. It follows the sun up to
+          the need and no further: above it the battery serves the house.
+        - **Buy** only in the last two hours, when the forecast hardly turns
+          any more, and only when a price entity says a kilowatt-hour bought
+          now still beats the period's price after the round trip through the
+          battery. With a few cents between the tariffs it never does, and the
+          rescue only holds.
+        - **Let go** once the outlook clears the need by
+          ``EVENING_RESCUE_RELEASE_KWH``: the sun came after all. Between that
+          and a shortfall nothing is written, so a forecast update cannot make
+          the rescue open and close.
 
-        The stage only ever rises within a day. A poll that sees the shortfall
-        close again does not release the block - the battery is still the
-        cheapest place for that energy to be, and the window ends when the
-        period starts anyway.
+        The need is the period's mean load, without the margin and the
+        forecast discount the night plan carries (``async_evening_outlook``).
+        Energy carried past the period ends up in the cheap night window,
+        which costs more than half an hour of the period bought from the grid.
         """
         await self.async_end_evening_rescue_if_off()
         if not self.evening_rescue_charge:
@@ -5715,42 +5742,124 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # on, the min SOC went back up every time it was set by hand
             return
         outlook = self.last_evening_outlook
-        if outlook is None or outlook.missing_kwh <= 0:
+        if outlook is None:
+            # Nothing to judge by. A running rescue stays as it is; it ends
+            # when the period starts at the latest.
             return
         if not self.is_enabled or self._is_backup_active() or self.is_discharge_mode:
             # The ad-hoc window would refuse the discharge mode on every poll
             return
+        rescuing = (
+            self._adhoc_until is not None and self._adhoc_reason == ADHOC_REASON_EVENING_RESCUE
+        )
+        if self.is_active and not rescuing:
+            # A configured window, or an ad-hoc one an action asked for
+            return
+        now = dt_util.now()
+        hands_off = self._hands_off_until
+        if hands_off is not None and elapsed_seconds(hands_off, now) > 0:
+            # reset_inverter handed the inverter back until the period starts;
+            # a shortfall that is still there must not take it again on the
+            # next poll (CodeRabbit on #44). An action asked for by hand still
+            # may - that is a new request, not this one coming back.
+            return
+        capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
+        spare_kwh = (outlook.projected_soc - outlook.required_soc) / 100.0 * capacity
+        if rescuing and spare_kwh >= EVENING_RESCUE_RELEASE_KWH:
+            _LOGGER.info(
+                "The battery will hold %.1f kWh more than the %s period needs - releasing "
+                "the high-price rescue",
+                spare_kwh,
+                outlook.zone_start.strftime("%H:%M"),
+            )
+            await self._on_window_end(now)
+            return
+        uncapped = rescuing and self._adhoc_floor_cap_soc is None
+        if outlook.missing_kwh <= 0 and not uncapped:
+            # Enough, or inside the band in which a running rescue stays put.
+            # A rescue from before 3.12 carries no cap and is put on one
+            # below, or the sun would keep raising its floor (CodeRabbit on #44).
+            return
         current_soc = self._current_battery_soc()
         if current_soc is None:
             return
-
-        now = dt_util.now()
         close_enough = (outlook.zone_start - now) <= timedelta(hours=EVENING_RESCUE_CHARGE_LEAD_H)
-        stage = 2 if close_enough else 1
-        if stage <= self._rescue_stage:
+        stage = (
+            2
+            if close_enough
+            and outlook.missing_kwh > 0
+            and self._rescue_purchase_pays(outlook, now)
+            else 1
+        )
+        if (
+            stage == 1
+            and not rescuing
+            and current_soc <= float(self.config.get(CONF_USER_MIN_SOC, 8.0))
+        ):
+            # Nothing above the minimum to hold, and a floor above the battery
+            # is a grid charge on some inverters. A purchase that pays still
+            # goes ahead (Codex on #44).
+            return
+        required = outlook.required_soc
+        cap = self._adhoc_floor_cap_soc
+        if (
+            rescuing
+            and stage == self._rescue_stage
+            and cap is not None
+            and abs(required - cap) < EVENING_RESCUE_RETARGET_SOC
+        ):
             return
 
         if stage == 1:
             _LOGGER.info(
-                "The battery is %.1f kWh short for the %s period - holding what is in it",
+                "The battery is %.1f kWh short for the %s period - holding up to %.1f%%, "
+                "what the period needs",
                 outlook.missing_kwh,
                 outlook.zone_start.strftime("%H:%M"),
+                required,
             )
         else:
             _LOGGER.info(
                 "The battery is %.1f kWh short for the %s period - charging to %.1f%% from the "
-                "grid at the day tariff, which is cheaper than the period itself",
+                "grid, which is cheaper than the period itself",
                 outlook.missing_kwh,
                 outlook.zone_start.strftime("%H:%M"),
-                outlook.required_soc,
+                required,
             )
         if await self.async_open_adhoc_window(
-            target_soc=outlook.required_soc if stage == 2 else current_soc,
+            target_soc=required if stage == 2 else min(current_soc, required),
             until=outlook.zone_start,
             reason=ADHOC_REASON_EVENING_RESCUE,
             allow_grid_charge=stage == 2,
+            floor_cap_soc=required,
         ):
             self._rescue_stage = stage
+
+    def _rescue_purchase_pays(self, outlook: EveningOutlook, now: datetime) -> bool:
+        """Whether buying before the period beats buying in it (plan 016).
+
+        Without a price entity, or with prices that do not cover both
+        stretches, the answer is no: the static price fields know no period.
+        """
+        series = self._price_series()
+        before_ct = mean_price_ct(series, now, outlook.zone_start) if series else None
+        period_ct = (
+            mean_price_ct(series, outlook.zone_start, outlook.zone_end) if series else None
+        )
+        pays = rescue_purchase_pays(
+            before_ct,
+            period_ct,
+            float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
+            float(self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)),
+            EVENING_RESCUE_BUY_MARGIN_CT,
+        )
+        _LOGGER.debug(
+            "High-price rescue: %s ct before the period, %s ct in it - buying %s",
+            f"{before_ct:.1f}" if before_ct is not None else "unknown",
+            f"{period_ct:.1f}" if period_ct is not None else "unknown",
+            "pays" if pays else "does not pay",
+        )
+        return pays
 
     async def async_end_evening_rescue_if_off(self) -> None:
         """Release a rescue window once the rescue is switched off.
@@ -5761,7 +5870,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if (self.evening_rescue_charge or self._adhoc_until is None
                 or self._adhoc_reason != ADHOC_REASON_EVENING_RESCUE):
             return
-        _LOGGER.info("The evening rescue is switched off - releasing its window")
+        _LOGGER.info("The high-price rescue is switched off - releasing its window")
         await self._on_window_end(dt_util.now())
 
     async def async_charge_to(self, target_soc: float, duration: timedelta) -> bool:
@@ -5816,6 +5925,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         until: datetime,
         reason: str,
         allow_grid_charge: bool,
+        floor_cap_soc: float | None = None,
     ) -> bool:
         """Open a window that the clock did not ask for (plan 013).
 
@@ -5828,7 +5938,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Refused while a configured window runs (that one has the tariff behind
         it), while the integration is off, in the morning discharge mode, during
         backup mode, and for an end that is already past. ``allow_grid_charge=False`` holds what is in the
-        battery without buying more.
+        battery without buying more. ``floor_cap_soc`` stops the floor that
+        follows a rising battery at that level (plan 016).
         """
         now = dt_util.now()
         if elapsed_seconds(until, now) <= 0:
@@ -5872,6 +5983,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._adhoc_target_soc = target_soc
             self._adhoc_allow_grid_charge = allow_grid_charge
             self._adhoc_reason = reason
+            self._adhoc_floor_cap_soc = floor_cap_soc
+            floor = self._window_floor_soc
+            if floor_cap_soc is not None and floor is not None and floor > floor_cap_soc:
+                # A need that shrank takes the floor the sun built down with it
+                _LOGGER.info(
+                    "Lowering the discharge-block floor from %.1f%% to %.1f%%: the "
+                    "high-price period needs less",
+                    floor,
+                    floor_cap_soc,
+                )
+                self._window_floor_soc = floor_cap_soc
             # A new target has to be judged afresh. The poll only ever *sets*
             # target_reached, so a hold that had reached the level it found
             # left it True, and every later poll skipped control - stage 2 of
@@ -5880,12 +6002,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.target_reached = False
             self._persist_state()
             await self._calculate_initial_soc()
+            # A floor that moved has to reach the inverter now, as at the start
+            # of a window: with the target already met the update returns
+            # before _control_charge, so a hold lowered to a smaller need, or
+            # a purchase called off, would keep the old min SOC (Codex on #44)
+            await self._write_raised_min_soc_floor()
             return True
 
         self._adhoc_until = until
         self._adhoc_reason = reason
         self._adhoc_target_soc = target_soc
         self._adhoc_allow_grid_charge = allow_grid_charge
+        self._adhoc_floor_cap_soc = floor_cap_soc
         _LOGGER.info(
             "Opening an ad-hoc window (%s) to %.1f%% until %s, grid charging %s",
             reason,
@@ -5900,6 +6028,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._adhoc_reason = None
             self._adhoc_target_soc = None
             self._adhoc_allow_grid_charge = False
+            self._adhoc_floor_cap_soc = None
             return False
         return True
 
@@ -6030,6 +6159,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._adhoc_reason = None
                 self._adhoc_target_soc = None
                 self._adhoc_allow_grid_charge = False
+                self._adhoc_floor_cap_soc = None
                 self._persist_state()
             else:
                 _LOGGER.debug("Window end without an active window - nothing to reset")
@@ -6092,6 +6222,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._adhoc_reason = None
             self._adhoc_target_soc = None
             self._adhoc_allow_grid_charge = False
+            self._adhoc_floor_cap_soc = None
             self._rescue_stage = 0
             # A failed reset is retried until the inverter is back at its
             # original settings; original_min_soc is kept for that (F3).
@@ -6866,6 +6997,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "Ad-hoc window (%s) does not allow grid charging", self._adhoc_reason
             )
             should_skip_charging = True
+            # ... and one left on by a purchase the window has since called off
+            # goes off: not switching it on is not the same as stopping it
+            # (CodeRabbit on #44). A switch that is already off is not written.
+            await self._pause_grid_charge("the ad-hoc window only holds")
 
         if battery_soc_entity:
             state = self.hass.states.get(battery_soc_entity)

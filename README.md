@@ -46,7 +46,7 @@ charges it to exactly that level, and leaves the rest of the capacity free for t
   fills room the sun leaves free, and it is bought once, not every night.
 - 🌡️ **Weather-aware.** It is optional and learns how much more a heat pump draws on a cold day.
 - 🌆 **Evening reserve.** It buys the energy for an expensive evening peak at night, and has an
-  optional evening rescue for days that turn out duller than forecast.
+  optional high-price rescue for days that turn out duller than forecast.
 - ⚡ **House connection protection.** With wallboxes on the same connection, the battery gives way
   before the main fuse does.
 - 📉 **Efficiency search.** It measures at which charge power your inverter loses the least
@@ -82,7 +82,7 @@ Step by step: [Installation and first setup](https://github.com/Puma7/InverterCh
 | [Configuration reference](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/configuration.md) | Every setting with its default, and suggested setups |
 | [Safety](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/safety.md) | Restoring settings, house connection, power cut, lost communication |
 | [Efficiency search](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/efficiency-search.md) | Finding the charge power with the smallest loss |
-| [Exceptions and extras](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/extras.md) | Skip, override, snow nights, evening rescue, PV shortfall, curtailment |
+| [Exceptions and extras](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/extras.md) | Skip, override, snow nights, high-price rescue, PV shortfall, curtailment |
 | [Entities and actions](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/entities-and-actions.md) | All entities and attributes, actions, automation examples |
 | [Dashboard](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/dashboard.md) | A ready-made dashboard view |
 | [Troubleshooting and FAQ](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/troubleshooting.md) | Repair issues, debug logs, diagnostics, common questions |

@@ -50,7 +50,7 @@
           "planner_mode": "Überbrückung: plant zusätzlich Energie vom Ladefensterende bis zu ausreichendem PV-Ertrag ein. Verwendet gelernten Hausverbrauch bzw. den Mittelwert und Sonnenaufgang plus Verzögerung aus Erweitert. PV-Freiraum: reserviert nur Platz für die Prognose; der Verbrauch am Morgen wird dabei nicht zusätzlich gedeckt.",
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
-          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
+          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist. Die Hochpreisrettung rechnet ohne ihn: Sie hält nur, was die Hochpreiszeit braucht."
         }
       },
       "power": {
@@ -100,7 +100,7 @@
           "grid_max_continuous_w": "Das Dauerlast-Budget direkt angeben, statt es aus der Sicherungsgröße zu berechnen. Hat Vorrang, wenn gesetzt.",
           "grid_headroom_w": "Abstand, der unter dem Budget frei bleibt, damit eine Last, die der Speicher nicht kommen sieht, den Anschluss nicht überlastet.",
           "discharge_block_switch": "Optional. Dient nur dazu, den Zustand zurückzugeben, den eine Version vor 3.10.6 verändert hat; die Integration schaltet diesen Schalter nicht mehr ein. Der Akku wird ausschließlich über den Min-SOC gehalten.",
-          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben."
+          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Hochpreisrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben."
         }
       },
       "advanced": {
@@ -220,7 +220,7 @@
           "planner_mode": "Überbrückung: plant zusätzlich Energie vom Ladefensterende bis zu ausreichendem PV-Ertrag ein. Verwendet gelernten Hausverbrauch bzw. den Mittelwert und Sonnenaufgang plus Verzögerung aus Erweitert. PV-Freiraum: reserviert nur Platz für die Prognose; der Verbrauch am Morgen wird dabei nicht zusätzlich gedeckt.",
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
-          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
+          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist. Die Hochpreisrettung rechnet ohne ihn: Sie hält nur, was die Hochpreiszeit braucht."
         }
       },
       "reconfigure_power": {
@@ -270,7 +270,7 @@
           "grid_max_continuous_w": "Das Dauerlast-Budget direkt angeben, statt es aus der Sicherungsgröße zu berechnen. Hat Vorrang, wenn gesetzt.",
           "grid_headroom_w": "Abstand, der unter dem Budget frei bleibt, damit eine Last, die der Speicher nicht kommen sieht, den Anschluss nicht überlastet.",
           "discharge_block_switch": "Optional. Dient nur dazu, den Zustand zurückzugeben, den eine Version vor 3.10.6 verändert hat; die Integration schaltet diesen Schalter nicht mehr ein. Der Akku wird ausschließlich über den Min-SOC gehalten.",
-          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben."
+          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Hochpreisrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben."
         }
       },
       "reconfigure_advanced": {
@@ -493,8 +493,8 @@
         "data_description": {
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
-          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist.",
-          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben.",
+          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist. Die Hochpreisrettung rechnet ohne ihn: Sie hält nur, was die Hochpreiszeit braucht.",
+          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Hochpreisrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben.",
           "discharge_block_switch": "Optional. Dient nur dazu, den Zustand zurückzugeben, den eine Version vor 3.10.6 verändert hat; die Integration schaltet diesen Schalter nicht mehr ein. Der Akku wird ausschließlich über den Min-SOC gehalten."
         }
       },
@@ -807,7 +807,7 @@
           "planner_mode": "Überbrückung: plant zusätzlich Energie vom Ladefensterende bis zu ausreichendem PV-Ertrag ein. Verwendet gelernten Hausverbrauch bzw. den Mittelwert und Sonnenaufgang plus Verzögerung aus Erweitert. PV-Freiraum: reserviert nur Platz für die Prognose; der Verbrauch am Morgen wird dabei nicht zusätzlich gedeckt.",
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
-          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist."
+          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist. Die Hochpreisrettung rechnet ohne ihn: Sie hält nur, was die Hochpreiszeit braucht."
         }
       },
       "power": {
@@ -857,7 +857,7 @@
           "grid_max_continuous_w": "Das Dauerlast-Budget direkt angeben, statt es aus der Sicherungsgröße zu berechnen. Hat Vorrang, wenn gesetzt.",
           "grid_headroom_w": "Abstand, der unter dem Budget frei bleibt, damit eine Last, die der Speicher nicht kommen sieht, den Anschluss nicht überlastet.",
           "discharge_block_switch": "Optional. Dient nur dazu, den Zustand zurückzugeben, den eine Version vor 3.10.6 verändert hat; die Integration schaltet diesen Schalter nicht mehr ein. Der Akku wird ausschließlich über den Min-SOC gehalten.",
-          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben."
+          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Hochpreisrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben."
         }
       },
       "advanced": {
@@ -1076,8 +1076,8 @@
         "data_description": {
           "high_price_start": "Optional: Ab dieser Uhrzeit kostet Netzbezug mehr als sonst — eine §14a-Hochlastzeit oder der Abendblock eines dynamischen Tarifs (oft 18:00). Der Planer sorgt dann dafür, dass der Speicher das Haus durch diese Zeit trägt: Was das Haus zwischen den beiden Uhrzeiten verbraucht, abzüglich dessen, was die Sonne morgen laut Prognose liefert, wird heute Nacht im günstigen Fenster gekauft. Ohne solche Zeit beide Felder leer lassen.",
           "high_price_end": "Uhrzeit, zu der die Hochpreiszeit vorbei ist (oft 21:00). Darf über Mitternacht laufen. Entweder beide Uhrzeiten setzen oder keine — eine allein sagt, wann es losgeht, aber nie, wann es vorbei ist.",
-          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist.",
-          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Abendrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben.",
+          "high_price_margin_pct": "Die Reserve wird aus dem gelernten Hausverbrauchsprofil gerechnet, und das ist ein Mittelwert der letzten Tage — ein Abend mit Herd und Waschmaschine liegt darüber. Dieser Prozentsatz wird darauf aufgeschlagen. 0 % nimmt den Mittelwert, wie er ist. Die Hochpreisrettung rechnet ohne ihn: Sie hält nur, was die Hochpreiszeit braucht.",
+          "discharge_block_mode": "Gilt nur für ausdrückliche Reservierungen und die Hochpreisrettung: Automatisch hebt den Min-SOC auf den gehaltenen Stand, Aus belässt nur den Ziel-Min-SOC. Das reguläre Nachtfenster setzt immer nur den geplanten Ziel-Min-SOC; darüber darf der Akku das Haus versorgen. Ein Entladesperre-Schalter oder eine Entladegrenze wird nie geschrieben.",
           "discharge_block_switch": "Optional. Dient nur dazu, den Zustand zurückzugeben, den eine Version vor 3.10.6 verändert hat; die Integration schaltet diesen Schalter nicht mehr ein. Der Akku wird ausschließlich über den Min-SOC gehalten."
         }
       },
@@ -1408,7 +1408,7 @@
             "name": "Laufendes Zusatzfenster",
             "state": {
               "service": "Aktion",
-              "evening_rescue": "Abendrettung"
+              "evening_rescue": "Hochpreisrettung"
             }
           },
           "adhoc_until": {
@@ -1613,7 +1613,7 @@
         "name": "Nächstes Fenster überspringen (24 h)"
       },
       "evening_rescue_charge": {
-        "name": "Abendrettung (festhalten und nachladen)"
+        "name": "Hochpreisrettung (festhalten und nachladen)"
       }
     },
     "select": {
@@ -1710,7 +1710,7 @@
   "services": {
     "allow_discharge": {
       "name": "Akku freigeben",
-      "description": "Beendet ein Halten oder Laden vor der Zeit und gibt den Wechselrichter zurück. Wirkt nur auf eines, das eine Aktion oder die Abendrettung begonnen hat — ein eingerichtetes Fenster ist der Zeitplan bei der Arbeit, und dafür gibt es „Wechselrichter zurücksetzen“.",
+      "description": "Beendet ein Halten oder Laden vor der Zeit und gibt den Wechselrichter zurück. Wirkt nur auf eines, das eine Aktion oder die Hochpreisrettung begonnen hat — ein eingerichtetes Fenster ist der Zeitplan bei der Arbeit, und dafür gibt es „Wechselrichter zurücksetzen“.",
       "fields": {
         "config_entry_id": {
           "name": "Wechselrichter",
@@ -1720,7 +1720,7 @@
     },
     "block_discharge": {
       "name": "Akku halten",
-      "description": "Hindert den Akku für eine Weile daran, das Haus zu versorgen, ohne etwas zu kaufen: das Haus zieht aus der Sonne und, wo die nicht reicht, aus dem Netz. Dasselbe, was die Abendrettung von selbst tut.",
+      "description": "Hindert den Akku für eine Weile daran, das Haus zu versorgen, ohne etwas zu kaufen: das Haus zieht aus der Sonne und, wo die nicht reicht, aus dem Netz. Dasselbe, was die Hochpreisrettung von selbst tut.",
       "fields": {
         "config_entry_id": {
           "name": "Wechselrichter",

@@ -442,3 +442,28 @@ def evening_reserve_pays(
         return True
     efficiency = min(1.0, max(0.01, charge_efficiency))
     return evening_ct + drop_margin_ct > window_ct / efficiency
+
+
+def rescue_purchase_pays(
+    before_ct: float | None,
+    period_ct: float | None,
+    charge_efficiency: float,
+    discharge_efficiency: float,
+    margin_ct: float,
+) -> bool:
+    """Whether buying now for the high-price period beats buying in it (plan 016).
+
+    A kilowatt-hour bought before the period at ``before_ct`` goes into the
+    battery and comes out again, and only ``charge × discharge`` of it is left
+    to replace a kilowatt-hour at ``period_ct``. With a 5 ct spread and 85 %
+    round trip that is a loss, so the default answer is no. The purchase has
+    to win by ``margin_ct`` on top.
+
+    Unknown prices answer no: buying is the one thing the rescue does that
+    costs money for sure, so it needs the prices to say it pays. The opposite
+    of :func:`evening_reserve_pays`, where unknown means keep what is there.
+    """
+    if before_ct is None or period_ct is None:
+        return False
+    round_trip = min(1.0, max(0.01, charge_efficiency)) * min(1.0, max(0.01, discharge_efficiency))
+    return period_ct > before_ct / round_trip + margin_ct

@@ -28,7 +28,7 @@ for a fraction of what it cost.
    only confirmed, not written again. See [Safety](safety.md) for what happens when the inverter
    does not accept a reset.
 
-Outside the window ICN does not control the inverter at all. The evening rescue and the actions
+Outside the window ICN does not control the inverter at all. The high-price rescue and the actions
 `charge_to` / `block_discharge` are the exceptions, and they run as short windows of their own
 with the same capture and restore ([Extras](extras.md)).
 

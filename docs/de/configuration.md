@@ -118,8 +118,8 @@ das Ergebnis genauer.
 | Feld | Standard | Bedeutung |
 |---|---|---|
 | Hochpreiszeit, Beginn / Ende (`high_price_start`, `high_price_end`) | – | Zum Beispiel 18:00–21:00. Beide oder keines. |
-| Zuschlag auf den Abendverbrauch (`high_price_margin_pct`) | 0 % | Kommt zum gelernten Durchschnitt hinzu. |
-| Entladesperre für Reservierungen (`discharge_block_mode`) | Automatisch | Für ausdrückliche Reservierungen und die Abendrettung: *Automatisch* hebt den Min-SOC auf den Stand, der gehalten wird, *Aus* hält nur das Ziel. Planmäßige Nächte sind nicht betroffen. |
+| Zuschlag auf den Abendverbrauch (`high_price_margin_pct`) | 0 % | Kommt für den Nachtplan zum gelernten Durchschnitt hinzu. Die Hochpreisrettung rechnet ohne ihn. |
+| Entladesperre für Reservierungen (`discharge_block_mode`) | Automatisch | Für ausdrückliche Reservierungen und die Hochpreisrettung: *Automatisch* hebt den Min-SOC auf den Stand, der gehalten wird, *Aus* hält nur das Ziel. Planmäßige Nächte sind nicht betroffen. |
 | Schalter „Entladung sperren“ (`discharge_block_switch`) | – | Altlast. Wird nur verwendet, um einen Zustand zurückzugeben, den eine Version vor 3.10.6 verändert hat. |
 
 ### Aktive Jahreszeit
@@ -143,7 +143,7 @@ modellierten Tages.
 | Feld | Bedeutung |
 |---|---|
 | Preis im Fenster / Preis außerhalb des Fensters / Einspeisevergütung (ct/kWh) | Feste Preise, alle drei oder keiner. Sie entscheiden einen Widerspruch zwischen dem Bedarf am Morgen und dem Platz für die PV. |
-| Strompreis-Entität | Optional: ein Sensor mit Stundenpreisen für heute und morgen (Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e und ähnliche). Er ersetzt den Preis im und außerhalb des Fensters. Die Einspeisevergütung bleibt ein festes Feld. |
+| Strompreis-Entität | Optional: ein Sensor mit Stundenpreisen für heute und morgen (Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e und ähnliche). Er ersetzt den Preis im und außerhalb des Fensters. Die Einspeisevergütung bleibt ein festes Feld. Die [Hochpreisrettung](extras.md#hochpreisrettung) kauft nur mit ihr aus dem Netz. |
 | Worin die Preise angegeben sind | *Automatisch erkennen*, oder setze die Einheit, wenn die Entität keine mitbringt. |
 | Zuschlag auf den Börsenpreis / Zuschlag im Fenster | Was deine Rechnung zum Preis der Entität hinzufügt (Netzentgelt, Umlagen, Mehrwertsteuer). Der zweite Wert ist für ein reduziertes Netzentgelt nach §14a im Fenster. |
 

@@ -80,11 +80,11 @@ class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):
 
 
 class EveningRescueChargeSwitch(InverterChargeNightEntity, SwitchEntity):
-    """Let the evening rescue act: hold the battery, and buy the rest late.
+    """Let the high-price rescue act: hold what the period needs, buy only if it pays.
 
     Off by default on purpose. Both stages change the inverter in the middle
     of the day, which nobody expects from a night-charge integration: holding
-    raises the min SOC to the level the battery is at, buying spends money in
+    raises the min SOC up to what the period needs, buying spends money in
     the afternoon against a forecast that might still turn. Watch
     ``sensor.…_evening_outlook`` for a season first and see whether it would
     have been right.

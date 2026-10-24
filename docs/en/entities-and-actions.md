@@ -18,7 +18,7 @@ version, check the ids on the device page.
 |---|---|---|
 | Automation | `switch.inverter_charge_night_automation` | The main switch. Off: everything ICN changed is given back, and it controls nothing until switched on again. |
 | Skip the next window (24 h) | `switch.inverter_charge_night_skip_the_next_window_24_h` | Skips one window, then expires by itself. |
-| Evening rescue (hold and charge) | `switch.inverter_charge_night_evening_rescue_hold_and_charge` | Lets the [evening rescue](extras.md#evening-rescue) act. Off by default. |
+| High-price rescue (hold and charge) | `switch.inverter_charge_night_high_price_rescue_hold_and_charge` | Lets the [high-price rescue](extras.md#high-price-rescue) act. Off by default. |
 | Efficiency search | `switch.inverter_charge_night_efficiency_search` | Starts the [efficiency search](efficiency-search.md). Switches itself off when it is done. |
 | Operation mode | `select.inverter_charge_night_operation_mode` | *Night charge* or *Morning discharge (experimental)*. Switching during a window resets the inverter first. |
 | Target SOC override | `number.inverter_charge_night_target_soc_override` | Replaces the planner's target until the window ends. |
@@ -55,7 +55,7 @@ version, check the ids on the device page.
 | `weather` | Status of the weather factor: `off`, `learning`, `active`, `forecast_unavailable`, with kWh per kelvin and factor. |
 | `inverter_floor_soc`, `discharge_block` | The minimum SOC the inverter should show, and how the battery is held (`min_soc` / `off`). |
 | `snow_nights`, `skip_next`, `operation_mode` | The current exceptions and mode. |
-| `adhoc_reason`, `adhoc_until` | A running evening rescue or action window. |
+| `adhoc_reason`, `adhoc_until` | A running high-price rescue or action window. |
 | `original_min_soc`, `pending_reset`, `reset_abandoned` | The stored original and the state of the restore. |
 | `charge_limit_not_held`, `min_soc_released_for_connection` | Protections of the house connection that have triggered. |
 | `pv_yield` | The PV shortfall detection. |

@@ -18,7 +18,7 @@ einem Update von einer älteren Version prüfst du die IDs auf der Geräteseite.
 |---|---|---|
 | Automatik | `switch.inverter_charge_night_automatik` | Der Hauptschalter. Aus: Alles, was ICN geändert hat, wird zurückgegeben, und ICN steuert nichts mehr, bis du ihn wieder einschaltest. |
 | Nächstes Fenster überspringen (24 h) | `switch.inverter_charge_night_nachstes_fenster_uberspringen_24_h` | Überspringt ein Fenster und läuft dann von selbst ab. |
-| Abendrettung (festhalten und nachladen) | `switch.inverter_charge_night_abendrettung_festhalten_und_nachladen` | Erlaubt der [Abendrettung](extras.md#abendrettung) einzugreifen. Standardmäßig aus. |
+| Hochpreisrettung (festhalten und nachladen) | `switch.inverter_charge_night_hochpreisrettung_festhalten_und_nachladen` | Erlaubt der [Hochpreisrettung](extras.md#hochpreisrettung) einzugreifen. Standardmäßig aus. |
 | Effizienzsuche | `switch.inverter_charge_night_effizienzsuche` | Startet die [Effizienzsuche](efficiency-search.md). Schaltet sich selbst aus, wenn sie fertig ist. |
 | Betriebsart | `select.inverter_charge_night_betriebsart` | *Nachtladung* oder *Morgenentladung (experimentell)*. Ein Wechsel während eines Fensters setzt zuerst den Wechselrichter zurück. |
 | Zielladestand überschreiben | `number.inverter_charge_night_zielladestand_uberschreiben` | Ersetzt das Ziel des Planers, bis das Fenster endet. |
@@ -55,7 +55,7 @@ einem Update von einer älteren Version prüfst du die IDs auf der Geräteseite.
 | `weather` | Status des Wetterfaktors: `off`, `learning`, `active`, `forecast_unavailable`, mit kWh pro Kelvin und Faktor. |
 | `inverter_floor_soc`, `discharge_block` | Der Min-SOC, den der Wechselrichter zeigen sollte, und wie der Akku gehalten wird (`min_soc` / `off`). |
 | `snow_nights`, `skip_next`, `operation_mode` | Die aktuellen Ausnahmen und die Betriebsart. |
-| `adhoc_reason`, `adhoc_until` | Eine laufende Abendrettung oder ein Fenster aus einer Aktion. |
+| `adhoc_reason`, `adhoc_until` | Eine laufende Hochpreisrettung oder ein Fenster aus einer Aktion. |
 | `original_min_soc`, `pending_reset`, `reset_abandoned` | Der gespeicherte Ausgangswert und der Stand der Rückgabe. |
 | `charge_limit_not_held`, `min_soc_released_for_connection` | Schutzfunktionen des Hausanschlusses, die ausgelöst haben. |
 | `pv_yield` | Die Erkennung von geringem PV-Ertrag. |

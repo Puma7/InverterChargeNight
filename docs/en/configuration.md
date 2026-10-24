@@ -116,8 +116,8 @@ are optional and make the result more accurate.
 | Field | Default | Meaning |
 |---|---|---|
 | High-price period, start / end (`high_price_start`, `high_price_end`) | – | For example 18:00–21:00. Both or neither. |
-| Allowance on the evening's consumption (`high_price_margin_pct`) | 0 % | Added on top of the learned average. |
-| Discharge block for reservations (`discharge_block_mode`) | Automatic | For explicit reservations and the evening rescue: *Automatic* raises the minimum SOC to the level being held, *Off* keeps only the target. Scheduled nights are not affected. |
+| Allowance on the evening's consumption (`high_price_margin_pct`) | 0 % | Added on top of the learned average for the night plan. The high-price rescue reckons without it. |
+| Discharge block for reservations (`discharge_block_mode`) | Automatic | For explicit reservations and the high-price rescue: *Automatic* raises the minimum SOC to the level being held, *Off* keeps only the target. Scheduled nights are not affected. |
 | Block Discharge Switch (`discharge_block_switch`) | – | Legacy. Only used to give back a state that a version before 3.10.6 changed. |
 
 ### Active season
@@ -140,7 +140,7 @@ modelled day.
 | Field | Meaning |
 |---|---|
 | Night / Day / Feed-in Price (ct/kWh) | Fixed prices, all three or none. They decide a conflict between the morning need and the room for the PV. |
-| Electricity price entity | Optional: a sensor with hourly prices for today and tomorrow (Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and similar). It replaces the night and day price. The feed-in price stays a fixed field. |
+| Electricity price entity | Optional: a sensor with hourly prices for today and tomorrow (Tibber, aWATTar, EPEX Spot, Nordpool, ENTSO-e and similar). It replaces the night and day price. The feed-in price stays a fixed field. The [high-price rescue](extras.md#high-price-rescue) buys from the grid only with it. |
 | What the prices are in | Detect automatically, or set the unit if the entity carries none. |
 | Surcharge on the exchange price / inside the window | What your bill adds to the entity's price (grid fee, levies, VAT). The second value is for a reduced §14a grid fee in the window. |
 
