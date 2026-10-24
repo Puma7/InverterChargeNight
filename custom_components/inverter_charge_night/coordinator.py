@@ -2122,6 +2122,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         now = dt_util.now()
         window_end = self._window_end_datetime(now)
         sunrise, sunset = self._sun_times(now, window_end)
+        # next_setting is the next sunset, which before sunset is today's - a
+        # window starting at 17:00 planned at 17:30 got a sunset before its own
+        # end, and the modelled day no sun at all (lab, 24 October). The sunset
+        # belongs to the sunrise's solar day; a day's shift is two minutes off.
+        while sunset < sunrise:
+            sunset += timedelta(days=1)
+        while sunset - sunrise > timedelta(days=1):
+            sunset -= timedelta(days=1)
         delay_min = int(float(self.config.get(CONF_PV_CROSSOVER_DELAY_MIN, DEFAULT_PV_CROSSOVER_DELAY_MIN)))
         pv_crossover = sunrise + timedelta(minutes=delay_min)
         if pv_crossover < window_end:

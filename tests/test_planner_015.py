@@ -438,3 +438,62 @@ async def test_a_hanging_weather_service_does_not_hold_up_the_plan(mock_hass):
     with patch(f"{COORDINATOR}.WEATHER_SERVICE_TIMEOUT_S", 0.01):
         assert await coordinator._forecast_mean_temperature(PLAN_DAY) is None
     assert mock_hass.services.async_call.await_count == 2  # daily, then hourly
+
+
+@pytest.mark.asyncio
+async def test_a_plan_made_before_sunset_uses_the_planned_days_sunset(mock_hass):
+    """The lab, 24 October: a window from 17:00 planned at 17:30, before that
+    day's sunset. ``next_setting`` was still today's 17:53, before the window
+    end, so the modelled day saw no sun at all and bridged until today's sunset,
+    and the upper bound counted no daytime load. The sunset belongs to the
+    solar day of the window end, like the sunrise."""
+    coordinator = _coordinator(mock_hass, {CONF_BRIDGE_MODEL: "modelled",
+                                           CONF_START_TIME: "17:00"})
+    del coordinator._sun_times  # the real one, reading sun.sun
+    mock_hass.states.async_set("sun.sun", "above_horizon", {
+        "next_rising": "2026-01-15T07:30:00",
+        "next_setting": "2026-01-14T17:00:00",
+    })
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 14, 16, 30)):
+        plan_input, crossover, _ = await coordinator._build_plan_input(20.0, True)
+
+    assert plan_input.window_end == datetime(2026, 1, 15, 5, 0)
+    assert plan_input.sunset == datetime(2026, 1, 15, 17, 0)
+    assert plan_input.window_end < crossover < plan_input.sunset
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "start, end, now, setting, expected",
+    [
+        # planned after sunset for a window that ends the same evening: next_setting
+        # is tomorrow's, the day planned is today
+        ("12:00", "21:00", datetime(2026, 1, 14, 18, 0), "2026-01-15T17:00:00",
+         datetime(2026, 1, 14, 17, 0)),
+        # the usual night, planned after sunset: already the right day
+        ("23:00", "05:00", datetime(2026, 1, 14, 23, 30), "2026-01-15T17:00:00",
+         datetime(2026, 1, 15, 17, 0)),
+    ],
+)
+async def test_the_sunset_is_the_planned_days(mock_hass, start, end, now, setting, expected):
+    coordinator = _coordinator(mock_hass, {CONF_START_TIME: start, CONF_END_TIME: end})
+    del coordinator._sun_times
+    mock_hass.states.async_set("sun.sun", "below_horizon", {
+        "next_rising": "2026-01-15T07:30:00", "next_setting": setting,
+    })
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=now):
+        plan_input, _, _ = await coordinator._build_plan_input(20.0, True)
+
+    assert plan_input.sunset == expected
+
+
+@pytest.mark.asyncio
+async def test_without_the_sun_entity_the_assumed_day_is_kept(mock_hass):
+    """No sun.sun: sunrise two hours after the window end, sunset ten after that,
+    across midnight for a late window. The alignment must leave that alone."""
+    coordinator = _coordinator(mock_hass, {CONF_START_TIME: "12:00", CONF_END_TIME: "20:00"})
+    del coordinator._sun_times
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 14, 13, 0)):
+        plan_input, _, _ = await coordinator._build_plan_input(20.0, True)
+
+    assert plan_input.sunset == datetime(2026, 1, 15, 8, 0)

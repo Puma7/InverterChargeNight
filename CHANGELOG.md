@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.11.1] - 2026-10-24
 
-Documentation in English and German, a refreshed logo, and a few corrected texts. Nothing in the
-control logic changes.
+Documentation in English and German, a refreshed logo, translated sensor attributes, and one
+fix for the modelled day.
 
 ### Docs
 - **A short README in English and German** (`README.md`, `README.de.md`) instead of 1480 lines:
@@ -44,8 +44,23 @@ control logic changes.
   (`docs-actions`: done).
 
 ### Fixed
+- **The sunset of the planned day, not today's.** `sun.sun`'s `next_setting` is today's sunset
+  until it has passed, so a plan made before sunset for a night window (a window starting at
+  17:00, or `plan_target_soc` in the afternoon) took a sunset before its own window end. The
+  modelled day then saw no sun and bridged until that sunset, and the upper bound counted no
+  daytime load. Found in the lab while taking the screenshots: crossover 17:53 today instead of
+  08:18 tomorrow. The sunset is now moved onto the solar day of the sunrise the plan uses. A
+  window starting after sunset, such as 23:00–05:00, was not affected.
 - German: the description of the action *Kommunikationsdiagnose* was still English, and its
   inverter field spoke of resetting (also in English).
+- English: *Operation mode* and its state *Night charge* in sentence case like every other name.
+
+### Added
+- **Translated attributes.** The attributes of *Target SOC*, *Next high-price period*, *Evening
+  outlook*, *Planned charge power*, *Charge power left by the house connection* and *Efficiency
+  search* have names in English and German, and the values of `plan_reason`, `operation_mode`,
+  `adhoc_reason` and `discharge_block` are translated too. The attribute keys themselves, which
+  templates use, do not change.
 
 ## [3.11.0] - 2026-10-24
 
