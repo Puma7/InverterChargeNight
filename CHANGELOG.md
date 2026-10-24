@@ -29,6 +29,10 @@ The evening rescue becomes the **high-price rescue** and holds only what the per
   with 0.5 kWh to spare, and engages again on a later shortfall. In the band between the two
   nothing is written. A smaller need takes the held floor down with it. The stage used to only
   ever rise within a day, so a sunny afternoon left the battery blocked until the period.
+- **A moved floor reaches the inverter at once.** When a running rescue lowers its hold or calls
+  off a purchase, the new minimum SOC is written in the same poll. Before, the update returned
+  early with the target already met, and the old floor stayed until the next verification.
+- **An empty battery still buys when that pays.** Only holding is skipped at the minimum SOC.
 - **A window opened by an action** (`block_discharge`, `charge_to`) is no longer taken over by
   the rescue.
 - **Renamed:** *High-price rescue (hold and charge)* / *Hochpreisrettung (festhalten und

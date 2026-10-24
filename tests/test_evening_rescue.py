@@ -444,6 +444,59 @@ async def test_a_window_an_action_opened_is_not_taken_over(mock_hass):
 
 
 @pytest.mark.asyncio
+async def test_an_empty_battery_still_buys_when_that_pays(mock_hass):
+    """Codex on #44: the empty-battery guard is about holding, not buying."""
+    coordinator = _make_coordinator(mock_hass, _prices(mock_hass, before=0.20, period=0.45))
+    mock_hass.states.async_set("sensor.soc", "8", {"unit_of_measurement": "%"})
+
+    await _rescue(coordinator, _short(), now=LATE)
+
+    assert coordinator.is_active is True
+    assert coordinator._rescue_stage == 2
+    assert coordinator._adhoc_allow_grid_charge is True
+
+
+@pytest.mark.asyncio
+async def test_a_smaller_need_reaches_the_inverter_at_once(mock_hass):
+    """Codex on #44: with the target met the update never gets to write it."""
+    coordinator = _make_coordinator(mock_hass)
+    await _rescue(coordinator, _short())
+    mock_hass.states.async_set("sensor.soc", "60", {"unit_of_measurement": "%"})
+    coordinator._update_window_floor()
+    mock_hass.states.async_set("number.min_soc", "60", {"unit_of_measurement": "%"})
+    mock_hass.services.async_call.reset_mock()
+
+    await _rescue(
+        coordinator,
+        _short(required=50.0, projected=40.0, missing=1.0),
+        now=EARLY + timedelta(minutes=15),
+    )
+
+    mock_hass.services.async_call.assert_any_await(
+        "number", "set_value", {"entity_id": "number.min_soc", "value": 50.0}, blocking=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_purchase_called_off_takes_the_floor_back_to_the_battery(mock_hass):
+    """Left at the need, a min SOC above the battery keeps buying on a Kostal."""
+    coordinator = _make_coordinator(mock_hass, _prices(mock_hass, before=0.20, period=0.45))
+    await _rescue(coordinator, _short(), now=LATE)
+    assert coordinator._rescue_stage == 2
+    mock_hass.states.async_set("number.min_soc", "62", {"unit_of_measurement": "%"})
+    _prices(mock_hass, before=0.30, period=0.35)
+    mock_hass.services.async_call.reset_mock()
+
+    await _rescue(coordinator, _short(), now=LATE + timedelta(minutes=15))
+
+    assert coordinator._rescue_stage == 1
+    assert coordinator._adhoc_allow_grid_charge is False
+    mock_hass.services.async_call.assert_any_await(
+        "number", "set_value", {"entity_id": "number.min_soc", "value": 30.0}, blocking=True
+    )
+
+
+@pytest.mark.asyncio
 async def test_an_empty_battery_is_not_held(mock_hass):
     """Nothing above the minimum to keep, and a floor above it would buy."""
     coordinator = _make_coordinator(mock_hass)

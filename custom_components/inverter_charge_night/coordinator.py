@@ -5773,13 +5773,17 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         current_soc = self._current_battery_soc()
         if current_soc is None:
             return
-        if not rescuing and current_soc <= float(self.config.get(CONF_USER_MIN_SOC, 8.0)):
-            # Nothing above the minimum to hold, and a floor above the battery
-            # is a grid charge on some inverters
-            return
-
         close_enough = (outlook.zone_start - now) <= timedelta(hours=EVENING_RESCUE_CHARGE_LEAD_H)
         stage = 2 if close_enough and self._rescue_purchase_pays(outlook, now) else 1
+        if (
+            stage == 1
+            and not rescuing
+            and current_soc <= float(self.config.get(CONF_USER_MIN_SOC, 8.0))
+        ):
+            # Nothing above the minimum to hold, and a floor above the battery
+            # is a grid charge on some inverters. A purchase that pays still
+            # goes ahead (Codex on #44).
+            return
         required = outlook.required_soc
         cap = self._adhoc_floor_cap_soc
         if (
@@ -5982,6 +5986,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.target_reached = False
             self._persist_state()
             await self._calculate_initial_soc()
+            # A floor that moved has to reach the inverter now, as at the start
+            # of a window: with the target already met the update returns
+            # before _control_charge, so a hold lowered to a smaller need, or
+            # a purchase called off, would keep the old min SOC (Codex on #44)
+            await self._write_raised_min_soc_floor()
             return True
 
         self._adhoc_until = until
