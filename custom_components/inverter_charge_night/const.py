@@ -110,6 +110,15 @@ DEFAULT_LOAD_SAFETY_LEVEL = LOAD_SAFETY_MEAN
 # Fewer days than this in an hour of the day and its quantile is noise: the
 # mean is used for that hour instead
 LOAD_QUANTILE_MIN_SAMPLES = 7
+# Plan 015 stage D: a colder day than the fortnight the profile is from draws
+# more where a heat pump runs. All optional; without a weather entity nothing
+# changes.
+CONF_WEATHER_ENTITY = "weather_entity"
+CONF_OUTDOOR_TEMPERATURE_ENTITY = "outdoor_temperature_entity"
+CONF_HEATING_LIMIT_C = "heating_limit_c"
+DEFAULT_HEATING_LIMIT_C = 15.0
+WEATHER_FORECAST_CACHE_S = 1800  # 30 minutes
+OUTDOOR_TEMPERATURE_CACHE_S = 3600
 DEFAULT_CHARGE_EFFICIENCY = 0.90
 DEFAULT_DISCHARGE_EFFICIENCY = 0.95
 HOUSE_LOAD_PROFILE_DAYS = 14  # history used to learn the hourly load profile

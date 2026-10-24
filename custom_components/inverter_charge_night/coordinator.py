@@ -30,6 +30,19 @@ from homeassistant.helpers.recorder import DATA_INSTANCE, get_instance
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
 
+from .heating import (
+    STATUS_ACTIVE,
+    STATUS_FORECAST_UNAVAILABLE,
+    STATUS_LEARNING,
+    STATUS_OFF,
+    TemperatureLog,
+    daily_mean_from_forecast,
+    fit_heating_model,
+    heating_degrees,
+    hourly_mean_from_forecast,
+    temperature_factor,
+    to_celsius,
+)
 from .pv_yield import PVYieldMonitor
 
 from .const import (
@@ -106,6 +119,9 @@ from .const import (
     CONF_BRIDGE_RESERVE_KWH,
     CONF_SAFETY_BUFFER_KWH,
     CONF_LOAD_SAFETY_LEVEL,
+    CONF_WEATHER_ENTITY,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_HEATING_LIMIT_C,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
     CONF_DISCHARGE_LIMIT_ENTITY,
@@ -122,6 +138,9 @@ from .const import (
     DEFAULT_LOAD_SAFETY_LEVEL,
     LOAD_QUANTILE_MIN_SAMPLES,
     LOAD_SAFETY_QUANTILES,
+    DEFAULT_HEATING_LIMIT_C,
+    WEATHER_FORECAST_CACHE_S,
+    OUTDOOR_TEMPERATURE_CACHE_S,
     DEFAULT_CHARGE_EFFICIENCY,
     HOUSE_LOAD_PROFILE_DAYS,
     CURTAILMENT_PEAK_CACHE_S,
@@ -373,6 +392,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _auto_start_failures: tuple[str, int] | None = None
     _auto_telemetry_losses: tuple[str, int] | None = None
     _auto_idle_trials: tuple[str, int] | None = None
+    # Replaced per instance in __init__; the class value only serves objects a
+    # test builds without it, and nothing writes to it there
+    _temperature_log: TemperatureLog = TemperatureLog()
     _grid_switch_suspended: bool = False
     _grid_stop_pending: bool = False
     _grid_stop_retries: int = 0
@@ -454,6 +476,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # ignoring the forecast. Counts down at every window end.
         self._pv_yield_notice: tuple[str, str] | None = None
         self._pv_yield = PVYieldMonitor()
+        # Plan 015 stage D: daily outdoor means collected from the polls, the
+        # forecast and recorder look-ups behind the temperature factor, and
+        # what the last plan made of them
+        self._temperature_log = TemperatureLog()
+        self._forecast_temp_cache: tuple[datetime, date, float | None] | None = None
+        self._outdoor_daily_cache: tuple[datetime, dict[date, float]] | None = None
+        self.weather_status: dict[str, Any] = {"status": STATUS_OFF}
         self.snow_nights: int = 0
         self._original_absolute_charge_power: float | None = None
         # What we last wrote there ourselves. Without it a fresh capture
@@ -803,6 +832,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "evening_rescue_charge": self.evening_rescue_charge,
             "snow_nights": self.snow_nights,
             "pv_yield": self._pv_yield.snapshot(),
+            "temperature_log": self._temperature_log.snapshot(),
         }
         self.hass.config_entries.async_update_entry(self.entry, options=options)
 
@@ -813,6 +843,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         state: dict[str, Any] = raw
         self._pv_yield = PVYieldMonitor(state.get("pv_yield"))
+        self._temperature_log = TemperatureLog(state.get("temperature_log"))
         if isinstance(state.get("is_enabled"), bool):
             self.is_enabled = state["is_enabled"]
         if isinstance(state.get("evening_rescue_charge"), bool):
@@ -1767,22 +1798,179 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for values in samples
         ]
 
-    async def _house_load_need_profile(self) -> list[float]:
-        """The hourly load the night target is bought for (plan 015 stage C).
+    async def _house_load_need_profile(self, day: date | None = None) -> list[float]:
+        """The hourly load the night target is bought for (plan 015 stages C, D).
 
         The mean profile, or with a safety level each hour's upper quantile of
-        the same fortnight - never below the mean. The room kept free for the
-        sun keeps using :meth:`_house_load_profile`.
+        the same fortnight - never below the mean. With a weather entity and a
+        ``day`` to plan for, scaled by how much colder or warmer that day is
+        than the fortnight. The room kept free for the sun keeps using
+        :meth:`_house_load_profile`, unscaled.
         """
         mean = await self._house_load_profile()
         level = self.config.get(CONF_LOAD_SAFETY_LEVEL, DEFAULT_LOAD_SAFETY_LEVEL)
         q = LOAD_SAFETY_QUANTILES.get(str(level))
         samples = self._house_load_samples
         if q is None or samples is None:
-            return list(mean)
-        return need_profile(
-            [[kwh for _, kwh in values] for values in samples], mean, q, LOAD_QUANTILE_MIN_SAMPLES
+            need = list(mean)
+        else:
+            need = need_profile(
+                [[kwh for _, kwh in values] for values in samples], mean, q,
+                LOAD_QUANTILE_MIN_SAMPLES,
+            )
+        if day is None:
+            return need
+        factor = await self._weather_factor(day)
+        return need if factor == 1.0 else [value * factor for value in need]
+
+    def _observe_outdoor_temperature(self) -> None:
+        """Add this poll's outdoor temperature to the diary (plan 015 stage D).
+
+        From the temperature sensor if one is set, otherwise from the weather
+        entity's current conditions. Persisted once a day is complete.
+        """
+        if not self.config.get(CONF_WEATHER_ENTITY):
+            return
+        if self._temperature_log.observe(dt_util.now().date(), self._current_outdoor_c()):
+            self._persist_state()
+
+    def _current_outdoor_c(self) -> float | None:
+        sensor_id = self.config.get(CONF_OUTDOOR_TEMPERATURE_ENTITY)
+        if sensor_id:
+            state = self.hass.states.get(str(sensor_id))
+            value = _as_float(state.state) if state is not None else None
+            if value is not None and state is not None:
+                return to_celsius(value, state.attributes.get("unit_of_measurement"))
+        weather = self.hass.states.get(str(self.config.get(CONF_WEATHER_ENTITY)))
+        if weather is None:
+            return None
+        raw = weather.attributes.get("temperature")
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw):
+            return None
+        return to_celsius(float(raw), weather.attributes.get("temperature_unit"))
+
+    async def _forecast_mean_temperature(self, day: date) -> float | None:
+        """The forecast daily mean for ``day``, from the weather entity.
+
+        Asked through ``weather.get_forecasts``: since 2023.9 a weather entity
+        no longer carries its forecast in an attribute. Daily first; the hourly
+        forecast where the provider has no daily one for that day.
+        """
+        entity_id = str(self.config.get(CONF_WEATHER_ENTITY))
+        now = dt_util.utcnow()
+        cached = self._forecast_temp_cache
+        if (cached is not None and cached[1] == day
+                and (now - cached[0]).total_seconds() < WEATHER_FORECAST_CACHE_S):
+            return cached[2]
+        weather = self.hass.states.get(entity_id)
+        unit = weather.attributes.get("temperature_unit") if weather is not None else None
+        result: float | None = None
+        for kind, parse in (("daily", daily_mean_from_forecast),
+                            ("hourly", hourly_mean_from_forecast)):
+            try:
+                response = await self.hass.services.async_call(
+                    "weather", "get_forecasts", {"type": kind},
+                    blocking=True, target={"entity_id": entity_id}, return_response=True,
+                )
+            except Exception as err:  # pylint: disable=broad-except
+                # A provider without this kind raises; the other kind may do
+                _LOGGER.debug("No %s forecast from %s: %s", kind, entity_id, err)
+                continue
+            forecast = (response or {}).get(entity_id, {})
+            entries = forecast.get("forecast") if isinstance(forecast, dict) else None
+            if isinstance(entries, list):
+                rows = [entry for entry in entries if isinstance(entry, dict)]
+                value = parse(rows, day, dt_util.as_local)
+                if value is not None:
+                    result = to_celsius(value, unit if isinstance(unit, str) else None)
+                    break
+        self._forecast_temp_cache = (now, day, result)
+        return result
+
+    async def _daily_outdoor_c(self) -> dict[date, float]:
+        """Daily mean outdoor temperatures to learn from.
+
+        The sensor's recorder statistics when a sensor is set - a fortnight of
+        history at once - completed by the integration's own diary, which is
+        all there is with only a weather entity.
+        """
+        days = dict(self._temperature_log.days)
+        sensor_id = self.config.get(CONF_OUTDOOR_TEMPERATURE_ENTITY)
+        if not sensor_id or DATA_INSTANCE not in self.hass.data:
+            return days
+        now = dt_util.utcnow()
+        cached = self._outdoor_daily_cache
+        if cached is not None and (now - cached[0]).total_seconds() < OUTDOOR_TEMPERATURE_CACHE_S:
+            return {**days, **cached[1]}
+        from homeassistant.components.recorder.statistics import statistics_during_period
+
+        start = (now - timedelta(days=HOUSE_LOAD_PROFILE_DAYS + 1)).replace(
+            minute=0, second=0, microsecond=0
         )
+        try:
+            rows = await get_instance(self.hass).async_add_executor_job(
+                lambda: statistics_during_period(
+                    self.hass, start, None, {str(sensor_id)}, "day", None, {"mean"}
+                )
+            )
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Reading temperature statistics for %s failed: %s", sensor_id, err)
+            return days
+        state = self.hass.states.get(str(sensor_id))
+        unit = state.attributes.get("unit_of_measurement") if state is not None else None
+        learned: dict[date, float] = {}
+        for row in rows.get(str(sensor_id), []):
+            start_ts = row.get("start")
+            mean = row.get("mean")
+            if isinstance(start_ts, (int, float)) and isinstance(mean, (int, float)):
+                local = dt_util.as_local(dt_util.utc_from_timestamp(start_ts))
+                learned[local.date()] = to_celsius(float(mean), unit if isinstance(unit, str) else None)
+        self._outdoor_daily_cache = (now, learned)
+        return {**days, **learned}
+
+    async def _weather_factor(self, day: date) -> float:
+        """How much more the planned day draws than the fortnight (plan 015 stage D).
+
+        1.0 without a weather entity, without a forecast, and until the days
+        behind the profile show a heating slope worth trusting. The reasoning
+        is kept in ``weather_status`` for the sensor and the diagnostics.
+        """
+        if not self.config.get(CONF_WEATHER_ENTITY):
+            self.weather_status = {"status": STATUS_OFF}
+            return 1.0
+        limit = float(self.config.get(CONF_HEATING_LIMIT_C, DEFAULT_HEATING_LIMIT_C))
+        forecast_c = await self._forecast_mean_temperature(day)
+        temperatures = await self._daily_outdoor_c()
+        daily_kwh: dict[date, float] = {}
+        hours: dict[date, int] = {}
+        for values in self._house_load_samples or []:
+            for sample_day, kwh in values:
+                daily_kwh[sample_day] = daily_kwh.get(sample_day, 0.0) + kwh
+                hours[sample_day] = hours.get(sample_day, 0) + 1
+        # Only whole days: a day half in the fortnight is half a day's use
+        pairs = [(temperatures[d], kwh) for d, kwh in daily_kwh.items()
+                 if hours[d] == 24 and d in temperatures]
+        model = fit_heating_model(pairs, limit)
+        profile_c = sum(t for t, _ in pairs) / len(pairs) if pairs else None
+        status: dict[str, Any] = {
+            "forecast_day": day.isoformat(),
+            "forecast_temp_c": round(forecast_c, 1) if forecast_c is not None else None,
+            "profile_temp_c": round(profile_c, 1) if profile_c is not None else None,
+            "learning_days": len(pairs),
+            "kwh_per_kelvin": round(model.slope_kwh_per_k, 3) if model else None,
+            "r2": round(model.r2, 2) if model else None,
+            "heating_limit_c": limit,
+        }
+        if forecast_c is None:
+            self.weather_status = {**status, "status": STATUS_FORECAST_UNAVAILABLE, "factor": 1.0}
+            return 1.0
+        if model is None or not model.usable:
+            self.weather_status = {**status, "status": STATUS_LEARNING, "factor": 1.0}
+            return 1.0
+        profile_degrees = sum(heating_degrees(t, limit) for t, _ in pairs) / len(pairs)
+        factor = temperature_factor(model, forecast_c, profile_degrees, limit)
+        self.weather_status = {**status, "status": STATUS_ACTIVE, "factor": round(factor, 3)}
+        return factor
 
     async def _feed_in_peaks_by_hour(self) -> list[float] | None:
         """The highest feed-in power seen in each hour of the day, in W, or None.
@@ -1908,7 +2096,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 window_end=window_end,
                 pv_crossover=pv_crossover,
                 sunset=sunset,
-                house_load_kw_profile=await self._house_load_need_profile(),
+                house_load_kw_profile=await self._house_load_need_profile(window_end.date()),
                 room_load_kw_profile=await self._house_load_profile(),
                 reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
                 charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
@@ -6193,6 +6381,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _async_update_data(self) -> dict[str, Any]:
         """Observe lost channels before control, retaining independent stop paths."""
         self._observe_pv_yield()
+        self._observe_outdoor_temperature()
         faults = self._update_communication_health()
         if faults and self.is_active and not self._ending and not self._unloading:
             # No raised ceiling may replace a protective zero while the stop

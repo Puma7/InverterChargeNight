@@ -132,7 +132,10 @@
           "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
           "pv_energy_today_entity": "Actual PV energy today",
           "safety_buffer_kwh": "Safety buffer",
-          "load_safety_level": "Safety level of the planned consumption"
+          "load_safety_level": "Safety level of the planned consumption",
+          "weather_entity": "Weather forecast entity",
+          "outdoor_temperature_entity": "Outdoor temperature sensor",
+          "heating_limit_c": "Heating limit temperature"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -160,7 +163,10 @@
           "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
           "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today.",
           "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
-          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average."
+          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average.",
+          "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
+          "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
+          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree."
         }
       },
       "reconfigure": {
@@ -294,7 +300,10 @@
           "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
           "pv_energy_today_entity": "Actual PV energy today",
           "safety_buffer_kwh": "Safety buffer",
-          "load_safety_level": "Safety level of the planned consumption"
+          "load_safety_level": "Safety level of the planned consumption",
+          "weather_entity": "Weather forecast entity",
+          "outdoor_temperature_entity": "Outdoor temperature sensor",
+          "heating_limit_c": "Heating limit temperature"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -322,7 +331,10 @@
           "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
           "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today.",
           "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
-          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average."
+          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average.",
+          "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
+          "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
+          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree."
         }
       },
       "review": {
@@ -614,7 +626,7 @@
           "pv_shortfall": "Account for very low PV yield",
           "prices": "Account for electricity prices",
           "setup": "Back to overview",
-          "reserve": "Safety buffer and reserves"
+          "reserve": "Safety buffer, safety level and weather"
         }
       },
       "advanced_features": {
@@ -683,15 +695,21 @@
         "description": "Disable efficiency search and house import limiting first. They require a watt control. Continue returns to feature selection. Active configuration changes only when finally applied."
       },
       "reserve": {
-        "title": "Safety buffer and reserves",
-        "description": "How much the night target carries beyond what the plan needs. The buffer only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power.",
+        "title": "Safety buffer, safety level and weather",
+        "description": "How much the night target carries beyond what the plan needs, how cautiously it plans the house consumption, and whether tomorrow's weather changes it. The buffer only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power.",
         "data": {
           "safety_buffer_kwh": "Safety buffer",
-          "load_safety_level": "Safety level of the planned consumption"
+          "load_safety_level": "Safety level of the planned consumption",
+          "weather_entity": "Weather forecast entity",
+          "outdoor_temperature_entity": "Outdoor temperature sensor",
+          "heating_limit_c": "Heating limit temperature"
         },
         "data_description": {
           "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
-          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average."
+          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average.",
+          "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
+          "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
+          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree."
         }
       }
     },
@@ -865,7 +883,10 @@
           "auto_pv_shortfall": "Automatically allow for severe PV shortfalls",
           "pv_energy_today_entity": "Actual PV energy today",
           "safety_buffer_kwh": "Safety buffer",
-          "load_safety_level": "Safety level of the planned consumption"
+          "load_safety_level": "Safety level of the planned consumption",
+          "weather_entity": "Weather forecast entity",
+          "outdoor_temperature_entity": "Outdoor temperature sensor",
+          "heating_limit_c": "Heating limit temperature"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -893,7 +914,10 @@
           "auto_pv_shortfall": "Optional: compares a morning full-day forecast of at least 5 kWh with fresh daily energy after sunset. At 15% or less, the next regular night charges to your maximum SOC. Possible causes include snow, shading, equipment faults or a wrong forecast. Requires observing a complete day.",
           "pv_energy_today_entity": "Whole-array daily PV energy in Wh/kWh/MWh, reset every day. Use neither instantaneous power nor a lifetime counter. Also requires the forecast for today.",
           "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
-          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average."
+          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average.",
+          "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
+          "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
+          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree."
         }
       },
       "review": {
@@ -1181,7 +1205,7 @@
           "pv_shortfall": "Account for very low PV yield",
           "prices": "Account for electricity prices",
           "setup": "Back to overview",
-          "reserve": "Safety buffer and reserves"
+          "reserve": "Safety buffer, safety level and weather"
         }
       },
       "advanced_features": {
@@ -1250,15 +1274,21 @@
         "description": "Disable efficiency search and house import limiting first. They require a watt control. Continue returns to feature selection. Active configuration changes only when finally applied."
       },
       "reserve": {
-        "title": "Safety buffer and reserves",
-        "description": "How much the night target carries beyond what the plan needs. The buffer only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power.",
+        "title": "Safety buffer, safety level and weather",
+        "description": "How much the night target carries beyond what the plan needs, how cautiously it plans the house consumption, and whether tomorrow's weather changes it. The buffer only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power.",
         "data": {
           "safety_buffer_kwh": "Safety buffer",
-          "load_safety_level": "Safety level of the planned consumption"
+          "load_safety_level": "Safety level of the planned consumption",
+          "weather_entity": "Weather forecast entity",
+          "outdoor_temperature_entity": "Outdoor temperature sensor",
+          "heating_limit_c": "Heating limit temperature"
         },
         "data_description": {
           "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
-          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average."
+          "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average.",
+          "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
+          "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
+          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree."
         }
       }
     },

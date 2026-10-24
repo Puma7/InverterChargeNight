@@ -132,7 +132,10 @@
           "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
           "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag",
           "safety_buffer_kwh": "Sicherheitspuffer",
-          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs"
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
+          "weather_entity": "Wettervorhersage-Entität",
+          "outdoor_temperature_entity": "Außentemperatur-Sensor",
+          "heating_limit_c": "Heizgrenztemperatur"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -160,7 +163,10 @@
           "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
           "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt.",
           "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
-          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet."
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
+          "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
+          "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad."
         }
       },
       "reconfigure": {
@@ -294,7 +300,10 @@
           "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
           "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag",
           "safety_buffer_kwh": "Sicherheitspuffer",
-          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs"
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
+          "weather_entity": "Wettervorhersage-Entität",
+          "outdoor_temperature_entity": "Außentemperatur-Sensor",
+          "heating_limit_c": "Heizgrenztemperatur"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -322,7 +331,10 @@
           "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
           "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt.",
           "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
-          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet."
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
+          "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
+          "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad."
         }
       },
       "review": {
@@ -614,7 +626,7 @@
           "pv_shortfall": "Sehr geringen PV-Ertrag berücksichtigen",
           "prices": "Strompreise berücksichtigen",
           "setup": "Zurück zur Übersicht",
-          "reserve": "Sicherheitspuffer und Reserven"
+          "reserve": "Sicherheitspuffer, Sicherheitsniveau und Wetter"
         }
       },
       "advanced_features": {
@@ -683,15 +695,21 @@
         "description": "Zuerst Effizienzsuche und Hausanschluss-Begrenzung ausschalten. Ohne Watt-Steller können diese Funktionen nicht regeln. Mit „Weiter“ zurück zur Funktionsauswahl gehen. Die aktive Konfiguration bleibt bis zum abschließenden Übernehmen unverändert."
       },
       "reserve": {
-        "title": "Sicherheitspuffer und Reserven",
-        "description": "Wie viel das Nachtziel über den geplanten Bedarf hinaus mitträgt. Der Puffer nutzt nur Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen.",
+        "title": "Sicherheitspuffer, Sicherheitsniveau und Wetter",
+        "description": "Wie viel das Nachtziel über den geplanten Bedarf hinaus mitträgt, wie vorsichtig es den Hausverbrauch plant und ob das Wetter von morgen es verändert. Der Puffer nutzt nur Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen.",
         "data": {
           "safety_buffer_kwh": "Sicherheitspuffer",
-          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs"
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
+          "weather_entity": "Wettervorhersage-Entität",
+          "outdoor_temperature_entity": "Außentemperatur-Sensor",
+          "heating_limit_c": "Heizgrenztemperatur"
         },
         "data_description": {
           "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
-          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet."
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
+          "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
+          "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad."
         }
       }
     },
@@ -865,7 +883,10 @@
           "auto_pv_shortfall": "PV-Ertragsausfall automatisch berücksichtigen",
           "pv_energy_today_entity": "Tatsächlicher PV-Tagesertrag",
           "safety_buffer_kwh": "Sicherheitspuffer",
-          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs"
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
+          "weather_entity": "Wettervorhersage-Entität",
+          "outdoor_temperature_entity": "Außentemperatur-Sensor",
+          "heating_limit_c": "Heizgrenztemperatur"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -893,7 +914,10 @@
           "auto_pv_shortfall": "Optional: Vergleicht die morgens gespeicherte Ganztagesprognose (mindestens 5 kWh) nach Sonnenuntergang mit dem Tagesertrag. Bei höchstens 15 % Ertrag wird die nächste reguläre Nacht bis zum konfigurierten Maximal-SoC geladen. Mögliche Ursachen sind Schnee, Verschattung, Anlagenfehler oder eine falsche Prognose. Benötigt eine vollständige Tagesbeobachtung.",
           "pv_energy_today_entity": "Energiezähler der gesamten PV-Anlage in Wh/kWh/MWh, der täglich zurückgesetzt wird. Kein Leistungssensor und kein Lebensdauerzähler. Zusätzlich wird die Prognose für heute benötigt.",
           "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
-          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet."
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
+          "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
+          "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad."
         }
       },
       "review": {
@@ -1181,7 +1205,7 @@
           "pv_shortfall": "Sehr geringen PV-Ertrag berücksichtigen",
           "prices": "Strompreise berücksichtigen",
           "setup": "Zurück zur Übersicht",
-          "reserve": "Sicherheitspuffer und Reserven"
+          "reserve": "Sicherheitspuffer, Sicherheitsniveau und Wetter"
         }
       },
       "advanced_features": {
@@ -1250,15 +1274,21 @@
         "description": "Zuerst Effizienzsuche und Hausanschluss-Begrenzung ausschalten. Ohne Watt-Steller können diese Funktionen nicht regeln. Mit „Weiter“ zurück zur Funktionsauswahl gehen. Die aktive Konfiguration bleibt bis zum abschließenden Übernehmen unverändert."
       },
       "reserve": {
-        "title": "Sicherheitspuffer und Reserven",
-        "description": "Wie viel das Nachtziel über den geplanten Bedarf hinaus mitträgt. Der Puffer nutzt nur Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen.",
+        "title": "Sicherheitspuffer, Sicherheitsniveau und Wetter",
+        "description": "Wie viel das Nachtziel über den geplanten Bedarf hinaus mitträgt, wie vorsichtig es den Hausverbrauch plant und ob das Wetter von morgen es verändert. Der Puffer nutzt nur Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen.",
         "data": {
           "safety_buffer_kwh": "Sicherheitspuffer",
-          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs"
+          "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
+          "weather_entity": "Wettervorhersage-Entität",
+          "outdoor_temperature_entity": "Außentemperatur-Sensor",
+          "heating_limit_c": "Heizgrenztemperatur"
         },
         "data_description": {
           "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
-          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet."
+          "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
+          "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
+          "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad."
         }
       }
     },

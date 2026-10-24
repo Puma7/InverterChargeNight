@@ -45,6 +45,9 @@ from .const import (
     CONF_BRIDGE_RESERVE_KWH,
     CONF_SAFETY_BUFFER_KWH,
     CONF_LOAD_SAFETY_LEVEL,
+    CONF_WEATHER_ENTITY,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_HEATING_LIMIT_C,
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
@@ -92,6 +95,7 @@ from .const import (
     DEFAULT_SAFETY_BUFFER_KWH,
     DEFAULT_LOAD_SAFETY_LEVEL,
     LOAD_SAFETY_LEVELS,
+    DEFAULT_HEATING_LIMIT_C,
     DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_COMMAND_DELAY,
@@ -206,6 +210,9 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_BRIDGE_RESERVE_KWH,
     CONF_SAFETY_BUFFER_KWH,
     CONF_LOAD_SAFETY_LEVEL,
+    CONF_WEATHER_ENTITY,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
+    CONF_HEATING_LIMIT_C,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
     CONF_NIGHT_PRICE_CT,
@@ -299,6 +306,8 @@ _ENTITY_KEYS_TO_VALIDATE = [
     CONF_GRID_IMPORT_ENTITY,
     CONF_DISCHARGE_BLOCK_SWITCH,
     CONF_CURTAILMENT_FEED_IN_ENTITY,
+    CONF_WEATHER_ENTITY,
+    CONF_OUTDOOR_TEMPERATURE_ENTITY,
 ]
 
 
@@ -843,6 +852,15 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
             _required(
                 CONF_LOAD_SAFETY_LEVEL, defaults, DEFAULT_LOAD_SAFETY_LEVEL
             ): _load_safety_level_selector(),
+            _optional(
+                CONF_WEATHER_ENTITY, defaults.get(CONF_WEATHER_ENTITY)
+            ): _entity_selector("weather"),
+            _optional(
+                CONF_OUTDOOR_TEMPERATURE_ENTITY, defaults.get(CONF_OUTDOOR_TEMPERATURE_ENTITY)
+            ): _entity_selector("sensor", "temperature"),
+            _required(
+                CONF_HEATING_LIMIT_C, defaults, DEFAULT_HEATING_LIMIT_C
+            ): _number_selector(5, 25, 0.5, "°C"),
             _required(
                 CONF_CHARGE_EFFICIENCY, defaults, DEFAULT_CHARGE_EFFICIENCY
             ): _number_selector(0.5, 1.0, 0.01),
@@ -953,7 +971,8 @@ _GUIDED_GROUPS: dict[str, tuple[str, ...]] = {
                  CONF_PV_FORECAST_TODAY_ENTITY, CONF_HOUSE_LOAD_ENTITY,
                  CONF_AVG_HOUSE_LOAD_KW, CONF_PV_CROSSOVER_DELAY_MIN, CONF_BRIDGE_RESERVE_KWH),
     # Plan 015: how much the night target carries beyond the bare need
-    "reserve": (CONF_SAFETY_BUFFER_KWH, CONF_LOAD_SAFETY_LEVEL),
+    "reserve": (CONF_SAFETY_BUFFER_KWH, CONF_LOAD_SAFETY_LEVEL, CONF_WEATHER_ENTITY,
+                CONF_OUTDOOR_TEMPERATURE_ENTITY, CONF_HEATING_LIMIT_C),
     "evening": (CONF_HIGH_PRICE_START, CONF_HIGH_PRICE_END, CONF_HIGH_PRICE_MARGIN_PCT,
                 CONF_DISCHARGE_BLOCK_MODE, CONF_DISCHARGE_BLOCK_SWITCH),
     "season": (CONF_ACTIVE_START_DATE, CONF_ACTIVE_END_DATE, CONF_ACTIVE_RANGE_YEARLY),
