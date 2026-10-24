@@ -10,8 +10,8 @@ Charge Night entry (the lab sets it up); a running charge window gives a target
 SOC instead of "unknown".
 
 Side effects on that instance only: the user's language and the server
-language are switched per screenshot language (afterwards the user gets the
-first one, the server its original one; Inverter Charge Night is reloaded so
+language are switched per screenshot language (afterwards both get their
+original settings back, formats included; Inverter Charge Night is reloaded so
 its entity names follow), the storage
 dashboard ``icn-docs`` is created or overwritten, and the setup and options
 flows are opened and closed again without saving. The reserve form is filled
@@ -133,6 +133,23 @@ class Shooter:
             "language": self.lang, "number_format": "language", "time_format": "language",
             "date_format": "language", "time_zone": "server", "first_weekday": "language"}})
         await self.page.evaluate("(l) => localStorage.setItem('selectedLanguage', JSON.stringify(l))", self.lang)
+
+    async def restore_language(self, user_language: object, core_language: str, fallback: str) -> None:
+        """Give the user and the server back the settings they had before.
+
+        A user who never chose a language in the profile keeps ``fallback``.
+        """
+        if not isinstance(user_language, dict):
+            self.lang = fallback
+            await self.set_language()
+        else:
+            await self.ws({"type": "frontend/set_user_data", "key": "language", "value": user_language})
+            if user_language.get("language"):
+                self.lang = str(user_language["language"])
+                await self.page.evaluate("(l) => localStorage.setItem('selectedLanguage', JSON.stringify(l))",
+                                         self.lang)
+        self.lang = core_language
+        await self.set_core_language()
 
     async def set_core_language(self) -> None:
         """Entity and device names come from the server language; a reload applies it."""
@@ -256,7 +273,8 @@ async def main() -> None:
               "hassUrl": base, "clientId": base + "/", "expires": 4102444800000}
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch()
-        for lang in args.lang:
+        languages = list(dict.fromkeys(args.lang))  # once each, in the order given
+        for index, lang in enumerate(languages):
             context = await browser.new_context(
                 viewport={"width": 1280, "height": 900}, device_scale_factor=1.5, color_scheme="light",
                 locale=LOCALES[lang], timezone_id="Europe/Berlin")
@@ -267,8 +285,10 @@ async def main() -> None:
             page = await context.new_page()
             shooter = Shooter(page, base, lang, args.out / lang)
             await shooter.goto("/config/integrations/dashboard")
-            if lang == args.lang[0]:
+            if index == 0:
                 original_core_language = (await shooter.ws({"type": "get_config"}))["language"]
+                original_user_language = (await shooter.ws(
+                    {"type": "frontend/get_user_data", "key": "language"}))["value"]
             finished = False
             try:
                 await shooter.set_language()
@@ -283,11 +303,9 @@ async def main() -> None:
                 try:
                     # Leave the instance as it was found: after the last language,
                     # and after a step that failed half-way through any of them
-                    if lang == args.lang[-1] or not finished:
-                        shooter.lang = args.lang[0]
-                        await shooter.set_language()
-                        shooter.lang = original_core_language
-                        await shooter.set_core_language()
+                    if index == len(languages) - 1 or not finished:
+                        await shooter.restore_language(original_user_language, original_core_language,
+                                                       languages[0])
                 finally:
                     await context.close()
         await browser.close()
