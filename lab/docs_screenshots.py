@@ -239,19 +239,27 @@ async def main() -> None:
             await shooter.goto("/config/integrations/dashboard")
             if lang == args.lang[0]:
                 original_core_language = (await shooter.ws({"type": "get_config"}))["language"]
-            await shooter.set_language()
-            await shooter.set_core_language()
-            await shooter.setup_start()
-            await shooter.options()
-            await shooter.device()
-            example = REPO / ("docs/examples/dashboard.yaml" if lang == "en" else f"docs/examples/dashboard.{lang}.yaml")
-            await shooter.dashboard(example, args.battery_soc)
-            if lang == args.lang[-1]:  # leave the instance as it was found
-                shooter.lang = args.lang[0]
+            finished = False
+            try:
                 await shooter.set_language()
-                shooter.lang = original_core_language
                 await shooter.set_core_language()
-            await context.close()
+                await shooter.setup_start()
+                await shooter.options()
+                await shooter.device()
+                example = REPO / ("docs/examples/dashboard.yaml" if lang == "en" else f"docs/examples/dashboard.{lang}.yaml")
+                await shooter.dashboard(example, args.battery_soc)
+                finished = True
+            finally:
+                try:
+                    # Leave the instance as it was found: after the last language,
+                    # and after a step that failed half-way through any of them
+                    if lang == args.lang[-1] or not finished:
+                        shooter.lang = args.lang[0]
+                        await shooter.set_language()
+                        shooter.lang = original_core_language
+                        await shooter.set_core_language()
+                finally:
+                    await context.close()
         await browser.close()
 
 
