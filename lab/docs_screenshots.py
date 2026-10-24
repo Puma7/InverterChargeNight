@@ -26,6 +26,7 @@ import asyncio
 import io
 import json
 import os
+import re
 from pathlib import Path
 
 import yaml
@@ -194,7 +195,17 @@ class Shooter:
         await self.height(900)
 
     async def dashboard(self, view_file: Path, battery_soc: str) -> None:
-        view = yaml.safe_load(view_file.read_text("utf-8").replace("sensor.battery_soc", battery_soc))
+        text = view_file.read_text("utf-8").replace("sensor.battery_soc", battery_soc)
+        # The examples carry the ids of an English or a German Home Assistant;
+        # the lab has whichever its language was at setup. Map by translation key.
+        registry = await self.ws({"type": "config/entity_registry/list"})
+        actual = {(entry["entity_id"].split(".")[0], entry["translation_key"]): entry["entity_id"]
+                  for entry in registry
+                  if entry.get("platform") == DOMAIN and entry.get("translation_key")}
+        for example_id, key in example_entity_ids().items():
+            if key in actual:
+                text = re.sub(rf"\b{re.escape(example_id)}\b", actual[key], text)
+        view = yaml.safe_load(text)
         dashboards = await self.ws({"type": "lovelace/dashboards/list"})
         existing = next((d for d in dashboards if d["url_path"] == DASHBOARD), None)
         meta = {"title": view["title"], "icon": view.get("icon"), "show_in_sidebar": True, "require_admin": False}
@@ -209,6 +220,25 @@ class Shooter:
         await self.settle("hui-history-graph-card")
         await self.page.wait_for_timeout(2500)  # history fetch and chart drawing
         await self.shot("dashboard.png", dialog=False)
+
+
+def slug(text: str) -> str:
+    """Home Assistant's entity id slug for the names this integration uses."""
+    text = text.lower()
+    for umlaut, plain in (("ä", "a"), ("ö", "o"), ("ü", "u"), ("ß", "ss")):
+        text = text.replace(umlaut, plain)
+    return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+
+
+def example_entity_ids() -> dict[str, tuple[str, str]]:
+    """Every default entity id, English and German, by (platform, translation key)."""
+    ids: dict[str, tuple[str, str]] = {}
+    for lang in ("en", "de"):
+        path = REPO / "custom_components" / DOMAIN / "translations" / f"{lang}.json"
+        for platform, keys in json.loads(path.read_text("utf-8"))["entity"].items():
+            for key, entry in keys.items():
+                ids[f"{platform}.{DOMAIN}_{slug(entry['name'])}"] = (platform, key)
+    return ids
 
 
 async def main() -> None:
