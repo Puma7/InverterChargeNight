@@ -135,7 +135,8 @@
           "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
           "weather_entity": "Wettervorhersage-Entität",
           "outdoor_temperature_entity": "Außentemperatur-Sensor",
-          "heating_limit_c": "Heizgrenztemperatur"
+          "heating_limit_c": "Heizgrenztemperatur",
+          "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -166,7 +167,8 @@
           "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
           "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
           "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
-          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad."
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       },
       "reconfigure": {
@@ -303,7 +305,8 @@
           "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
           "weather_entity": "Wettervorhersage-Entität",
           "outdoor_temperature_entity": "Außentemperatur-Sensor",
-          "heating_limit_c": "Heizgrenztemperatur"
+          "heating_limit_c": "Heizgrenztemperatur",
+          "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -334,7 +337,8 @@
           "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
           "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
           "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
-          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad."
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       },
       "review": {
@@ -702,14 +706,16 @@
           "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
           "weather_entity": "Wettervorhersage-Entität",
           "outdoor_temperature_entity": "Außentemperatur-Sensor",
-          "heating_limit_c": "Heizgrenztemperatur"
+          "heating_limit_c": "Heizgrenztemperatur",
+          "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
           "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
           "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
           "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
           "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
-          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad."
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       }
     },
@@ -886,7 +892,8 @@
           "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
           "weather_entity": "Wettervorhersage-Entität",
           "outdoor_temperature_entity": "Außentemperatur-Sensor",
-          "heating_limit_c": "Heizgrenztemperatur"
+          "heating_limit_c": "Heizgrenztemperatur",
+          "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
           "update_interval": "Wie oft die Integration ihre Daten neu liest (Sekunden, Standard 900).",
@@ -917,7 +924,8 @@
           "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
           "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
           "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
-          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad."
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       },
       "review": {
@@ -1281,14 +1289,16 @@
           "load_safety_level": "Sicherheitsniveau des geplanten Verbrauchs",
           "weather_entity": "Wettervorhersage-Entität",
           "outdoor_temperature_entity": "Außentemperatur-Sensor",
-          "heating_limit_c": "Heizgrenztemperatur"
+          "heating_limit_c": "Heizgrenztemperatur",
+          "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
           "safety_buffer_kwh": "Energie in kWh, die der Akku über den geplanten Bedarf hinaus mitträgt – für einen Stromausfall mit Inselbetrieb, ein E-Auto oder einen Abend über dem Durchschnitt (Standard 0). Nur im Überbrückungsplaner. Er nutzt nur den Platz, den die PV-Prognose für morgen frei lässt, und lässt den Akku daher nie überlaufen. Er wird einmal gekauft und dann mitgetragen: Jede Nacht lädt nur nach, was der Tag verbraucht hat.",
           "load_safety_level": "Mit welchem stündlichen Hausverbrauch das Nachtziel eingekauft wird, gelernt aus den letzten 14 Tagen des Verbrauchszählers. Durchschnitt: wie bisher. Sicher (75. Perzentil) oder sehr sicher (90. Perzentil): Jede Stunde wird wie an einem der verbrauchsstärkeren Tage geplant, nie unter ihrem Durchschnitt – das deckt einen Abend mit Backofen oder laufender Wärmepumpe. Nur das Ziel steigt; der Platz für die PV von morgen wird weiter mit dem Durchschnitt gerechnet.",
           "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
           "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
-          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad."
+          "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       }
     },
@@ -1358,6 +1368,12 @@
         "mean": "Durchschnitt (wie bisher)",
         "p75": "Sicher (75. Perzentil)",
         "p90": "Sehr sicher (90. Perzentil)"
+      }
+    },
+    "bridge_model": {
+      "options": {
+        "fixed_delay": "Feste Verzögerung nach Sonnenaufgang (wie bisher)",
+        "modelled": "Modelliert aus Prognose und Verbrauch"
       }
     }
   },

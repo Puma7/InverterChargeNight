@@ -119,6 +119,17 @@ CONF_HEATING_LIMIT_C = "heating_limit_c"
 DEFAULT_HEATING_LIMIT_C = 15.0
 WEATHER_FORECAST_CACHE_S = 1800  # 30 minutes
 OUTDOOR_TEMPERATURE_CACHE_S = 3600
+# Plan 015 stage B: the bridge as a balance of load and the forecast PV curve
+# instead of "load until sunrise + a fixed delay". Opt-in: it changes targets.
+CONF_BRIDGE_MODEL = "bridge_model"
+BRIDGE_MODEL_FIXED_DELAY = "fixed_delay"
+BRIDGE_MODEL_MODELLED = "modelled"
+BRIDGE_MODELS = (BRIDGE_MODEL_FIXED_DELAY, BRIDGE_MODEL_MODELLED)
+DEFAULT_BRIDGE_MODEL = BRIDGE_MODEL_FIXED_DELAY
+# The PV curve learned from the daily PV meter: days below this yield say
+# nothing about the shape, and fewer days than this are not a shape yet
+PV_SHAPE_MIN_DAY_KWH = 1.0
+PV_SHAPE_MIN_DAYS = 5
 DEFAULT_CHARGE_EFFICIENCY = 0.90
 DEFAULT_DISCHARGE_EFFICIENCY = 0.95
 HOUSE_LOAD_PROFILE_DAYS = 14  # history used to learn the hourly load profile

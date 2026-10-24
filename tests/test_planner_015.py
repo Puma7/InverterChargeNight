@@ -293,3 +293,87 @@ def test_the_status_sensor_shows_the_weather(mock_hass):
     sensor = CalculatedSOCSensor(coordinator, coordinator.entry)
     assert sensor.extra_state_attributes["weather"] == {"status": "active", "factor": 1.2}
 
+
+
+# --- stage B: the modelled day ------------------------------------------------
+
+from custom_components.inverter_charge_night.const import (  # noqa: E402
+    CONF_BRIDGE_MODEL,
+    CONF_PV_ENERGY_TODAY_ENTITY,
+)
+
+PV_METER = "sensor.pv_today"
+
+
+def _pv_rows(days, per_hour):
+    """Hourly changes of the daily PV meter, the day's yield spread by ``per_hour``."""
+    rows = []
+    for day in days:
+        for hour, kwh in per_hour.items():
+            start = datetime(2026, 1, day, hour, tzinfo=timezone.utc).timestamp()
+            rows.append({"start": start, "end": start + 3600, "change": kwh})
+    return rows
+
+
+def _pv_recorder(mock_hass, rows):
+    instance = MagicMock()
+    instance.async_add_executor_job = AsyncMock(return_value={PV_METER: rows})
+    mock_hass.data[DATA_INSTANCE] = instance
+    return instance
+
+
+@pytest.mark.asyncio
+async def test_the_pv_curve_is_learned_from_the_daily_meter(mock_hass):
+    """An east roof: most of the yield before noon. Dull days and today say nothing."""
+    coordinator = _coordinator(mock_hass, {CONF_BRIDGE_MODEL: "modelled",
+                                           CONF_PV_ENERGY_TODAY_ENTITY: PV_METER})
+    mock_hass.states.async_set(PV_METER, "1", {"unit_of_measurement": "kWh"})
+    east = {8: 1.0, 9: 2.0, 10: 1.0}
+    rows = _pv_rows(range(5, 11), east) + _pv_rows((11,), {9: 0.5})  # 0.5 kWh: too dull
+    rows += _pv_rows((15,), {1: 9.0})  # today is not over yet
+    rows.append({"start": rows[0]["start"], "end": 0, "change": -12.0})  # the midnight reset
+    instance = _pv_recorder(mock_hass, rows)
+
+    with patch(f"{COORDINATOR}.dt_util.utcnow", return_value=datetime(2026, 1, 15, 2, 0, tzinfo=timezone.utc)):
+        shape = await coordinator._pv_hourly_shape()
+        assert await coordinator._pv_hourly_shape() == shape  # cached
+    instance.async_add_executor_job.assert_awaited_once()
+
+    assert shape is not None
+    assert sum(shape) == pytest.approx(1.0)
+    assert shape[9] == pytest.approx(0.5)
+    assert shape[8] == pytest.approx(0.25) and shape[10] == pytest.approx(0.25)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["few days", "no meter", "recorder fails"])
+async def test_without_a_learned_curve_the_bell_is_used(mock_hass, case):
+    extra = {CONF_BRIDGE_MODEL: "modelled"}
+    if case != "no meter":
+        extra[CONF_PV_ENERGY_TODAY_ENTITY] = PV_METER
+    coordinator = _coordinator(mock_hass, extra)
+    mock_hass.states.async_set(PV_METER, "1", {"unit_of_measurement": "Wh"})
+    instance = _pv_recorder(mock_hass, _pv_rows(range(5, 9), {9: 2000.0}))
+    if case == "recorder fails":
+        instance.async_add_executor_job = AsyncMock(side_effect=RuntimeError("db locked"))
+    assert await coordinator._pv_hourly_shape() is None
+
+
+@pytest.mark.asyncio
+async def test_the_modelled_day_moves_the_crossover_and_the_target(mock_hass, caplog):
+    """A dull day: the fixed delay hands over at 09:00, the model never does."""
+    fixed = _coordinator(mock_hass)
+    modelled = _coordinator(mock_hass, {CONF_BRIDGE_MODEL: "modelled"})
+    caplog.set_level("INFO")
+    with patch(f"{COORDINATOR}.dt_util.now", return_value=NIGHT):
+        before = await fixed._plan_target(2.0, True)
+        caplog.clear()
+        after = await modelled._plan_target(2.0, True)
+
+    assert before is not None and after is not None
+    assert before.pv_crossover is None
+    assert after.pv_crossover == SUN[1]  # never carried: bridged until sunset
+    assert modelled._pv_crossover == SUN[1]
+    assert "until 17:00" in caplog.text
+    assert after.lower_bound_soc > before.lower_bound_soc
+    assert fixed._pv_shape_cache is None  # the fixed delay never asks the recorder

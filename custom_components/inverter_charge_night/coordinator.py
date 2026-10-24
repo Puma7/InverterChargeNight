@@ -122,6 +122,7 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_HEATING_LIMIT_C,
+    CONF_BRIDGE_MODEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
     CONF_DISCHARGE_LIMIT_ENTITY,
@@ -141,6 +142,10 @@ from .const import (
     DEFAULT_HEATING_LIMIT_C,
     WEATHER_FORECAST_CACHE_S,
     OUTDOOR_TEMPERATURE_CACHE_S,
+    BRIDGE_MODEL_MODELLED,
+    DEFAULT_BRIDGE_MODEL,
+    PV_SHAPE_MIN_DAY_KWH,
+    PV_SHAPE_MIN_DAYS,
     DEFAULT_CHARGE_EFFICIENCY,
     HOUSE_LOAD_PROFILE_DAYS,
     CURTAILMENT_PEAK_CACHE_S,
@@ -482,6 +487,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._temperature_log = TemperatureLog()
         self._forecast_temp_cache: tuple[datetime, date, float | None] | None = None
         self._outdoor_daily_cache: tuple[datetime, dict[date, float]] | None = None
+        # Plan 015 stage B: the PV curve learned from the daily PV meter
+        self._pv_shape_cache: tuple[datetime, list[float] | None] | None = None
         self.weather_status: dict[str, Any] = {"status": STATUS_OFF}
         self.snow_nights: int = 0
         self._original_absolute_charge_power: float | None = None
@@ -1823,6 +1830,61 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         factor = await self._weather_factor(day)
         return need if factor == 1.0 else [value * factor for value in need]
 
+    async def _pv_hourly_shape(self) -> list[float] | None:
+        """How the day's PV yield spreads over the clock hours (plan 015 stage B).
+
+        Learned from the daily PV meter's hourly recorder statistics over the
+        last fortnight: each day with a real yield gives the share of it in
+        every hour, and the shares are averaged. That knows the roof - east,
+        west, the tree in front of it - and the season of the last two weeks,
+        which the clear-sky bell does not. None without the meter or enough
+        days, and the bell is used.
+        """
+        entity_id = self.config.get(CONF_PV_ENERGY_TODAY_ENTITY)
+        if not entity_id or DATA_INSTANCE not in self.hass.data:
+            return None
+        now = dt_util.utcnow()
+        cached = self._pv_shape_cache
+        if cached is not None and (now - cached[0]).total_seconds() < HOUSE_LOAD_PROFILE_CACHE_S:
+            return cached[1]
+        from homeassistant.components.recorder.statistics import statistics_during_period
+
+        start = (now - timedelta(days=HOUSE_LOAD_PROFILE_DAYS)).replace(
+            minute=0, second=0, microsecond=0
+        )
+        try:
+            rows = await get_instance(self.hass).async_add_executor_job(
+                lambda: statistics_during_period(
+                    self.hass, start, None, {str(entity_id)}, "hour", None, {"change"}
+                )
+            )
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.debug("Reading PV statistics for %s failed: %s", entity_id, err)
+            return None
+        unit = _unit_of(self.hass.states.get(str(entity_id)))
+        factor = 0.001 if unit in ("wh", "watthour", "watthours") else (
+            1000.0 if unit in ("mwh", "megawatthour", "megawatthours") else 1.0
+        )
+        by_day: dict[date, list[float]] = {}
+        for row in rows.get(str(entity_id), []):
+            start_ts = row.get("start")
+            change = row.get("change")
+            if not isinstance(start_ts, (int, float)) or not isinstance(change, (int, float)):
+                continue
+            if change < 0:
+                continue  # the daily reset
+            local = dt_util.as_local(dt_util.utc_from_timestamp(start_ts))
+            by_day.setdefault(local.date(), [0.0] * 24)[local.hour] += float(change) * factor
+        today = dt_util.as_local(now).date()
+        days = [hours for day, hours in by_day.items()
+                if day != today and sum(hours) >= PV_SHAPE_MIN_DAY_KWH]
+        shape: list[float] | None = None
+        if len(days) >= PV_SHAPE_MIN_DAYS:
+            shares = [[value / sum(hours) for value in hours] for hours in days]
+            shape = [sum(day[hour] for day in shares) / len(shares) for hour in range(24)]
+        self._pv_shape_cache = (now, shape)
+        return shape
+
     def _observe_outdoor_temperature(self) -> None:
         """Add this poll's outdoor temperature to the diary (plan 015 stage D).
 
@@ -2084,6 +2146,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             window_ct, series, now, window_end, pv_crossover
         )
         high_price_window = self._high_price_window(window_end)
+        bridge_model = str(self.config.get(CONF_BRIDGE_MODEL, DEFAULT_BRIDGE_MODEL))
         return (
             PlanInput(
                 capacity_kwh=capacity,
@@ -2118,6 +2181,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ),
                 safety_buffer_kwh=float(
                     self.config.get(CONF_SAFETY_BUFFER_KWH, DEFAULT_SAFETY_BUFFER_KWH)
+                ),
+                bridge_model=bridge_model,
+                sunrise=sunrise,
+                pv_hourly_shape=(
+                    await self._pv_hourly_shape()
+                    if bridge_model == BRIDGE_MODEL_MODELLED
+                    else None
                 ),
             ),
             pv_crossover,
@@ -2389,6 +2459,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if plan.reason in (REASON_CONFLICT_BRIDGE_WINS, REASON_CONFLICT_HEADROOM_WINS)
             else None
         )
+        if plan.pv_crossover is not None:
+            # Plan 015 stage B: the modelled day says when the PV takes over
+            pv_crossover = plan.pv_crossover
         self._pv_crossover = pv_crossover
         _LOGGER.info(
             "Bridge plan: target %.1f%% (%s), bridge %.2f kWh until %s, surplus %.2f kWh, "

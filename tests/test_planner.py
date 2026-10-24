@@ -931,3 +931,99 @@ def test_without_a_room_profile_the_need_profile_is_the_room():
         _plan_input(house_load_kw_profile=[0.8] * 24, room_load_kw_profile=[0.8] * 24)
     )
     assert plan == same
+
+
+# --- plan 015 stage B: the modelled day ------------------------------------
+
+from custom_components.inverter_charge_night.planner import (  # noqa: E402
+    BRIDGE_MODEL_MODELLED,
+    day_balance,
+)
+
+B_SUNRISE = datetime(2026, 1, 15, 7, 30)
+
+
+def _modelled(**overrides) -> PlanInput:
+    return _plan_input(bridge_model=BRIDGE_MODEL_MODELLED, sunrise=B_SUNRISE, **overrides)
+
+
+def test_the_fixed_delay_is_still_the_default():
+    plan = plan_target_soc(_plan_input(sunrise=B_SUNRISE))
+    assert plan == plan_target_soc(_plan_input())
+    assert plan.pv_crossover is None
+    assert day_balance(_plan_input(sunrise=B_SUNRISE)) is None
+
+
+def test_a_day_without_sun_is_bridged_until_sunset():
+    """No forecast PV at all: the battery carries 05:59-17:00 at 0.5 kW."""
+    balance = day_balance(_modelled(forecast_kwh_next_day=0.0, discharge_efficiency=0.95))
+    assert balance is not None
+    expected = 0.5 * (11 + 1 / 60) / 0.95
+    assert balance.required_kwh == pytest.approx(expected, rel=1e-6)
+    assert balance.bridge_kwh == pytest.approx(expected, rel=1e-6)
+    assert balance.crossover == SUNSET
+    assert balance.rise_kwh == 0.0
+    plan = plan_target_soc(_modelled(forecast_kwh_next_day=0.0, discharge_efficiency=0.95))
+    assert plan.lower_bound_soc == pytest.approx(8.0 + (expected + 0.5) / CAPACITY * 100, abs=0.06)
+    assert plan.pv_crossover == SUNSET
+
+
+def test_a_sunny_day_crosses_early_and_bridges_less():
+    """20 kWh of sun: the PV carries 0.5 kW long before sunrise + 90 minutes."""
+    fixed = plan_target_soc(_plan_input(forecast_kwh_next_day=20.0, discharge_efficiency=0.95))
+    modelled = plan_target_soc(_modelled(forecast_kwh_next_day=20.0, discharge_efficiency=0.95))
+    assert modelled.pv_crossover is not None and modelled.pv_crossover < PV_CROSSOVER
+    assert modelled.bridge_kwh < fixed.bridge_kwh
+    assert modelled.lower_bound_soc < fixed.lower_bound_soc
+
+
+def test_a_dull_december_day_bridges_much_more():
+    """3 kWh on a 9.5 h day peak at 0.5 kW: barely ever above the load."""
+    fixed = plan_target_soc(_plan_input(forecast_kwh_next_day=3.0, discharge_efficiency=0.95))
+    modelled = plan_target_soc(_modelled(forecast_kwh_next_day=3.0, discharge_efficiency=0.95))
+    assert modelled.lower_bound_soc > fixed.lower_bound_soc + 10
+
+
+def test_a_learned_shape_replaces_the_bell():
+    """All of the day's yield between 12:00 and 13:00, worked out by hand."""
+    shape = [0.0] * 24
+    shape[12] = 1.0
+    balance = day_balance(
+        _modelled(forecast_kwh_next_day=9.0, pv_hourly_shape=shape, discharge_efficiency=0.95)
+    )
+    assert balance is not None
+    morning = 0.5 * (6 + 1 / 60) / 0.95  # 05:59-12:00 drawn from the battery
+    assert balance.crossover == datetime(2026, 1, 15, 12, 0)
+    assert balance.required_kwh == pytest.approx(morning, rel=1e-9)
+    # The room side: 9.9 kW for an hour against 0.5 kW, after the morning
+    assert balance.rise_kwh == pytest.approx(-morning + 9.4, rel=1e-9)
+
+
+def test_the_evening_is_in_the_balance_and_its_margin_applies():
+    evening = (datetime(2026, 1, 15, 18, 0), datetime(2026, 1, 15, 21, 0))
+    without = day_balance(_modelled(forecast_kwh_next_day=0.0, discharge_efficiency=0.95))
+    plain = day_balance(_modelled(forecast_kwh_next_day=0.0, discharge_efficiency=0.95,
+                                  high_price_window=evening))
+    margin = day_balance(_modelled(forecast_kwh_next_day=0.0, discharge_efficiency=0.95,
+                                   high_price_window=evening, reserve_margin_pct=20.0))
+    assert without is not None and plain is not None and margin is not None
+    # The battery carries on past sunset: 17:00-18:00 at 0.5 kW, then the period
+    assert plain.required_kwh - without.required_kwh == pytest.approx(2.0 / 0.95, rel=1e-6)
+    # The margin is the period's alone
+    assert margin.required_kwh - plain.required_kwh == pytest.approx(0.3 / 0.95, rel=1e-6)
+    # Without sun the crossover is where the day ends: sunset, the period starts later
+    assert plain.crossover == SUNSET
+
+
+def test_the_modelled_room_keeps_the_pv_from_spilling():
+    plan = plan_target_soc(_modelled(forecast_kwh_next_day=9.0))
+    balance = day_balance(_modelled(forecast_kwh_next_day=9.0))
+    assert balance is not None and 0 < balance.rise_kwh < CAPACITY
+    assert plan.upper_bound_soc == pytest.approx(100.0 - balance.rise_kwh / CAPACITY * 100, abs=0.06)
+    assert plan.target_soc <= plan.upper_bound_soc
+
+
+def test_without_a_forecast_or_a_sunrise_the_fixed_delay_decides():
+    assert day_balance(_modelled(forecast_available=False)) is None
+    assert day_balance(_plan_input(bridge_model=BRIDGE_MODEL_MODELLED)) is None
+    assert day_balance(_modelled(pv_hourly_shape=[0.1] * 3)) is None

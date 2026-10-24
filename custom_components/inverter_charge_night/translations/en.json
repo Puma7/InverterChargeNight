@@ -135,7 +135,8 @@
           "load_safety_level": "Safety level of the planned consumption",
           "weather_entity": "Weather forecast entity",
           "outdoor_temperature_entity": "Outdoor temperature sensor",
-          "heating_limit_c": "Heating limit temperature"
+          "heating_limit_c": "Heating limit temperature",
+          "bridge_model": "How the morning and the day are bridged"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -166,7 +167,8 @@
           "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average.",
           "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
           "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
-          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree."
+          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree.",
+          "bridge_model": "Fixed delay (as before): the battery covers the house from the window end until sunrise plus the PV crossover delay, and the high-price evening. Modelled: ICN runs tomorrow every five minutes, the house load against the PV curve of the forecast, from the window end to the end of the high-price evening. A sunny day takes over early and needs less; a dull December day may never carry the house, and then the whole day is bridged. With the daily PV energy meter set, the PV curve is learned from the last two weeks (roof orientation, shading, season) instead of a clear-sky bell."
         }
       },
       "reconfigure": {
@@ -303,7 +305,8 @@
           "load_safety_level": "Safety level of the planned consumption",
           "weather_entity": "Weather forecast entity",
           "outdoor_temperature_entity": "Outdoor temperature sensor",
-          "heating_limit_c": "Heating limit temperature"
+          "heating_limit_c": "Heating limit temperature",
+          "bridge_model": "How the morning and the day are bridged"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -334,7 +337,8 @@
           "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average.",
           "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
           "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
-          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree."
+          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree.",
+          "bridge_model": "Fixed delay (as before): the battery covers the house from the window end until sunrise plus the PV crossover delay, and the high-price evening. Modelled: ICN runs tomorrow every five minutes, the house load against the PV curve of the forecast, from the window end to the end of the high-price evening. A sunny day takes over early and needs less; a dull December day may never carry the house, and then the whole day is bridged. With the daily PV energy meter set, the PV curve is learned from the last two weeks (roof orientation, shading, season) instead of a clear-sky bell."
         }
       },
       "review": {
@@ -702,14 +706,16 @@
           "load_safety_level": "Safety level of the planned consumption",
           "weather_entity": "Weather forecast entity",
           "outdoor_temperature_entity": "Outdoor temperature sensor",
-          "heating_limit_c": "Heating limit temperature"
+          "heating_limit_c": "Heating limit temperature",
+          "bridge_model": "How the morning and the day are bridged"
         },
         "data_description": {
           "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
           "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average.",
           "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
           "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
-          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree."
+          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree.",
+          "bridge_model": "Fixed delay (as before): the battery covers the house from the window end until sunrise plus the PV crossover delay, and the high-price evening. Modelled: ICN runs tomorrow every five minutes, the house load against the PV curve of the forecast, from the window end to the end of the high-price evening. A sunny day takes over early and needs less; a dull December day may never carry the house, and then the whole day is bridged. With the daily PV energy meter set, the PV curve is learned from the last two weeks (roof orientation, shading, season) instead of a clear-sky bell."
         }
       }
     },
@@ -886,7 +892,8 @@
           "load_safety_level": "Safety level of the planned consumption",
           "weather_entity": "Weather forecast entity",
           "outdoor_temperature_entity": "Outdoor temperature sensor",
-          "heating_limit_c": "Heating limit temperature"
+          "heating_limit_c": "Heating limit temperature",
+          "bridge_model": "How the morning and the day are bridged"
         },
         "data_description": {
           "update_interval": "How often the coordinator should refresh data (seconds, default 900)",
@@ -917,7 +924,8 @@
           "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average.",
           "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
           "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
-          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree."
+          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree.",
+          "bridge_model": "Fixed delay (as before): the battery covers the house from the window end until sunrise plus the PV crossover delay, and the high-price evening. Modelled: ICN runs tomorrow every five minutes, the house load against the PV curve of the forecast, from the window end to the end of the high-price evening. A sunny day takes over early and needs less; a dull December day may never carry the house, and then the whole day is bridged. With the daily PV energy meter set, the PV curve is learned from the last two weeks (roof orientation, shading, season) instead of a clear-sky bell."
         }
       },
       "review": {
@@ -1281,14 +1289,16 @@
           "load_safety_level": "Safety level of the planned consumption",
           "weather_entity": "Weather forecast entity",
           "outdoor_temperature_entity": "Outdoor temperature sensor",
-          "heating_limit_c": "Heating limit temperature"
+          "heating_limit_c": "Heating limit temperature",
+          "bridge_model": "How the morning and the day are bridged"
         },
         "data_description": {
           "safety_buffer_kwh": "Energy in kWh the battery carries above what the plan needs, for a power cut on the island box, an electric car or an evening above average (default 0). Bridge planner only. It only fills room tomorrow's PV forecast leaves free, so it never makes the battery spill solar power. It is bought once and then carried: each night only tops up what the day used.",
           "load_safety_level": "Which hourly house consumption the night target is bought for, learned from the last 14 days of the consumption meter. Average: as before. Safe (75th percentile) or very safe (90th percentile): each hour is planned like one of the busier days, never below its average, which covers an evening with the oven or the heat pump running. Only the target rises; the room kept free for tomorrow's PV is still reckoned with the average.",
           "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
           "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
-          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree."
+          "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree.",
+          "bridge_model": "Fixed delay (as before): the battery covers the house from the window end until sunrise plus the PV crossover delay, and the high-price evening. Modelled: ICN runs tomorrow every five minutes, the house load against the PV curve of the forecast, from the window end to the end of the high-price evening. A sunny day takes over early and needs less; a dull December day may never carry the house, and then the whole day is bridged. With the daily PV energy meter set, the PV curve is learned from the last two weeks (roof orientation, shading, season) instead of a clear-sky bell."
         }
       }
     },
@@ -1358,6 +1368,12 @@
         "mean": "Average (as before)",
         "p75": "Safe (75th percentile)",
         "p90": "Very safe (90th percentile)"
+      }
+    },
+    "bridge_model": {
+      "options": {
+        "fixed_delay": "Fixed delay after sunrise (as before)",
+        "modelled": "Modelled from forecast and consumption"
       }
     }
   },

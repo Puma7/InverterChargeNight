@@ -48,6 +48,7 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_HEATING_LIMIT_C,
+    CONF_BRIDGE_MODEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
@@ -96,6 +97,8 @@ from .const import (
     DEFAULT_LOAD_SAFETY_LEVEL,
     LOAD_SAFETY_LEVELS,
     DEFAULT_HEATING_LIMIT_C,
+    DEFAULT_BRIDGE_MODEL,
+    BRIDGE_MODELS,
     DEFAULT_CHARGE_EFFICIENCY,
     DEFAULT_DISCHARGE_EFFICIENCY,
     DEFAULT_COMMAND_DELAY,
@@ -213,6 +216,7 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_WEATHER_ENTITY,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_HEATING_LIMIT_C,
+    CONF_BRIDGE_MODEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
     CONF_NIGHT_PRICE_CT,
@@ -636,6 +640,18 @@ def _mode_selector() -> Any:
     )
 
 
+def _bridge_model_selector() -> Any:
+    return cast(
+        Any,
+        selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=list(BRIDGE_MODELS),
+                translation_key="bridge_model",
+            )
+        ),
+    )
+
+
 def _load_safety_level_selector() -> Any:
     return cast(
         Any,
@@ -862,6 +878,9 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
                 CONF_HEATING_LIMIT_C, defaults, DEFAULT_HEATING_LIMIT_C
             ): _number_selector(5, 25, 0.5, "°C"),
             _required(
+                CONF_BRIDGE_MODEL, defaults, DEFAULT_BRIDGE_MODEL
+            ): _bridge_model_selector(),
+            _required(
                 CONF_CHARGE_EFFICIENCY, defaults, DEFAULT_CHARGE_EFFICIENCY
             ): _number_selector(0.5, 1.0, 0.01),
             _required(
@@ -971,8 +990,8 @@ _GUIDED_GROUPS: dict[str, tuple[str, ...]] = {
                  CONF_PV_FORECAST_TODAY_ENTITY, CONF_HOUSE_LOAD_ENTITY,
                  CONF_AVG_HOUSE_LOAD_KW, CONF_PV_CROSSOVER_DELAY_MIN, CONF_BRIDGE_RESERVE_KWH),
     # Plan 015: how much the night target carries beyond the bare need
-    "reserve": (CONF_SAFETY_BUFFER_KWH, CONF_LOAD_SAFETY_LEVEL, CONF_WEATHER_ENTITY,
-                CONF_OUTDOOR_TEMPERATURE_ENTITY, CONF_HEATING_LIMIT_C),
+    "reserve": (CONF_SAFETY_BUFFER_KWH, CONF_LOAD_SAFETY_LEVEL, CONF_BRIDGE_MODEL,
+                CONF_WEATHER_ENTITY, CONF_OUTDOOR_TEMPERATURE_ENTITY, CONF_HEATING_LIMIT_C),
     "evening": (CONF_HIGH_PRICE_START, CONF_HIGH_PRICE_END, CONF_HIGH_PRICE_MARGIN_PCT,
                 CONF_DISCHARGE_BLOCK_MODE, CONF_DISCHARGE_BLOCK_SWITCH),
     "season": (CONF_ACTIVE_START_DATE, CONF_ACTIVE_END_DATE, CONF_ACTIVE_RANGE_YEARLY),
