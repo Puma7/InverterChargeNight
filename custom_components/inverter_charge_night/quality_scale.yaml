@@ -49,20 +49,20 @@ rules:
     status: exempt
     comment: No third-party requirements; the integration only uses Home Assistant helpers.
   docs-actions:
-    status: exempt
-    comment: No service actions are registered.
+    status: done
+    comment: docs/en/entities-and-actions.md (and docs/de/) documents every action with its fields and response.
   docs-conditions:
     status: exempt
     comment: No conditions are provided.
   docs-high-level-description:
     status: done
-    comment: README.md opens with what the integration does and what it is not.
+    comment: README.md and README.de.md open with what the integration does; docs/en/installation.md says what it is not.
   docs-installation-instructions:
     status: done
-    comment: README.md, "Installation" - HACS and manual.
+    comment: docs/en/installation.md (and docs/de/), "Installing" - HACS and manual.
   docs-removal-instructions:
     status: done
-    comment: README.md, "Installation - Removing it".
+    comment: docs/en/installation.md (and docs/de/), "Removing it".
   docs-triggers:
     status: exempt
     comment: No triggers are provided.
@@ -107,10 +107,10 @@ rules:
     status: done
     comment: |
       Every field carries a description in the UI (strings.json, English and
-      German); README.md, "Configuration" repeats them with context.
+      German); docs/en/configuration.md (and docs/de/) lists every field with its default.
   docs-installation-parameters:
     status: done
-    comment: README.md, "Configuration - Step 1/2".
+    comment: docs/en/installation.md (and docs/de/), "Setting it up".
   entity-unavailable:
     status: done
     comment: |
@@ -153,31 +153,31 @@ rules:
       installation and picking the wrong one would write to the wrong device.
   docs-data-update:
     status: done
-    comment: README.md, "How It Works - Operation Flow" describes the polling and the listeners.
+    comment: docs/en/how-it-works.md, "One night, step by step", and docs/en/safety.md describe the polling and the listeners.
   docs-examples:
     status: done
-    comment: README.md, "Example Automations", "Dashboard Examples", "Configuration Examples".
+    comment: docs/en/entities-and-actions.md (automations), docs/en/dashboard.md and docs/examples/, docs/en/configuration.md (suggested settings).
   docs-known-limitations:
     status: done
     comment: |
-      README.md states that the integration controls only the battery (not
+      docs/en/safety.md states that the integration controls only the battery (not
       wallboxes), that the inverter shows a raised min SOC during the window,
       and what the house connection limit cannot see.
   docs-supported-devices:
     status: done
     comment: |
-      README.md, "What this is - and what it is not": any inverter whose
+      docs/en/installation.md, "What you need": any inverter whose
       integration exposes a min SOC number, a grid charge switch and an SOC
-      sensor. docs/kostal-kore.md maps one real inverter entity by entity.
+      sensor. docs/en/kostal-kore.md maps one real inverter entity by entity.
   docs-supported-functions:
     status: done
-    comment: README.md, "Features" and "Entity List".
+    comment: README.md, "Highlights", and docs/en/entities-and-actions.md.
   docs-troubleshooting:
     status: done
-    comment: README.md, "Troubleshooting".
+    comment: docs/en/troubleshooting.md (and docs/de/).
   docs-use-cases:
     status: done
-    comment: README.md, "Why §14a EnWG" and "Use Cases".
+    comment: README.md, docs/en/how-it-works.md and docs/en/extras.md.
   dynamic-devices:
     status: exempt
     comment: One static device per entry; nothing appears at runtime.

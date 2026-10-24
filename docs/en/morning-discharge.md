@@ -1,5 +1,7 @@
 # Morning discharge (experimental)
 
+[🇩🇪 Deutsch](../de/morning-discharge.md) · [Documentation overview](README.md)
+
 > **Experimental.** This mode sells stored energy instead of buying it, and whether that pays
 > depends on a tariff, a forecast and an inverter that can be told to discharge on demand. It is
 > off by default and nothing else in the integration needs it. If you are unsure, use **Night
@@ -32,7 +34,7 @@ reduced; here you *sell* when the grid is strained and the tariff is high.
 
 | | |
 |---|---|
-| **Force discharge switch** | Required. It is the only thing that actually discharges — without it the mode just raises the min SOC floor and waits. The wizard refuses to save the mode without it. |
+| **Force discharge switch** | Required. It is the only thing that actually discharges — without it the mode just raises the min SOC floor and waits. The setup refuses to save the mode without it, but the *Operation Mode* select does not check, so configure the switch first. |
 | **A tariff that pays for it** | A dynamic tariff (Tibber, aWATTar, EPEX-based) or a feed-in arrangement worth more than what the energy cost you. At a flat feed-in rate the arithmetic usually does not work. |
 | **A summer-shaped forecast** | It only makes sense when the day's PV will cover the house *and* refill the battery. In winter this mode empties a battery you will want. |
 | **A window that matches your peak** | Start and end time are the same two fields as for night charge. 05:00–08:00 is a reasonable starting point for a German household; look at your own consumption first. |
@@ -58,11 +60,11 @@ Two safety properties are worth knowing:
 It runs on the same fixed daily window as night charge. It does not read a price signal, so it
 cannot pick the most expensive three hours by itself, and it does not know whether today's
 forecast justifies emptying the battery — you decide that by switching the mode. Both are
-tracked in `plans/README.md` (items 010 and 013).
+tracked in [`plans/README.md`](../../plans/README.md) (items 010 and 013).
 
 ## The evening reserve bounds it
 
-Since 3.2.0 a configured high-price period (step 2) also floors this mode: the target the
+Since 3.2.0 a configured high-price period (page *Reserve for expensive evening hours*) also floors this mode: the target the
 battery is emptied to is raised by what that evening will need, minus what today's forecast says
 the sun will still deliver. Selling at 06:00 what has to be bought back at 19:00 under a peak
 tariff is the one trade this mode must not make. On a summer day, whose forecast covers the

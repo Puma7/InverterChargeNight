@@ -410,7 +410,7 @@ async def test_the_documented_attribute_names_are_the_ones_emitted(mock_hass):
     """A rename that misses the docs leaves users reading a missing attribute.
 
     Exactly what happened to ``model_vs_measured_pct``: the emitted name moved
-    and the README, the sensor's own docstring and the plan all still named the
+    and the docs, the sensor's own docstring and the plan all still named the
     old one. Anybody building a template from those would have got nothing back
     and no error.
     """
@@ -428,9 +428,9 @@ async def test_the_documented_attribute_names_are_the_ones_emitted(mock_hass):
     # Only this sensor's own prose: the efficiency search has attributes of its
     # own whose names start the same way, and they are none of this test's
     # business.
-    readme = Path(__file__).resolve().parents[1].joinpath("README.md").read_text()
-    start = readme.index("### The feed-in cap")
-    section = readme[start : readme.index("\n## ", start)]
+    docs = Path(__file__).resolve().parents[1].joinpath("docs/en/extras.md").read_text()
+    start = docs.index("## Curtailment outlook")
+    section = docs[start : docs.index("\n## ", start)]
     prose = (sensor_module.CurtailmentOutlookSensor.__doc__ or "") + section
     named = set(re.findall(r"`{1,2}(model_vs_\w+|measured_overflow\w*)`{1,2}", prose))
     assert named, "the guard is worthless if it matches nothing"

@@ -5,6 +5,48 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.11.1] - 2026-10-24
+
+Documentation in English and German, a refreshed logo, and a few corrected texts. Nothing in the
+control logic changes.
+
+### Docs
+- **A short README in English and German** (`README.md`, `README.de.md`) instead of 1480 lines:
+  what the integration does, highlights, quick start, and an index of the documentation.
+- **The documentation lives in `docs/en/` and `docs/de/`**, page by page: installation, how it
+  works, every setting with its default, safety, efficiency search, exceptions and extras,
+  entities and actions, dashboard, troubleshooting and FAQ, Kostal with KOSTAL KORE, morning
+  discharge, development. Every statement was checked against the code; several that the old
+  README got wrong are corrected:
+  - In Headroom mode the planned charge power is only shown, not written, unless a house
+    connection limit or an efficiency result exists.
+  - An unreadable grid import sensor pauses charging (0 W); it does not fall back to the
+    minimum charge power.
+  - The grid charge switch is not captured and restored; it is switched off at the window end.
+  - The forecast entity is chosen by the day the window ends.
+  - The evening reserve, the safety buffer and the weather factor belong to the Bridge planner,
+    and `plan_target_soc` always runs the Bridge planner.
+- **Diagrams** (`docs/images/`, light and dark, English and German): a night and the following
+  day, the parts of the target, how the parts fit together. Drawn by
+  `scripts/docs_graphics/make_diagrams.py`.
+- **Screenshots** of the real Home Assistant interface in both languages, taken in the lab.
+- **An example dashboard** (`docs/examples/dashboard.yaml`, German `dashboard.de.yaml`) with
+  cards that ship with Home Assistant.
+- The old pages `docs/kostal-kore.md`, `docs/morning-discharge.md`, `docs/setup-and-efficiency.md`
+  and `docs/overnight-debugging.md` point to their new places.
+
+### Changed
+- **Logo and icon redrawn** as clean vectors, with a variant for the dark theme and a logo with
+  wordmark (`brand/`: `icon`, `dark_icon`, `logo`, `dark_logo`, each also `@2x`). Drawn by
+  `scripts/docs_graphics/make_brand.py`.
+- The help text of *Operation Mode* links to the morning discharge page in the reader's language.
+- `quality_scale.yaml` points to the new pages and counts the documented actions
+  (`docs-actions`: done).
+
+### Fixed
+- German: the description of the action *Kommunikationsdiagnose* was still English, and its
+  inverter field spoke of resetting (also in English).
+
 ## [3.11.0] - 2026-10-24
 
 The night target no longer has to sit on the edge of the bare need (plan 015). On 23/24 October

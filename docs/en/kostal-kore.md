@@ -1,5 +1,7 @@
 # Inverter Charge Night with KOSTAL KORE
 
+[🇩🇪 Deutsch](../de/kostal-kore.md) · [Documentation overview](README.md)
+
 Checked against [`Puma7/KostalKore`](https://github.com/Puma7/KostalKore) on 2026-09-12
 (commit at the time of writing) by reading its register table, its platforms and its write
 paths. This integration stays inverter-agnostic: it only ever talks to plain Home Assistant
@@ -19,8 +21,8 @@ cost real money if you get them wrong.
 | **Charge power drawn for charging** | **`Grid2Bat_P`** (`devices:local`) | Power flowing from the grid into the battery — exactly the AC-side intake the efficiency search needs. Confirmed present on a PLENTICORE L G3 with firmware 3.07. |
 | **Energy meter: drawn for charging** | `Battery Charge from Grid Total` (kWh) | Exactly the right quantity: grid energy that went into the battery. |
 | **Energy meter: stored in the battery** | not exported as an entity today | KOSTAL KORE reads Modbus `total_dc_charge` (1046) but does not create a sensor for it. Without it the efficiency search falls back to the power sensors. |
-| **Discharge power limit entity** | `Battery Max Discharge Limit (Modbus)` (1040) or `Battery Max Discharge Power (G3)` (1282) | |
-| **Block discharge switch** | `Battery Disable Discharge` (`EnergyMgmt:BatCtrl:DisabelDischarge`) | This is the vendor switch the discharge block prefers over every other way. Hidden by default in KOSTAL KORE. |
+| **Discharge power limit entity** (legacy) | `Battery Max Discharge Limit (Modbus)` (1040) or `Battery Max Discharge Power (G3)` (1282) | Only needed to give back a value a version before 3.10.6 wrote. ICN no longer writes it. |
+| **Block discharge switch** (legacy) | `Battery Disable Discharge` (`EnergyMgmt:BatCtrl:DisabelDischarge`) | Only needed to give back a state a version before 3.10.6 changed. ICN no longer switches it; the battery is held through the min SOC only. |
 | **Grid import power** | `devices:local:powermeter` → **`P`** (the meter's total power), not `Home Power from Grid` | See the traps. The same module also exposes `L1_I` / `L2_I` / `L3_I`, the per-phase currents at the meter — the most direct measure of what the connection carries. |
 | **Backup / island mode entity** | `Inverter:State` with **Backup mode states** set to `ESB` | Kostal reports `ESB` (Ersatzstrombetrieb) in its inverter state; `devices:local` also carries `WorkTimeESB`, the hours spent in island operation, which is a second way to confirm it. There is no dedicated "island active" entity. |
 | **House consumption energy meter** | `Home Consumption Total` (`Statistic:EnergyHome:Total`) | For the bridge planner's load profile. |
