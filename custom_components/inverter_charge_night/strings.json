@@ -16,7 +16,7 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
-          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See the page Morning discharge in the documentation.",
           "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
           "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured. Do not select an ICN output such as Evening outlook or Target SoC.",
@@ -186,7 +186,7 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
-          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See the page Morning discharge in the documentation.",
           "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
           "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured. Do not select an ICN output such as Evening outlook or Target SoC.",
@@ -592,7 +592,7 @@
           "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
           "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
           "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
-          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See the page Morning discharge in the documentation.",
           "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode."
         }
       },
@@ -773,7 +773,7 @@
         },
         "data_description": {
           "name": "Name for this integration instance",
-          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See the page Morning discharge in the documentation.",
           "min_soc_entity": "The inverter's number entity for the minimum state of charge. It also identifies this instance, so each inverter can only be configured once.",
           "grid_charge_switch": "The inverter's switch that turns charging from the grid on and off.",
           "pv_forecast_entity": "PV forecast for the NEXT DAY (e.g. sensor.solcast_forecast_tomorrow). Used automatically when the window runs before midnight (evening). Also used as fallback if today's forecast entity is not configured. Do not select an ICN output such as Evening outlook or Target SoC.",
@@ -1175,7 +1175,7 @@
           "discharge_efficiency": "How much of what leaves the battery arrives in the house (0.5-1.0, default 0.95). The load profile and the forecast are measured on the house side; energy coming out of the battery loses a few percent on the way through the inverter. Without this the planner buys a little too little for the bridge and for the evening reserve - every night, in the same direction.",
           "curtailment_feed_in_entity": "Optional: a power sensor for what actually goes out to the grid. The cap applies to this, so it is the one measurement that can check the figure above against reality — the curtailment sensor holds the modelled overflow next to the measured one. Without it the sensor is model-only and says so.",
           "curtailment_limit_w": "Optional: the most your system is allowed to feed into the grid, in watts — the 60 % or 70 % limit at the grid connection point. Enter the cap itself, not the percentage: 0.60 x your array in watts, so 9000 for 15 kWp at 60 %. Leave empty if you are not capped. Nothing is throttled from this; it only tells you how much midday PV the cap throws away because the battery was already full.",
-          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See docs/morning-discharge.md.",
+          "operation_mode": "Night charge fills the battery from the grid during the cheap window, sized so that tomorrow's PV still fits. Morning discharge is the opposite, and experimental: on a summer day whose forecast covers the house anyway, it empties the battery into the morning peak - roughly 05:00 to 08:00, when households draw the most and the sun is not up yet. That earns the spread on a dynamic tariff and takes load off the grid at its tightest hour. It needs a force discharge switch and a tariff that pays for it. If in doubt, stay on Night charge. See the page Morning discharge in the documentation.",
           "force_discharge_switch": "Switch entity that makes the inverter discharge the battery into the grid (e.g. via Modbus). Required in Morning discharge mode - it is the only thing that actually discharges; unused in Night charge mode."
         }
       },
@@ -1380,16 +1380,132 @@
   "entity": {
     "sensor": {
       "calculated_soc": {
-        "name": "Target SOC"
+        "name": "Target SOC",
+        "state_attributes": {
+          "is_active": {
+            "name": "Window running"
+          },
+          "target_reached": {
+            "name": "Target reached"
+          },
+          "current_soc": {
+            "name": "Current state of charge"
+          },
+          "operation_mode": {
+            "name": "Operation mode",
+            "state": {
+              "night_charge": "Night charge",
+              "morning_discharge": "Morning discharge"
+            }
+          },
+          "skip_next": {
+            "name": "Skip the next window"
+          },
+          "snow_nights": {
+            "name": "Snow nights"
+          },
+          "adhoc_reason": {
+            "name": "Running extra window",
+            "state": {
+              "service": "Action",
+              "evening_rescue": "Evening rescue"
+            }
+          },
+          "adhoc_until": {
+            "name": "Extra window until"
+          },
+          "original_min_soc": {
+            "name": "Original minimum SOC"
+          },
+          "pending_reset": {
+            "name": "Reset pending"
+          },
+          "reset_abandoned": {
+            "name": "Reset given up"
+          },
+          "charge_limit_not_held": {
+            "name": "Charge limit not held"
+          },
+          "min_soc_released_for_connection": {
+            "name": "Minimum SOC released for the house connection"
+          },
+          "plan_reason": {
+            "name": "Plan",
+            "state": {
+              "bridge": "Morning need",
+              "conflict_bridge_wins": "Conflict: the morning wins",
+              "conflict_headroom_wins": "Conflict: the room for the PV wins",
+              "fallback": "Fallback without forecast"
+            }
+          },
+          "bridge_kwh": {
+            "name": "Morning need"
+          },
+          "surplus_kwh": {
+            "name": "PV surplus tomorrow"
+          },
+          "lower_bound_soc": {
+            "name": "Lower bound"
+          },
+          "upper_bound_soc": {
+            "name": "Upper bound"
+          },
+          "buffer_soc": {
+            "name": "Safety buffer"
+          },
+          "buffer_capped": {
+            "name": "Buffer cut by the upper bound"
+          },
+          "pv_crossover": {
+            "name": "PV carries the house from"
+          },
+          "pv_yield": {
+            "name": "PV shortfall detection"
+          },
+          "weather": {
+            "name": "Weather"
+          },
+          "inverter_floor_soc": {
+            "name": "Minimum SOC on the inverter"
+          },
+          "discharge_block": {
+            "name": "Battery held by",
+            "state": {
+              "min_soc": "Minimum SOC",
+              "off": "Off",
+              "switch": "Switch",
+              "limit": "Discharge limit"
+            }
+          }
+        }
       },
       "best_charge_power": {
         "name": "Most efficient charge power"
       },
       "planned_charge_power": {
-        "name": "Planned charge power"
+        "name": "Planned charge power",
+        "state_attributes": {
+          "applied": {
+            "name": "Written to the inverter"
+          }
+        }
       },
       "grid_charge_headroom": {
-        "name": "Charge power left by the house connection"
+        "name": "Charge power left by the house connection",
+        "state_attributes": {
+          "budget_w": {
+            "name": "Budget"
+          },
+          "grid_import_w": {
+            "name": "Grid import"
+          },
+          "other_load_w": {
+            "name": "Other consumers"
+          },
+          "limited": {
+            "name": "Limiting"
+          }
+        }
       },
       "efficiency_search": {
         "name": "Efficiency search",
@@ -1399,13 +1515,85 @@
           "settling": "Settling",
           "measuring": "Measuring",
           "finished": "Finished"
+        },
+        "state_attributes": {
+          "test_power_w": {
+            "name": "Trial power"
+          },
+          "best_power_w": {
+            "name": "Best power"
+          },
+          "best_loss_pct": {
+            "name": "Loss at the best power"
+          },
+          "loss_by_power_pct": {
+            "name": "Loss by power"
+          },
+          "uncertainty_by_power_pct": {
+            "name": "Uncertainty by power"
+          },
+          "loss_by_band_pct": {
+            "name": "Loss by state of charge"
+          },
+          "search_range_w": {
+            "name": "Search range"
+          },
+          "measured_energy_kwh": {
+            "name": "Measured energy"
+          },
+          "last_result": {
+            "name": "Last result"
+          },
+          "measurement_source": {
+            "name": "Measured with"
+          },
+          "waiting_reason": {
+            "name": "Waiting because"
+          }
         }
       },
       "next_high_price_window": {
-        "name": "Next high-price period"
+        "name": "Next high-price period",
+        "state_attributes": {
+          "end": {
+            "name": "End"
+          },
+          "duration_h": {
+            "name": "Duration"
+          },
+          "reserve_kwh": {
+            "name": "Reserve"
+          },
+          "bought_at_night_kwh": {
+            "name": "Bought at night"
+          }
+        }
       },
       "evening_outlook": {
-        "name": "Evening outlook"
+        "name": "Evening outlook",
+        "state_attributes": {
+          "zone_start": {
+            "name": "High-price period starts"
+          },
+          "zone_end": {
+            "name": "High-price period ends"
+          },
+          "required_soc": {
+            "name": "Needed at the start"
+          },
+          "projected_soc": {
+            "name": "Expected at the start"
+          },
+          "pv_to_come_kwh": {
+            "name": "PV still to come"
+          },
+          "load_to_come_kwh": {
+            "name": "Consumption still to come"
+          },
+          "forecast_available": {
+            "name": "Forecast available"
+          }
+        }
       },
       "price_signal": {
         "name": "Price signal"
@@ -1430,9 +1618,9 @@
     },
     "select": {
       "operation_mode": {
-        "name": "Operation Mode",
+        "name": "Operation mode",
         "state": {
-          "night_charge": "Night Charge",
+          "night_charge": "Night charge",
           "morning_discharge": "Morning discharge (experimental)"
         }
       }
@@ -1588,7 +1776,7 @@
       "fields": {
         "config_entry_id": {
           "name": "Inverter",
-          "description": "Which configured inverter to reset. Can be left empty when only one is configured."
+          "description": "Which configured inverter to read. Can be left empty when only one is configured."
         }
       }
     }

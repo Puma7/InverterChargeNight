@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 362" width="920" height="362" role="img" aria-label="Battery state of charge">
+  <style>
+    svg { --fg: #1C2541; --muted: #5B6478; --grid: #D9DEE8; --soc: #2F6FDE; --pv: #FFB020;
+          --cheap: #2E9E6A; --peak: #D9534F; --card: #FFFFFF; --box: #F3F5FA; --line: #9AA3B5; }
+    @media (prefers-color-scheme: dark) {
+      svg { --fg: #E8ECF6; --muted: #A9B1C3; --grid: #39404F; --soc: #6EA2FF; --pv: #FFC94D;
+            --cheap: #4CC38A; --peak: #F07C78; --card: #0D1117; --box: #1B2230; --line: #6B7488; }
+    }
+    text { font-family: Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; fill: var(--fg); }
+    .muted { fill: var(--muted); }
+    .small { font-size: 13px; }
+    .label { font-size: 14px; }
+    .title { font-size: 16px; font-weight: 600; }
+  </style>
+<rect width="920" height="362" rx="14" fill="var(--card)"/>
+<rect x="119.7" y="30" width="191.1" height="270" fill="var(--cheap)" opacity="0.12" rx="6"/>
+<text x="215.2" y="46" text-anchor="middle" class="small" style="fill:var(--cheap);font-weight:600">Cheap window</text>
+<rect x="724.8" y="30" width="95.5" height="270" fill="var(--peak)" opacity="0.12" rx="6"/>
+<text x="772.5" y="46" text-anchor="middle" class="small" style="fill:var(--peak);font-weight:600">High-price period</text>
+<line x1="56" x2="884" y1="300.0" y2="300.0" stroke="var(--grid)" stroke-width="1"/>
+<text x="48" y="304.0" text-anchor="end" class="small muted">0 %</text>
+<line x1="56" x2="884" y1="176.0" y2="176.0" stroke="var(--grid)" stroke-width="1"/>
+<text x="48" y="180.0" text-anchor="end" class="small muted">50 %</text>
+<line x1="56" x2="884" y1="52.0" y2="52.0" stroke="var(--grid)" stroke-width="1"/>
+<text x="48" y="56.0" text-anchor="end" class="small muted">100 %</text>
+<text x="56.0" y="320" text-anchor="middle" class="small muted">21:00</text>
+<text x="151.5" y="320" text-anchor="middle" class="small muted">00:00</text>
+<text x="247.1" y="320" text-anchor="middle" class="small muted">03:00</text>
+<text x="342.6" y="320" text-anchor="middle" class="small muted">06:00</text>
+<text x="438.2" y="320" text-anchor="middle" class="small muted">09:00</text>
+<text x="533.7" y="320" text-anchor="middle" class="small muted">12:00</text>
+<text x="629.2" y="320" text-anchor="middle" class="small muted">15:00</text>
+<text x="724.8" y="320" text-anchor="middle" class="small muted">18:00</text>
+<text x="820.3" y="320" text-anchor="middle" class="small muted">21:00</text>
+<polygon points="390.4,300 390.4,300.0 393.0,299.9 395.7,299.6 398.3,299.1 401.0,298.3 403.7,297.4 406.3,296.2 409.0,294.9 411.6,293.4 414.3,291.6 416.9,289.7 419.6,287.6 422.2,285.3 424.9,282.9 427.5,280.3 430.2,277.5 432.8,274.6 435.5,271.5 438.2,268.3 440.8,265.0 443.5,261.6 446.1,258.0 448.8,254.4 451.4,250.7 454.1,246.9 456.7,243.0 459.4,239.1 462.0,235.1 464.7,231.2 467.3,227.1 470.0,223.1 472.7,219.1 475.3,215.1 478.0,211.1 480.6,207.1 483.3,203.2 485.9,199.4 488.6,195.6 491.2,191.9 493.9,188.2 496.5,184.7 499.2,181.2 501.8,177.9 504.5,174.7 507.2,171.7 509.8,168.8 512.5,166.0 515.1,163.4 517.8,160.9 520.4,158.6 523.1,156.5 525.7,154.6 528.4,152.9 531.0,151.3 533.7,150.0 536.3,148.9 539.0,147.9 541.7,147.2 544.3,146.7 547.0,146.3 549.6,146.2 552.3,146.3 554.9,146.7 557.6,147.2 560.2,147.9 562.9,148.9 565.5,150.0 568.2,151.3 570.8,152.9 573.5,154.6 576.2,156.5 578.8,158.6 581.5,160.9 584.1,163.4 586.8,166.0 589.4,168.8 592.1,171.7 594.7,174.7 597.4,177.9 600.0,181.2 602.7,184.7 605.3,188.2 608.0,191.9 610.7,195.6 613.3,199.4 616.0,203.2 618.6,207.1 621.3,211.1 623.9,215.1 626.6,219.1 629.2,223.1 631.9,227.1 634.5,231.2 637.2,235.1 639.8,239.1 642.5,243.0 645.2,246.9 647.8,250.7 650.5,254.4 653.1,258.0 655.8,261.6 658.4,265.0 661.1,268.3 663.7,271.5 666.4,274.6 669.0,277.5 671.7,280.3 674.3,282.9 677.0,285.3 679.7,287.6 682.3,289.7 685.0,291.6 687.6,293.4 690.3,294.9 692.9,296.2 695.6,297.4 698.2,298.3 700.9,299.1 703.5,299.6 706.2,299.9 708.8,300.0 708.8,300" fill="var(--pv)" opacity="0.35"/>
+<line x1="119.7" x2="310.8" y1="163.6" y2="163.6" stroke="var(--soc)" stroke-dasharray="5 4" stroke-width="1.5"/>
+<text x="127.7" y="156.6" class="small" style="fill:var(--soc);font-weight:600">Target 55 %</text>
+<path d="M56.0,215.7 C66.6,218.2 77.2,239.2 119.7,230.6 C162.2,221.9 255.0,168.6 310.8,163.6 C366.5,158.6 422.2,196.7 454.1,200.8 C485.9,204.9 483.3,204.5 501.8,188.4 C520.4,172.3 547.0,125.2 565.5,104.1 C584.1,83.0 594.7,69.8 613.3,61.9 C631.9,54.1 658.4,55.7 677.0,57.0 C695.6,58.2 700.9,57.0 724.8,69.4 C748.7,81.8 793.8,118.5 820.3,131.4 C846.8,144.2 873.4,143.8 884.0,146.2" fill="none" stroke="var(--soc)" stroke-width="3.5" stroke-linecap="round"/>
+<text x="170.6" y="183.4" text-anchor="start" class="label">① charge to the target</text>
+<text x="361.7" y="223.1" text-anchor="start" class="label">② bridge until the PV takes over</text>
+<text x="546.4" y="111.5" text-anchor="end" class="label">③ the PV fills the battery</text>
+<text x="772.5" y="176.0" text-anchor="middle" class="label">④ the battery carries the evening</text>
+<line x1="56" x2="82" y1="342" y2="342" stroke="var(--soc)" stroke-width="3.5"/>
+<text x="90" y="346" class="small muted">Battery state of charge</text>
+<rect x="286" y="334" width="26" height="12" fill="var(--pv)" opacity="0.5" rx="2"/>
+<text x="320" y="346" class="small muted">PV output</text>
+</svg>

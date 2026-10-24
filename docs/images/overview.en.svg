@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 350" width="900" height="350" role="img" aria-label="Inverter Charge Night">
+  <style>
+    svg { --fg: #1C2541; --muted: #5B6478; --grid: #D9DEE8; --soc: #2F6FDE; --pv: #FFB020;
+          --cheap: #2E9E6A; --peak: #D9534F; --card: #FFFFFF; --box: #F3F5FA; --line: #9AA3B5; }
+    @media (prefers-color-scheme: dark) {
+      svg { --fg: #E8ECF6; --muted: #A9B1C3; --grid: #39404F; --soc: #6EA2FF; --pv: #FFC94D;
+            --cheap: #4CC38A; --peak: #F07C78; --card: #0D1117; --box: #1B2230; --line: #6B7488; }
+    }
+    text { font-family: Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; fill: var(--fg); }
+    .muted { fill: var(--muted); }
+    .small { font-size: 13px; }
+    .label { font-size: 14px; }
+    .title { font-size: 16px; font-weight: 600; }
+  </style>
+<rect width="900" height="350" rx="14" fill="var(--card)"/>
+<text x="120" y="30" text-anchor="middle" class="title">What ICN reads</text>
+<rect x="30" y="46" width="180" height="36" rx="10" fill="var(--box)" stroke="var(--line)" stroke-width="1.2"/>
+<text x="120" y="69" text-anchor="middle" class="label">PV forecast</text>
+<line x1="210" y1="64" x2="322" y2="179.0" stroke="var(--line)" stroke-width="2"/>
+<polygon points="330,179.0 320,174.0 320,184.0" fill="var(--line)"/>
+<rect x="30" y="92" width="180" height="36" rx="10" fill="var(--box)" stroke="var(--line)" stroke-width="1.2"/>
+<text x="120" y="115" text-anchor="middle" class="label">House consumption</text>
+<line x1="210" y1="110" x2="322" y2="179.0" stroke="var(--line)" stroke-width="2"/>
+<polygon points="330,179.0 320,174.0 320,184.0" fill="var(--line)"/>
+<rect x="30" y="138" width="180" height="36" rx="10" fill="var(--box)" stroke="var(--line)" stroke-width="1.2"/>
+<text x="120" y="161" text-anchor="middle" class="label">Sun, weather</text>
+<line x1="210" y1="156" x2="322" y2="179.0" stroke="var(--line)" stroke-width="2"/>
+<polygon points="330,179.0 320,174.0 320,184.0" fill="var(--line)"/>
+<rect x="30" y="184" width="180" height="36" rx="10" fill="var(--box)" stroke="var(--line)" stroke-width="1.2"/>
+<text x="120" y="207" text-anchor="middle" class="label">Prices</text>
+<line x1="210" y1="202" x2="322" y2="179.0" stroke="var(--line)" stroke-width="2"/>
+<polygon points="330,179.0 320,174.0 320,184.0" fill="var(--line)"/>
+<rect x="30" y="230" width="180" height="36" rx="10" fill="var(--box)" stroke="var(--line)" stroke-width="1.2"/>
+<text x="120" y="253" text-anchor="middle" class="label">Grid import</text>
+<line x1="210" y1="248" x2="322" y2="179.0" stroke="var(--line)" stroke-width="2"/>
+<polygon points="330,179.0 320,174.0 320,184.0" fill="var(--line)"/>
+<rect x="30" y="276" width="180" height="36" rx="10" fill="var(--box)" stroke="var(--line)" stroke-width="1.2"/>
+<text x="120" y="299" text-anchor="middle" class="label">State of charge</text>
+<line x1="210" y1="294" x2="322" y2="179.0" stroke="var(--line)" stroke-width="2"/>
+<polygon points="330,179.0 320,174.0 320,184.0" fill="var(--line)"/>
+<rect x="330" y="92" width="250" height="180" rx="10" fill="var(--card)" stroke="var(--soc)" stroke-width="1.2"/>
+<text x="455" y="124" text-anchor="middle" class="title" style="fill:var(--soc)">Inverter Charge Night</text>
+<text x="455" y="156" text-anchor="middle" class="label">plans the target</text>
+<text x="455" y="182" text-anchor="middle" class="label">charges in the window</text>
+<text x="455" y="208" text-anchor="middle" class="label">protects the connection</text>
+<text x="455" y="234" text-anchor="middle" class="label">gives everything back</text>
+<text x="770" y="30" text-anchor="middle" class="title">What ICN writes</text>
+<rect x="680" y="46" width="180" height="36" rx="10" fill="var(--box)" stroke="var(--line)" stroke-width="1.2"/>
+<text x="770" y="69" text-anchor="middle" class="label">Minimum SOC</text>
+<line x1="580" y1="182" x2="672" y2="64" stroke="var(--line)" stroke-width="2"/>
+<polygon points="680,64 670,59 670,69" fill="var(--line)"/>
+<rect x="680" y="92" width="180" height="36" rx="10" fill="var(--box)" stroke="var(--line)" stroke-width="1.2"/>
+<text x="770" y="115" text-anchor="middle" class="label">Grid charge switch</text>
+<line x1="580" y1="182" x2="672" y2="110" stroke="var(--line)" stroke-width="2"/>
+<polygon points="680,110 670,105 670,115" fill="var(--line)"/>
+<rect x="680" y="138" width="180" height="36" rx="10" fill="var(--box)" stroke="var(--line)" stroke-width="1.2"/>
+<text x="770" y="161" text-anchor="middle" class="label">Charge limit (W)</text>
+<line x1="580" y1="182" x2="672" y2="156" stroke="var(--line)" stroke-width="2"/>
+<polygon points="680,156 670,151 670,161" fill="var(--line)"/>
+<text x="770" y="200" text-anchor="middle" class="small muted">through your inverter integration</text>
+<line x1="770" y1="208" x2="770" y2="228" stroke="var(--line)" stroke-width="2"/>
+<polygon points="770,237 765,227 775,227" fill="var(--line)"/>
+<rect x="680" y="238" width="180" height="40" rx="10" fill="var(--card)" stroke="var(--fg)" stroke-width="1.2"/>
+<text x="770" y="263" text-anchor="middle" class="label" style="font-weight:600">Inverter + battery</text>
+<rect x="330" y="300" width="250" height="36" rx="10" fill="var(--box)" stroke="var(--line)" stroke-width="1.2"/>
+<text x="455" y="323" text-anchor="middle" class="label">Sensors, actions, dashboard</text>
+<line x1="455" y1="272" x2="455" y2="300" stroke="var(--line)" stroke-width="2"/>
+</svg>

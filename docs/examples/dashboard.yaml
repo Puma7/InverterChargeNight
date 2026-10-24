@@ -1,0 +1,92 @@
+# Inverter Charge Night - example dashboard view
+#
+# Uses only cards that ship with Home Assistant. Paste it into a dashboard via
+# Edit dashboard -> three dots -> Raw configuration editor (as one entry under
+# "views:"), or copy single cards. Replace sensor.battery_soc with your own
+# battery state-of-charge sensor. The entity ids below are the ones Home
+# Assistant creates for the device "Inverter Charge Night"; check yours on the
+# device page if you renamed it.
+title: Night charge
+path: night-charge
+icon: mdi:battery-clock
+cards:
+  - type: vertical-stack
+    cards:
+      - type: gauge
+        name: Target SOC for tonight
+        entity: sensor.inverter_charge_night_target_soc
+        min: 0
+        max: 100
+        severity:
+          green: 0
+          yellow: 70
+          red: 90
+      - type: entities
+        title: Tonight
+        state_color: true
+        entities:
+          - entity: switch.inverter_charge_night_automation
+            name: Automation
+          - entity: binary_sensor.inverter_charge_night_window_active
+            name: Window active
+          - entity: select.inverter_charge_night_operation_mode
+            name: Operation mode
+          - entity: sensor.inverter_charge_night_planned_charge_power
+            name: Planned charge power
+          - entity: sensor.inverter_charge_night_evening_outlook
+            name: Evening outlook
+          - entity: sensor.inverter_charge_night_next_high_price_period
+            name: Next high-price period
+  - type: markdown
+    title: Why this target
+    # Literal block (|-): a folded block (>-) would join the table rows into one line.
+    content: |-
+      {% set s = 'sensor.inverter_charge_night_target_soc' %}
+      {% set crossover = state_attr(s, 'pv_crossover') %}
+      {% set lower = state_attr(s, 'lower_bound_soc') %}
+      {% set upper = state_attr(s, 'upper_bound_soc') %}
+      {% set bridge = state_attr(s, 'bridge_kwh') %}
+      {% set reasons = {'bridge': 'morning need', 'conflict_bridge_wins': 'conflict: the morning wins',
+                        'conflict_headroom_wins': 'conflict: room for the PV', 'fallback': 'no forecast'} %}
+      {% set weather = {'off': 'off', 'learning': 'learning', 'active': 'active',
+                        'forecast_unavailable': 'no forecast'} %}
+      | Item | Value |
+      |---|---|
+      | Plan | {{ reasons.get(state_attr(s, 'plan_reason'), '-') }} |
+      | Lower bound (need) | {{ lower ~ ' %' if lower is not none else '-' }} |
+      | Upper bound (room for PV) | {{ upper ~ ' %' if upper is not none else '-' }} |
+      | Safety buffer | {{ state_attr(s, 'buffer_soc') or 0 }} % |
+      | Bridge until PV | {{ bridge ~ ' kWh' if bridge is not none else '-' }} |
+      | PV carries the house from | {{ (crossover | as_datetime | as_local).strftime('%H:%M') if crossover else '-' }} |
+      | Weather | {{ weather.get((state_attr(s, 'weather') or {}).get('status'), '-') }} |
+  - type: history-graph
+    title: Battery and target, last 48 h
+    hours_to_show: 48
+    entities:
+      - entity: sensor.battery_soc
+        name: Battery
+      - entity: sensor.inverter_charge_night_target_soc
+        name: Target
+  - type: entities
+    title: Exceptions
+    show_header_toggle: false
+    entities:
+      - entity: switch.inverter_charge_night_skip_the_next_window_24_h
+        name: Skip the next window (24 h)
+      - entity: number.inverter_charge_night_target_soc_override
+        name: Target SOC override
+      - entity: number.inverter_charge_night_snow_nights
+        name: Snow nights
+      - entity: switch.inverter_charge_night_evening_rescue_hold_and_charge
+        name: Evening rescue
+  # Both efficiency search sensors are disabled by default: enable them on the
+  # device page, or remove this card if you do not use the efficiency search.
+  - type: entities
+    title: Efficiency search
+    entities:
+      - entity: switch.inverter_charge_night_efficiency_search
+        name: Efficiency search
+      - entity: sensor.inverter_charge_night_efficiency_search
+        name: Search status
+      - entity: sensor.inverter_charge_night_most_efficient_charge_power
+        name: Most efficient charge power

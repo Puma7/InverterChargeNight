@@ -5,6 +5,64 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.11.1] - 2026-10-24
+
+Documentation in English and German, a refreshed logo, translated sensor attributes, and one
+fix for the modelled day.
+
+### Docs
+- **A short README in English and German** (`README.md`, `README.de.md`) instead of 1480 lines:
+  what the integration does, highlights, quick start, and an index of the documentation.
+- **The documentation lives in `docs/en/` and `docs/de/`**, page by page: installation, how it
+  works, every setting with its default, safety, efficiency search, exceptions and extras,
+  entities and actions, dashboard, troubleshooting and FAQ, Kostal with KOSTAL KORE, morning
+  discharge, development. Every statement was checked against the code; several that the old
+  README got wrong are corrected:
+  - In Headroom mode the planned charge power is only shown, not written, unless a house
+    connection limit or an efficiency result exists.
+  - An unreadable grid import sensor pauses charging (0 W); it does not fall back to the
+    minimum charge power.
+  - The grid charge switch is not captured and restored; it is switched off at the window end.
+  - The forecast entity is chosen by the day the window ends.
+  - The evening reserve, the safety buffer and the weather factor belong to the Bridge planner,
+    and `plan_target_soc` always runs the Bridge planner.
+- **Diagrams** (`docs/images/`, light and dark, English and German): a night and the following
+  day, the parts of the target, how the parts fit together. Drawn by
+  `scripts/docs_graphics/make_diagrams.py`.
+- **Screenshots** of the real Home Assistant interface in both languages, taken in the lab.
+- **An example dashboard** (`docs/examples/dashboard.yaml`, German `dashboard.de.yaml`) with
+  cards that ship with Home Assistant.
+- The old pages `docs/kostal-kore.md`, `docs/morning-discharge.md`, `docs/setup-and-efficiency.md`
+  and `docs/overnight-debugging.md` point to their new places.
+
+### Changed
+- **Logo and icon redrawn** as clean vectors, with a variant for the dark theme and a logo with
+  wordmark (`brand/`: `icon`, `dark_icon`, `logo`, `dark_logo`, each also `@2x`). Drawn by
+  `scripts/docs_graphics/make_brand.py`.
+- The help text of *Operation Mode* names the documentation page *Morning discharge* instead of
+  the old file path. Home Assistant does not allow URLs in translations (hassfest).
+- `quality_scale.yaml` points to the new pages and counts the documented actions
+  (`docs-actions`: done).
+
+### Fixed
+- **The sunset of the planned day, not today's.** `sun.sun`'s `next_setting` is today's sunset
+  until it has passed, so a plan made before sunset for a night window (a window starting at
+  17:00, or `plan_target_soc` in the afternoon) took a sunset before its own window end. The
+  modelled day then saw no sun and bridged until that sunset, and the upper bound counted no
+  daytime load. Found in the lab while taking the screenshots: crossover 17:53 today instead of
+  08:18 tomorrow. The sunset is now moved onto the solar day of the sunrise the plan uses. A
+  window starting after sunset, such as 23:00–05:00, was not affected.
+- German: the description of the action *Kommunikationsdiagnose* was still English, and its
+  inverter field spoke of resetting (also in English).
+- English: *Operation mode* and its state *Night charge* in sentence case like every other name.
+
+### Added
+- **Translated attributes.** The attributes of *Target SOC*, *Next high-price period*, *Evening
+  outlook*, *Planned charge power*, *Charge power left by the house connection* and *Efficiency
+  search* have names in English and German, and the values of `plan_reason`, `operation_mode`,
+  `adhoc_reason` and `discharge_block` are translated too. The attribute keys themselves, which
+  templates use, do not change.
+
 ## [3.11.0] - 2026-10-24
 
 The night target no longer has to sit on the edge of the bare need (plan 015). On 23/24 October

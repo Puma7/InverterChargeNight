@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 250" width="920" height="250" role="img" aria-label="target = min(lower + buffer, upper)">
+  <style>
+    svg { --fg: #1C2541; --muted: #5B6478; --grid: #D9DEE8; --soc: #2F6FDE; --pv: #FFB020;
+          --cheap: #2E9E6A; --peak: #D9534F; --card: #FFFFFF; --box: #F3F5FA; --line: #9AA3B5; }
+    @media (prefers-color-scheme: dark) {
+      svg { --fg: #E8ECF6; --muted: #A9B1C3; --grid: #39404F; --soc: #6EA2FF; --pv: #FFC94D;
+            --cheap: #4CC38A; --peak: #F07C78; --card: #0D1117; --box: #1B2230; --line: #6B7488; }
+    }
+    text { font-family: Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; fill: var(--fg); }
+    .muted { fill: var(--muted); }
+    .small { font-size: 13px; }
+    .label { font-size: 14px; }
+    .title { font-size: 16px; font-weight: 600; }
+  </style>
+<rect width="920" height="250" rx="14" fill="var(--card)"/>
+<rect x="38" y="68" width="844" height="68" rx="12" fill="none" stroke="var(--fg)" stroke-width="2.5"/>
+<rect x="884" y="88" width="10" height="28" rx="3" fill="var(--fg)"/>
+<rect x="40.0" y="70" width="67.2" height="64" fill="var(--line)" opacity="0.45"/>
+<line x1="73.6" x2="73.6" y1="134" y2="172" stroke="var(--line)" stroke-width="1"/>
+<text x="73.6" y="186" text-anchor="middle" class="small">Minimum SOC</text>
+<rect x="107.2" y="70" width="210.0" height="64" fill="var(--soc)" opacity="0.85"/>
+<line x1="212.2" x2="212.2" y1="134" y2="144" stroke="var(--line)" stroke-width="1"/>
+<text x="212.2" y="158" text-anchor="middle" class="small">Morning bridge</text>
+<rect x="317.2" y="70" width="75.6" height="64" fill="var(--soc)" opacity="0.6"/>
+<line x1="355.0" x2="355.0" y1="134" y2="172" stroke="var(--line)" stroke-width="1"/>
+<text x="355.0" y="186" text-anchor="middle" class="small">Evening reserve</text>
+<rect x="392.8" y="70" width="67.2" height="64" fill="var(--pv)" opacity="0.9"/>
+<line x1="426.4" x2="426.4" y1="134" y2="144" stroke="var(--line)" stroke-width="1"/>
+<text x="426.4" y="158" text-anchor="middle" class="small">Safety buffer</text>
+<rect x="460.0" y="70" width="134.4" height="64" fill="var(--grid)" opacity="0.6"/>
+<line x1="527.2" x2="527.2" y1="134" y2="172" stroke="var(--line)" stroke-width="1"/>
+<text x="527.2" y="186" text-anchor="middle" class="small">unused</text>
+<rect x="594.4" y="70" width="285.6" height="64" fill="var(--pv)" opacity="0.35"/>
+<line x1="737.2" x2="737.2" y1="134" y2="144" stroke="var(--line)" stroke-width="1"/>
+<text x="737.2" y="158" text-anchor="middle" class="small">Room for tomorrow's PV surplus</text>
+<line x1="392.8" x2="392.8" y1="54" y2="134" stroke="var(--soc)" stroke-width="2" stroke-dasharray="4 3"/>
+<text x="392.8" y="48" text-anchor="middle" class="small" style="font-weight:600">lower bound</text>
+<line x1="594.4" x2="594.4" y1="54" y2="134" stroke="var(--fg)" stroke-width="2" stroke-dasharray="4 3"/>
+<text x="594.4" y="48" text-anchor="middle" class="small" style="font-weight:600">upper bound</text>
+<line x1="460.0" x2="460.0" y1="64" y2="140" stroke="var(--peak)" stroke-width="3"/>
+<text x="468.0" y="48" class="small" style="fill:var(--peak);font-weight:600">Target</text>
+<text x="40.0" y="107.0" text-anchor="start" dx="8" class="small muted">0 %</text>
+<text x="880.0" y="107.0" text-anchor="end" dx="-8" class="small muted">100 %</text>
+<text x="460.0" y="226" text-anchor="middle" class="label muted">target = min(lower + buffer, upper)</text>
+</svg>
