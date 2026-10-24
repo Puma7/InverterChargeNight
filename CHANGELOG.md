@@ -5,6 +5,51 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.11.0] - 2026-10-24
+
+The night target no longer has to sit on the edge of the bare need (plan 015). On 23/24 October
+it was 44 % on 35.8 kWh, and the next morning the evening outlook was already 0.85 kWh short.
+Every new setting leaves the target exactly as before at its default. They live on the new
+options page "Safety buffer, safety level and weather".
+
+### Added
+- **Safety buffer** (`safety_buffer_kwh`, default 0). The target carries it above the lower
+  bound, but only into room the upper bound leaves, so it can never make tomorrow's PV spill.
+  A conflict carries none, and without a forecast it rides on the lower bound. It is bought
+  once and carried, because each night plans from the battery as it finds it. The buffer
+  applied and whether the upper bound cut it short are logged and shown as `buffer_soc` and
+  `buffer_capped`.
+- **Safety level of the planned consumption** (`load_safety_level`: `mean` as before, `p75`,
+  `p90`). Each hour of the learned profile takes the upper quantile of its 14 days, never
+  below its mean, and the mean below seven days. Only the lower bound and the evening's
+  cautious surplus use it. The room for the PV stays on the mean.
+- **Modelled day** (`bridge_model`: `fixed_delay` as before, `modelled` opt-in). Tomorrow runs
+  in five-minute steps from the window end to the end of the high-price period. The need load
+  against the cautious forecast curve gives the lower bound, and the mean load against the
+  generous curve gives the upper bound. The crossover is when the PV first carries the need,
+  and a day it never does is bridged to its end. With the daily PV meter, the PV curve per
+  clock hour is learned from the last fortnight; otherwise it is a clear-sky bell. The
+  modelled crossover goes to the plan, the log and the sensor.
+- **Weather** (`weather_entity`, `outdoor_temperature_entity`, `heating_limit_c`, all
+  optional). A heating-degree model `daily kWh = a + b × max(0, limit − T)` is fitted over the
+  whole days behind the profile and scales the need for the planned day's forecast mean,
+  between −15 % and +50 %.
+  - It applies only with ten days, three kelvin of spread, a positive slope and R² ≥ 0.3, so
+    without electric heating nothing changes.
+  - The forecast comes from `weather.get_forecasts`: the daily forecast, the hourly one as a
+    fallback, °F converted, cached for 30 minutes.
+  - Temperatures come from the sensor's statistics, or from a diary of the weather entity
+    kept by the polls.
+  - Status, slope and factor are shown in the sensor attribute and the diagnostics as
+    `weather`.
+
+### Changed
+- The planning menu no longer lists "disable poor PV yield detection" a second time; it stays
+  under "disable features". Menus stay within seven entries.
+
+### Docs
+- `plans/015-planer-puffer-lernen-wetter.md`: the master plan.
+
 ## [3.10.11] - 2026-10-22
 
 ### Added

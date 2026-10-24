@@ -598,7 +598,7 @@
       },
       "setup": {
         "title": "Einrichtung",
-        "description": "**ICN 3.10 · Einrichtungsübersicht**\n\nFür den Start nur **1. Wechselrichter und Batterie** und **2. Ladezeiten** ausfüllen. Danach prüfen und übernehmen. Grundangaben vorhanden: **{core_count}/6**.\n\nJede bestätigte Seite wird als Entwurf gespeichert und führt hierher zurück. Öffne einen Bereich erneut, um zurückzugehen und etwas zu ändern. „Entwurf speichern und schließen“ unterbricht die Einrichtung; später über dieselbe Einrichtung fortsetzen. Entwürfe bleiben 30 Tage erhalten. Noch nicht abgesendete Eingaben werden nicht gespeichert. Erst „Einstellungen jetzt übernehmen“ verändert die laufende Konfiguration.\n\nHome-Assistant-Zeitzone: **{timezone}**.",
+        "description": "**ICN 3.11 · Einrichtungsübersicht**\n\nFür den Start nur **1. Wechselrichter und Batterie** und **2. Ladezeiten** ausfüllen. Danach prüfen und übernehmen. Grundangaben vorhanden: **{core_count}/6**.\n\nJede bestätigte Seite wird als Entwurf gespeichert und führt hierher zurück. Öffne einen Bereich erneut, um zurückzugehen und etwas zu ändern. „Entwurf speichern und schließen“ unterbricht die Einrichtung; später über dieselbe Einrichtung fortsetzen. Entwürfe bleiben 30 Tage erhalten. Noch nicht abgesendete Eingaben werden nicht gespeichert. Erst „Einstellungen jetzt übernehmen“ verändert die laufende Konfiguration.\n\nHome-Assistant-Zeitzone: **{timezone}**.",
         "menu_options": {
           "basics": "1 · Wechselrichter und Batterie",
           "schedule": "2 · Ladezeiten und Ladezustand",
@@ -1181,7 +1181,7 @@
       },
       "setup": {
         "title": "Einrichtung",
-        "description": "**ICN 3.10 · Einrichtungsübersicht**\n\nFür den Start nur **1. Wechselrichter und Batterie** und **2. Ladezeiten** ausfüllen. Danach prüfen und übernehmen. Grundangaben vorhanden: **{core_count}/6**.\n\nJede bestätigte Seite wird als Entwurf gespeichert und führt hierher zurück. Öffne einen Bereich erneut, um zurückzugehen und etwas zu ändern. „Entwurf speichern und schließen“ unterbricht die Einrichtung; später über dieselbe Einrichtung fortsetzen. Entwürfe bleiben 30 Tage erhalten. Noch nicht abgesendete Eingaben werden nicht gespeichert. Erst „Einstellungen jetzt übernehmen“ verändert die laufende Konfiguration.\n\nHome-Assistant-Zeitzone: **{timezone}**.",
+        "description": "**ICN 3.11 · Einrichtungsübersicht**\n\nFür den Start nur **1. Wechselrichter und Batterie** und **2. Ladezeiten** ausfüllen. Danach prüfen und übernehmen. Grundangaben vorhanden: **{core_count}/6**.\n\nJede bestätigte Seite wird als Entwurf gespeichert und führt hierher zurück. Öffne einen Bereich erneut, um zurückzugehen und etwas zu ändern. „Entwurf speichern und schließen“ unterbricht die Einrichtung; später über dieselbe Einrichtung fortsetzen. Entwürfe bleiben 30 Tage erhalten. Noch nicht abgesendete Eingaben werden nicht gespeichert. Erst „Einstellungen jetzt übernehmen“ verändert die laufende Konfiguration.\n\nHome-Assistant-Zeitzone: **{timezone}**.",
         "menu_options": {
           "basics": "1 · Wechselrichter und Batterie",
           "schedule": "2 · Ladezeiten und Ladezustand",

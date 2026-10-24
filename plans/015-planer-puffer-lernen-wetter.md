@@ -9,8 +9,11 @@
 - **Priorität**: P1 (Pascal: „alles drei sollten wir auf jeden Fall umsetzen“, dazu das Wetter)
 - **Aufwand**: L, in vier Stufen, jede für sich testbar und abschaltbar
 - **Risiko**: mittel. Jede Stufe ist mit ihrem Standardwert **verhaltensneutral**. Wer nichts
-  einstellt, bekommt dasselbe Ziel wie in 3.10.11. Ausnahme ist Stufe B, siehe dort.
-- **Version**: 3.11.0
+  einstellt, bekommt dasselbe Ziel wie in 3.10.11.
+- **Version**: 3.11.0, **umgesetzt** am 24.10.2026, alle vier Stufen. Abweichung vom Entwurf:
+  Stufe B ist **Opt-in** (`fixed_delay` bleibt Standard), siehe dort. Optionen stehen auf einer
+  neuen Seite „Sicherheitspuffer, Sicherheitsniveau und Wetter“, weil eine Seite höchstens
+  acht Felder hat.
 
 ## Ausgangslage: die Rechnung heute
 
@@ -125,11 +128,22 @@ Form statt der Glocke. Weniger Daten bedeuten Glocke wie bisher.
 
 ### Rückfallebene und Option
 
-- Neue Option `bridge_model` mit `"modelled"` (neu, Standard) und `"fixed_delay"` (bisherige
-  90-min-Regel, `pv_crossover_delay_min`).
-- Ohne verwertbare Prognose rechnet der Planer immer mit `fixed_delay`.
-- **Bewusst nicht verhaltensneutral**: Der neue Standard ändert das Ziel. Das ist der Kern des
-  Wunsches. Wer den alten Wert will, stellt auf `fixed_delay`.
+- Neue Option `bridge_model` mit `"fixed_delay"` (bisherige 90-min-Regel, **Standard**) und
+  `"modelled"`.
+- Ohne verwertbare Prognose oder Sonnenaufgang rechnet der Planer immer mit `fixed_delay`.
+- **Umgesetzt als Opt-in** statt als neuer Standard: Das Modell ändert Ziele, und bei anderen
+  Nutzern soll sich mit einem Update nichts ungefragt verschieben. Für Pascal empfohlen.
+
+### Umgesetzt (Abweichungen vom Entwurf)
+
+- Die Bilanz läuft durchgehend vom Fensterende bis zum Ende der Hochpreiszeit (ohne Hochpreiszeit
+  bis Sonnenuntergang). Sie deckt also auch die Stunden zwischen Sonnenuntergang und Hochpreisbeginn
+  ab, die vorher nicht gezählt wurden. Die Abendmarge gilt nur in der Hochpreiszeit.
+- Die gelernte PV-Kurve ist ein Anteil des Tagesertrags **je Uhrstunde** (24 Werte) statt
+  12 Bins über die Sonnentaglänge. Für 14 Tage ist der Unterschied der Tageslänge klein, und die
+  Uhrstunden kommen direkt aus der Statistik.
+- Die Reserve (`bridge_reserve_kwh`) kommt nur auf die untere Grenze, nicht mehr als Platz in die
+  obere: Sie wird nicht verbraucht und ist kein Raum für die Sonne.
 
 **Tests**:
 - Ein Tag mit viel Prognose hat seinen Übergang vor Sonnenaufgang + 90 min, die Überbrückung wird
@@ -182,7 +196,7 @@ Form statt der Glocke. Weniger Daten bedeuten Glocke wie bisher.
 
 ```
 HGT(T)       = max(0, T_grenz − T)               T_grenz = 15 °C (Option heating_limit_c)
-Tagesverbrauch E = a + b · HGT(T)                 kleinste Quadrate über ≤ 28 Tage, b ≥ 0
+Tagesverbrauch E = a + b · HGT(T)                 kleinste Quadrate über die ganzen Tage des 14-Tage-Profils, b ≥ 0
 gültig, wenn ≥ 10 Tage, Spannweite der HGT ≥ 3 K und R² ≥ 0,3
 faktor = (a + b · HGT(T_morgen)) / (a + b · HGT(T_profil))
          T_profil = mittlere Temperatur der Tage, aus denen das Lastprofil gelernt ist
@@ -242,4 +256,4 @@ Jede Stufe bekommt einen eigenen Commit mit Tests und Gegenprobe. Danach laufen 
 - Sicherheitsniveau **p75**.
 - Wetter-Entität `weather.<met.no oder DWD>` und, falls vorhanden, ein Außentemperatur-Sensor mit
   Statistik.
-- Überbrückungsmodell: Standard (`modelled`).
+- Überbrückungsmodell **modelliert** (Opt-in), mit gesetztem PV-Tageszähler.

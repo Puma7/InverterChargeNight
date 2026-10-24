@@ -598,7 +598,7 @@
       },
       "setup": {
         "title": "Setup",
-        "description": "**ICN 3.10 · Setup overview**\n\nStart with **1. Inverter and battery** and **2. Charging window**. Then review and apply. Basic fields present: **{core_count}/6**.\n\nEach submitted page is saved as a draft and returns here. Reopen any section to go back and edit it. Save and close to pause; resume from the same setup later. Drafts are kept for 30 days. Unsubmitted browser inputs are not saved. Only Apply changes the running configuration.\n\nHome Assistant time zone: **{timezone}**.",
+        "description": "**ICN 3.11 · Setup overview**\n\nStart with **1. Inverter and battery** and **2. Charging window**. Then review and apply. Basic fields present: **{core_count}/6**.\n\nEach submitted page is saved as a draft and returns here. Reopen any section to go back and edit it. Save and close to pause; resume from the same setup later. Drafts are kept for 30 days. Unsubmitted browser inputs are not saved. Only Apply changes the running configuration.\n\nHome Assistant time zone: **{timezone}**.",
         "menu_options": {
           "basics": "1 · Inverter and battery",
           "schedule": "2 · Charging window and state of charge",
@@ -1181,7 +1181,7 @@
       },
       "setup": {
         "title": "Setup",
-        "description": "**ICN 3.10 · Setup overview**\n\nStart with **1. Inverter and battery** and **2. Charging window**. Then review and apply. Basic fields present: **{core_count}/6**.\n\nEach submitted page is saved as a draft and returns here. Reopen any section to go back and edit it. Save and close to pause; resume from the same setup later. Drafts are kept for 30 days. Unsubmitted browser inputs are not saved. Only Apply changes the running configuration.\n\nHome Assistant time zone: **{timezone}**.",
+        "description": "**ICN 3.11 · Setup overview**\n\nStart with **1. Inverter and battery** and **2. Charging window**. Then review and apply. Basic fields present: **{core_count}/6**.\n\nEach submitted page is saved as a draft and returns here. Reopen any section to go back and edit it. Save and close to pause; resume from the same setup later. Drafts are kept for 30 days. Unsubmitted browser inputs are not saved. Only Apply changes the running configuration.\n\nHome Assistant time zone: **{timezone}**.",
         "menu_options": {
           "basics": "1 · Inverter and battery",
           "schedule": "2 · Charging window and state of charge",

@@ -335,7 +335,56 @@ Load** is used for every hour.
 
 The chosen bound and its inputs are exposed as attributes of
 `sensor.inverter_charge_night_calculated_soc` (`plan_reason`, `bridge_kwh`, `surplus_kwh`,
-`lower_bound_soc`, `upper_bound_soc`, `pv_crossover`).
+`lower_bound_soc`, `upper_bound_soc`, `buffer_soc`, `buffer_capped`, `pv_crossover`,
+`weather`).
+
+#### Safety buffer, safety level, modelled day and weather (3.11)
+
+The lower bound is the bare need: on 23/24 October 2026 it was 44 % on 35.8 kWh, and the
+next morning the evening outlook was already 0.85 kWh short. Four settings on the page
+**Safety buffer, safety level and weather** move the target off that edge. Each of them leaves
+the target exactly as before at its default.
+
+- **Safety buffer (kWh)**: carried above the lower bound, but only into room the upper bound
+  leaves.
+
+  ```
+  target = min(lower + buffer, upper)        when lower <= upper
+  ```
+
+  It can therefore never make tomorrow's PV spill. A conflict carries none. Without a forecast
+  it rides on the lower bound. It is bought **once** and then carried: each night plans from
+  the battery as it finds it and only tops up what the day used. It is there for a power cut on
+  the island box, an electric car, or an evening above average.
+- **Safety level of the planned consumption**: average (as before), safe (75th percentile) or
+  very safe (90th percentile). Each hour of the learned profile is planned like one of the
+  busier days of the fortnight, never below its mean. Only the lower bound uses it. The room
+  for the sun is still reckoned with the mean, so a high load estimate can never pretend there
+  is more room than there is.
+- **How the morning and the day are bridged**: the fixed delay after sunrise (as before), or
+  **modelled**. In modelled mode the planner runs tomorrow in five-minute steps from the
+  window end to the end of the high-price period:
+  - The need load against the cautious forecast curve says how low the battery falls. That
+    is the lower bound.
+  - The mean load against the generous curve says how high the sun lifts it before sunset.
+    That is the upper bound.
+
+  A sunny day takes over early and needs less. A dull December day may never carry the
+  house, and then the whole day is bridged, which the old rule did not count at all between
+  the morning and the evening period. With the daily PV energy meter set, the PV curve is the
+  share of the day's yield per clock hour learned from the last fortnight: roof orientation,
+  shading, season. Otherwise it is a clear-sky bell.
+- **Weather** (optional, for a heat pump): a `weather.*` entity, optionally an outdoor
+  temperature sensor, and the heating limit (15 °C).
+  - ICN fits `daily kWh = a + b × heating degrees` over the whole days behind the load
+    profile and scales the need by what that predicts for tomorrow's forecast mean against
+    the fortnight. The scaling is at most +50 % and at least −15 %.
+  - It only applies when ten days, three kelvin of spread, a positive slope and R² ≥ 0.3 say
+    the slope is real. A house without electric heating keeps a factor of 1.
+  - The forecast comes from `weather.get_forecasts`. Temperatures come from the sensor's
+    statistics, or from a diary ICN keeps of the weather entity's current temperature,
+    which needs about ten days.
+  - The `weather` attribute shows the status, the learned kWh per kelvin and the factor.
 
 #### Target precedence
 
@@ -1314,6 +1363,11 @@ Step 4 -- advanced:
 - `avg_house_load_kw` - Fallback average house load in kW
 - `pv_crossover_delay_min` - Minutes after sunrise until PV exceeds the load
 - `bridge_reserve_kwh` - Safety reserve added to the bridge energy
+- `safety_buffer_kwh` - Buffer carried above the lower bound, capped by the upper bound (3.11)
+- `load_safety_level` - `mean`, `p75` or `p90`: the hourly load the target is bought for (3.11)
+- `bridge_model` - `fixed_delay` or `modelled`: how the morning and the day are bridged (3.11)
+- `weather_entity` / `outdoor_temperature_entity` / `heating_limit_c` - Optional temperature
+  scaling of the planned load for electric heating (3.11)
 - `charge_efficiency` - Grid-to-battery efficiency used for the charge power plan
 - `night_price_ct` / `day_price_ct` / `feed_in_price_ct` - Optional tariffs, all three or none
 
@@ -1331,6 +1385,10 @@ Defined in `const.py`:
 - `DEFAULT_AVG_HOUSE_LOAD_KW = 0.5`
 - `DEFAULT_PV_CROSSOVER_DELAY_MIN = 90`
 - `DEFAULT_BRIDGE_RESERVE_KWH = 0.5`
+- `DEFAULT_SAFETY_BUFFER_KWH = 0.0`
+- `DEFAULT_LOAD_SAFETY_LEVEL = "mean"`
+- `DEFAULT_BRIDGE_MODEL = "fixed_delay"`
+- `DEFAULT_HEATING_LIMIT_C = 15.0`
 - `DEFAULT_CHARGE_EFFICIENCY = 0.90`
 - `DEFAULT_GRID_PHASES = 3`
 - `DEFAULT_GRID_VOLTAGE_V = 230`
