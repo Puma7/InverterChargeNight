@@ -5,6 +5,7 @@
 Needs fontTools and the Inter font (Inter-SemiBold.otf). See README.md in this folder for
 rendering the PNGs.
 """
+import os
 import sys
 from pathlib import Path
 from fontTools.ttLib import TTFont
@@ -46,7 +47,7 @@ def text_path(text: str, font_file: str, size: float, x0: float, baseline: float
     return " ".join(paths), x
 
 def logo_svg(body: str, text: str) -> str:
-    semibold = "/usr/share/fonts/opentype/inter/Inter-SemiBold.otf"
+    semibold = os.environ.get("INTER_SEMIBOLD", "/usr/share/fonts/opentype/inter/Inter-SemiBold.otf")
     first, x = text_path("Inverter Charge ", semibold, 200, 540, 360)
     second, x = text_path("Night", semibold, 200, x, 360)
     width = int(x + 40)

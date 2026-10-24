@@ -43,6 +43,9 @@ cards:
     content: |-
       {% set s = 'sensor.inverter_charge_night_target_soc' %}
       {% set crossover = state_attr(s, 'pv_crossover') %}
+      {% set lower = state_attr(s, 'lower_bound_soc') %}
+      {% set upper = state_attr(s, 'upper_bound_soc') %}
+      {% set bridge = state_attr(s, 'bridge_kwh') %}
       {% set reasons = {'bridge': 'morning need', 'conflict_bridge_wins': 'conflict: the morning wins',
                         'conflict_headroom_wins': 'conflict: room for the PV', 'fallback': 'no forecast'} %}
       {% set weather = {'off': 'off', 'learning': 'learning', 'active': 'active',
@@ -50,10 +53,10 @@ cards:
       | Item | Value |
       |---|---|
       | Plan | {{ reasons.get(state_attr(s, 'plan_reason'), '-') }} |
-      | Lower bound (need) | {{ state_attr(s, 'lower_bound_soc') }} % |
-      | Upper bound (room for PV) | {{ state_attr(s, 'upper_bound_soc') }} % |
+      | Lower bound (need) | {{ lower ~ ' %' if lower is not none else '-' }} |
+      | Upper bound (room for PV) | {{ upper ~ ' %' if upper is not none else '-' }} |
       | Safety buffer | {{ state_attr(s, 'buffer_soc') or 0 }} % |
-      | Bridge until PV | {{ state_attr(s, 'bridge_kwh') }} kWh |
+      | Bridge until PV | {{ bridge ~ ' kWh' if bridge is not none else '-' }} |
       | PV carries the house from | {{ (crossover | as_datetime | as_local).strftime('%H:%M') if crossover else '-' }} |
       | Weather | {{ weather.get((state_attr(s, 'weather') or {}).get('status'), '-') }} |
   - type: history-graph

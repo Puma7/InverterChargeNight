@@ -8,7 +8,7 @@
 # Die Entitäts-IDs unten erzeugt Home Assistant für das Gerät "Inverter Charge
 # Night", wenn die Systemsprache bei der Einrichtung Deutsch war. Mit Englisch
 # als Systemsprache entstehen englische IDs (dashboard.yaml), zum Beispiel
-# sensor.inverter_charge_night_zielladestand statt
+# sensor.inverter_charge_night_target_soc statt
 # sensor.inverter_charge_night_zielladestand. Die eigenen IDs stehen auf der
 # Geräteseite.
 title: Nachtladung
@@ -50,6 +50,9 @@ cards:
     content: |-
       {% set s = 'sensor.inverter_charge_night_zielladestand' %}
       {% set crossover = state_attr(s, 'pv_crossover') %}
+      {% set lower = state_attr(s, 'lower_bound_soc') %}
+      {% set upper = state_attr(s, 'upper_bound_soc') %}
+      {% set bridge = state_attr(s, 'bridge_kwh') %}
       {% set reasons = {'bridge': 'Bedarf am Morgen', 'conflict_bridge_wins': 'Konflikt: der Morgen gewinnt',
                         'conflict_headroom_wins': 'Konflikt: Platz für die PV', 'fallback': 'ohne Prognose'} %}
       {% set weather = {'off': 'aus', 'learning': 'lernt', 'active': 'aktiv',
@@ -57,11 +60,11 @@ cards:
       | Größe | Wert |
       |---|---|
       | Plan | {{ reasons.get(state_attr(s, 'plan_reason'), '-') }} |
-      | Untergrenze (Bedarf) | {{ state_attr(s, 'lower_bound_soc') | string | replace('.', ',') }} % |
-      | Obergrenze (Platz für PV) | {{ state_attr(s, 'upper_bound_soc') | string | replace('.', ',') }} % |
+      | Untergrenze (Bedarf) | {{ (lower | string | replace('.', ',')) ~ ' %' if lower is not none else '-' }} |
+      | Obergrenze (Platz für PV) | {{ (upper | string | replace('.', ',')) ~ ' %' if upper is not none else '-' }} |
       | Sicherheitspuffer | {{ (state_attr(s, 'buffer_soc') or 0) | string | replace('.', ',') }} % |
-      | Überbrückung bis PV | {{ state_attr(s, 'bridge_kwh') | string | replace('.', ',') }} kWh |
-      | PV versorgt das Haus ab | {{ (crossover | as_datetime | as_local).strftime('%H:%M') if crossover else '-' }} Uhr |
+      | Überbrückung bis PV | {{ (bridge | string | replace('.', ',')) ~ ' kWh' if bridge is not none else '-' }} |
+      | PV versorgt das Haus ab | {{ (crossover | as_datetime | as_local).strftime('%H:%M') ~ ' Uhr' if crossover else '-' }} |
       | Wetter | {{ weather.get((state_attr(s, 'weather') or {}).get('status'), '-') }} |
   - type: history-graph
     title: Akku und Ziel, letzte 48 h

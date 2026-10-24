@@ -16,6 +16,11 @@ pyright                                       # strikt
 python scripts/smoke_real_ha.py               # durchgehend gegen einen echten HA-Core
 ```
 
+Die Typprüfer sind auf Python 3.13 eingestellt. In einer Umgebung mit Python 3.14 gibst du die
+Version mit, wie die CI es tut, sonst scheitern sie an der 3.14-Syntax von Home Assistant:
+`mypy --python-version 3.14 custom_components/inverter_charge_night` und
+`pyright --pythonversion 3.14`.
+
 - **Die Coverage ist eine Ratsche.** `.coveragerc` deckt das ganze Paket ab, und `fail_under` ist
   der zuletzt gemessene Gesamtwert, abgerundet. Wer Tests hinzufügt, hebt ihn an; gesenkt wird er
   nie.

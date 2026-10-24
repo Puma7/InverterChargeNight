@@ -5,7 +5,7 @@ be changed and drawn again instead of edited by hand.
 
 | Script | Draws |
 |---|---|
-| `make_brand.py <dir>` | `icon.svg`, `dark_icon.svg`, `logo.svg`, `dark_logo.svg` (needs `fonttools` and the Inter font) |
+| `make_brand.py <dir>` | `icon.svg`, `dark_icon.svg`, `logo.svg`, `dark_logo.svg` (needs `fonttools` and the Inter font; `INTER_SEMIBOLD` points to `Inter-SemiBold.otf` if it is not in `/usr/share/fonts/opentype/inter/`) |
 | `make_diagrams.py docs/images` | `night-and-day`, `target-bounds`, `overview`, in English and German |
 | `render.js <svg> <png> <w> <h> [bg]` | A PNG of an SVG with the preinstalled Playwright Chromium. `COLOR_SCHEME=dark` and `SCALE=2` are optional. |
 

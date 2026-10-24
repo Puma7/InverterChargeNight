@@ -16,6 +16,11 @@ pyright                                       # strict
 python scripts/smoke_real_ha.py               # end to end against a real HA core
 ```
 
+The type checkers are configured for Python 3.13. In a Python 3.14 environment pass the version,
+as CI does, or they stop at Home Assistant's 3.14-only syntax:
+`mypy --python-version 3.14 custom_components/inverter_charge_night` and
+`pyright --pythonversion 3.14`.
+
 - **Coverage is a ratchet.** `.coveragerc` covers the whole package, and `fail_under` is the
   last measured total, rounded down. Whoever adds tests raises it; it is never lowered.
 - **Strict test hass.** The `mock_hass` fixture returns `None` for every entity a test has not
