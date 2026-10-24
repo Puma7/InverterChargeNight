@@ -5774,14 +5774,23 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             await self._on_window_end(now)
             return
-        if outlook.missing_kwh <= 0:
-            # Enough, or inside the band in which a running rescue stays put
+        uncapped = rescuing and self._adhoc_floor_cap_soc is None
+        if outlook.missing_kwh <= 0 and not uncapped:
+            # Enough, or inside the band in which a running rescue stays put.
+            # A rescue from before 3.12 carries no cap and is put on one
+            # below, or the sun would keep raising its floor (CodeRabbit on #44).
             return
         current_soc = self._current_battery_soc()
         if current_soc is None:
             return
         close_enough = (outlook.zone_start - now) <= timedelta(hours=EVENING_RESCUE_CHARGE_LEAD_H)
-        stage = 2 if close_enough and self._rescue_purchase_pays(outlook, now) else 1
+        stage = (
+            2
+            if close_enough
+            and outlook.missing_kwh > 0
+            and self._rescue_purchase_pays(outlook, now)
+            else 1
+        )
         if (
             stage == 1
             and not rescuing

@@ -414,6 +414,30 @@ async def test_the_cap_survives_a_restart(mock_hass):
 
 
 @pytest.mark.asyncio
+async def test_a_rescue_from_before_the_cap_gets_one_inside_the_band(mock_hass):
+    """CodeRabbit on #44: a window persisted by 3.11 restores without a cap."""
+    coordinator = _make_coordinator(mock_hass, _prices(mock_hass, before=0.20, period=0.45))
+    await _rescue(coordinator, _short())
+    mock_hass.states.async_set("sensor.soc", "70", {"unit_of_measurement": "%"})
+    coordinator._adhoc_floor_cap_soc = None  # what 3.11 persisted
+    coordinator._rescue_stage = 0  # not persisted either
+    coordinator._update_window_floor()
+    assert coordinator._window_floor_soc == 70.0
+    mock_hass.states.async_set("number.min_soc", "70", {"unit_of_measurement": "%"})
+    mock_hass.services.async_call.reset_mock()
+
+    await _rescue(coordinator, _fine(spare_soc=2.0), now=LATE)
+
+    assert coordinator.is_active is True
+    assert coordinator._adhoc_floor_cap_soc == 62.0
+    assert coordinator._window_floor_soc == 62.0
+    assert coordinator._adhoc_allow_grid_charge is False  # nothing is missing
+    mock_hass.services.async_call.assert_any_await(
+        "number", "set_value", {"entity_id": "number.min_soc", "value": 62.0}, blocking=True
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_need_that_barely_moves_keeps_the_target(mock_hass):
     coordinator = _make_coordinator(mock_hass)
     await _rescue(coordinator, _short())
@@ -512,6 +536,44 @@ async def test_a_reset_by_hand_is_not_undone_by_the_next_poll(mock_hass):
 
     assert coordinator.is_active is False
     assert coordinator._rescue_stage == 0
+
+
+@pytest.mark.asyncio
+async def test_a_purchase_called_off_switches_grid_charging_off_in_the_same_poll(mock_hass):
+    """CodeRabbit on #44: through the real update, not only the rescue."""
+    mock_hass.states.async_set(
+        "sun.sun",
+        "above_horizon",
+        {
+            "next_rising": "2026-06-02T05:00:00+00:00",
+            "next_setting": "2026-06-01T21:00:00+00:00",
+        },
+    )
+    coordinator = _make_coordinator(
+        mock_hass,
+        {CONF_PV_FORECAST_TODAY_ENTITY: "sensor.pv_today"}
+        | _prices(mock_hass, before=0.20, period=0.45),
+    )
+    mock_hass.states.async_set("sensor.soc", "12", {"unit_of_measurement": "%"})
+    mock_hass.states.async_set("sensor.pv_today", "0.5", {"unit_of_measurement": "kWh"})
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=LATE
+    ):
+        await coordinator._async_update_data()
+    assert coordinator._rescue_stage == 2
+    mock_hass.states.async_set("switch.grid", "on")
+    _prices(mock_hass, before=0.30, period=0.35)
+    mock_hass.services.async_call.reset_mock()
+
+    with patch(CALL_LATER, return_value=MagicMock()), patch(
+        f"{COORDINATOR}.dt_util.now", return_value=LATE + timedelta(minutes=15)
+    ):
+        await coordinator._async_update_data()
+
+    assert coordinator._rescue_stage == 1
+    mock_hass.services.async_call.assert_any_await(
+        "switch", "turn_off", {"entity_id": "switch.grid"}, blocking=True
+    )
 
 
 @pytest.mark.asyncio
