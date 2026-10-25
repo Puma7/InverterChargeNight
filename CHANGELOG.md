@@ -35,14 +35,16 @@ before.
   - A value applies from three samples, recent ones weighted more. The capacity is bounded to
     60–105 % of the nameplate, the efficiencies to 0.75–0.99.
 - **The charge efficiency the efficiency search measured** now reaches the planner, the charge
-  power and the trial planning. Before, the setting's 0.90 stayed in force.
+  power and the trial planning. Before, the setting's 0.90 stayed in force. Where a SOC band has
+  its own optimum, its loss is taken along with its power.
 - **Switch *Use learned values*,** on by default. Off, everything is still collected.
 - **Sensors *PV forecast correction*** (factor, band, days, error before and after) **and *Usable
   battery capacity*** (with both efficiencies and what the plan uses). Both are also in the
   diagnostics.
 - The learned data lives in its own store and is deleted with the entry. It records which
   entities each kind of value came from: a new forecast entity, PV meter or battery sensor starts
-  that kind afresh and keeps the rest. A new nameplate capacity starts the capacity afresh.
+  that kind afresh and keeps the rest. A new nameplate capacity starts the capacity afresh. Runs
+  from before a battery change are not read back from the recorder's statistics.
 - A day the PV meter's statistics cover for fewer than 20 hours is not taken as a yield. It stays
   open and is read again later.
 - Unloading writes the store and closes it, so no delayed save of the old coordinator lands over a

@@ -103,6 +103,8 @@ aufbewahrt werden. Sie werden einmal am Tag ausgewertet. Gebraucht werden:
 **Werte**:
 
 - Gewichteter Median der Proben, Halbwertszeit 180 Tage, erst ab drei Proben.
+- Ändert sich die Quelle einer Art (Sensor oder Nennkapazität), werden ihre Proben verworfen.
+  Ein Abschnitt, der vor der Änderung begann, zählt auch beim nächsten Lesen der Statistik nicht.
 - Begrenzungen:
   - Kapazität 60–105 % des Nennwerts;
   - beide Wirkungsgrade 0,75–0,99.
@@ -110,7 +112,7 @@ aufbewahrt werden. Sie werden einmal am Tag ausgewertet. Gebraucht werden:
 **Ladewirkungsgrad**:
 
 - Vorrang hat der Verlust, den die Effizienzsuche am Optimum gemessen hat. Mit genau dieser
-  Leistung lädt die Nacht.
+  Leistung lädt die Nacht. Hat das SOC-Band ein eigenes Optimum, gilt dessen Verlust.
 - Sonst gilt die Bilanz.
 - Sonst gilt die Einstellung.
 

@@ -86,7 +86,9 @@ change.
 - The capacity is bounded to 60–105 % of the nameplate, the efficiencies to 0.75–0.99.
 
 **Charge efficiency first from the efficiency search:** the loss it measured at the best power is
-exactly what the night charges at. The energy balance is used only without a search result.
+exactly what the night charges at. Where a SOC band has an optimum of its own, the night charges
+at that band's power, and its loss is taken too. The energy balance is used only without a search
+result.
 
 **Requirements:**
 
@@ -110,8 +112,9 @@ kWh. Its attributes are:
 - Every learned value is bounded, and it applies only with enough data behind it.
 - Missing sensors or statistics leave the setting in place.
 - A new forecast entity, PV meter or battery sensor starts what is learned from it afresh, and so
-  does a new battery capacity setting for the capacity. A new
-  *today* entity, for example, keeps the evening forecasts and the yields.
+  does a new battery capacity setting for the capacity. A new *today* entity, for example, keeps
+  the evening forecasts and the yields. The battery's statistics of the days before the change
+  are not read again.
 - A smaller capacity means more percent per kWh and a higher target: that is the safe direction.
   A larger one is capped at 105 % of the nameplate.
 - The PV shortfall monitor ([extras](extras.md)) keeps comparing the raw forecast. It is there to

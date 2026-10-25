@@ -402,3 +402,101 @@ def test_a_new_battery_on_the_same_sensors_starts_the_capacity_afresh(coordinato
     assert coordinator._battery_log.count(bl.KIND_CAPACITY) == 0
     assert coordinator._battery_log.count(bl.KIND_CHARGE) == 3
     assert coordinator._capacity_kwh() == 2 * NAMEPLATE
+
+
+def _balance_coordinator(mock_hass: Any) -> Any:
+    _register(mock_hass)
+    co = _make_coordinator(mock_hass, {**CONFIG, CONF_CHARGE_POWER_HOUSE_ENTITY: HOUSE,
+                                       CONF_GRID_IMPORT_ENTITY: GRID_IMPORT,
+                                       CONF_PV_ENERGY_TODAY_ENTITY: PV_METER})
+    mock_hass.states.async_set(RECEIVED, "0", {"unit_of_measurement": "kW"})
+    for entity in (HOUSE, GRID_IMPORT):
+        mock_hass.states.async_set(entity, "0", {"unit_of_measurement": "W"})
+    mock_hass.states.async_set(PV_METER, "0", {"unit_of_measurement": "kWh"})
+    return co
+
+
+async def _learn_from(co: Any, buckets: list[bl.Bucket]) -> bool:
+    with _recorder(), patch("homeassistant.components.recorder.statistics.statistics_during_period",
+                            return_value=_rows(buckets)):
+        return bool(await co._learn_battery())
+
+
+@pytest.mark.asyncio
+async def test_the_old_batterys_runs_do_not_come_back_from_the_recorder(mock_hass):
+    """Codex on #46: the statistics still hold the old battery's runs after the swap."""
+    co = _balance_coordinator(mock_hass)
+    co._check_learning_sources()
+    now = datetime.now().timestamp()
+    before = [_night_charge(start=now - day * 86400) for day in (3, 2, 1)]
+    for buckets in before:
+        assert await _learn_from(co, buckets) is True
+    assert co._capacity_kwh() == pytest.approx(32.0)
+
+    co.config = {**co.config, "battery_capacity": 2 * NAMEPLATE}
+    co._check_learning_sources()
+    for buckets in before:  # the next refresh reads the same eleven days again
+        assert await _learn_from(co, buckets) is False
+
+    assert co._battery_log.count(bl.KIND_CAPACITY) == 0
+    assert co._capacity_kwh() == 2 * NAMEPLATE
+    # The charger is the same: its samples stay, and are not added twice
+    assert co._battery_log.count(bl.KIND_CHARGE) == 3
+    # A run of the new battery counts
+    assert await _learn_from(co, _night_charge(start=now + 600, capacity=64.0)) is True
+    assert co._battery_log.count(bl.KIND_CAPACITY) == 1
+    # And the cut-off is kept with the samples
+    assert co._learning_snapshot()["since"][bl.KIND_CAPACITY] == pytest.approx(now, abs=60)
+
+
+@pytest.mark.asyncio
+async def test_a_change_found_at_load_is_written_with_the_next_refresh(coordinator):
+    """Else it would be found again at every load, each time with a later cut-off."""
+    stored = {"sources": {**coordinator._current_learning_sources(), bl.KIND_CAPACITY: ["old"]}}
+    with patch("custom_components.inverter_charge_night.coordinator.Store") as store:
+        store.return_value.async_load = AsyncMock(return_value=stored)
+        await coordinator.async_load_learning()
+    assert bl.KIND_CAPACITY in coordinator._learning_since
+    coordinator._backfill_forecasts = AsyncMock(return_value=False)
+    coordinator._read_pv_actuals = AsyncMock(return_value=False)
+    coordinator._learn_battery = AsyncMock(return_value=False)
+    coordinator._forecast_backfilled = True
+
+    await coordinator.async_refresh_learning()
+    store.return_value.async_delay_save.assert_called_once()
+    await coordinator.async_refresh_learning()
+    store.return_value.async_delay_save.assert_called_once()
+
+
+def _band_search(coordinator: Any, *, samples: int = 3) -> None:
+    """Battery-wide 6000 W at 2 % loss; the 40-60 % band searched: 3000 W at 20 %."""
+    coordinator.entry.options = {CONF_AUTO_EFFICIENCY_DATA: {
+        "best_loss": 0.02, "best_power_w": 6000,
+        "measurement_signature": coordinator._efficiency_signature(), "bounds_w": [500, 10000],
+        "bands": {coordinator._efficiency_band(50.0): {
+            "best_loss": 0.20, "best_power_w": 3000,
+            "history": {str(1000 * (i + 1)): 0.25 for i in range(samples - 1)} | {"3000": 0.20},
+        }},
+    }}
+
+
+def test_the_charge_efficiency_is_the_one_of_the_band_charged_in(coordinator, mock_hass):
+    """Codex on #46: the loss belongs to the power the night charges at there."""
+    _band_search(coordinator)
+
+    assert coordinator.best_charge_power_w(50.0) == 3000
+    assert coordinator.learned_charge_efficiency(50.0) == (pytest.approx(0.80), "efficiency_search")
+    assert coordinator._charge_efficiency(50.0) == pytest.approx(0.80)
+    # Outside the band, battery-wide
+    assert coordinator.best_charge_power_w(20.0) == 6000
+    assert coordinator._charge_efficiency(20.0) == pytest.approx(0.98)
+    # Without a SOC given, at the battery's now
+    mock_hass.states.async_set(BATTERY, "50")
+    assert coordinator._charge_efficiency() == pytest.approx(0.80)
+
+
+def test_a_band_only_sampled_keeps_the_battery_wide_loss(coordinator):
+    _band_search(coordinator, samples=2)
+
+    assert coordinator.best_charge_power_w(50.0) == 6000
+    assert coordinator._charge_efficiency(50.0) == pytest.approx(0.98)

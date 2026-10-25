@@ -545,6 +545,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Which entities each kind of learned value came from: a new forecast
         # provider or meter must not inherit the old one's history (Codex on #46)
         self._learning_sources: dict[str, Any] = {}
+        # Per battery kind, when its source last changed: the recorder still
+        # holds the old battery's runs, and they must not come back (Codex on #46)
+        self._learning_since: dict[str, float] = {}
+        self._learning_sources_unsaved = False
         self._learning_refreshed: date | None = None
         self._learning_task: asyncio.Task[None] | None = None
         self._battery_learning_status = bl.STATUS_LEARNING
@@ -2017,9 +2021,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._forecast_backfilled = raw.get("backfilled") is True
             sources = raw.get("sources")
             self._learning_sources = dict(sources) if isinstance(sources, dict) else {}
-        # Written with the next change: until then a changed source is
-        # recognised again at every load, which forgets nothing twice
-        self._check_learning_sources()
+            since = raw.get("since")
+            self._learning_since = {
+                str(kind): float(ts) for kind, ts in (since.items() if isinstance(since, dict) else ())
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(ts)
+            }
+        # Written with the next refresh, so the change and its cut-off are
+        # recognised once, not again at every load
+        self._learning_sources_unsaved = self._check_learning_sources()
 
     async def async_unload_learning(self) -> None:
         """Write the diaries once more and close the store for this coordinator.
@@ -2046,6 +2055,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "battery": self._battery_log.snapshot(),
             "backfilled": self._forecast_backfilled,
             "sources": dict(self._learning_sources),
+            "since": dict(self._learning_since),
         }
 
     def _current_learning_sources(self) -> dict[str, Any]:
@@ -2085,6 +2095,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         self._forecast_backfilled = False  # fill in the new one
                 else:
                     changed |= self._battery_log.clear([kind])
+                    # The statistics are read again tomorrow: only runs from now on
+                    self._learning_since[kind] = dt_util.utcnow().timestamp()
                 _LOGGER.info("The %s source changed - starting what is learned from it afresh", kind)
                 changed = True
         if known != current:
@@ -2137,7 +2149,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         is still starting up is asked again on the next poll.
         """
         today = dt_util.now().date()
-        changed = self._forecast_log.prune(today)
+        changed = self._forecast_log.prune(today) or self._learning_sources_unsaved
+        self._learning_sources_unsaved = False
         complete = True
         try:
             if not self._forecast_backfilled:
@@ -2315,7 +2328,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             bl.Bucket(ts, soc[ts], battery[ts], house.get(ts), grid.get(ts), pv.get(ts))
             for ts in sorted(soc) if ts in battery
         ]
-        samples = bl.segment_samples(buckets, self._nameplate_capacity_kwh())
+        samples = [
+            sample for sample in bl.segment_samples(buckets, self._nameplate_capacity_kwh())
+            if sample.start >= self._learning_since.get(sample.kind, -math.inf)
+        ]
         changed = self._battery_log.add(samples)
         changed |= self._battery_log.prune(now.timestamp())
         self._battery_learning_status = (
@@ -2342,9 +2358,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         learned = self.learned_capacity_kwh() if self.use_learned_values else None
         return learned if learned is not None else self._nameplate_capacity_kwh()
 
-    def learned_charge_efficiency(self) -> tuple[float | None, str | None]:
-        """(efficiency, source): the efficiency search first, then the balance."""
-        loss = self._measured_best_loss()
+    def learned_charge_efficiency(self, soc: float | None = None) -> tuple[float | None, str | None]:
+        """(efficiency, source): the efficiency search first, then the balance.
+
+        At ``soc``, default the battery's now: the loss of the band whose
+        optimum the night charges at there (Codex on #46).
+        """
+        loss = self._measured_best_loss(self._current_battery_soc() if soc is None else soc)
         if (loss is not None
                 and AUTO_TEST_MIN_PLAUSIBLE_LOSS <= loss <= AUTO_TEST_MAX_PLAUSIBLE_LOSS):
             # The search measured it at the power the night charges at
@@ -2354,8 +2374,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         return (balance, "energy_balance") if balance is not None else (None, None)
 
-    def _measured_best_loss(self) -> float | None:
-        """The efficiency search's lowest loss, while it still belongs to this setup."""
+    def _measured_best_loss(self, soc: float | None = None) -> float | None:
+        """The efficiency search's lowest loss, while it still belongs to this setup.
+
+        For the band ``soc`` falls into where ``best_charge_power_w`` takes
+        that band's optimum, battery-wide otherwise.
+        """
         data = self.entry.options.get(CONF_AUTO_EFFICIENCY_DATA)
         if not isinstance(data, Mapping):
             return None
@@ -2365,13 +2389,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if data.get("measurement_signature") != self._efficiency_signature() or (
                 isinstance(bounds, list) and [int(b) for b in bounds] != current):
             return None
-        loss = data.get("best_loss")
+        band = self._searched_band(data, soc)
+        loss = (band if band is not None else data).get("best_loss")
         if isinstance(loss, bool) or not isinstance(loss, (int, float)) or not math.isfinite(loss):
             return None
         return float(loss)
 
-    def _charge_efficiency(self) -> float:
-        learned = self.learned_charge_efficiency()[0] if self.use_learned_values else None
+    def _charge_efficiency(self, soc: float | None = None) -> float:
+        learned = self.learned_charge_efficiency(soc)[0] if self.use_learned_values else None
         if learned is not None:
             return learned
         return float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY))
@@ -3154,7 +3179,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 current_soc,
                 self._capacity_kwh(),
                 hours_remaining,
-                self._charge_efficiency(),
+                self._charge_efficiency(current_soc),
             )
         except ValueError as err:
             _LOGGER.error("Cannot plan the charge power: %s", err)
@@ -5300,21 +5325,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         so an installation that measured before this existed keeps its result.
         """
         data = self.get_auto_efficiency_data()
+        band = self._searched_band(data, soc)
+        if band is not None:
+            return int(band["best_power_w"])
         overall = data.get("best_power_w")
-        overall_w = overall if isinstance(overall, int) else None
-        if soc is None:
-            return overall_w
+        return overall if isinstance(overall, int) else None
+
+    def _searched_band(self, data: Mapping[str, Any], soc: float | None) -> Mapping[str, Any] | None:
+        """The band ``soc`` falls into, if it has been searched and has an optimum."""
         bands = data.get("bands")
-        if not isinstance(bands, dict):
-            return overall_w
+        if soc is None or not isinstance(bands, Mapping):
+            return None
         band = bands.get(self._efficiency_band(soc))
-        if not isinstance(band, dict):
-            return overall_w
+        if not isinstance(band, Mapping):
+            return None
         history = band.get("history")
         best = band.get("best_power_w")
-        if not isinstance(history, dict) or len(history) < EFFICIENCY_BAND_MIN_SAMPLES:
-            return overall_w
-        return best if isinstance(best, int) else overall_w
+        if (not isinstance(history, Mapping) or len(history) < EFFICIENCY_BAND_MIN_SAMPLES
+                or isinstance(best, bool) or not isinstance(best, int)):
+            return None
+        return band
 
     def _record_band_sample(self, data: dict[str, Any], power_w: int, loss: float) -> None:
         """File a finished measurement under the band it was taken in."""

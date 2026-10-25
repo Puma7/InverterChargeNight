@@ -450,9 +450,10 @@ def test_the_refresh_waits_for_the_recorder_and_runs_once_a_day(coordinator, moc
 async def test_the_store_is_read_at_setup(coordinator):
     stored = {"pv": {"days": {"2026-01-10": {"f": 7.0, "a": 6.0}}},
               "battery": {"samples": [{"ts": 1.0, "kind": "capacity", "v": 9.5}]},
-              "backfilled": True}
+              "backfilled": True, "since": {"capacity": 5.0}}
     with patch("custom_components.inverter_charge_night.coordinator.Store") as store:
-        store.return_value.async_load = AsyncMock(return_value=stored)
+        store.return_value.async_load = AsyncMock(
+            return_value={**stored, "since": {"capacity": 5.0, "charge_efficiency": True, "x": "y"}})
         await coordinator.async_load_learning()
 
     assert coordinator._forecast_log.days[date(2026, 1, 10)] == {"f": 7.0, "a": 6.0}

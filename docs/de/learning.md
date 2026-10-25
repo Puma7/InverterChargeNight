@@ -89,7 +89,9 @@ SOC-Änderung.
 - Die Kapazität ist auf 60–105 % des Nennwerts begrenzt, die Wirkungsgrade auf 0,75–0,99.
 
 **Ladewirkungsgrad zuerst aus der Effizienzsuche:** Den Verlust, den sie bei der besten Leistung
-gemessen hat, lädt die Nacht genau so. Die Energiebilanz gilt nur ohne Suchergebnis.
+gemessen hat, lädt die Nacht genau so. Hat ein SOC-Band ein eigenes Optimum, lädt die Nacht dort
+mit dessen Leistung, und es gilt auch dessen Verlust. Die Energiebilanz gilt nur ohne
+Suchergebnis.
 
 **Voraussetzungen:**
 
@@ -113,8 +115,9 @@ kWh. Die Attribute sind:
 - Jeder gelernte Wert ist begrenzt und wirkt erst mit genug Daten dahinter.
 - Fehlende Sensoren oder Statistiken lassen die Einstellung stehen.
 - Eine neue Prognose-Entität, ein neuer PV-Zähler oder ein neuer Akkusensor beginnt das, was aus
-  ihm gelernt wird, von vorn. Eine neue eingetragene Akkukapazität beginnt die Kapazität von vorn. Eine neue *Heute*-Entität etwa behält die Abendprognosen und die
-  Erträge.
+  ihm gelernt wird, von vorn. Eine neue eingetragene Akkukapazität beginnt die Kapazität von vorn.
+  Eine neue *Heute*-Entität etwa behält die Abendprognosen und die Erträge. Die Akkustatistiken
+  der Tage vor der Änderung werden nicht noch einmal gelesen.
 - Eine kleinere Kapazität heißt mehr Prozent je kWh und ein höheres Ziel. Das ist die sichere
   Richtung. Eine größere ist auf 105 % des Nennwerts gedeckelt.
 - Die Ertragsüberwachung ([Extras](extras.md)) vergleicht weiter die rohe Prognose. Sie soll die
