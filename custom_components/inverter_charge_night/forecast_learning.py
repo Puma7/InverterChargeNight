@@ -185,8 +185,9 @@ class ForecastLog:
     def calibrate(self, day: date, kind: str, today: date) -> Calibration:
         """Factor and band for ``kind`` forecasts of ``day``, from completed days."""
         samples: list[tuple[float, float, float]] = []  # (weight, forecast, actual)
+        oldest = today - timedelta(days=LOG_DAYS)  # as kept by prune, before it ran
         for logged, values in self.days.items():
-            if logged >= today:
+            if logged >= today or logged < oldest:
                 continue
             forecast = values.get(kind)
             actual = values.get(KIND_ACTUAL)

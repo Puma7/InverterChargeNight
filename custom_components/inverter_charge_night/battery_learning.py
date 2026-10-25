@@ -210,9 +210,14 @@ class BatteryLog:
         return sum(1 for s in self.samples if s.kind == kind)
 
     def estimate(self, kind: str, now_ts: float) -> float | None:
-        """The recency-weighted median, or None with fewer than three samples."""
+        """The recency-weighted median, or None with fewer than three samples.
+
+        Samples past the year kept do not count even before ``prune`` ran:
+        that waits for statistics, which a recorder may not have.
+        """
+        cutoff = now_ts - SAMPLES_KEPT_DAYS * 86400.0
         pairs = [(s.value, 0.5 ** (max(0.0, now_ts - s.start) / 86400.0 / SAMPLE_HALF_LIFE_DAYS))
-                 for s in self.samples if s.kind == kind]
+                 for s in self.samples if s.kind == kind and s.start >= cutoff]
         if len(pairs) < MIN_SAMPLES:
             return None
         return weighted_median(pairs)

@@ -177,6 +177,16 @@ def test_three_years_are_kept():
     assert len(log.days) == 1
 
 
+def test_days_past_the_three_years_do_not_count_before_the_prune():
+    log = fl.ForecastLog()
+    _season(log, ratio=0.8, end=TODAY - timedelta(days=4 * 365))
+
+    assert log.calibrate(TODAY, fl.KIND_AHEAD, TODAY).status == fl.STATUS_LEARNING
+    assert len(log.days) == 20  # still there, until the prune
+    assert log.calibrate(TODAY - timedelta(days=4 * 365), fl.KIND_AHEAD,
+                         TODAY - timedelta(days=4 * 365)).active
+
+
 def test_days_waiting_for_their_yield():
     log = fl.ForecastLog()
     log.note(TODAY - timedelta(days=2), fl.KIND_AHEAD, 5.0)

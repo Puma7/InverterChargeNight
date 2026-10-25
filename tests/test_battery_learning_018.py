@@ -144,6 +144,17 @@ def test_the_log_keeps_each_stretch_once_and_a_year_long():
     assert log.samples == []
 
 
+def test_samples_past_the_year_kept_do_not_count_before_the_prune():
+    """CodeRabbit on #46: the prune waits for statistics, which may never come."""
+    log = bl.BatteryLog()
+    log.add([bl.Sample(T0 + i, bl.KIND_CAPACITY, 31.0) for i in range(3)])
+    later = T0 + (bl.SAMPLES_KEPT_DAYS - 1) * 86400.0
+    assert log.estimate(bl.KIND_CAPACITY, later) == 31.0
+
+    assert log.estimate(bl.KIND_CAPACITY, later + 2 * 86400.0) is None
+    assert log.count(bl.KIND_CAPACITY) == 3  # still there, until the prune
+
+
 def test_three_samples_make_a_value_and_recent_ones_weigh_more():
     log = bl.BatteryLog()
     log.add([bl.Sample(T0, bl.KIND_CAPACITY, 34.0), bl.Sample(T0 + 1, bl.KIND_CAPACITY, 34.0)])
