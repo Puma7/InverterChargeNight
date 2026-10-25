@@ -40,9 +40,9 @@ battery side counts charging as negative. The search never got to a second power
   An "off" counts only when the switch reported it after it was asked to go off; KostalKore
   publishes the switch with its next settings poll, so right after a turn_on Home Assistant may
   still hold the "off" from before.
-  A switch that has to be turned off again later in the window starts the count anew, and a
-  charge with the sun up at any point from there to the window end proves nothing: the panels
-  may have done it.
+  A switch that reads on again later in the window starts the count anew, whether or not a
+  stop could still be sent, and a charge with the sun up at any point from there to the window
+  end proves nothing: the panels may have done it.
 - **A grid import read only for the efficiency search does not stop charging when it is lost.**
   It only counts as a communication fault while it protects the house connection (a budget is
   set); otherwise a lost reading costs a trial. Switching the house connection limit off keeps

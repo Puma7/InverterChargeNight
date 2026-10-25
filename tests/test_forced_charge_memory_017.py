@@ -29,7 +29,7 @@ NEXT_NIGHT = WINDOW_START + timedelta(days=1)
 async def _run_night(hass: Any, coordinator: Any, clock: Any, start: Any, *, charge: bool,
                      switch_stuck_on: bool = False, on_while: Any = None,
                      switch_stale: bool = False, sun_up_while: Any = None,
-                     sun_up_at_end: bool = False) -> None:
+                     sun_up_at_end: bool = False, stops_spent_at: float | None = None) -> None:
     clock.now = start
     hass.states.get(BATTERY).state = "33"
     await coordinator._on_window_start(start)
@@ -44,6 +44,8 @@ async def _run_night(hass: Any, coordinator: Any, clock: Any, start: Any, *, cha
             _hold_stale_off(hass, start)
         if switch_stuck_on and coordinator._grid_switch_suspended:
             hass.states.get(GRID).state = "on"  # the turn_off never took
+        if stops_spent_at is not None and soc >= stops_spent_at:
+            coordinator._pause_grid_charge = AsyncMock()  # no turn_off goes out any more
         if on_while is not None and coordinator._grid_switch_suspended:
             hass.states.get(GRID).state = "on" if on_while(soc) else "off"
         if charge:
@@ -130,6 +132,17 @@ async def test_a_switch_on_again_after_the_baseline_takes_it_along(night):  # no
     hass, coordinator, clock = night
     await _run_night(hass, coordinator, clock, WINDOW_START, charge=True,
                      on_while=lambda soc: 40 <= soc < 43.1)
+
+    assert float(hass.states.get(BATTERY).state) >= 43.1
+    assert coordinator._grid_switch_forced_charge is None
+
+
+@pytest.mark.asyncio
+async def test_a_switch_on_again_with_no_stop_left_takes_it_along(night):  # noqa: F811
+    """CodeRabbit on #45: the stop budget is spent, no turn_off resets anything."""
+    hass, coordinator, clock = night
+    await _run_night(hass, coordinator, clock, WINDOW_START, charge=True,
+                     stops_spent_at=39, on_while=lambda soc: 40 <= soc < 43.1)
 
     assert float(hass.states.get(BATTERY).state) >= 43.1
     assert coordinator._grid_switch_forced_charge is None

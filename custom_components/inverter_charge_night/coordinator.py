@@ -7379,6 +7379,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         entity_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         state = self.hass.states.get(entity_id) if entity_id else None
         if entity_id and (assume_on or state is None or state.state != "off"):
+            # Not reading off, the switch may have charged since the baseline,
+            # sent or not: it is taken again from the next confirmed off
+            # (CodeRabbit on #45)
+            self._grid_switch_off_soc = None
             if self._stop_pending_for_this_target():
                 if self._grid_stop_retries >= GRID_STOP_MAX_RETRIES:
                     return
@@ -7395,9 +7399,6 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Taken after the call: an optimistic state written during it is
             # not the inverter's answer
             self._grid_off_requested_at = dt_util.now()
-            # Not reading off, the switch may have charged since the baseline:
-            # it is taken again from the next confirmed off (CodeRabbit on #45)
-            self._grid_switch_off_soc = None
 
     def _charge_permission_current(self) -> bool:
         """Check live lifecycle and the absolute deadline at the command sink."""
@@ -7488,6 +7489,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if not self._grid_switch_forced_this_window:
             return
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        switch = self.hass.states.get(str(switch_id)) if switch_id else None
+        if switch is None or switch.state != "off":
+            # On again, whether or not a stop could still be sent: what it
+            # charged is not the floor's (CodeRabbit on #45)
+            self._grid_switch_off_soc = None
         if self._grid_switch_off_soc is None:
             if not self._grid_switch_reported_off():
                 return
@@ -7948,6 +7955,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         state = self.hass.states.get(str(switch_id)) if switch_id else None
         if state is not None and state.state == "on":
+            self._grid_switch_off_soc = None  # see _pause_grid_charge
             if self._grid_stop_retries >= GRID_STOP_MAX_RETRIES:
                 return  # the window-end reset takes it from here
             self._grid_stop_retries += 1
