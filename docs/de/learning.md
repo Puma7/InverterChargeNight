@@ -88,10 +88,11 @@ SOC-Änderung.
 - Der Wert ist der Median der Proben, neuere zählen mehr. Er gilt ab drei Proben.
 - Die Kapazität ist auf 60–105 % des Nennwerts begrenzt, die Wirkungsgrade auf 0,75–0,99.
 
-**Ladewirkungsgrad zuerst aus der Effizienzsuche:** Den Verlust, den sie bei der besten Leistung
-gemessen hat, lädt die Nacht genau so. Hat ein SOC-Band ein eigenes Optimum, lädt die Nacht dort
-mit dessen Leistung, und es gilt auch dessen Verlust. Die Energiebilanz gilt nur ohne
-Suchergebnis.
+**Ladewirkungsgrad zuerst aus der Effizienzsuche:** Die Nacht lädt mit der besten Leistung, die
+die Suche gefunden hat. Also nimmt der Plan den Verlust, den die Suche bei dieser Leistung gemessen
+hat: Der Wirkungsgrad ist eins minus dieser Verlust. Hat ein SOC-Band ein eigenes Optimum, lädt
+die Nacht dort mit dessen Leistung, und es gilt auch dessen Verlust. Die Energiebilanz gilt nur
+ohne Suchergebnis.
 
 **Voraussetzungen:**
 

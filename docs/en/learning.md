@@ -85,10 +85,10 @@ change.
   samples.
 - The capacity is bounded to 60–105 % of the nameplate, the efficiencies to 0.75–0.99.
 
-**Charge efficiency first from the efficiency search:** the loss it measured at the best power is
-exactly what the night charges at. Where a SOC band has an optimum of its own, the night charges
-at that band's power, and its loss is taken too. The energy balance is used only without a search
-result.
+**Charge efficiency first from the efficiency search:** the night charges at the best power the
+search found, so the plan takes the loss the search measured at that power: the efficiency is one
+minus that loss. Where a SOC band has an optimum of its own, the night charges at that band's
+power, and its loss is taken too. The energy balance is used only without a search result.
 
 **Requirements:**
 
