@@ -7392,6 +7392,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Taken after the call: an optimistic state written during it is
             # not the inverter's answer
             self._grid_off_requested_at = dt_util.now()
+            # Not reading off, the switch may have charged since the baseline:
+            # it is taken again from the next confirmed off (CodeRabbit on #45)
+            self._grid_switch_off_soc = None
 
     def _charge_permission_current(self) -> bool:
         """Check live lifecycle and the absolute deadline at the command sink."""

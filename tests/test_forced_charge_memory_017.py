@@ -119,6 +119,17 @@ async def test_a_switch_that_read_off_only_at_the_target_proves_nothing(night): 
 
 
 @pytest.mark.asyncio
+async def test_a_switch_on_again_after_the_baseline_takes_it_along(night):  # noqa: F811
+    """CodeRabbit on #45: the charge up to the target happened with it on."""
+    hass, coordinator, clock = night
+    await _run_night(hass, coordinator, clock, WINDOW_START, charge=True,
+                     on_while=lambda soc: 40 <= soc < 43.1)
+
+    assert float(hass.states.get(BATTERY).state) >= 43.1
+    assert coordinator._grid_switch_forced_charge is None
+
+
+@pytest.mark.asyncio
 async def test_an_off_from_before_the_pause_proves_nothing(night):  # noqa: F811
     """CodeRabbit on #45: KORE may still hold the "off" from before the turn_on."""
     hass, coordinator, clock = night
