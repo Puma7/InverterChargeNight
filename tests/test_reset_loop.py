@@ -644,7 +644,9 @@ async def test_removing_the_entry_removes_its_repair_issue(mock_hass):
 
     entry = MagicMock()
     entry.entry_id = "entry_1"
-    with patch("custom_components.inverter_charge_night.ir.async_delete_issue") as deleted:
+    with patch("custom_components.inverter_charge_night.ir.async_delete_issue") as deleted, \
+            patch("custom_components.inverter_charge_night.Store") as store:
+        store.return_value.async_remove = AsyncMock()
         await async_remove_entry(mock_hass, entry)
 
     assert any(c.args[2] == "reset_incomplete_entry_1" for c in deleted.call_args_list)

@@ -1626,6 +1626,12 @@
       },
       "curtailment_outlook": {
         "name": "Curtailment outlook"
+      },
+      "pv_forecast_correction": {
+        "name": "PV forecast correction"
+      },
+      "usable_battery_capacity": {
+        "name": "Usable battery capacity"
       }
     },
     "switch": {
@@ -1640,6 +1646,9 @@
       },
       "evening_rescue_charge": {
         "name": "High-price rescue (hold and charge)"
+      },
+      "use_learned_values": {
+        "name": "Use learned values"
       }
     },
     "select": {

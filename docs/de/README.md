@@ -14,6 +14,8 @@
 
 - [Sicherheit](safety.md): Einstellungen zurückgeben, Hausanschluss, Stromausfall, Kommunikationsverlust.
 - [Effizienzsuche](efficiency-search.md): die Ladeleistung mit dem kleinsten Verlust.
+- [Was ICN selbst lernt](learning.md): die Prognose je Jahreszeit, die nutzbare Kapazität, beide
+  Wirkungsgrade.
 - [Ausnahmen und Extras](extras.md): Überspringen, Überschreiben, Schnee-Nächte, Hochpreisrettung,
   geringer PV-Ertrag, Abregelung.
 - [Morgenentladung](morning-discharge.md): der experimentelle Gegenmodus.

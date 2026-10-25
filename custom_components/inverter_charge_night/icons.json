@@ -27,6 +27,12 @@
       },
       "curtailment_outlook": {
         "default": "mdi:solar-power-variant-outline"
+      },
+      "pv_forecast_correction": {
+        "default": "mdi:chart-bell-curve-cumulative"
+      },
+      "usable_battery_capacity": {
+        "default": "mdi:battery-heart-variant"
       }
     },
     "switch": {
@@ -56,6 +62,12 @@
         "state": {
           "on": "mdi:home-lightning-bolt",
           "off": "mdi:home-lightning-bolt-outline"
+        }
+      },
+      "use_learned_values": {
+        "default": "mdi:school",
+        "state": {
+          "off": "mdi:school-outline"
         }
       }
     },

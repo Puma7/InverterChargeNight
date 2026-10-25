@@ -457,3 +457,18 @@ ENERGY_UNITS_WH: frozenset[str] = frozenset(
 ENERGY_UNITS_MWH: frozenset[str] = frozenset(
     {"mwh", "megawatthour", "megawatthours", "megawatt_hour", "megawatt-hour"}
 )
+
+# Plan 018: what ICN learns from the house's own data
+LEARNING_STORE_VERSION = 1
+LEARNING_SAVE_DELAY_S = 60
+# The evening's forecast for tomorrow is what the night plans with: the last
+# value from this hour until midnight. The morning's for today is what the
+# day decides with: the last value before this hour.
+FORECAST_AHEAD_FROM_HOUR = 18
+FORECAST_TODAY_UNTIL_HOUR = 9
+# The recorder keeps states about ten days; what it has is filled in once
+FORECAST_BACKFILL_DAYS = 14
+# Days older than this whose yield the PV meter never reported are given up
+PV_ACTUAL_LOOKBACK_DAYS = 60
+# The recorder's five-minute statistics last about as long as its states
+BATTERY_STATISTICS_DAYS = 11

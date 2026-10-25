@@ -393,7 +393,9 @@ async def test_removing_the_entry_deletes_the_charge_limit_issue(mock_hass):
 
     entry = MagicMock()
     entry.entry_id = "entry_1"
-    with patch(f"{ir.__name__}.async_delete_issue") as delete:
+    with patch(f"{ir.__name__}.async_delete_issue") as delete, \
+            patch("custom_components.inverter_charge_night.Store") as store:
+        store.return_value.async_remove = AsyncMock()
         await async_remove_entry(mock_hass, entry)
 
     assert call_for(delete, "charge_limit_not_held_entry_1")

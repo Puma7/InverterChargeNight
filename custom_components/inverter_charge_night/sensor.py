@@ -44,8 +44,67 @@ async def async_setup_entry(
             EveningOutlookSensor(coordinator, entry),
             PriceSignalSensor(coordinator, entry),
             CurtailmentOutlookSensor(coordinator, entry),
+            PVForecastCorrectionSensor(coordinator, entry),
+            UsableBatteryCapacitySensor(coordinator, entry),
         ]
     )
+
+
+class PVForecastCorrectionSensor(InverterChargeNightEntity, SensorEntity):
+    """How far this roof's PV forecast is off at this time of year (plan 018).
+
+    The state is the factor the evening forecast is multiplied by, in percent:
+    92 means the sun delivered 8 % less than forecast over the season's days.
+    The attributes say how wide the spread around it is, how many days stand
+    behind it, and how much better the corrected forecast hit than the raw one.
+    """
+
+    _attr_translation_key = "pv_forecast_correction"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "pv_forecast_correction")
+
+    @property
+    def native_value(self) -> float | None:
+        """The season's factor in percent; unknown while it is still learning."""
+        attrs = self.coordinator.forecast_learning_attributes()
+        if attrs.get("status") != "active":
+            return None
+        return round(float(attrs["factor"]) * 100.0, 1)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Margins, days, errors - and the same for the morning forecast."""
+        return self.coordinator.forecast_learning_attributes()
+
+
+class UsableBatteryCapacitySensor(InverterChargeNightEntity, SensorEntity):
+    """What the battery really holds, from its own energy balance (plan 018)."""
+
+    _attr_translation_key = "usable_battery_capacity"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.ENERGY_STORAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator, entry, "usable_battery_capacity")
+
+    @property
+    def native_value(self) -> float | None:
+        """The learned capacity; unknown until three stretches have measured it."""
+        value = self.coordinator.learned_capacity_kwh()
+        return round(value, 2) if value is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Both efficiencies, where they came from, and what the plan uses."""
+        return self.coordinator.battery_learning_attributes()
 
 
 class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):

@@ -71,6 +71,11 @@ async def async_get_config_entry_diagnostics(
             "communication": coordinator.communication_diagnostics(),
             "pv_yield": coordinator.pv_yield_attributes(),
             "weather": coordinator.weather_status,
+            # Plan 018: what the house's own data says, and whether it is used
+            "learning": {
+                "pv_forecast": coordinator.forecast_learning_attributes(),
+                "battery": coordinator.battery_learning_attributes(),
+            },
             "is_active": coordinator.is_active,
             "is_enabled": coordinator.is_enabled,
             "operation_mode": coordinator.operation_mode,

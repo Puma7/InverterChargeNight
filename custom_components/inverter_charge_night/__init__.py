@@ -2,11 +2,13 @@
 
 import logging
 from datetime import timedelta
+from typing import Any
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
@@ -29,6 +31,7 @@ from .const import (
     DEFAULT_START_TIME,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
+    LEARNING_STORE_VERSION,
     LEGACY_HOUSE_LOAD_ENERGY_ENTITY,
     LEGACY_INVERTER_KEYS,
     LEGACY_UNUSED_DATA_KEYS,
@@ -221,6 +224,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: InverterChargeNightConfi
     coordinator.review_discharge_block_risk()
     coordinator.enable_communication_monitoring()
     await coordinator.async_load_communication_translations()
+    await coordinator.async_load_learning()
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
@@ -345,6 +349,11 @@ async def async_remove_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     ir.async_delete_issue(hass, DOMAIN, f"reset_incomplete_{entry.entry_id}")
     ir.async_delete_issue(hass, DOMAIN, f"charge_limit_not_held_{entry.entry_id}")
     ir.async_delete_issue(hass, DOMAIN, f"efficiency_sensors_{entry.entry_id}")
+    # What the entry learned about this house (plan 018) goes with it
+    store: Store[dict[str, Any]] = Store(
+        hass, LEARNING_STORE_VERSION, f"{DOMAIN}.learning.{entry.entry_id}"
+    )
+    await store.async_remove()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConfigEntry) -> bool:

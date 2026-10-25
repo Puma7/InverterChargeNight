@@ -95,7 +95,7 @@ das Ergebnis genauer.
 | Feld | Standard | Bedeutung |
 |---|---|---|
 | Planer (`planner_mode`) | Freiraum | *Freiraum*: hält nur Platz für die Prognose frei. *Überbrückung*: deckt außerdem das Haus vom Ende des Fensters, bis die PV übernimmt ([wie](how-it-works.md#überbrückung-empfohlen)). |
-| Zusätzlicher Speicherplatz für PV-Ertrag (`forecast_error_margin`) | 10 % | Wie weit die Prognose danebenliegen darf. Wird zur sicheren Seite hin angewendet: mehr Platz für die Sonne, weniger Sonne für den Abend. |
+| Zusätzlicher Speicherplatz für PV-Ertrag (`forecast_error_margin`) | 10 % | Wie weit die Prognose danebenliegen darf. Wird zur sicheren Seite hin angewendet: mehr Platz für die Sonne, weniger Sonne für den Abend. Wird durch das [gelernte Band](learning.md) ersetzt, sobald 14 Tage der Jahreszeit bekannt sind. |
 | Rückfallwert beim Zurücksetzen des Mindestladestands (`default_min_soc`) | die Untergrenze | Wird nur verwendet, wenn der ursprüngliche Min-SOC nicht gelesen werden konnte. Eine neue Einrichtung übernimmt die Untergrenze von Seite 2. |
 | PV-Ertragsprognose für heute (`pv_forecast_today_entity`) | – | Nötig für Fenster nach Mitternacht, die Abendvorschau und die Abregelungsvorschau. |
 | Energiezähler des Hausverbrauchs (`house_load_entity`) | – | Fortlaufender kWh-Zähler. ICN lernt daraus ein Stundenprofil der letzten 14 Tage. |
