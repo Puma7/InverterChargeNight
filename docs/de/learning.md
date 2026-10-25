@@ -39,8 +39,9 @@ Lauf des Tages, oder Home Assistant lief zeitweise nicht.
 - **Faktor**: Ertrag der Jahreszeit geteilt durch die Prognose der Jahreszeit, beide als
   kWh-Summe. Ein trüber Tag mit der halben Prognose sagt wenig über das Dach, ein sonniger Tag mit
   einem Fünftel weniger sagt viel.
-- **Band**: wie weit die Tage um die korrigierte Prognose streuten. An vier von fünf Tagen lieferte
-  die Sonne mindestens die untere Kante und höchstens die obere. Das Band ist nach beiden Seiten
+- **Band**: wie weit die Tage um die korrigierte Prognose streuten. Jede Kante gilt für sich: An
+  vier von fünf Tagen lieferte die Sonne mindestens die untere Kante, an vier von fünf höchstens die
+  obere. Beides zugleich galt an mindestens drei von fünf Tagen. Das Band ist nach beiden Seiten
   nie schmaler als **5 %**.
 
 **Wie es angewandt wird:**

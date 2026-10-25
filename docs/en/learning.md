@@ -35,9 +35,10 @@ hours stays open, because recording began or Home Assistant was down part of the
 - **When it starts**: once **14 days** in that window have both a forecast and a yield.
 - **Factor**: the season's yield divided by the season's forecast, both summed in kWh. A dull day
   off by half says little about the roof; a sunny day off by a fifth says a lot.
-- **Band**: how far the days scattered around the corrected forecast. Four days in five the sun
-  delivered at least the lower edge and at most the upper one. The band is never narrower than
-  **5 %** either way.
+- **Band**: how far the days scattered around the corrected forecast. Each edge is one-sided: on
+  four days in five the sun delivered at least the lower edge, and on four days in five at most
+  the upper one. Both held together on at least three days in five. The band is never narrower
+  than **5 %** either way.
 
 **How it is used:**
 

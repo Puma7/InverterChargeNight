@@ -618,6 +618,7 @@ async def test_unload_cancels_the_pending_window_check(mock_hass, mock_config_en
     coordinator = MagicMock()
     coordinator.is_active = False
     coordinator._stop_periodic_verification = AsyncMock()
+    coordinator.async_unload_learning = AsyncMock()
     mock_config_entry.runtime_data = coordinator
     mock_hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
 

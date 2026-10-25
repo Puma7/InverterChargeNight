@@ -385,5 +385,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: InverterChargeNightConf
         # A pending reset stays persisted and is retried after the next setup
         coordinator._cancel_reset_retry()
         coordinator._cancel_switch_on_recheck()
+        # Written now and closed: a delayed save of this coordinator must not
+        # outlive it, over a reload's new one or a removed entry's deleted
+        # file (CodeRabbit on #46)
+        await coordinator.async_unload_learning()
 
     return unload_ok

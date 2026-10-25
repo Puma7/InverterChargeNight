@@ -43,8 +43,9 @@ MIN_SEASON_DAYS = 14
 MIN_DAY_HOURS = 20
 FACTOR_MIN = 0.5
 FACTOR_MAX = 1.5
-# One-sided 80 % band: four days in five the sun delivers at least the lower
-# edge and at most the upper one
+# Each edge is one-sided: four days in five the sun delivers at least the
+# lower edge, four days in five at most the upper one - so both hold together
+# on at least three days in five
 LOWER_QUANTILE = 0.2
 UPPER_QUANTILE = 0.8
 # Never tighter than this, whatever a good season says (Pascal, 25 October 2026)

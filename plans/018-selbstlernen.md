@@ -53,7 +53,8 @@ Gelernt wird bereits: das Lastprofil (Plan 006/015), die PV-Tageskurve (015 B), 
 - **Faktor** = Σ w·a ÷ Σ w·f. Das ist das Verhältnis der Energiesummen: kWh zählen, nicht Prozente
   bewölkter Tage. Begrenzt auf 0,5–1,5.
 - **Fehlerband**: Rest r = a ÷ (Faktor·f) − 1, gewichtet mit w·f.
-  - untere Marge = −P20(r), obere Marge = P80(r). Das ist ein einseitiges 80-%-Vertrauensband.
+  - untere Marge = −P20(r), obere Marge = P80(r). Jede Kante ist einseitig: An vier von fünf
+    Tagen hält sie für sich, beide zusammen an mindestens drei von fünf.
   - Beide Margen liegen mindestens bei 5 %, die untere höchstens bei 80 %, die obere höchstens
     bei 100 %.
 - **Sichtbar**: der mittlere Fehler (energiegewichtet) roh und korrigiert. Daran sieht man, ob die

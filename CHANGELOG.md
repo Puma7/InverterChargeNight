@@ -19,8 +19,9 @@ before.
     meter's yield, for three years. At the first start it fills in what the recorder still knows.
   - For the planned day it uses the days within 45 days of the calendar date, in every year.
     Older years count half as much, so ageing panels come in by themselves.
-  - From 14 such days it learns a **factor** (kWh against kWh) and a **band**: four days in five
-    the sun stayed inside it. The band is never narrower than 5 % either way.
+  - From 14 such days it learns a **factor** (kWh against kWh) and a **band**. Each edge is
+    one-sided: four days in five the sun delivered at least the lower edge, four days in five at
+    most the upper one. The band is never narrower than 5 % either way.
   - The night plans with the corrected forecast. The less-sun side takes the lower edge, the room
     for the sun the upper one (new `error_margin_high_pct` in the planner).
   - The high-price rescue and the evening outlook take the morning forecast's factor, still
@@ -44,6 +45,8 @@ before.
   that kind afresh and keeps the rest.
 - A day the PV meter's statistics cover for fewer than 20 hours is not taken as a yield. It stays
   open and is read again later.
+- Unloading writes the store and closes it, so no delayed save of the old coordinator lands over a
+  reload's new one or recreates a removed entry's file.
 
 ### Lab
 - `check_real_ha` calls the forecast backfill, the yield read and the battery balance against the

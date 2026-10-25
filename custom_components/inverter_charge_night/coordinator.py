@@ -2021,6 +2021,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # recognised again at every load, which forgets nothing twice
         self._check_learning_sources()
 
+    async def async_unload_learning(self) -> None:
+        """Write the diaries once more and close the store for this coordinator.
+
+        ``async_save`` drops a delayed write still pending, and with the store
+        gone no later save can be scheduled - not by a refresh still running,
+        not over the next setup's store, not after the entry's removal.
+        """
+        task = self._learning_task
+        if task is not None and not task.done():
+            task.cancel()
+        store = self._learning_store
+        self._learning_store = None
+        if store is None:
+            return
+        try:
+            await store.async_save(self._learning_snapshot())
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.warning("Could not write the learning store at unload: %s", err)
+
     def _learning_snapshot(self) -> dict[str, Any]:
         return {
             "pv": self._forecast_log.snapshot(),

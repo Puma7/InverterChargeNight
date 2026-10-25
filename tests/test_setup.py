@@ -74,6 +74,7 @@ async def test_async_unload_entry_cleans_up(mock_hass, mock_config_entry):
     coordinator._remove_battery_soc_listener = MagicMock()
     coordinator._remove_inverter_min_soc_listener = MagicMock()
     coordinator._stop_periodic_verification = AsyncMock()
+    coordinator.async_unload_learning = AsyncMock()
     coordinator._remove_backup_mode_listener = MagicMock()
     coordinator._reset_settings = AsyncMock()
 
@@ -88,6 +89,8 @@ async def test_async_unload_entry_cleans_up(mock_hass, mock_config_entry):
     coordinator._remove_inverter_min_soc_listener.assert_called_once()
     coordinator._stop_periodic_verification.assert_awaited_once()
     coordinator._reset_settings.assert_not_awaited()
+    # Plan 018: the learning store is written and closed with it
+    coordinator.async_unload_learning.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -611,3 +611,36 @@ def test_the_planner_keeps_each_side_of_the_band():
     assert surplus_kwh(plan(None)) == pytest.approx(10.5)
     assert surplus_kwh(plan(40.0), cautious=True) == pytest.approx(9.5)
     assert surplus_kwh(plan(40.0)) == pytest.approx(14.0)
+
+
+@pytest.mark.asyncio
+async def test_unloading_writes_the_store_and_closes_it(coordinator):
+    """CodeRabbit on #46: no delayed save may outlive the coordinator."""
+    import asyncio
+
+    store = MagicMock()
+    store.async_save = AsyncMock()
+    coordinator._learning_store = store
+    coordinator._forecast_log.note(TODAY, fl.KIND_AHEAD, 9.0)
+    running = asyncio.get_running_loop().create_future()
+    coordinator._learning_task = running
+
+    await coordinator.async_unload_learning()
+
+    store.async_save.assert_awaited_once()
+    assert store.async_save.await_args.args[0]["pv"]["days"][TODAY.isoformat()] == {"f": 9.0}
+    assert running.cancelled()
+    coordinator._save_learning()
+    store.async_delay_save.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_store_that_cannot_be_written_does_not_stop_the_unload(coordinator):
+    store = MagicMock()
+    store.async_save = AsyncMock(side_effect=OSError("disk full"))
+    coordinator._learning_store = store
+
+    await coordinator.async_unload_learning()
+
+    assert coordinator._learning_store is None
+    await coordinator.async_unload_learning()  # twice is harmless
