@@ -421,6 +421,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _grid_switch_forced_this_window: bool = False
     # The battery level once grid charging read off after the forced charge
     _grid_switch_off_soc: float | None = None
+    # When grid charging was last asked to go off: only a report after it shows
+    # the switch off (CodeRabbit on #45)
+    _grid_off_requested_at: datetime | None = None
     _grid_stop_pending: bool = False
     _grid_stop_retries: int = 0
     _last_trusted_soc: tuple[float, datetime] | None = None
@@ -7386,6 +7389,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning("Requested grid-charge pause: %s", reason)
             except Exception:
                 _LOGGER.exception("Cannot pause grid charging (%s); inverter stop is unconfirmed", reason)
+            # Taken after the call: an optimistic state written during it is
+            # not the inverter's answer
+            self._grid_off_requested_at = dt_util.now()
 
     def _charge_permission_current(self) -> bool:
         """Check live lifecycle and the absolute deadline at the command sink."""
@@ -7417,6 +7423,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # (plan 017): see _remember_forced_charge
         self._grid_switch_forced_this_window = True
         self._grid_switch_off_soc = None
+        self._grid_off_requested_at = dt_util.now()
         self._persist_state()
         _LOGGER.warning(
             "The charge limit did not hold with %s switched on - grid charging stays off "
@@ -7445,10 +7452,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # pause that never took effect leaves the forced charge to reach the
         # target, which proves nothing about the floor (Codex on #45)
         target = self.current_target_soc()
-        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
-        switch = self.hass.states.get(str(switch_id)) if switch_id else None
         if (baseline is None or target is None or baseline > target - 1.0
-                or switch is None or switch.state != "off" or self._grid_stop_pending):
+                or not self._grid_switch_reported_off()):
             return
         self._grid_switch_forced_charge = (
             self._grid_switch_signature(), dt_util.now().isoformat(),
@@ -7468,13 +7473,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         if not self._grid_switch_forced_this_window or self._grid_switch_off_soc is not None:
             return
-        if self._grid_stop_pending:
+        if not self._grid_switch_reported_off():
             return
+        self._grid_switch_off_soc = self._current_battery_soc()
+
+    def _grid_switch_reported_off(self) -> bool:
+        """The switch reads off, reported after the last turn_off went out.
+
+        KORE publishes the switch only with its next settings poll: right after
+        a turn_on and the pause that follows, Home Assistant may still hold the
+        "off" from before (CodeRabbit on #45).
+        """
+        if self._grid_stop_pending:
+            return False
         switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         switch = self.hass.states.get(str(switch_id)) if switch_id else None
         if switch is None or switch.state != "off":
-            return
-        self._grid_switch_off_soc = self._current_battery_soc()
+            return False
+        sent = self._grid_off_requested_at
+        seen = getattr(switch, "last_reported", None) or getattr(switch, "last_updated", None)
+        return isinstance(seen, datetime) and sent is not None and seen > sent
 
     def _grid_switch_signature(self) -> str:
         """Which switch and which limit the forced-charge finding is about."""

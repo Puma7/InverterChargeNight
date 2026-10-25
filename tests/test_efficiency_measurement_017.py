@@ -348,6 +348,29 @@ async def test_disabling_the_limit_keeps_the_meter_the_measurement_reads(guide):
     assert not flow_module._grid_limit_set(guide._data)
 
 
+def test_a_meter_only_for_the_measurement_needs_no_charge_control(mock_hass, entity_registry):
+    """CodeRabbit on #45: it writes nothing, so nothing to write to is missing."""
+    values = {CONF_GRID_IMPORT_ENTITY: GRID, CONF_CHARGE_POWER_HOUSE_ENTITY: HOUSE}
+
+    assert CONF_CHARGE_POWER_ENTITY not in _validate(mock_hass, values)
+    assert _validate(mock_hass, {**values, CONF_MAIN_FUSE_A: 63})[CONF_CHARGE_POWER_ENTITY] == (
+        "required_entity"
+    )
+
+
+@pytest.mark.asyncio
+async def test_charging_can_be_turned_off_after_the_limit_and_the_search(guide, mock_hass):
+    await guide.async_step_user()
+    guide._data.update({CONF_AUTO_EFFICIENT_CHARGE: True, **DERIVED, CONF_MAIN_FUSE_A: 63})
+    await guide.async_step_grid_off()
+    await guide.async_step_efficiency_off()
+
+    await guide.async_step_charging_off()
+
+    assert CONF_CHARGE_POWER_ENTITY not in guide._data
+    assert CONF_CHARGE_POWER_ENTITY not in _validate(mock_hass, guide._data)
+
+
 @pytest.mark.asyncio
 async def test_without_house_consumption_the_limit_takes_the_meter_along(guide):
     await guide.async_step_user()

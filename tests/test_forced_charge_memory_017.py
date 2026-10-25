@@ -16,14 +16,19 @@ from typing import Any
 
 import pytest
 
-from tests.test_forced_charge_night import WINDOW_START, _calls, _fresh, night  # noqa: F401
-from tests.test_grid_limit import BATTERY, GRID
+from unittest.mock import AsyncMock
+
+from tests.test_forced_charge_night import (  # noqa: F401
+    CONFIG, WINDOW_START, _calls, _fresh, night,
+)
+from tests.test_grid_limit import BATTERY, GRID, _make_coordinator
 
 NEXT_NIGHT = WINDOW_START + timedelta(days=1)
 
 
 async def _run_night(hass: Any, coordinator: Any, clock: Any, start: Any, *, charge: bool,
-                     switch_stuck_on: bool = False, on_while: Any = None) -> None:
+                     switch_stuck_on: bool = False, on_while: Any = None,
+                     switch_stale: bool = False) -> None:
     clock.now = start
     hass.states.get(BATTERY).state = "33"
     await coordinator._on_window_start(start)
@@ -31,7 +36,11 @@ async def _run_night(hass: Any, coordinator: Any, clock: Any, start: Any, *, cha
     soc = 33.0
     while clock.now < start + timedelta(hours=5):
         _fresh(hass, clock)
+        if switch_stale:
+            _hold_stale_off(hass, start)
         await coordinator._async_update_data()
+        if switch_stale:
+            _hold_stale_off(hass, start)
         if switch_stuck_on and coordinator._grid_switch_suspended:
             hass.states.get(GRID).state = "on"  # the turn_off never took
         if on_while is not None and coordinator._grid_switch_suspended:
@@ -41,6 +50,13 @@ async def _run_night(hass: Any, coordinator: Any, clock: Any, start: Any, *, cha
             hass.states.get(BATTERY).state = str(soc)
         clock.now += timedelta(minutes=15)
     await coordinator._on_window_end(clock.now)
+
+
+def _hold_stale_off(hass: Any, start: Any) -> None:
+    """KORE has not published the switch since before the window."""
+    switch = hass.states.get(GRID)
+    switch.state = "off"
+    switch.last_reported = switch.last_updated = start - timedelta(minutes=1)
 
 
 def _turn_ons_since(hass: Any, count: int) -> int:
@@ -103,6 +119,16 @@ async def test_a_switch_that_read_off_only_at_the_target_proves_nothing(night): 
 
 
 @pytest.mark.asyncio
+async def test_an_off_from_before_the_pause_proves_nothing(night):  # noqa: F811
+    """CodeRabbit on #45: KORE may still hold the "off" from before the turn_on."""
+    hass, coordinator, clock = night
+    await _run_night(hass, coordinator, clock, WINDOW_START, charge=True, switch_stale=True)
+
+    assert float(hass.states.get(BATTERY).state) >= 43.1
+    assert coordinator._grid_switch_forced_charge is None
+
+
+@pytest.mark.asyncio
 async def test_the_switch_is_tried_again_after_a_month(night):  # noqa: F811
     """A firmware update may have changed it."""
     hass, coordinator, clock = night
@@ -132,6 +158,16 @@ async def test_the_finding_survives_a_restart(night):  # noqa: F811
     assert persisted["runtime_state"]["grid_switch_forced_charge"][0] == (
         coordinator._grid_switch_signature()
     )
+
+    # Home Assistant restarts during the day; the next night leaves the switch off
+    again = _make_coordinator(hass, CONFIG, options={"runtime_state": dict(persisted["runtime_state"])})
+    again._start_periodic_verification = AsyncMock()
+    again._stop_periodic_verification = AsyncMock()
+    again._restore_state()
+    before = len(_calls(hass))
+    await _run_night(hass, again, clock, NEXT_NIGHT, charge=True)
+
+    assert _turn_ons_since(hass, before) == 0
 
 
 # --- The floor's rounding once the target is met ----------------------------

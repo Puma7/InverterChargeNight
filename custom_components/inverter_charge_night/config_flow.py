@@ -464,10 +464,14 @@ def _validate_user_input(
             # Without a budget the entity would be read but never act - unless
             # the efficiency search reads it for the AC side (plan 017)
             errors[CONF_MAIN_FUSE_A] = "required_value"
-        if not user_input.get(CONF_CHARGE_POWER_ENTITY):
+        if (grid_max_w is not None or fuse_a is not None) and not user_input.get(
+            CONF_CHARGE_POWER_ENTITY
+        ):
             # The limit works by writing a lower charge setpoint. Without that
             # entity there is nothing to write to and the protection would be
-            # configured but inert - which is worse than not offering it.
+            # configured but inert - which is worse than not offering it. A
+            # meter read only for the measurement writes nothing (CodeRabbit
+            # on #45).
             errors[CONF_CHARGE_POWER_ENTITY] = "required_entity"
 
     prices_set = [key for key in _PRICE_KEYS if user_input.get(key) is not None]
