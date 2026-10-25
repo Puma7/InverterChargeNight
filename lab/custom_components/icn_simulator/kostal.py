@@ -103,7 +103,11 @@ class KostalEmulator:
                   "EnergyDischarge": p.discharged_energy, "Yield": p.pv_energy}
         result = {
             "devices:local": {"Inverter:State": (3, ""), "Dc_P": (p.effective_pv, "W"),
-                "Ac_P": (p.effective_pv - (p.battery_power / p.charge_efficiency if p.battery_power >= 0 else p.battery_power * p.discharge_efficiency), "W"), "Grid2Bat_P": (p.charge_ac_power, "W"),
+                "Ac_P": (p.effective_pv - (p.battery_power / p.charge_efficiency if p.battery_power >= 0 else p.battery_power * p.discharge_efficiency), "W"), # Like the real Kostal: its own split of the battery's DC power
+                # by source, not a measurement of the charger's AC input. The
+                # lab used to publish the AC side here, and so never saw the
+                # ratio of -1 the inverter showed on 24/25 October 2026.
+                "Grid2Bat_P": (p.battery_power if p.charge_ac_power > 0 else 0.0, "W"),
                 "Home_P": (p.total_house_load, "W"), "HomeGrid_P": (max(0, p.grid_power - p.charge_ac_power), "W"),
                 "HomeBat_P": (max(0, -p.battery_power) * p.discharge_efficiency, "W")},
             "devices:local:battery": {"SoC": (p.soc, "%"), "P": (p.battery_power, "W"),

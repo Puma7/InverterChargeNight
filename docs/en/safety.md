@@ -70,7 +70,10 @@ the several kW the plan asks for. If the rest of the house uses the whole budget
 power goes to 0 for as long as that lasts.
 
 - *What the battery draws itself* is the measured AC charge power (at most the setpoint). Without
-  that sensor, all import counts as other load, which is the safe side.
+  that sensor, all import counts as other load, which is the safe side. Taken as grid import
+  minus house consumption, it counts for no more than the battery power plus 25 %: the two
+  meters report at different moments, and a house load that has just risen would otherwise read
+  as charger draw. A house consumption update is answered like a grid import update.
 - It only ever charges **less**. An unavailable grid import sensor, one that has not reported for
   five minutes, or one without a unit of W or kW pauses charging (0 W) until it reads again.
 - Between the polls, a listener on the grid import lowers the setpoint within about 30 seconds
@@ -138,7 +141,8 @@ its history without touching the device.
 On some inverters the "grid charge" switch is a forced charge at full power. The Kostal's
 *Battery Manual Charge* is one. ICN detects it: if switching on lifts the charge limit, grid
 charging goes off again for the rest of the window, and the raised minimum SOC does the charging
-under the written limit. Expect one short switch-on per night and a warning in the log. Details:
+under the written limit. Once a window has reached its target that way, ICN leaves the switch
+off in later windows for 30 days, so the short switch-on does not repeat every night. Details:
 [Kostal with KOSTAL KORE](kostal-kore.md).
 
 ## Disclaimer

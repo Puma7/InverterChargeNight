@@ -106,7 +106,7 @@ class EveningRescueChargeSwitch(InverterChargeNightEntity, SwitchEntity):
         """Allow the rescue to hold and to buy for the evening."""
         if self.coordinator.evening_rescue_charge:
             return
-        _LOGGER.info("The evening rescue may now hold the battery and charge from the grid")
+        _LOGGER.info("The high-price rescue may now hold the battery and charge from the grid")
         self.coordinator.evening_rescue_charge = True
         self.coordinator._persist_state()
         self.async_write_ha_state()
@@ -116,7 +116,7 @@ class EveningRescueChargeSwitch(InverterChargeNightEntity, SwitchEntity):
         """Stop the rescue; a window it opened ends and hands the inverter back."""
         if not self.coordinator.evening_rescue_charge:
             return
-        _LOGGER.info("The evening rescue is switched off")
+        _LOGGER.info("The high-price rescue is switched off")
         self.coordinator.evening_rescue_charge = False
         self.coordinator._persist_state()
         self.async_write_ha_state()

@@ -98,7 +98,11 @@ async def test_missing_basics_and_bad_time_cannot_activate(guide, mock_hass):
 async def test_efficiency_is_enabled_only_with_independent_measurements(guide):
     await guide.async_step_user()
     result = await guide.async_step_efficiency()
-    assert all(isinstance(marker, vol.Required) for marker in result["data_schema"].schema)
+    # Every field is required except the AC side, which is one sensor or house
+    # consumption with grid import - the validation asks for one (plan 017)
+    ac_side = {CONF_CHARGE_POWER_SENT_ENTITY, CONF_CHARGE_POWER_HOUSE_ENTITY, CONF_GRID_IMPORT_ENTITY}
+    for marker in result["data_schema"].schema:
+        assert isinstance(marker, vol.Optional if marker.schema in ac_side else vol.Required), marker
     bad = {CONF_CHARGE_POWER_ENTITY: "number.power", CONF_CHARGE_POWER_SENT_ENTITY: "sensor.same",
            CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.same", CONF_MIN_CHARGE_POWER_W: 1000,
            CONF_MAX_CHARGE_POWER_W: 15000}

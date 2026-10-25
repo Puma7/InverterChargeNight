@@ -11,12 +11,31 @@ Deshalb misst ICN ihn, statt zu raten.
 ## Was sie braucht
 
 - Eine beschreibbare **Ladegrenze** in W ([Ladeleistung begrenzen](configuration.md#ladeleistung-begrenzen)).
-- Zwei getrennte Leistungsmessungen: die **AC-Leistung, die in das Ladegerät fließt**, und die
-  **DC-Leistung, die im Akku ankommt** (KOSTAL KORE: *Grid to Battery Power* und *Battery Power*).
+- Die **AC-Leistung, die in das Ladegerät fließt**, und die **DC-Leistung, die im Akku ankommt**,
+  getrennt gemessen (siehe [Woher die AC-Seite kommt](#woher-die-ac-seite-kommt)).
 - Freiwillig und besser: zwei **kWh-Zähler** für dieselben beiden Größen. Die Differenz zweier
   Zählerstände ist die Energie, die wirklich geflossen ist.
 - Dunkelheit: PV, die den Akku speist, würde den Vergleich verfälschen. Deshalb misst die Suche nur,
   solange `sun.sun` unter dem Horizont steht.
+
+### Woher die AC-Seite kommt
+
+Kaum ein Haus hat einen Zähler nur für das Ladegerät. ICN nimmt die AC-Seite deshalb vom Zähler
+am Hausanschluss: **Netzbezug minus Hausverbrauch** ist das, was bei Nacht in das Ladegerät
+fließt. Setze auf der Seite *Effizienzsuche einrichten* *Hausverbrauch (Leistung)* und
+*Netzbezug (Leistung)* und lass *AC-Eingangsleistung nur für die Batterieladung* leer.
+
+Ein Beispiel aus der Nacht vom 24. auf den 25. Oktober 2026: 1575 W aus dem Netz, 495 W im Haus,
+also 1080 W in das Ladegerät. Im Akku kamen 1000 W an: 80 W Verlust, 7,4 %.
+
+Nur ein Sensor, der wirklich die AC-Aufnahme des Ladegeräts misst, darf das Paar ersetzen. Die
+*Netz-zu-Akku*-Leistung eines Wechselrichters ist meist seine eigene Aufteilung der DC-Leistung des
+Akkus nach Quellen. Gegen die Akkuleistung ergibt sie ein Verhältnis von genau 1, und der Verlust
+ist immer null. Bei einem Kostal mit KOSTAL KORE ist das *Grid to Battery Power*; die Einrichtung
+lehnt sie deshalb ab.
+
+Ein Akkusensor, der Laden negativ zählt, wie die *Battery Power* des Kostal, wird für die Messung
+umgedreht, und das Protokoll sagt es einmal.
 
 Schalte sie mit der Seite *Effizienzsuche einrichten* oder mit dem Schalter **Effizienzsuche** ein.
 Sie schaltet sich selbst aus, wenn sie fertig ist. Die beiden Sensoren *Effizienzsuche* und
@@ -55,8 +74,8 @@ Eine falsche Messung würde jede spätere Nacht lenken. Deshalb verwirft sie:
 - eine Messung, bei der der Wechselrichter dem Sollwert nicht gefolgt ist, zum Beispiel ein fast
   voller Akku, der die Ladung zurückfährt;
 - eine, die zu kurz war oder zu wenig Energie bewegt hat;
-- einen Verlust unter null (die beiden Sensoren messen dieselbe Seite) oder über 50 % (ein Problem
-  mit Sensor, Verkabelung oder Einheit);
+- einen Verlust unter 0,5 % (die beiden Sensoren messen dasselbe; kein Ladegerät verliert weniger)
+  oder über 50 % (ein Problem mit Sensor, Verkabelung oder Einheit);
 - nicht verfügbare oder veraltete Messwerte, einen unterbrochenen Strom von Messpunkten, eine Uhr,
   die gesprungen ist;
 - alles, was gemessen wurde, während die Sonne am Himmel steht.
@@ -66,7 +85,9 @@ als ein Viertel der Leistung aufnimmt, endet. Ein zweiter solcher Versuch beende
 Fenster (`battery_not_charging`). Ebenso ein Wechselrichter, der die Grenze selbst senkt
 (`inverter_lowered_limit`), zwei Versuchsstarts, die er nicht übernommen hat
 (`charge_limit_not_taken`), und zwei Versuche, die an fehlenden Messwerten gescheitert sind
-(`power_telemetry_lost`). Das nächste Fenster versucht es erneut.
+(`power_telemetry_lost`). Auch zwei Versuche mit einem unmöglichen Verlust beenden sie
+(`sensors_implausible`), und eine Reparaturmeldung nennt die Sensoren und das gemessene
+Verhältnis. Das nächste Fenster versucht es erneut.
 
 ## Ergebnis ablesen
 
@@ -82,7 +103,8 @@ Der Sensor **Effizienzsuche** zeigt den Zustand (*Aus*, *Wartet auf das Laden*, 
 | `waiting_reason` | Warum gerade kein Versuch läuft. |
 
 **Effizienteste Ladeleistung** behält das Ergebnis. Wird jede Messung verworfen, prüfe zuerst die
-Sensoren: *aufgenommen* muss die AC-Seite des Ladegeräts sein und *angekommen* die Akkuseite.
+Sensoren: Die AC-Seite muss die Aufnahme des Ladegeräts sein, am besten Netzbezug minus
+Hausverbrauch, und *angekommen* die Akkuseite.
 
 Werden die Sensoren, die Ladegrenze, die kleinste oder größte Ladeleistung oder die
 Akkukapazität geändert, werden alte Messungen ungültig. Das Ergebnis ist eine Schätzung unter den

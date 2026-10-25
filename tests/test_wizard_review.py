@@ -50,8 +50,11 @@ def test_measurements_and_controls_must_be_independent(mock_hass, entity_registr
 def test_optional_becomes_required_only_for_the_enabled_feature():
     schema = flow_module._schema_power({CONF_AUTO_EFFICIENT_CHARGE: True})
     markers = {m.schema: m for m in schema.schema}
-    for key in (CONF_CHARGE_POWER_ENTITY, CONF_CHARGE_POWER_SENT_ENTITY, CONF_CHARGE_POWER_RECEIVED_ENTITY):
+    for key in (CONF_CHARGE_POWER_ENTITY, CONF_CHARGE_POWER_RECEIVED_ENTITY):
         assert isinstance(markers[key], vol.Required)
+    # The AC side is one sensor or house consumption with grid import (plan 017)
+    assert isinstance(markers[CONF_CHARGE_POWER_SENT_ENTITY], vol.Optional)
+    assert isinstance(markers[CONF_CHARGE_POWER_HOUSE_ENTITY], vol.Optional)
     assert isinstance(markers[CONF_ABSOLUTE_MAX_CHARGE_POWER_W], vol.Optional)
     assert isinstance(markers[CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY], vol.Optional)
 

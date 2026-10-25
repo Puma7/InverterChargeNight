@@ -60,6 +60,12 @@ CONF_MAX_CHARGE_POWER_W = "max_charge_power_w"
 CONF_CHARGE_POWER_ENTITY = "charge_power_entity"
 CONF_CHARGE_POWER_SENT_ENTITY = "charge_power_sent_entity"
 CONF_CHARGE_POWER_RECEIVED_ENTITY = "charge_power_received_entity"
+# The house's own consumption in W. Set together with the grid import entity it
+# replaces the "sent" sensor: what the charger takes from the AC side is then
+# grid import minus house consumption (plan 017). Inverters that report a
+# "grid to battery" power usually derive it from the battery's DC power, which
+# leaves the conversion loss out of the measurement altogether.
+CONF_CHARGE_POWER_HOUSE_ENTITY = "charge_power_house_entity"
 CONF_AUTO_EFFICIENT_CHARGE = "auto_efficient_charge"
 CONF_AUTO_EFFICIENCY_DATA = "auto_efficiency_data"
 CONF_RUNTIME_STATE = "runtime_state"  # entry.options key: flags that survive a restart
@@ -170,6 +176,11 @@ DEFAULT_GRID_CONTINUOUS_PCT = 80
 DEFAULT_GRID_HEADROOM_W = 500
 GRID_LIMIT_STALE_AFTER_S = 300  # after this the grid import counts as unknown
 GRID_LIMIT_MIN_WRITE_INTERVAL_S = 30  # debounce for the grid import listener
+# Grid import minus house consumption as the battery's own draw is bounded by
+# the battery power: two meters that report at different moments can show a
+# rising house load as charger draw. The charger takes at most this much more
+# than reaches the battery (plan 017, Codex on #45).
+GRID_OWN_DRAW_MAX_LOSS = 0.2
 # Additional discharge block for explicit reservations/evening rescue. Auto
 # chooses a vendor switch, discharge limit, then a raised min-SOC floor.
 # Scheduled nights only use the planned target floor, regardless of this mode.
@@ -195,6 +206,13 @@ AUTO_TEST_MIN_DURATION_S = 300  # measured time after settling
 AUTO_TEST_MIN_ENERGY_WH = 300.0  # ... and this much energy, so 20 kW is measurable too
 AUTO_TEST_MIN_FOLLOW_RATIO = 0.8  # the inverter has to draw what it was told to draw
 AUTO_TEST_MAX_PLAUSIBLE_LOSS = 0.5  # above this the sensors are wrong, not the inverter
+# ... and below this they measure the same side twice: no AC/DC charger loses
+# less than half a percent. 24/25 October 2026: "grid to battery" against the
+# battery power read a ratio of -1.000, night after night (plan 017).
+AUTO_TEST_MIN_PLAUSIBLE_LOSS = 0.005
+# Trials with an impossible loss before the search stops for the window and
+# says which sensors to check: the same sensors give the same answer.
+AUTO_TEST_MAX_IMPLAUSIBLE = 2
 AUTO_TEST_MAX_ATTEMPTS = 2  # after this many failures a power counts as unmeasurable
 # A trial whose battery draws less than this share of the setpoint is not
 # charging at all - a Kostal ignores a min SOC only 1 % above the battery
@@ -203,6 +221,11 @@ AUTO_TEST_IDLE_RATIO = 0.25
 # Trial starts whose setpoint the inverter did not take before the search
 # stops for the window: each further one is a Modbus write that changes nothing
 AUTO_TEST_MAX_START_FAILURES = 2
+# Once switching grid charging on lifted the charge limit (the Kostal forced
+# charge), later windows leave the switch off and charge under the raised min
+# SOC instead, without trying again every night. Retried after this many days,
+# or at once when the switch or the charge limit entity changes (plan 017).
+GRID_SWITCH_FORCED_CHARGE_MEMORY_DAYS = 30
 # How long a trial measures is set by how sure it is, not by the clock alone:
 # the loss is taken per block, and the trial ends once the standard error of
 # their mean is below the target - or at the longest trial, whichever is first.

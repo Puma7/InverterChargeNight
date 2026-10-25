@@ -77,7 +77,11 @@ die der Plan verlangt. Braucht der Rest des Hauses das ganze Budget, geht die La
 solange das anhält.
 
 - *Was der Akku selbst zieht* ist die gemessene AC-Ladeleistung (höchstens der Sollwert). Ohne
-  diesen Sensor zählt der gesamte Bezug als andere Last. Das ist die sichere Seite.
+  diesen Sensor zählt der gesamte Bezug als andere Last. Das ist die sichere Seite. Kommt sie aus
+  Netzbezug minus Hausverbrauch, zählt sie höchstens so viel wie die Akkuleistung plus 25 %. Die
+  beiden Zähler melden zu verschiedenen Zeitpunkten, und ein gerade gestiegener Hausverbrauch
+  sähe sonst wie Ladeaufnahme aus. Auf eine Meldung des Hausverbrauchs reagiert ICN wie auf eine
+  des Netzbezugs.
 - Es lädt immer nur **weniger**. Ein Netzbezugssensor, der nicht verfügbar ist, seit fünf Minuten
   nichts gemeldet hat oder keine Einheit W oder kW hat, pausiert das Laden (0 W), bis er wieder
   einen Wert liefert.
@@ -148,8 +152,9 @@ Kommunikationszustand und seinen Verlauf zurück, ohne das Gerät anzufassen.
 Bei manchen Wechselrichtern ist der Schalter für das Netzladen eine Zwangsladung mit voller
 Leistung. Das *Battery Manual Charge* des Kostal ist so einer. ICN erkennt das: Hebt das
 Einschalten die Ladegrenze auf, geht das Netzladen für den Rest des Fensters wieder aus, und der
-angehobene Min-SOC übernimmt das Laden unter der geschriebenen Grenze. Rechne mit einem kurzen
-Einschalten pro Nacht und einer Warnung im Protokoll. Details:
+angehobene Min-SOC übernimmt das Laden unter der geschriebenen Grenze. Hat ein Fenster sein Ziel
+so erreicht, lässt ICN den Schalter in den folgenden Fenstern 30 Tage lang aus, damit sich das
+kurze Einschalten nicht jede Nacht wiederholt. Details:
 [Kostal mit KOSTAL KORE](kostal-kore.md).
 
 ## Haftungsausschluss

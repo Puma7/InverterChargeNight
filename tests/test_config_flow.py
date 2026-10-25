@@ -384,7 +384,8 @@ async def test_options_flow_requires_auto_entities(mock_hass, mock_config_entry,
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "power"
     assert result["errors"][CONF_CHARGE_POWER_ENTITY] == "required_entity"
-    assert result["errors"][CONF_CHARGE_POWER_SENT_ENTITY] == "required_entity"
+    # One sensor or house consumption with grid import (plan 017)
+    assert result["errors"][CONF_CHARGE_POWER_SENT_ENTITY] == "ac_side_required"
     assert result["errors"][CONF_CHARGE_POWER_RECEIVED_ENTITY] == "required_entity"
 
 

@@ -41,7 +41,11 @@ async def check_efficiency_over_the_floor(hass, lab, planner, kore_entry, check)
     options.pop("auto_efficiency_data", None)  # a search from scratch
     hass.config_entries.async_update_entry(planner, options=options, data={**planner.data,
         "auto_efficient_charge": True, "min_charge_power_w": 1000, "max_charge_power_w": 15000,
-        "charge_energy_sent_entity": None, "charge_energy_received_entity": None})
+        "charge_energy_sent_entity": None, "charge_energy_received_entity": None,
+        # The AC side from the actual import, not the per-phase guard value the
+        # connection limit reads: that one is the larger of the two under an
+        # unbalanced load and would overstate what the charger takes
+        "grid_import_entity": "sensor.icn_lab_grid_power"})
     await hass.async_block_till_done()
     co = planner.runtime_data
     enabled = next(entity.entity_id for entity in er.async_get(hass).entities.values()

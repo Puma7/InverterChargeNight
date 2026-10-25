@@ -56,8 +56,9 @@ async def configure_planner(hass, data):
             continue
         if group == "pv_shortfall" and not data.get("auto_pv_shortfall"):
             continue
-        if group == "efficiency" and not all(data.get(key) for key in (
-                "charge_power_entity", "charge_power_sent_entity", "charge_power_received_entity")):
+        if group == "efficiency" and not (
+                data.get("charge_power_entity") and data.get("charge_power_received_entity")
+                and (data.get("charge_power_sent_entity") or data.get("charge_power_house_entity"))):
             continue
         if group not in ("basics", "schedule"):
             await choose("features")

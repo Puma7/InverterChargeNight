@@ -68,8 +68,11 @@ from .const import (
     CONF_CHARGE_POWER_ENTITY,
     AUTO_TEST_IDLE_RATIO,
     AUTO_TEST_MAX_ATTEMPTS,
+    AUTO_TEST_MAX_IMPLAUSIBLE,
     AUTO_TEST_MAX_PLAUSIBLE_LOSS,
+    AUTO_TEST_MIN_PLAUSIBLE_LOSS,
     AUTO_TEST_MAX_START_FAILURES,
+    GRID_SWITCH_FORCED_CHARGE_MEMORY_DAYS,
     AUTO_TEST_MIN_DURATION_S,
     AUTO_TEST_MIN_ENERGY_WH,
     AUTO_TEST_BLOCK_S,
@@ -89,6 +92,7 @@ from .const import (
     CONF_CHARGE_ENERGY_SENT_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
+    CONF_CHARGE_POWER_HOUSE_ENTITY,
     CONF_AUTO_EFFICIENT_CHARGE,
     CONF_AUTO_EFFICIENCY_DATA,
     CONF_RUNTIME_STATE,
@@ -202,6 +206,7 @@ from .const import (
     DEFAULT_MAX_CHARGE_POWER_W,
     GRID_LIMIT_STALE_AFTER_S,
     GRID_LIMIT_MIN_WRITE_INTERVAL_S,
+    GRID_OWN_DRAW_MAX_LOSS,
 )
 from .calculation import calculate_required_soc
 from .prices import PriceSeries, mean_price_ct, parse_price_series, rescue_purchase_pays
@@ -404,10 +409,24 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _auto_start_failures: tuple[str, int] | None = None
     _auto_telemetry_losses: tuple[str, int] | None = None
     _auto_idle_trials: tuple[str, int] | None = None
+    _auto_implausible_trials: tuple[str, int] | None = None
+    _auto_sent_sign: float = 1.0
+    _auto_received_sign: float = 1.0
     # Replaced per instance in __init__; the class value only serves objects a
     # test builds without it, and nothing writes to it there
     _temperature_log: TemperatureLog = TemperatureLog()
     _grid_switch_suspended: bool = False
+    # (switch and limit signature, when): switching grid charging on lifted the
+    # charge limit on this inverter (plan 017)
+    _grid_switch_forced_charge: tuple[str, str] | None = None
+    _grid_switch_forced_this_window: bool = False
+    # The battery level once grid charging read off after the forced charge
+    _grid_switch_off_soc: float | None = None
+    # The sun was up after that: the panels may have done the charging
+    _grid_switch_off_sunlit: bool = False
+    # When grid charging was last asked to go off: only a report after it shows
+    # the switch off (CodeRabbit on #45)
+    _grid_off_requested_at: datetime | None = None
     _grid_stop_pending: bool = False
     _grid_stop_retries: int = 0
     _last_trusted_soc: tuple[float, datetime] | None = None
@@ -557,6 +576,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_measure_start: datetime | None = None
         self._auto_last_sent_w: float | None = None
         self._auto_last_received_w: float | None = None
+        # The sign each side is read with in the running trial (plan 017)
+        self._auto_sent_sign = 1.0
+        self._auto_received_sign = 1.0
+        self._auto_orientation_logged: set[str] = set()
         self._auto_meter_start: tuple[float, float] | None = None
         self._auto_sample_listener: CALLBACK_TYPE | None = None
         self._auto_last_result: dict[str, Any] | None = None
@@ -666,14 +689,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for unsubscribe in getattr(self, "_communication_unsubscribers", []):
             unsubscribe()
         self._communication_unsubscribers: list[CALLBACK_TYPE] = []
+        # The grid import only belongs here when it protects the connection; read
+        # for the efficiency measurement alone (plan 017) its loss must not stop
+        # the night (Codex on #45)
+        meter_keys = (CONF_GRID_IMPORT_ENTITY,) if self._grid_limit_configured() else ()
         entities = [self.config[key] for key in (
             CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH,
-            CONF_CHARGE_POWER_ENTITY, CONF_GRID_IMPORT_ENTITY, CONF_BACKUP_MODE_ENTITY,
+            CONF_CHARGE_POWER_ENTITY, *meter_keys, CONF_BACKUP_MODE_ENTITY,
             CONF_FORCE_DISCHARGE_SWITCH,
         ) if self.config.get(key)]
         numeric = {self.config[key] for key in (
             CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY,
-            CONF_CHARGE_POWER_ENTITY, CONF_GRID_IMPORT_ENTITY,
+            CONF_CHARGE_POWER_ENTITY, *meter_keys,
         ) if self.config.get(key)}
 
         def unreadable(state: Any) -> bool:
@@ -755,7 +782,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.config.get(CONF_BATTERY_SOC_ENTITY) and self._current_battery_soc() is None:
             faults.append("battery_soc")
         meter = self.config.get(CONF_GRID_IMPORT_ENTITY)
-        if meter and self._read_grid_import_w(str(meter)) is None:
+        # Only a meter that protects the connection stops charging when it is
+        # lost; one read for the efficiency measurement alone costs that
+        # measurement a trial, nothing more (Codex on #45)
+        if meter and self._grid_limit_configured() and self._read_grid_import_w(str(meter)) is None:
             faults.append("grid_meter")
         return sorted(set(faults))
 
@@ -830,6 +860,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "floor_released_soc": self._floor_released_soc,
             "ac_limit_window": self._ac_limit_window,
             "grid_switch_suspended": self._grid_switch_suspended,
+            "grid_switch_forced_charge": (
+                list(self._grid_switch_forced_charge) if self._grid_switch_forced_charge else None
+            ),
             "auto_search_stopped": list(self._auto_stopped) if self._auto_stopped else None,
             "auto_start_failures": (
                 list(self._auto_start_failures) if self._auto_start_failures else None
@@ -839,6 +872,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
             "auto_idle_trials": (
                 list(self._auto_idle_trials) if self._auto_idle_trials else None
+            ),
+            "auto_implausible_trials": (
+                list(self._auto_implausible_trials) if self._auto_implausible_trials else None
             ),
             "hands_off_until": (
                 self._hands_off_until.isoformat() if self._hands_off_until else None
@@ -919,6 +955,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         window_raw = state.get("ac_limit_window")
         self._ac_limit_window = window_raw if isinstance(window_raw, str) else None
         self._grid_switch_suspended = state.get("grid_switch_suspended") is True
+        forced = state.get("grid_switch_forced_charge")
+        if (isinstance(forced, list) and len(forced) == 2
+                and all(isinstance(item, str) for item in forced)):
+            self._grid_switch_forced_charge = (forced[0], forced[1])
         stopped = state.get("auto_search_stopped")
         self._auto_stopped = (
             (stopped[0], stopped[1])
@@ -929,6 +969,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_start_failures = self._restore_window_count(state, "auto_start_failures")
         self._auto_telemetry_losses = self._restore_window_count(state, "auto_telemetry_losses")
         self._auto_idle_trials = self._restore_window_count(state, "auto_idle_trials")
+        self._auto_implausible_trials = self._restore_window_count(state, "auto_implausible_trials")
         snow_raw = state.get("snow_nights")
         if isinstance(snow_raw, int) and not isinstance(snow_raw, bool) and snow_raw > 0:
             self.snow_nights = snow_raw
@@ -1142,6 +1183,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Only an actual charging request may round upwards. A hold must not
         # create a new grid-energy demand just to reach the next input step.
         return self._representable_min_soc(floor, round_up=(soc < target_soc and not self.target_reached))
+
+    def _floor_already_holds(self, current: float, target_soc: float, floor_soc: float) -> bool:
+        """The inverter holds the charging floor's rounded-up step, and no charge is due.
+
+        Only once the target is met, and only for the one step between the
+        floor rounded down and rounded up: a lower value would let the battery
+        below its target, a higher one would hold more than was planned.
+        """
+        if not self.target_reached or self.is_discharge_mode:
+            return False
+        floor = self.inverter_floor_soc(target_soc)
+        if floor is None or self._floor_released_soc is not None:
+            return False
+        rounded_up = self._representable_min_soc(floor, round_up=True)
+        return (rounded_up is not None and floor_soc - 0.5 <= current <= rounded_up + 0.5
+                and current > floor_soc + 0.5)
 
     def inverter_floor_soc(self, target_soc: float | None = None) -> float | None:
         """The minimum SOC written to the inverter, capped where it was taken down.
@@ -3335,6 +3392,64 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return value
         return value
 
+    def _charge_input_entities(self) -> tuple[str, ...]:
+        """The entities the AC side of a charge is read from (plan 017).
+
+        Grid import and house consumption when both are configured: what the
+        charger takes is then the difference of the two. Otherwise the "sent"
+        sensor on its own. Empty when neither is set.
+        """
+        house = self.config.get(CONF_CHARGE_POWER_HOUSE_ENTITY)
+        grid = self.config.get(CONF_GRID_IMPORT_ENTITY)
+        if house and grid:
+            return (str(grid), str(house))
+        sent = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
+        return (str(sent),) if sent else ()
+
+    def _charge_input_w(self) -> float | None:
+        """What the charger takes on the AC side right now, in W, or None.
+
+        A "grid to battery" power that an inverter reports is usually its own
+        split of the battery's DC power, so it carries no conversion loss at
+        all: against the battery power it read a ratio of exactly -1 for a
+        whole night (24/25 October 2026). Grid import minus house consumption
+        is measured on the AC side, by the meter at the connection point.
+        """
+        entities = self._charge_input_entities()
+        if len(entities) == 2:
+            grid_w = self._get_power_w(entities[0])
+            house_w = self._get_power_w(entities[1])
+            if grid_w is None or house_w is None:
+                return None
+            return grid_w - house_w
+        if entities:
+            return self._get_power_w(entities[0])
+        return None
+
+    def _charge_orientation(self, value_w: float, label: str) -> float:
+        """+1, or -1 for a sensor that counts charging as negative.
+
+        Judged while the trial is charging: a reading of at least a quarter of
+        the trial's power below zero is a sign convention, not a discharge.
+        Kostal reports the battery power that way, and taken as it is every
+        trial read a loss of 200 % (24/25 October 2026). A grid import minus
+        house consumption is positive by its definition and never turned.
+        """
+        power_w = self._auto_test_power_w
+        if label == "sent" and len(self._charge_input_entities()) == 2:
+            return 1.0
+        if power_w is None or value_w > -AUTO_TEST_IDLE_RATIO * power_w:
+            return 1.0
+        if label not in self._auto_orientation_logged:
+            self._auto_orientation_logged.add(label)
+            _LOGGER.info(
+                "Efficiency search: the %s power reads %.0f W while charging - it counts "
+                "charging as negative, so its sign is turned for the measurement",
+                "AC side" if label == "sent" else "battery side",
+                value_w,
+            )
+        return -1.0
+
     def _get_ac_charge_limit_w(self, entity_id: str | None) -> float | None:
         """Read the charge control with the same unit inference used for writes."""
         value = self._get_power_w(entity_id)
@@ -3968,7 +4083,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             CONF_CHARGE_ENERGY_RECEIVED_ENTITY, CONF_BATTERY_SOC_ENTITY,
             CONF_BATTERY_CAPACITY,
         )
-        payload = [2, *(self.config.get(key) for key in keys)]
+        payload: list[Any] = [2, *(self.config.get(key) for key in keys)]
+        if len(self._charge_input_entities()) == 2:
+            # Appended only for the derived AC side (plan 017), so a setup that
+            # does not use it keeps the losses it has already measured
+            payload.extend(self._charge_input_entities())
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     def _efficiency_window_key(self) -> str:
@@ -4139,6 +4258,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_last_sample_time = None
         self._auto_last_sent_w = None
         self._auto_last_received_w = None
+        self._auto_sent_sign = 1.0
+        self._auto_received_sign = 1.0
         self._auto_meter_start = None
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
@@ -4245,6 +4366,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_last_sample_time = None
         self._auto_last_sent_w = None
         self._auto_last_received_w = None
+        self._auto_sent_sign = 1.0
+        self._auto_received_sign = 1.0
         self._auto_meter_start = None
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
@@ -4406,8 +4529,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_block_start = now
         self._auto_block_sent_wh = 0.0
         self._auto_block_received_wh = 0.0
-        self._auto_last_sent_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_SENT_ENTITY))
-        self._auto_last_received_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY))
+        sent_w = self._charge_input_w()
+        received_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY))
+        if sent_w is not None and received_w is not None:
+            self._auto_sent_sign = self._charge_orientation(sent_w, "sent")
+            self._auto_received_sign = self._charge_orientation(received_w, "received")
+            sent_w *= self._auto_sent_sign
+            received_w *= self._auto_received_sign
+        self._auto_last_sent_w = sent_w
+        self._auto_last_received_w = received_w
         if self._auto_last_sent_w is None or self._auto_last_received_w is None:
             self._discard_auto_test("power telemetry is unavailable at measurement start")
             # Otherwise every poll writes a new trial for as long as the
@@ -4455,11 +4585,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "charge limit changed or became unavailable during measurement"
             )
             return
-        sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
         received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
-        sent_w = self._get_power_w(sent_entity)
+        sent_w = self._charge_input_w()
         received_w = self._get_power_w(received_entity)
-        for entity in (sent_entity, received_entity):
+        if sent_w is not None:
+            sent_w *= self._auto_sent_sign
+        if received_w is not None:
+            received_w *= self._auto_received_sign
+        for entity in (*self._charge_input_entities(), received_entity):
             state = self.hass.states.get(entity) if entity else None
             age = self._state_age_s(state, dt_util.now())
             if age is not None and (age < -5 or age > 60):
@@ -4516,9 +4649,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _setup_auto_sample_listener(self) -> None:
         """Sample the charge power whenever the sensor reports, not every poll."""
         self._remove_auto_sample_listener()
-        sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
+        input_entities = self._charge_input_entities()
         received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
-        if not sent_entity or not received_entity:
+        if not input_entities or not received_entity:
             return
 
         async def _on_charge_power_change(event: Event[EventStateChangedData]) -> None:
@@ -4529,7 +4662,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         self._auto_sample_listener = async_track_state_change_event(
             self.hass,
-            [str(sent_entity), str(received_entity)],
+            [*input_entities, str(received_entity)],
             _on_charge_power_change,
         )
 
@@ -4758,18 +4891,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         loss = 1.0 - (received_wh / sent_wh)
-        if loss < 0 or loss > AUTO_TEST_MAX_PLAUSIBLE_LOSS:
-            # Negative means the battery received more than was sent, which no
-            # charger does: the two sensors measure the same side, or the wrong
-            # ones are configured. Recording it would make this power win the
-            # search for ever, because the loss is clamped at zero.
-            self._discard_auto_test(
-                "a loss of %.1f %% is not physical - check that 'sent' is the AC side and "
-                "'received' the battery side",
-                loss * 100.0,
-            )
+        if loss < AUTO_TEST_MIN_PLAUSIBLE_LOSS or loss > AUTO_TEST_MAX_PLAUSIBLE_LOSS:
+            # Below the floor the battery received about as much as was sent,
+            # or more, which no charger does: the two sensors measure the same
+            # side. Recording it would make this power win the search for
+            # ever. Above the ceiling a sensor, its unit or its wiring is wrong.
+            self._count_implausible_trial(loss, received_wh / sent_wh)
             return
 
+        if self._auto_implausible_trials is not None:
+            self._clear_implausible_sensors()
         data = self.get_auto_efficiency_data()
         history = dict(data.get("history", {}))
         history[str(power_w)] = loss
@@ -4889,6 +5020,62 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if last:
             self._stop_auto_search_for_window("battery_not_charging")
 
+    def _count_implausible_trial(self, loss: float, ratio: float) -> None:
+        """An impossible loss; a second one in the window ends the search (plan 017).
+
+        The same sensors give the same answer: on 24/25 October 2026 the search
+        measured 1000 W fourteen times in a row, each time a loss of 200 %, and
+        never got to a second power. Stopped, it names the sensors once, under
+        Repairs, rather than writing a new trial every twenty minutes.
+        """
+        key = self._efficiency_window_key()
+        previous = self._auto_implausible_trials
+        count = previous[1] + 1 if previous is not None and previous[0] == key else 1
+        self._auto_implausible_trials = (key, count)
+        last = count >= AUTO_TEST_MAX_IMPLAUSIBLE
+        self._discard_auto_test(
+            "a loss of %.1f %% is not physical (battery side / AC side = %.3f) - %s",
+            loss * 100.0,
+            ratio,
+            "no more trials in this window, see Repairs" if last else "measuring once more",
+        )
+        self._persist_state()
+        if last:
+            self._report_implausible_sensors(ratio)
+            self._stop_auto_search_for_window("sensors_implausible")
+
+    def _efficiency_sensors_issue_id(self) -> str:
+        return f"efficiency_sensors_{self.entry.entry_id}"
+
+    def _report_implausible_sensors(self, ratio: float) -> None:
+        """Say which sensors gave the impossible loss, under Repairs."""
+        entities = self._charge_input_entities()
+        ac_side = (
+            f"{entities[0]} − {entities[1]}" if len(entities) == 2
+            else (entities[0] if entities else "—")
+        )
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            self._efficiency_sensors_issue_id(),
+            is_fixable=False,
+            is_persistent=True,
+            issue_domain=DOMAIN,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="efficiency_sensors_implausible",
+            translation_placeholders={
+                "name": str(self.entry.title),
+                "ac_side": ac_side,
+                "battery_side": str(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY) or "—"),
+                "ratio": f"{ratio:.3f}",
+            },
+        )
+
+    def _clear_implausible_sensors(self) -> None:
+        """A plausible sample, or other sensors: the warning no longer applies."""
+        self._auto_implausible_trials = None
+        ir.async_delete_issue(self.hass, DOMAIN, self._efficiency_sensors_issue_id())
+
     def _carry_auto_search_to(self, new_key: str) -> None:
         """Keep the window's stop and counts when its end moves (an extended ad-hoc window).
 
@@ -4900,7 +5087,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         if self._auto_stopped is not None and self._auto_stopped[0] == old_key:
             self._auto_stopped = (new_key, self._auto_stopped[1])
-        for name in ("_auto_start_failures", "_auto_telemetry_losses", "_auto_idle_trials"):
+        for name in ("_auto_start_failures", "_auto_telemetry_losses", "_auto_idle_trials",
+                     "_auto_implausible_trials"):
             count: tuple[str, int] | None = getattr(self, name)
             if count is not None and count[0] == old_key:
                 setattr(self, name, (new_key, count[1]))
@@ -4933,6 +5121,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # read against the new ones it would file a corrupt sample under
             # the new signature (Codex on #40)
             self._discard_auto_test("the measurement entities were replaced")
+        # The warning named the old sensors (plan 017)
+        self._clear_implausible_sensors()
         if self._auto_stopped is None and self._auto_start_failures is None \
                 and self._auto_telemetry_losses is None and self._auto_idle_trials is None:
             return
@@ -5002,9 +5192,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         charge_entity = self.config.get(CONF_CHARGE_POWER_ENTITY)
-        sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
         received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
-        if not charge_entity or not sent_entity or not received_entity:
+        if not charge_entity or not self._charge_input_entities() or not received_entity:
             self._set_auto_wait_reason("missing_configuration")
             if not self._auto_missing_entities_logged:
                 _LOGGER.warning(
@@ -6166,6 +6355,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         mode_label = "Morning discharge" if self.is_discharge_mode else "Night charge"
         _LOGGER.info("%s window ended, resetting settings", mode_label)
+        self._remember_forced_charge()
         if self._window_started_at is not None and self._adhoc_until is None:
             bounds = scheduled_window_bounds(self._window_started_at, *self._window_times())
             if bounds is not None and elapsed_seconds(now, self._align_tz(bounds[1], now)) >= 0:
@@ -6726,6 +6916,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Error parsing configuration values: %s", e)
             return inactive_data
 
+        self._note_switch_off_baseline()
+
         # Use initial SOC calculated at window start, or recalculate if initial failed
         calculated_soc: float | None
         if self.initial_calculated_soc is not None:
@@ -7187,6 +7379,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         entity_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         state = self.hass.states.get(entity_id) if entity_id else None
         if entity_id and (assume_on or state is None or state.state != "off"):
+            # Not reading off, the switch may have charged since the baseline,
+            # sent or not: it is taken again from the next confirmed off
+            # (CodeRabbit on #45)
+            self._grid_switch_off_soc = None
             if self._stop_pending_for_this_target():
                 if self._grid_stop_retries >= GRID_STOP_MAX_RETRIES:
                     return
@@ -7200,6 +7396,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.warning("Requested grid-charge pause: %s", reason)
             except Exception:
                 _LOGGER.exception("Cannot pause grid charging (%s); inverter stop is unconfirmed", reason)
+            # Taken after the call: an optimistic state written during it is
+            # not the inverter's answer
+            self._grid_off_requested_at = dt_util.now()
 
     def _charge_permission_current(self) -> bool:
         """Check live lifecycle and the absolute deadline at the command sink."""
@@ -7227,6 +7426,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not switched_on and (state is None or state.state != "on"):
             return
         self._grid_switch_suspended = True
+        # Remembered at the window end if the floor then did the charging
+        # (plan 017): see _remember_forced_charge
+        self._grid_switch_forced_this_window = True
+        self._grid_switch_off_soc = None
+        self._grid_switch_off_sunlit = False
+        self._grid_off_requested_at = dt_util.now()
         self._persist_state()
         _LOGGER.warning(
             "The charge limit did not hold with %s switched on - grid charging stays off "
@@ -7234,6 +7439,114 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "that charges up to it does so under the charge limit",
             switch_id,
         )
+
+    def _remember_forced_charge(self) -> None:
+        """Keep the switch off in later windows too, once the floor did the job.
+
+        The next night would switch it on again and draw at the inverter's own
+        limit for the seconds it takes to notice: 21.4 kW read back on 24/25
+        October 2026 (plan 017). Only remembered when the battery reached its
+        target with the switch off, so an inverter whose min SOC does not
+        charge from the grid - or a single failed write - is never left
+        without grid charging for weeks.
+        """
+        found = self._grid_switch_forced_this_window
+        baseline = self._grid_switch_off_soc
+        sunlit = self._grid_switch_off_sunlit or not self._sun_below_horizon()
+        self._grid_switch_forced_this_window = False
+        self._grid_switch_off_soc = None
+        self._grid_switch_off_sunlit = False
+        if not found or not self.target_reached or self.is_discharge_mode:
+            return
+        if sunlit:
+            # Charged with the switch off, but perhaps by the panels: that says
+            # nothing about the floor charging from the grid (Codex on #45)
+            _LOGGER.debug("Forced charge not remembered: the sun was up during the charge")
+            return
+        # The charge has to have happened with the switch confirmed off: a
+        # pause that never took effect leaves the forced charge to reach the
+        # target, which proves nothing about the floor (Codex on #45)
+        target = self.current_target_soc()
+        if (baseline is None or target is None or baseline > target - 1.0
+                or not self._grid_switch_reported_off()):
+            return
+        self._grid_switch_forced_charge = (
+            self._grid_switch_signature(), dt_util.now().isoformat(),
+        )
+        self._persist_state()
+        _LOGGER.info(
+            "The battery reached its target under the raised min SOC with grid charging "
+            "switched off - the switch stays off for the next %d days",
+            GRID_SWITCH_FORCED_CHARGE_MEMORY_DAYS,
+        )
+
+    def _note_switch_off_baseline(self) -> None:
+        """Where the battery stood once grid charging read off after a forced charge.
+
+        Taken once per window, on the first poll that sees the switch off with
+        no stop still unconfirmed: only a charge from there on is the floor's.
+        Every poll after it notes whether the sun was up.
+        """
+        if not self._grid_switch_forced_this_window:
+            return
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        switch = self.hass.states.get(str(switch_id)) if switch_id else None
+        if switch is None or switch.state != "off":
+            # On again, whether or not a stop could still be sent: what it
+            # charged is not the floor's (CodeRabbit on #45)
+            self._grid_switch_off_soc = None
+        if self._grid_switch_off_soc is None:
+            if not self._grid_switch_reported_off():
+                return
+            self._grid_switch_off_soc = self._current_battery_soc()
+            self._grid_switch_off_sunlit = False
+        if not self._sun_below_horizon():
+            self._grid_switch_off_sunlit = True
+
+    def _sun_below_horizon(self) -> bool:
+        """The sun is down for sure; a missing sun entity does not say so."""
+        sun = self.hass.states.get(SUN_ENTITY_ID)
+        return sun is not None and sun.state == "below_horizon"
+
+    def _grid_switch_reported_off(self) -> bool:
+        """The switch reads off, reported after the last turn_off went out.
+
+        KORE publishes the switch only with its next settings poll: right after
+        a turn_on and the pause that follows, Home Assistant may still hold the
+        "off" from before (CodeRabbit on #45).
+        """
+        if self._grid_stop_pending:
+            return False
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        switch = self.hass.states.get(str(switch_id)) if switch_id else None
+        if switch is None or switch.state != "off":
+            return False
+        sent = self._grid_off_requested_at
+        seen = getattr(switch, "last_reported", None) or getattr(switch, "last_updated", None)
+        return isinstance(seen, datetime) and sent is not None and seen > sent
+
+    def _grid_switch_signature(self) -> str:
+        """Which switch and which limit the forced-charge finding is about."""
+        payload = [self.config.get(CONF_GRID_CHARGE_SWITCH), self.config.get(CONF_CHARGE_POWER_ENTITY)]
+        return hashlib.sha256(json.dumps(payload).encode()).hexdigest()[:16]
+
+    def _grid_switch_known_forced(self) -> bool:
+        """True while a recent window found the switch to lift the charge limit.
+
+        Only for the same switch and limit, and only for a while: a firmware
+        update may change it, so it is tried again after
+        ``GRID_SWITCH_FORCED_CHARGE_MEMORY_DAYS``.
+        """
+        forced = self._grid_switch_forced_charge
+        if forced is None or forced[0] != self._grid_switch_signature():
+            return False
+        try:
+            found = datetime.fromisoformat(forced[1])
+        except ValueError:
+            return False
+        now = dt_util.now()
+        age_s = elapsed_seconds(now, self._align_tz(found, now))
+        return 0 <= age_s < GRID_SWITCH_FORCED_CHARGE_MEMORY_DAYS * 86400
 
     async def _confirm_limit_after_switch_on(self) -> None:
         """Check the charge limit right after switching grid charging on.
@@ -7642,6 +7955,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         state = self.hass.states.get(str(switch_id)) if switch_id else None
         if state is not None and state.state == "on":
+            self._grid_switch_off_soc = None  # see _pause_grid_charge
             if self._grid_stop_retries >= GRID_STOP_MAX_RETRIES:
                 return  # the window-end reset takes it from here
             self._grid_stop_retries += 1
@@ -8091,7 +8405,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Give every window its own bounded rewrites."""
         self._ac_limit_rewrites = 0
         self._floor_released_soc = None
-        self._grid_switch_suspended = False
+        self._grid_switch_suspended = self._grid_switch_known_forced()
+        self._grid_switch_forced_this_window = False
+        self._grid_switch_off_soc = None
+        self._grid_switch_off_sunlit = False
+        if self._grid_switch_suspended and self._grid_switch_forced_charge is not None:
+            _LOGGER.info(
+                "Grid charging stays off this window: on %s switching it on lifted the charge "
+                "limit. The battery charges under the raised min SOC instead",
+                self._grid_switch_forced_charge[1][:10],
+            )
         self._keepalive_lapse_since = None
         if not self._ac_limit_not_held:
             return
@@ -8153,6 +8476,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                          and floor_soc > (self._current_battery_soc() or 0.0))
             if held_back:
                 _LOGGER.debug("Planned charge limit not written - not raising the min SOC here either")
+            elif self._floor_already_holds(current_inverter_soc, target_soc, floor_soc):
+                # Charged with the floor rounded up to the next step; once the
+                # target is met it rounds down. Writing that one step back
+                # changes nothing that matters - it is a write per night,
+                # every night (24/25 October 2026, plan 017).
+                pass
             # Check if inverter min SOC doesn't match the floor (with tolerance)
             elif abs(current_inverter_soc - floor_soc) > 0.5:
                 _LOGGER.warning(
@@ -8340,20 +8669,49 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         written = self._planned_setpoint_written_w
         measured: float | None = None
-        sent_entity = self.config.get(CONF_CHARGE_POWER_SENT_ENTITY)
-        if sent_entity:
-            state = self.hass.states.get(str(sent_entity))
-            age_s = self._state_age_s(state, dt_util.now()) if state else None
-            if (age_s is not None and 0 <= age_s <= GRID_LIMIT_STALE_AFTER_S
+        input_entities = self._charge_input_entities()
+        now = dt_util.now()
+        fresh = bool(input_entities)
+        for entity_id in input_entities:
+            state = self.hass.states.get(entity_id)
+            age_s = self._state_age_s(state, now) if state else None
+            if not (age_s is not None and 0 <= age_s <= GRID_LIMIT_STALE_AFTER_S
                     and _unit_of(state) in ("w", "watt", "watts", "kw", "kilowatt", "kilowatts")):
-                value = self._get_power_w(sent_entity)
-                if value is not None and value >= 0:
-                    measured = value
+                fresh = False
+        if fresh:
+            value = self._charge_input_w()
+            if value is not None and value >= 0:
+                measured = value
+        if measured is not None and len(input_entities) == 2:
+            measured = self._bounded_by_battery_side(measured, now)
         if measured is None:
             return 0.0
         if written is None:
             return measured
         return min(measured, float(written))
+
+    def _bounded_by_battery_side(self, derived_w: float, now: datetime) -> float | None:
+        """Grid import minus house consumption, no more than the battery takes.
+
+        The two meters report at their own moments: a house load that has just
+        risen shows in the grid import before the house sensor has it, and the
+        difference reads as charger draw - credited, it lets the battery take
+        the connection the house needs (Codex on #45). The battery power is an
+        independent measurement; without a fresh one nothing is credited.
+        """
+        received_id = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
+        state = self.hass.states.get(str(received_id)) if received_id else None
+        age_s = self._state_age_s(state, now) if state else None
+        if not (age_s is not None and 0 <= age_s <= GRID_LIMIT_STALE_AFTER_S
+                and _unit_of(state) in ("w", "watt", "watts", "kw", "kilowatt", "kilowatts")):
+            return None
+        battery_w = self._get_power_w(str(received_id))
+        if battery_w is None:
+            return None
+        # Either sign: a Kostal counts charging as negative. A discharging
+        # battery leaves the grid import below the house load, so the
+        # difference is not positive and nothing is credited anyway.
+        return min(derived_w, abs(battery_w) / (1.0 - GRID_OWN_DRAW_MAX_LOSS))
 
     async def _enforce_grid_limit_now(self) -> None:
         """Keep the written charge limit within what the connection carries.
@@ -8456,7 +8814,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_stale_logged = False
         headroom = _as_float(self.config.get(CONF_GRID_HEADROOM_W, DEFAULT_GRID_HEADROOM_W))
         own_w = min(self._own_charge_draw_w(), max(0.0, import_w))
-        if not self.config.get(CONF_CHARGE_POWER_SENT_ENTITY) and not self._grid_own_draw_logged:
+        if not self._charge_input_entities() and not self._grid_own_draw_logged:
             # Treat all import as foreign load until actual own draw is measured.
             _LOGGER.info(
                 "No measured charge-power sensor: all grid import counts as foreign load. "
@@ -8526,9 +8884,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as e:  # pylint: disable=broad-except
                 _LOGGER.error("Unexpected error in grid import listener: %s", e, exc_info=True)
 
+        # With the battery's draw taken from grid import minus house
+        # consumption, a house update changes it too (Codex on #45)
         self._grid_limit_listener = async_track_state_change_event(
             self.hass,
-            str(entity_id),
+            list(dict.fromkeys([str(entity_id), *self._charge_input_entities()[1:]])),
             _on_grid_import_change,
         )
         _LOGGER.debug("Set up grid import listener for %s", entity_id)

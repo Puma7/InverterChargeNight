@@ -29,6 +29,7 @@ REDACT_KEYS = {
     "charge_power_entity",
     "charge_power_sent_entity",
     "charge_power_received_entity",
+    "charge_power_house_entity",
     "charge_energy_sent_entity",
     "charge_energy_received_entity",
     "absolute_max_charge_power_entity",
@@ -143,9 +144,10 @@ async def async_get_config_entry_diagnostics(
                 "charge_limit_feedback_w": coordinator._get_ac_charge_limit_w(
                     coordinator.config.get("charge_power_entity")
                 ),
-                "ac_charge_power_w": coordinator._get_power_w(
-                    coordinator.config.get("charge_power_sent_entity")
-                ),
+                # The AC side as the efficiency search reads it: the sent sensor,
+                # or grid import minus house consumption (plan 017)
+                "ac_charge_power_w": coordinator._charge_input_w(),
+                "ac_side_derived": len(coordinator._charge_input_entities()) == 2,
                 "dc_charge_power_w": coordinator._get_power_w(
                     coordinator.config.get("charge_power_received_entity")
                 ),
@@ -153,6 +155,7 @@ async def async_get_config_entry_diagnostics(
                 "input_configured": {
                     key: bool(coordinator.config.get(key))
                     for key in ("charge_power_entity", "charge_power_sent_entity",
+                                "charge_power_house_entity", "grid_import_entity",
                                 "charge_power_received_entity", "grid_charge_switch")
                 },
             },
