@@ -542,6 +542,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._battery_log = bl.BatteryLog()
         self._learning_store: Store[dict[str, Any]] | None = None
         self._forecast_backfilled = False
+        # Which entities each kind of learned value came from: a new forecast
+        # provider or meter must not inherit the old one's history (Codex on #46)
+        self._learning_sources: dict[str, Any] = {}
         self._learning_refreshed: date | None = None
         self._learning_task: asyncio.Task[None] | None = None
         self._battery_learning_status = bl.STATUS_LEARNING
@@ -2012,13 +2015,62 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._forecast_log = fl.ForecastLog(raw.get("pv"))
             self._battery_log = bl.BatteryLog(raw.get("battery"))
             self._forecast_backfilled = raw.get("backfilled") is True
+            sources = raw.get("sources")
+            self._learning_sources = dict(sources) if isinstance(sources, dict) else {}
+        # Written with the next change: until then a changed source is
+        # recognised again at every load, which forgets nothing twice
+        self._check_learning_sources()
 
     def _learning_snapshot(self) -> dict[str, Any]:
         return {
             "pv": self._forecast_log.snapshot(),
             "battery": self._battery_log.snapshot(),
             "backfilled": self._forecast_backfilled,
+            "sources": dict(self._learning_sources),
         }
+
+    def _current_learning_sources(self) -> dict[str, Any]:
+        """Per kind of learned value, the entities it is measured with."""
+        def entity(key: str) -> str | None:
+            value = self.config.get(key)
+            return str(value) if value else None
+
+        battery = [entity(CONF_BATTERY_SOC_ENTITY), entity(CONF_CHARGE_POWER_RECEIVED_ENTITY)]
+        ac_side = [entity(CONF_CHARGE_POWER_HOUSE_ENTITY), entity(CONF_GRID_IMPORT_ENTITY),
+                   entity(CONF_PV_ENERGY_TODAY_ENTITY)]
+        return {
+            fl.KIND_AHEAD: entity(CONF_PV_FORECAST_ENTITY),
+            fl.KIND_TODAY: entity(CONF_PV_FORECAST_TODAY_ENTITY),
+            fl.KIND_ACTUAL: entity(CONF_PV_ENERGY_TODAY_ENTITY),
+            bl.KIND_CAPACITY: battery,
+            bl.KIND_CHARGE: [*battery, *ac_side],
+            bl.KIND_DISCHARGE: [*battery, *ac_side],
+        }
+
+    def _check_learning_sources(self) -> bool:
+        """Forget what was learned from entities that are no longer configured.
+
+        Only the kinds whose sources changed: a new today entity keeps the
+        evening forecasts and the yields. A diary from before sources were
+        recorded is taken as this setup's. True when anything was forgotten.
+        """
+        current = self._current_learning_sources()
+        known = self._learning_sources
+        changed = False
+        for kind, source in current.items():
+            if kind in known and known[kind] != source:
+                if kind in (fl.KIND_AHEAD, fl.KIND_TODAY, fl.KIND_ACTUAL):
+                    changed |= self._forecast_log.clear(kind)
+                    if kind != fl.KIND_ACTUAL:
+                        self._forecast_backfilled = False  # fill in the new one
+                else:
+                    changed |= self._battery_log.clear([kind])
+                _LOGGER.info("The %s source changed - starting what is learned from it afresh", kind)
+                changed = True
+        if known != current:
+            self._learning_sources = current
+            changed = True
+        return changed
 
     def _save_learning(self) -> None:
         if self._learning_store is not None:
@@ -2031,7 +2083,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         it: the one the night plans with, and the one the day decides with.
         """
         now = dt_util.now()
-        changed = False
+        # An options change swaps self.config in place: check on every poll
+        changed = self._check_learning_sources()
         tomorrow_id = self.config.get(CONF_PV_FORECAST_ENTITY)
         if tomorrow_id and now.hour >= FORECAST_AHEAD_FROM_HOUR:
             kwh, available = self._parse_forecast_energy(str(tomorrow_id))
@@ -2162,16 +2215,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         factor = self._energy_factor(_unit_of(self.hass.states.get(str(meter))))
         totals: dict[date, float] = {}
+        hours: dict[date, int] = {}
         for row in rows.get(str(meter), []):
             start_ts, change = row.get("start"), row.get("change")
-            if not isinstance(start_ts, (int, float)) or not isinstance(change, (int, float)) or change < 0:
+            if not isinstance(start_ts, (int, float)) or not isinstance(change, (int, float)):
                 continue
             local = dt_util.as_local(dt_util.utc_from_timestamp(start_ts))
-            totals[local.date()] = totals.get(local.date(), 0.0) + float(change) * factor
+            hours[local.date()] = hours.get(local.date(), 0) + 1
+            if change >= 0:
+                totals[local.date()] = totals.get(local.date(), 0.0) + float(change) * factor
         changed = False
         for day in days:
-            if day in totals:
-                changed |= self._forecast_log.note(day, fl.KIND_ACTUAL, totals[day])
+            # A day covered only in part stays open: kept now, it would be a
+            # low yield for good, and a later read could not repair it
+            # (Codex on #46)
+            if hours.get(day, 0) >= fl.MIN_DAY_HOURS:
+                changed |= self._forecast_log.note(day, fl.KIND_ACTUAL, totals.get(day, 0.0))
         return changed
 
     def _battery_balance_entities(self) -> dict[str, str] | None:

@@ -26,7 +26,9 @@ wird auch dann weiter.
   Recorders.
 
 Beim ersten Start trägt ICN nach, was der Recorder noch von den Prognosen weiß, in der Regel die
-letzten zehn Tage. Das Tagebuch reicht drei Jahre zurück.
+letzten zehn Tage. Das Tagebuch reicht drei Jahre zurück. Ein Tag, den die Statistiken des
+PV-Zählers mit weniger als 20 Stunden abdecken, bleibt offen. Dann begann die Aufzeichnung erst im
+Lauf des Tages, oder Home Assistant lief zeitweise nicht.
 
 **Was gerechnet wird**, für den Tag, der geplant wird:
 
@@ -109,6 +111,9 @@ kWh. Die Attribute sind:
 
 - Jeder gelernte Wert ist begrenzt und wirkt erst mit genug Daten dahinter.
 - Fehlende Sensoren oder Statistiken lassen die Einstellung stehen.
+- Eine neue Prognose-Entität, ein neuer PV-Zähler oder ein neuer Akkusensor beginnt das, was aus
+  ihm gelernt wird, von vorn. Eine neue *Heute*-Entität etwa behält die Abendprognosen und die
+  Erträge.
 - Eine kleinere Kapazität heißt mehr Prozent je kWh und ein höheres Ziel. Das ist die sichere
   Richtung. Eine größere ist auf 105 % des Nennwerts gedeckelt.
 - Die Ertragsüberwachung ([Extras](extras.md)) vergleicht weiter die rohe Prognose. Sie soll die

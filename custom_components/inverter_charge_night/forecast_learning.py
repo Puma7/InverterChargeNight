@@ -37,6 +37,10 @@ RECENCY_HALF_LIFE_DAYS = 365.0
 MIN_FORECAST_KWH = 1.0
 # Fewer days in the season window, and the setting stands
 MIN_SEASON_DAYS = 14
+# A day the PV meter's statistics cover with fewer hours than this is not
+# complete: recording began, or Home Assistant was down, part of the way
+# through it (a DST day has 23)
+MIN_DAY_HOURS = 20
 FACTOR_MIN = 0.5
 FACTOR_MAX = 1.5
 # One-sided 80 % band: four days in five the sun delivers at least the lower
@@ -153,6 +157,16 @@ class ForecastLog:
         if kind in self.days.get(day, {}):
             return False
         return self.note(day, kind, kwh)
+
+    def clear(self, kind: str) -> bool:
+        """Forget one kind of value, for a source that has changed."""
+        changed = False
+        for day in list(self.days):
+            if self.days[day].pop(kind, None) is not None:
+                changed = True
+            if not self.days[day]:
+                del self.days[day]
+        return changed
 
     def prune(self, today: date) -> bool:
         cutoff = today - timedelta(days=LOG_DAYS)

@@ -368,14 +368,35 @@ async def test_the_pv_meter_gives_each_day_its_yield(coordinator, mock_hass):
     def hour(h: int) -> float:
         return dt_util.as_utc(datetime(day.year, day.month, day.day, h, 30).astimezone()).timestamp()
 
-    rows = {PV_METER: [{"start": hour(10), "change": 2.5}, {"start": hour(12), "change": 4.0},
-                       {"start": hour(13), "change": -30.0}]}
+    changes = {10: 2.5, 12: 4.0, 13: -30.0}  # -30: the meter's midnight reset seen late
+    rows = {PV_METER: [{"start": hour(h), "change": changes.get(h, 0.0)} for h in range(24)]}
     with patch(NOW, return_value=_at(12)), _recorder(coordinator), patch(
         "homeassistant.components.recorder.statistics.statistics_during_period", return_value=rows
     ):
         assert await coordinator._read_pv_actuals(TODAY) is True
 
     assert coordinator._forecast_log.days[day][fl.KIND_ACTUAL] == pytest.approx(6.5)
+
+
+@pytest.mark.asyncio
+async def test_a_day_the_statistics_cover_only_in_part_stays_open(coordinator, mock_hass):
+    """Codex on #46: kept, it would be a low yield for good."""
+    mock_hass.states.async_set(PV_METER, "3.2", {"unit_of_measurement": "kWh"})
+    day = TODAY - timedelta(days=1)
+    coordinator._forecast_log.note(day, fl.KIND_AHEAD, 10.0)
+    import homeassistant.util.dt as dt_util
+
+    def hour(h: int) -> float:
+        return dt_util.as_utc(datetime(day.year, day.month, day.day, h, 30).astimezone()).timestamp()
+
+    # Recording began at 14:00
+    rows = {PV_METER: [{"start": hour(h), "change": 0.5} for h in range(14, 24)]}
+    with patch(NOW, return_value=_at(12)), _recorder(coordinator), patch(
+        "homeassistant.components.recorder.statistics.statistics_during_period", return_value=rows
+    ):
+        assert await coordinator._read_pv_actuals(TODAY) is False
+
+    assert coordinator._forecast_log.days_without_actual(TODAY) == [day]
 
 
 @pytest.mark.asyncio
@@ -431,7 +452,54 @@ async def test_the_store_is_read_at_setup(coordinator):
     assert coordinator._forecast_log.days[date(2026, 1, 10)] == {"f": 7.0, "a": 6.0}
     assert coordinator._battery_log.count("capacity") == 1
     assert coordinator._forecast_backfilled is True
-    assert coordinator._learning_snapshot() == stored
+    assert coordinator._learning_snapshot() == {**stored, "sources": coordinator._current_learning_sources()}
+
+
+@pytest.mark.asyncio
+async def test_a_diary_from_another_forecast_provider_is_not_used(coordinator):
+    """Codex on #46: the old provider's bias is not the new one's."""
+    _season(coordinator._forecast_log, ratio=0.8)
+    _season(coordinator._forecast_log, ratio=0.7, kind=fl.KIND_TODAY)
+    stored = {**coordinator._learning_snapshot(), "backfilled": True,
+              "sources": {**coordinator._current_learning_sources(), fl.KIND_AHEAD: "sensor.old_provider"}}
+
+    with patch("custom_components.inverter_charge_night.coordinator.Store") as store:
+        store.return_value.async_load = AsyncMock(return_value=stored)
+        await coordinator.async_load_learning()
+
+    assert all(fl.KIND_AHEAD not in values for values in coordinator._forecast_log.days.values())
+    # The morning forecasts and the yields came from the same entities as before
+    assert sum(fl.KIND_TODAY in v for v in coordinator._forecast_log.days.values()) == 20
+    assert sum(fl.KIND_ACTUAL in v for v in coordinator._forecast_log.days.values()) == 20
+    assert coordinator._forecast_backfilled is False  # the new one is filled in
+    assert coordinator._learning_snapshot()["sources"][fl.KIND_AHEAD] == PV
+
+
+def test_an_options_change_is_noticed_on_the_next_poll(coordinator, mock_hass):
+    _season(coordinator._forecast_log, ratio=0.8)
+    with patch(NOW, return_value=_at(12)):
+        coordinator._observe_forecasts()  # records the sources
+    coordinator.config = {**coordinator.config, CONF_PV_ENERGY_TODAY_ENTITY: "sensor.new_meter"}
+
+    with patch(NOW, return_value=_at(12)):
+        coordinator._observe_forecasts()
+
+    assert all(fl.KIND_ACTUAL not in values for values in coordinator._forecast_log.days.values())
+    with patch(NOW, return_value=_at(23)):
+        assert coordinator.forecast_calibration(fl.KIND_AHEAD).status == fl.STATUS_LEARNING
+
+
+@pytest.mark.asyncio
+async def test_a_diary_from_before_sources_were_recorded_is_kept(coordinator):
+    _season(coordinator._forecast_log, ratio=0.8)
+    stored = {"pv": coordinator._forecast_log.snapshot(), "backfilled": True}
+
+    with patch("custom_components.inverter_charge_night.coordinator.Store") as store:
+        store.return_value.async_load = AsyncMock(return_value=stored)
+        await coordinator.async_load_learning()
+
+    assert len(coordinator._forecast_log.days) == 20
+    assert coordinator._learning_sources == coordinator._current_learning_sources()
 
 
 @pytest.mark.asyncio

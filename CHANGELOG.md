@@ -39,7 +39,11 @@ before.
 - **Sensors *PV forecast correction*** (factor, band, days, error before and after) **and *Usable
   battery capacity*** (with both efficiencies and what the plan uses). Both are also in the
   diagnostics.
-- The learned data lives in its own store and is deleted with the entry.
+- The learned data lives in its own store and is deleted with the entry. It records which
+  entities each kind of value came from: a new forecast entity, PV meter or battery sensor starts
+  that kind afresh and keeps the rest.
+- A day the PV meter's statistics cover for fewer than 20 hours is not taken as a yield. It stays
+  open and is read again later.
 
 ### Lab
 - `check_real_ha` calls the forecast backfill, the yield read and the battery balance against the

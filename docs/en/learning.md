@@ -24,7 +24,8 @@ use off. Collecting goes on while it is off.
   statistics.
 
 At the first start ICN fills in what the recorder still knows of the forecasts, usually the last
-ten days. The diary keeps three years.
+ten days. The diary keeps three years. A day the PV meter's statistics cover for fewer than 20
+hours stays open, because recording began or Home Assistant was down part of the way through it.
 
 **What is calculated**, for the day being planned:
 
@@ -107,6 +108,8 @@ kWh. Its attributes are:
 
 - Every learned value is bounded, and it applies only with enough data behind it.
 - Missing sensors or statistics leave the setting in place.
+- A new forecast entity, PV meter or battery sensor starts what is learned from it afresh. A new
+  *today* entity, for example, keeps the evening forecasts and the yields.
 - A smaller capacity means more percent per kWh and a higher target: that is the safe direction.
   A larger one is capped at 105 % of the nameplate.
 - The PV shortfall monitor ([extras](extras.md)) keeps comparing the raw forecast. It is there to

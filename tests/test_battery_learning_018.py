@@ -365,3 +365,26 @@ def test_a_day_old_sample_is_still_fresh(coordinator):
     _learned(coordinator, bl.KIND_CAPACITY, 31.0)
     later = datetime.now() + timedelta(days=1)
     assert coordinator._battery_log.estimate(bl.KIND_CAPACITY, later.timestamp()) == 31.0
+
+
+def test_another_battery_sensor_starts_the_capacity_afresh(coordinator):
+    """Codex on #46: samples belong to the sensors that measured them."""
+    _learned(coordinator, bl.KIND_CAPACITY, 31.0)
+    assert coordinator._check_learning_sources() is True  # recorded for the first time
+    coordinator.config = {**coordinator.config, CONF_CHARGE_POWER_RECEIVED_ENTITY: "sensor.other"}
+
+    assert coordinator._check_learning_sources() is True
+    assert coordinator._battery_log.count(bl.KIND_CAPACITY) == 0
+    assert coordinator._check_learning_sources() is False
+
+
+def test_a_new_house_sensor_keeps_the_capacity(coordinator):
+    _learned(coordinator, bl.KIND_CAPACITY, 31.0)
+    _learned(coordinator, bl.KIND_DISCHARGE, 0.9)
+    coordinator._check_learning_sources()
+    coordinator.config = {**coordinator.config, CONF_CHARGE_POWER_HOUSE_ENTITY: HOUSE}
+
+    coordinator._check_learning_sources()
+
+    assert coordinator._battery_log.count(bl.KIND_CAPACITY) == 3
+    assert coordinator._battery_log.count(bl.KIND_DISCHARGE) == 0

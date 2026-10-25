@@ -198,6 +198,14 @@ class BatteryLog:
         self.samples = kept
         return changed
 
+    def clear(self, kinds: Iterable[str]) -> bool:
+        """Forget the samples of these kinds, for sensors that have changed."""
+        drop = set(kinds)
+        kept = [s for s in self.samples if s.kind not in drop]
+        changed = len(kept) != len(self.samples)
+        self.samples = kept
+        return changed
+
     def count(self, kind: str) -> int:
         return sum(1 for s in self.samples if s.kind == kind)
 
