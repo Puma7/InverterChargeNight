@@ -32,7 +32,11 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
     # measurement or writing fabricated efficiency history.
     hass.config_entries.async_update_entry(planner, data={**planner.data,
         "auto_efficient_charge": True, "min_charge_power_w": 1000, "max_charge_power_w": 15000,
-        "charge_energy_sent_entity": None, "charge_energy_received_entity": None})
+        "charge_energy_sent_entity": None, "charge_energy_received_entity": None,
+        # The AC side from the actual import, not the per-phase guard value the
+        # connection limit reads: that one is the larger of the two under an
+        # unbalanced load and would overstate what the charger takes
+        "grid_import_entity": "sensor.icn_lab_grid_power"})
     await hass.async_block_till_done()
     # Reconfiguration deliberately releases an existing window. Start the
     # experiment only once the new measurement configuration has settled.
@@ -57,6 +61,9 @@ async def check_efficiency(hass, lab, planner, kore_entry, check):
           {"active": co.is_active, "target": co.minimum_calculated_soc,
            "pending_reset": co._pending_reset, "hands_off": str(co._hands_off_until),
            "soc": lab.plant.soc, "min_soc": lab.plant.min_soc, "health": co.communication_diagnostics()})
+    check("efficiency measures the AC side as grid import minus house consumption",
+          co._charge_input_entities() == ("sensor.icn_lab_grid_power", planner.data["charge_power_house_entity"]),
+          co._charge_input_entities())
     lab.commands.clear()
 
     clock = [dt_util.now()]

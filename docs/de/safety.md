@@ -148,8 +148,9 @@ Kommunikationszustand und seinen Verlauf zurück, ohne das Gerät anzufassen.
 Bei manchen Wechselrichtern ist der Schalter für das Netzladen eine Zwangsladung mit voller
 Leistung. Das *Battery Manual Charge* des Kostal ist so einer. ICN erkennt das: Hebt das
 Einschalten die Ladegrenze auf, geht das Netzladen für den Rest des Fensters wieder aus, und der
-angehobene Min-SOC übernimmt das Laden unter der geschriebenen Grenze. Rechne mit einem kurzen
-Einschalten pro Nacht und einer Warnung im Protokoll. Details:
+angehobene Min-SOC übernimmt das Laden unter der geschriebenen Grenze. Hat ein Fenster sein Ziel
+so erreicht, lässt ICN den Schalter in den folgenden Fenstern 30 Tage lang aus, damit sich das
+kurze Einschalten nicht jede Nacht wiederholt. Details:
 [Kostal mit KOSTAL KORE](kostal-kore.md).
 
 ## Haftungsausschluss

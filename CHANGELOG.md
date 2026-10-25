@@ -5,6 +5,52 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.13.0] - 2026-10-25
+
+The efficiency search measures what it is meant to measure (plan 017). On 24/25 October 2026 it
+ran fourteen trials at 1000 W and discarded every one with a loss of 200 %: the AC side was
+KostalKore's *Grid to Battery Power*, which is the battery's DC power split by source, and the
+battery side counts charging as negative. The search never got to a second power.
+
+### Added
+- **House consumption (power)** on the efficiency search page. Together with grid import it gives
+  what the charger takes on the AC side: grid import minus house consumption. Example from that
+  night: 1575 W from the grid, 495 W in the house, 1000 W in the battery, 7.4 % loss. Either this
+  pair or a sensor of its own; the setup asks for one and refuses both. KostalKore's *Home Power*
+  is suggested.
+- **A repair issue when the sensors cannot be right.** Two trials with an impossible loss in a
+  window end the search for that window (`sensors_implausible`) and name the AC side, the battery
+  side and the ratio they read, instead of writing a new trial every twenty minutes all night.
+
+### Fixed
+- **A sensor that counts charging as negative** is turned for the measurement and the log says so
+  once. The help texts claimed "the sign is handled"; it was not.
+- **A loss below 0.5 % is refused** like one below zero: no AC/DC charger loses less, so both
+  sensors measure the same thing.
+- **The setup no longer suggests or accepts KostalKore *Grid to Battery Power*** as the AC side,
+  and its help texts no longer recommend it.
+- **The house connection limit credits the charger's own draw** from grid import minus house
+  consumption too; without an AC sensor all import counted as foreign load.
+- **The forced charge is remembered.** Once switching grid charging on lifted the charge limit and
+  the window then reached its target under the raised min SOC, later windows leave the switch off
+  from the start, for 30 days or until the switch or the limit entity changes. Before, every night
+  switched it on again, and for the seconds until that was noticed the Kostal could draw at its
+  own 21.4 kW limit. A window that did not reach its target that way remembers nothing.
+- **No write-back of the rounded floor.** Charged to a min SOC rounded up to the next step, the
+  verification wrote it one step down once the target was met, every night. It now keeps that
+  step.
+- Two log lines still said "evening rescue".
+
+### Lab
+- The simulator publishes `Grid2Bat_P` on the DC side, like the real inverter; it used to be the
+  AC side, which is why the lab never showed the problem. The KostalKore campaign measures grid
+  import minus `Home_P` and still finds the 8 kW optimum.
+
+### Docs
+- Efficiency search, configuration, Kostal with KOSTAL KORE and safety (DE/EN): where the AC side
+  comes from, which KostalKore entities to leave empty, the forced-charge memory, and what KORE
+  reads back from register 1038.
+
 ## [3.12.0] - 2026-10-24
 
 The evening rescue becomes the **high-price rescue** and holds only what the period needs

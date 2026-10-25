@@ -72,12 +72,15 @@ Berechnung aus der Sicherung, und das Speichern der Sicherungsseite entfernt ein
 ## Effizienzsuche einrichten
 
 Misst, bei welcher Ladeleistung am wenigsten Energie verloren geht, und hält sich dann daran
-([Details](efficiency-search.md)). Braucht die Ladegrenze und zwei getrennte Leistungsmessungen:
+([Details](efficiency-search.md)). Braucht die Ladegrenze, die AC-Seite der Ladung und die
+Akkuseite:
 
 | Feld | Bedeutung |
 |---|---|
-| AC-Eingangsleistung nur für die Batterieladung (`charge_power_sent_entity`) | Die AC-Leistung, die in das Ladegerät des Akkus fließt, positiv beim Laden. Nicht der Netzbezug des Hauses und nicht die gesamte AC-Leistung des Wechselrichters. KOSTAL KORE: *Grid to Battery Power*. |
-| DC-Ladeleistung, die am Akku ankommt (`charge_power_received_entity`) | Die DC-Leistung, die im Akku ankommt. KOSTAL KORE: *Battery Power*. |
+| Hausverbrauch (Leistung) (`charge_power_house_entity`) | Empfohlen. Was das Haus selbst verbraucht, in W, ohne den Akku. Mit dem Netzbezug ergibt das die AC-Aufnahme des Ladegeräts: Netzbezug minus Hausverbrauch. KOSTAL KORE: *Home Power*. |
+| Netzbezug (Leistung) (`grid_import_entity`) | Der Bezug am Hausanschluss, positiv beim Bezug. Dasselbe Feld wie für die [Begrenzung des Hausanschlusses](#hausanschluss-begrenzen). |
+| AC-Eingangsleistung nur für die Batterieladung (`charge_power_sent_entity`) | Nur statt des Paars oben, und nur ein Sensor, der die AC-Aufnahme des Ladegeräts selbst misst. Nicht KOSTAL KORE *Grid to Battery Power*, das ist die DC-Leistung des Akkus, und nicht die gesamte AC-Leistung des Wechselrichters. |
+| DC-Ladeleistung, die am Akku ankommt (`charge_power_received_entity`) | Die DC-Leistung, die im Akku ankommt. KOSTAL KORE: *Battery Power*. Zählt der Sensor Laden negativ, wird das automatisch umgedreht. |
 
 Zwei kWh-Zähler für dieselben beiden Größen (Seite *Effizienz-Messwerte und Energiezähler*:
 *Energiezähler: aufgenommen*, *Energiezähler: im Speicher angekommen*) sind freiwillig und machen
@@ -153,7 +156,7 @@ Der Sensor *Preissignal* zeigt, welche Preise verwendet wurden.
 
 | Seite | Felder |
 |---|---|
-| **Effizienz-Messwerte und Energiezähler** | Die beiden Leistungssensoren der Effizienzsuche, dazu freiwillig kWh-Zähler für beide Seiten (*Energiezähler: aufgenommen*, *Energiezähler: im Speicher angekommen*). |
+| **Effizienz-Messwerte und Energiezähler** | Die Leistungssensoren der Effizienzsuche, dazu freiwillig kWh-Zähler für beide Seiten (*Energiezähler: aufgenommen*, *Energiezähler: im Speicher angekommen*). |
 | **Inselbetrieb erkennen** | *Entität für Notstrom-/Inselbetrieb* und, wenn es ein einfacher Sensor ist, die *Zustände für Notstrombetrieb*, die Inselbetrieb bedeuten (Kostal: `ESB`). Dringend empfohlen bei einem Notstrom- oder Umschalter ([Details](safety.md#stromausfall-und-inselbetrieb)). |
 | **Zusätzliche Hardwaregrenzen** | Eine zweite, unabhängige Ladeobergrenze (*Zusätzlicher Hardwaredeckel: eigener Watt-Steller* und *Zusätzlicher Hardwaredeckel: Leistungswert*, beide oder keines). Meist leer. Die *Entität für die Entladeleistungsgrenze* ist eine Altlast, nur um einen alten Wert zurückzugeben. |
 | **Hausanschluss aus Sicherungsdaten berechnen** | Siehe [Hausanschluss](#hausanschluss-begrenzen). |

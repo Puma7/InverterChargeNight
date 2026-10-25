@@ -10,12 +10,31 @@ where it lies depends on the hardware. So ICN measures it rather than guessing.
 ## What it needs
 
 - A writable **charge limit** in W ([Limit charging power](configuration.md#limit-charging-power)).
-- Two separate power measurements: the **AC power going into the charger** and the **DC power
-  arriving in the battery** (KOSTAL KORE: *Grid to Battery Power* and *Battery Power*).
+- The **AC power going into the charger** and the **DC power arriving in the battery**, measured
+  separately (see [Where the AC side comes from](#where-the-ac-side-comes-from)).
 - Optional and better: two **kWh meters** for the same two quantities. A difference of two meter
   readings is the energy that really flowed.
 - Darkness: PV feeding the battery would spoil the comparison, so the search only measures while
   `sun.sun` is below the horizon.
+
+### Where the AC side comes from
+
+Few houses have a meter for the charger alone. ICN therefore takes it from the meter at the
+connection point: **grid import minus house consumption** is what goes into the charger while the
+sun is down. Set *House consumption (power)* and *Grid import (power)* on the page *Set up
+efficiency search* and leave *AC input power used only for battery charging* empty.
+
+An example from 24/25 October 2026: 1575 W from the grid, 495 W in the house, so 1080 W into the
+charger. 1000 W arrived in the battery: a loss of 80 W, 7.4 %.
+
+Only a sensor that really measures the charger's AC input may stand in for the pair. An
+inverter's *grid to battery* power is usually its own split of the battery's DC power by source.
+Against the battery power it reads a ratio of exactly 1, and the loss it shows is always zero. On
+a Kostal with KOSTAL KORE that is *Grid to Battery Power*, which the setup refuses for this
+reason.
+
+A battery sensor that counts charging as negative, as the Kostal's *Battery Power* does, is
+turned for the measurement and the log says so once.
 
 Switch it on with the page *Set up efficiency search* or the switch **Efficiency search**. It
 switches itself off when it is done. The two sensors *Efficiency search* and *Most efficient
@@ -51,8 +70,8 @@ A wrong sample would steer every later night, so it discards:
 - a measurement where the inverter did not follow the setpoint, for example a nearly full battery
   that tapers the charge;
 - one that was too short or moved too little energy;
-- a loss below zero (the two sensors measure the same side) or above 50 % (a sensor, wiring or
-  unit problem);
+- a loss below 0.5 % (the two sensors measure the same thing; no charger loses less) or above
+  50 % (a sensor, wiring or unit problem);
 - unavailable or stale readings, an interrupted sample stream, a clock that jumped;
 - anything measured while the sun is up.
 
@@ -60,7 +79,9 @@ It also does not keep writing in vain. A trial whose battery draws less than a q
 power after five minutes ends. A second such trial ends the search for the window
 (`battery_not_charging`). So do an inverter that lowers the limit itself
 (`inverter_lowered_limit`), two trial starts it did not take (`charge_limit_not_taken`) and two
-trials lost to missing readings (`power_telemetry_lost`). The next window tries again.
+trials lost to missing readings (`power_telemetry_lost`). Two trials with an impossible loss end
+it too (`sensors_implausible`), and a repair issue names the sensors and the ratio they read. The
+next window tries again.
 
 ## Reading the result
 
@@ -76,7 +97,8 @@ The sensor **Efficiency search** shows the state (*off*, *waiting for charging*,
 | `waiting_reason` | Why no trial is running right now. |
 
 **Most efficient charge power** keeps the result. If every measurement is discarded, check the
-sensors first: *drawn* must be the AC side of the charger and *received* the battery side.
+sensors first: the AC side must be the charger's intake, best grid import minus house
+consumption, and *received* the battery side.
 
 Changing the sensors, the charge limit, the minimum or maximum charge power or the battery
 capacity invalidates old measurements. The result is an

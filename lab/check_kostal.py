@@ -133,7 +133,9 @@ async def main():
                         "grid_charge_switch": "_devices:local_Battery:ManualCharge",
                         "battery_soc_entity": "_devices:local:battery_SoC",
                         "charge_power_entity": "_modbus_bat_max_charge_limit",
-                        "charge_power_sent_entity": "_devices:local_Grid2Bat_P",
+                        # The AC side is grid import minus house consumption
+                        # (plan 017); Grid to Battery Power is DC
+                        "charge_power_house_entity": "_devices:local_Home_P",
                         "charge_power_received_entity": "_devices:local:battery_P",
                         "discharge_limit_entity": "_modbus_bat_max_discharge_limit"}
             for key, suffix in suffixes.items():
@@ -174,6 +176,7 @@ async def main():
             from custom_components.icn_simulator.defaults import configure_planner, planner_defaults
             defaults = planner_defaults()
             defaults.update(mapping)
+            defaults.pop("charge_power_sent_entity", None)  # one AC side, not two
             # Exercise the same min-SOC based hold as the persistent ICN2 lab.
             defaults.pop("discharge_block_switch", None)
             defaults.pop("discharge_limit_entity", None)

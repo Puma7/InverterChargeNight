@@ -138,7 +138,8 @@ its history without touching the device.
 On some inverters the "grid charge" switch is a forced charge at full power. The Kostal's
 *Battery Manual Charge* is one. ICN detects it: if switching on lifts the charge limit, grid
 charging goes off again for the rest of the window, and the raised minimum SOC does the charging
-under the written limit. Expect one short switch-on per night and a warning in the log. Details:
+under the written limit. Once a window has reached its target that way, ICN leaves the switch
+off in later windows for 30 days, so the short switch-on does not repeat every night. Details:
 [Kostal with KOSTAL KORE](kostal-kore.md).
 
 ## Disclaimer

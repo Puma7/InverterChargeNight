@@ -29,6 +29,7 @@ REDACT_KEYS = {
     "charge_power_entity",
     "charge_power_sent_entity",
     "charge_power_received_entity",
+    "charge_power_house_entity",
     "charge_energy_sent_entity",
     "charge_energy_received_entity",
     "absolute_max_charge_power_entity",

@@ -17,9 +17,10 @@ cost real money if you get them wrong.
 | **Battery SOC sensor** (required) | `Battery SoC` | |
 | **PV forecast** (required) | — | Comes from Solcast or another forecast integration, not from the inverter. |
 | **AC charge limit entity** | `Battery Max Charge Limit (Modbus)` (register 1038) or `Battery Max Charge Power (G3)` (register 1280) | See the traps below — this is the entity the house connection limit writes to. |
-| **Charge power arriving in the battery** | `Battery Power` (`devices:local:battery` → `P`, DC side) | |
-| **Charge power drawn for charging** | **`Grid2Bat_P`** (`devices:local`) | Power flowing from the grid into the battery — exactly the AC-side intake the efficiency search needs. Confirmed present on a PLENTICORE L G3 with firmware 3.07. |
-| **Energy meter: drawn for charging** | `Battery Charge from Grid Total` (kWh) | Exactly the right quantity: grid energy that went into the battery. |
+| **Charge power arriving in the battery** | `Battery Power` (`devices:local:battery` → `P`, DC side) | Counts charging as negative; ICN turns it for the efficiency search. |
+| **House consumption (power)** | `Home Power` (`devices:local` → `Home_P`) | With the grid import it gives the charger's AC intake for the efficiency search: grid import minus house consumption. |
+| **AC input power used only for battery charging** | leave empty | `Grid2Bat_P` (*Grid to Battery Power*) is the inverter's split of the battery's DC power, not its AC intake: against `Battery Power` it read a ratio of exactly -1 all night (24/25 October 2026). The setup refuses it. |
+| **Energy meter: drawn for charging** | leave empty for now | Whether `Battery Charge from Grid Total` counts the AC or the DC side is not confirmed. KOSTAL documents Modbus register 1054 as *total AC charge energy (grid to battery)* and 1046 as the DC charge energy; KOSTAL KORE does not create sensors for them yet. With both, the efficiency search could measure the energy that really flowed. |
 | **Energy meter: stored in the battery** | not exported as an entity today | KOSTAL KORE reads Modbus `total_dc_charge` (1046) but does not create a sensor for it. Without it the efficiency search falls back to the power sensors. |
 | **Discharge power limit entity** (legacy) | `Battery Max Discharge Limit (Modbus)` (1040) or `Battery Max Discharge Power (G3)` (1282) | Only needed to give back a value a version before 3.10.6 wrote. ICN no longer writes it. |
 | **Block discharge switch** (legacy) | `Battery Disable Discharge` (`EnergyMgmt:BatCtrl:DisabelDischarge`) | Only needed to give back a state a version before 3.10.6 changed. ICN no longer switches it; the battery is held through the min SOC only. |
@@ -72,8 +73,15 @@ battery charged nothing all night (0 W at a 1000 W limit), and from 23:31 the Ko
 charge limit as 51 W and ignored writes. Inverter
 Charge Night writes the limit again right after switching on and rechecks it shortly after; if
 the switch lifted it, grid charging goes off again for the rest of the window and the raised min
-SOC does the charging. Expect one short switch-on per night and the warning
-`The charge limit did not hold with ... switched on` in the log.
+SOC does the charging. Once a window has reached its target that way, later windows leave the
+switch off from the start for 30 days, so the short switch-on happens once rather than every
+night. A new switch or charge limit entity, or 30 days, and it is tried again. The log says
+`The charge limit did not hold with ... switched on` the first time, and
+`Grid charging stays off this window` after that.
+
+On 24/25 October 2026 KOSTAL KORE read register 1038 back as 21 460 W a second after the
+switch-on, 0 W after the switch-off and 245 W and 53 W later in the night, each time after
+1000 W had been written. A read of 1038 is not a reliable confirmation of what was written.
 
 **A limit on 1038 lapses unless it is written again.** 1000 W written and confirmed at 23:01,
 about 8 kW charging at 23:12, with nothing else writing the register: without a new value within

@@ -71,12 +71,15 @@ fuse page removes such a budget.
 ## Set up efficiency search
 
 Measures at which charge power the least energy is lost and then keeps to it
-([details](efficiency-search.md)). Needs the charge limit and two separate power measurements:
+([details](efficiency-search.md)). Needs the charge limit, the AC side of the charge and the
+battery side:
 
 | Field | Meaning |
 |---|---|
-| AC input power used only for battery charging (`charge_power_sent_entity`) | The AC power going into the battery charger, positive while charging. Not the house import or the inverter's total AC power. KOSTAL KORE: *Grid to Battery Power*. |
-| DC charging power received by battery (`charge_power_received_entity`) | The DC power arriving in the battery. KOSTAL KORE: *Battery Power*. |
+| House consumption (power) (`charge_power_house_entity`) | Recommended. What the house itself consumes in W, without the battery. With grid import it gives the charger's AC input: grid import minus house consumption. KOSTAL KORE: *Home Power*. |
+| Grid import (power) (`grid_import_entity`) | The import at the house connection, positive while drawing. The same field as for the [house connection limit](#limit-house-connection-import). |
+| AC input power used only for battery charging (`charge_power_sent_entity`) | Only instead of the pair above, and only a sensor that measures the charger's AC input itself. Not KOSTAL KORE *Grid to Battery Power*, which is the battery's DC power, nor the inverter's total AC power. |
+| DC charging power received by battery (`charge_power_received_entity`) | The DC power arriving in the battery. KOSTAL KORE: *Battery Power*. Counted negative while charging, it is turned automatically. |
 
 Two kWh meters for the same two quantities (page *Efficiency measurements and energy meters*)
 are optional and make the result more accurate.
@@ -150,7 +153,7 @@ The *Price signal* sensor shows which prices were used.
 
 | Page | Fields |
 |---|---|
-| **Efficiency measurements and energy meters** | The two power sensors of the efficiency search, plus optional kWh meters for both sides. |
+| **Efficiency measurements and energy meters** | The power sensors of the efficiency search, plus optional kWh meters for both sides. |
 | **Detect island operation** | Backup / island mode entity, and the states that mean island operation if it is a plain sensor (Kostal: `ESB`). Strongly recommended with a backup or transfer switch ([details](safety.md#power-cut-and-island-operation)). |
 | **Additional hardware limits** | A second, independent charge ceiling (entity and value, both or neither). Usually empty. The *Discharge Power Limit Entity* is legacy, only to give back an old value. |
 | **Calculate import budget from fuse rating** | See [house connection](#limit-house-connection-import). |

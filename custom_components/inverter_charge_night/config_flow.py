@@ -53,6 +53,7 @@ from .const import (
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
     CONF_CHARGE_ENERGY_SENT_ENTITY,
+    CONF_CHARGE_POWER_HOUSE_ENTITY,
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
     CONF_COMMAND_DELAY,
@@ -181,6 +182,7 @@ STEP_POWER_KEYS: tuple[str, ...] = (
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
+    CONF_CHARGE_POWER_HOUSE_ENTITY,
     CONF_CHARGE_ENERGY_SENT_ENTITY,
     CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
     CONF_AUTO_EFFICIENT_CHARGE,
@@ -300,6 +302,7 @@ _ENTITY_KEYS_TO_VALIDATE = [
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_POWER_SENT_ENTITY,
     CONF_CHARGE_POWER_RECEIVED_ENTITY,
+    CONF_CHARGE_POWER_HOUSE_ENTITY,
     CONF_CHARGE_ENERGY_SENT_ENTITY,
     CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
     CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY,
@@ -411,10 +414,23 @@ def _validate_user_input(
     if user_input.get(CONF_AUTO_EFFICIENT_CHARGE):
         if not user_input.get(CONF_CHARGE_POWER_ENTITY):
             errors[CONF_CHARGE_POWER_ENTITY] = "required_entity"
-        if not user_input.get(CONF_CHARGE_POWER_SENT_ENTITY):
-            errors[CONF_CHARGE_POWER_SENT_ENTITY] = "required_entity"
+        if not user_input.get(CONF_CHARGE_POWER_SENT_ENTITY) and not user_input.get(
+            CONF_CHARGE_POWER_HOUSE_ENTITY
+        ):
+            # The AC side: a sensor of its own, or grid import minus house
+            # consumption (plan 017)
+            errors[CONF_CHARGE_POWER_SENT_ENTITY] = "ac_side_required"
         if not user_input.get(CONF_CHARGE_POWER_RECEIVED_ENTITY):
             errors[CONF_CHARGE_POWER_RECEIVED_ENTITY] = "required_entity"
+    house = user_input.get(CONF_CHARGE_POWER_HOUSE_ENTITY)
+    if house:
+        if not user_input.get(CONF_GRID_IMPORT_ENTITY):
+            errors[CONF_GRID_IMPORT_ENTITY] = "required_entity"
+        if user_input.get(CONF_CHARGE_POWER_SENT_ENTITY):
+            errors[CONF_CHARGE_POWER_HOUSE_ENTITY] = "ac_side_twice"
+        if house in (user_input.get(CONF_GRID_IMPORT_ENTITY),
+                     user_input.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)):
+            errors[CONF_CHARGE_POWER_HOUSE_ENTITY] = "separate_power_measurements"
 
     # Planner v2 inputs (plan 006); all optional in the sense that defaults exist
     avg_load = user_input.get(CONF_AVG_HOUSE_LOAD_KW)
@@ -444,8 +460,9 @@ def _validate_user_input(
     if pct is not None and not 0 < pct <= 100:
         errors[CONF_GRID_CONTINUOUS_PCT] = "invalid_soc"
     if user_input.get(CONF_GRID_IMPORT_ENTITY):
-        if grid_max_w is None and fuse_a is None:
-            # Without a budget the entity would be read but never act.
+        if grid_max_w is None and fuse_a is None and not house:
+            # Without a budget the entity would be read but never act - unless
+            # the efficiency search reads it for the AC side (plan 017)
             errors[CONF_MAIN_FUSE_A] = "required_value"
         if not user_input.get(CONF_CHARGE_POWER_ENTITY):
             # The limit works by writing a lower charge setpoint. Without that
@@ -507,7 +524,13 @@ def _validate_user_input(
         errors[CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY] = "separate_power_controls"
     if sent:
         entity = entity_registry.async_get(sent)
-        if entity is not None and entity.platform == "kostal_kore" and entity.unique_id.endswith(("_devices:local:ac_P", "_devices:local_Ac_P")):
+        # Neither is the charger's AC input. Total AC power includes the
+        # house; "Grid to Battery Power" is the inverter's split of the
+        # battery's DC power and read a ratio of exactly -1 against the battery
+        # power all night (24/25 October 2026, plan 017).
+        if entity is not None and entity.platform == "kostal_kore" and entity.unique_id.endswith(
+            ("_devices:local:ac_P", "_devices:local_Ac_P", "_devices:local_Grid2Bat_P")
+        ):
             errors[CONF_CHARGE_POWER_SENT_ENTITY] = "requires_charge_input_power"
 
     return errors
@@ -781,7 +804,12 @@ def _schema_power(defaults: Mapping[str, Any]) -> vol.Schema:
             _optional(CONF_ABSOLUTE_MAX_CHARGE_POWER_W, defaults.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_W)): _number_selector(**_WATTS),
             _optional(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY, defaults.get(CONF_ABSOLUTE_MAX_CHARGE_POWER_ENTITY)): _entity_selector(_CONTROL_DOMAINS),
             dependent(CONF_CHARGE_POWER_ENTITY, control_needed): _entity_selector(_CONTROL_DOMAINS),
-            dependent(CONF_CHARGE_POWER_SENT_ENTITY, efficiency): _entity_selector("sensor", "power"),
+            _optional(
+                CONF_CHARGE_POWER_SENT_ENTITY, defaults.get(CONF_CHARGE_POWER_SENT_ENTITY)
+            ): _entity_selector("sensor", "power"),
+            _optional(
+                CONF_CHARGE_POWER_HOUSE_ENTITY, defaults.get(CONF_CHARGE_POWER_HOUSE_ENTITY)
+            ): _entity_selector("sensor", "power"),
             dependent(CONF_CHARGE_POWER_RECEIVED_ENTITY, efficiency): _entity_selector("sensor", "power"),
             _optional(
                 CONF_CHARGE_ENERGY_SENT_ENTITY, defaults.get(CONF_CHARGE_ENERGY_SENT_ENTITY)
@@ -979,10 +1007,12 @@ _GUIDED_GROUPS: dict[str, tuple[str, ...]] = {
                CONF_BATTERY_SOC_ENTITY, CONF_BATTERY_CAPACITY, CONF_PV_FORECAST_ENTITY),
     "schedule": (CONF_START_TIME, CONF_END_TIME, CONF_USER_MIN_SOC, CONF_USER_MAX_SOC),
     "charging": (CONF_CHARGE_POWER_ENTITY, CONF_MIN_CHARGE_POWER_W, CONF_MAX_CHARGE_POWER_W),
-    "efficiency": (CONF_CHARGE_POWER_ENTITY, CONF_CHARGE_POWER_SENT_ENTITY,
+    "efficiency": (CONF_CHARGE_POWER_ENTITY, CONF_CHARGE_POWER_HOUSE_ENTITY,
+                   CONF_GRID_IMPORT_ENTITY, CONF_CHARGE_POWER_SENT_ENTITY,
                    CONF_CHARGE_POWER_RECEIVED_ENTITY, CONF_MIN_CHARGE_POWER_W,
                    CONF_MAX_CHARGE_POWER_W),
-    "meters": (CONF_CHARGE_POWER_SENT_ENTITY, CONF_CHARGE_POWER_RECEIVED_ENTITY,
+    "meters": (CONF_CHARGE_POWER_HOUSE_ENTITY, CONF_GRID_IMPORT_ENTITY,
+               CONF_CHARGE_POWER_SENT_ENTITY, CONF_CHARGE_POWER_RECEIVED_ENTITY,
                CONF_CHARGE_ENERGY_SENT_ENTITY, CONF_CHARGE_ENERGY_RECEIVED_ENTITY),
     "grid": (CONF_GRID_IMPORT_ENTITY, CONF_GRID_MAX_CONTINUOUS_W,
              CONF_GRID_HEADROOM_W, CONF_CHARGE_POWER_ENTITY),
@@ -1009,6 +1039,11 @@ _GUIDED_GROUPS: dict[str, tuple[str, ...]] = {
                 CONF_CURTAILMENT_LIMIT_W, CONF_OPERATION_MODE, CONF_FORCE_DISCHARGE_SWITCH),
 }
 _BUILDERS = (_schema_entities, _schema_time_soc, _schema_power, _schema_advanced)
+# The efficiency search's AC side is one sensor or house consumption with grid
+# import, so none of the three is required on its own (plan 017); the
+# validation asks for one complete choice.
+_AC_SIDE_KEYS = frozenset({CONF_CHARGE_POWER_SENT_ENTITY, CONF_CHARGE_POWER_HOUSE_ENTITY,
+                           CONF_GRID_IMPORT_ENTITY})
 _FEATURE_FLAGS = {"efficiency": CONF_AUTO_EFFICIENT_CHARGE,
                   "pv_shortfall": CONF_AUTO_PV_SHORTFALL}
 _KORE_SUFFIXES = {
@@ -1016,7 +1051,10 @@ _KORE_SUFFIXES = {
     CONF_GRID_CHARGE_SWITCH: ("_devices:local_Battery:ManualCharge",),
     CONF_BATTERY_SOC_ENTITY: ("_devices:local:battery_SoC",),
     CONF_CHARGE_POWER_ENTITY: ("_modbus_bat_max_charge_limit",),
-    CONF_CHARGE_POWER_SENT_ENTITY: ("_devices:local_Grid2Bat_P",),
+    # The AC side of a charge is grid import minus house consumption: KORE's
+    # "Grid to Battery Power" is the battery's DC power split by source and
+    # carries no conversion loss (plan 017)
+    CONF_CHARGE_POWER_HOUSE_ENTITY: ("_devices:local_Home_P",),
     CONF_CHARGE_POWER_RECEIVED_ENTITY: ("_devices:local:battery_P",),
 }
 
@@ -1052,6 +1090,8 @@ def _guided_schema(group: str, defaults: Mapping[str, Any]) -> vol.Schema:
     fields = {marker.schema: (marker, validator)
               for builder in _BUILDERS for marker, validator in builder(defaults).schema.items()}
     required = set(_GUIDED_GROUPS[group]) if group in ("charging", "efficiency", "grid", "grid_fuse", "pv_shortfall") else set()
+    if group == "efficiency":
+        required -= _AC_SIDE_KEYS
     if defaults.get(CONF_AUTO_PV_SHORTFALL):
         required.add(CONF_PV_FORECAST_TODAY_ENTITY)
     return vol.Schema({(_required(key, defaults) if key in required else fields[key][0]): fields[key][1]
@@ -1142,7 +1182,8 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
             errors = _process_step(self.hass, candidate, keys, values)
             for key in _GUIDED_GROUPS[group]:
                 if (group in ("basics", "charging", "efficiency", "grid", "grid_fuse", "pv_shortfall")
-                        and not values.get(key) and key != CONF_GRID_HEADROOM_W):
+                        and not values.get(key) and key != CONF_GRID_HEADROOM_W
+                        and not (group == "efficiency" and key in _AC_SIDE_KEYS)):
                     errors[key] = "required_value"
             if group == "basics" and values.get(CONF_MIN_SOC_ENTITY):
                 scope = self._draft_scope()

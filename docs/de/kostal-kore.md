@@ -17,9 +17,10 @@ Wechselrichter, dazu die Fallstricke, die echtes Geld kosten, wenn man sie falsc
 | **Ladestandssensor des Speichers** (Pflicht) | `Battery SoC` | |
 | **PV-Prognose (MORGEN)** (Pflicht) | — | Kommt von Solcast oder einer anderen Prognose-Integration, nicht vom Wechselrichter. |
 | **Entität für die maximale AC-Ladeleistung** | `Battery Max Charge Limit (Modbus)` (Register 1038) oder `Battery Max Charge Power (G3)` (Register 1280) | Siehe die Fallstricke unten — in diese Entität schreibt die Begrenzung des Hausanschlusses. |
-| **Im Speicher ankommende Ladeleistung** | `Battery Power` (`devices:local:battery` → `P`, DC-Seite) | |
-| **Aufgenommene Ladeleistung** | **`Grid2Bat_P`** (`devices:local`) | Leistung, die aus dem Netz in den Akku fließt — genau die Aufnahme auf der AC-Seite, die die Effizienzsuche braucht. Auf einem PLENTICORE L G3 mit Firmware 3.07 als vorhanden bestätigt. |
-| **Energiezähler: aufgenommen** | `Battery Charge from Grid Total` (kWh) | Genau die richtige Größe: Netzenergie, die in den Akku gegangen ist. |
+| **Im Speicher ankommende Ladeleistung** | `Battery Power` (`devices:local:battery` → `P`, DC-Seite) | Zählt Laden negativ; ICN dreht das für die Effizienzsuche um. |
+| **Hausverbrauch (Leistung)** | `Home Power` (`devices:local` → `Home_P`) | Mit dem Netzbezug ergibt das die AC-Aufnahme des Ladegeräts für die Effizienzsuche: Netzbezug minus Hausverbrauch. |
+| **AC-Eingangsleistung nur für die Batterieladung** | leer lassen | `Grid2Bat_P` (*Grid to Battery Power*) ist die Aufteilung der DC-Leistung des Akkus durch den Wechselrichter, nicht seine AC-Aufnahme: Gegen `Battery Power` ergab sie die ganze Nacht ein Verhältnis von genau −1 (24./25. Oktober 2026). Die Einrichtung lehnt sie ab. |
+| **Energiezähler: aufgenommen** | vorerst leer lassen | Ob `Battery Charge from Grid Total` die AC- oder die DC-Seite zählt, ist nicht bestätigt. KOSTAL dokumentiert Modbus-Register 1054 als *gesamte AC-Ladeenergie (Netz zu Akku)* und 1046 als DC-Ladeenergie; KOSTAL KORE legt dafür noch keine Sensoren an. Mit beiden könnte die Effizienzsuche die Energie messen, die wirklich geflossen ist. |
 | **Energiezähler: im Speicher angekommen** | derzeit nicht als Entität verfügbar | KOSTAL KORE liest Modbus `total_dc_charge` (1046), legt dafür aber keinen Sensor an. Ohne ihn greift die Effizienzsuche auf die Leistungssensoren zurück. |
 | **Entität für die Entladeleistungsgrenze** (Altbestand) | `Battery Max Discharge Limit (Modbus)` (1040) oder `Battery Max Discharge Power (G3)` (1282) | Nur nötig, um einen Wert zurückzugeben, den eine Version vor 3.10.6 geschrieben hat. ICN schreibt ihn nicht mehr. |
 | **Schalter „Entladung sperren“** (Altbestand) | `Battery Disable Discharge` (`EnergyMgmt:BatCtrl:DisabelDischarge`) | Nur nötig, um einen Zustand zurückzugeben, den eine Version vor 3.10.6 geändert hat. ICN schaltet ihn nicht mehr; der Akku wird nur noch über den Min-SOC gehalten. |
@@ -74,9 +75,17 @@ ein Min-SOC von 22 % bei einem Akku mit 21 % die ganze Nacht nichts (0 W bei ein
 1000 W), und ab 23:31 las der Kostal seine Ladegrenze als 51 W und ignorierte Schreibvorgänge.
 Inverter Charge Night schreibt die Grenze direkt nach dem Einschalten erneut und prüft sie kurz
 danach noch einmal. Hat der Schalter sie angehoben, wird das Netzladen für den Rest des Fensters
-wieder ausgeschaltet, und der angehobene Min-SOC übernimmt das Laden. Rechne mit einem kurzen
-Einschalten pro Nacht und der Warnung
-`The charge limit did not hold with ... switched on` im Protokoll.
+wieder ausgeschaltet, und der angehobene Min-SOC übernimmt das Laden. Hat ein Fenster sein Ziel
+so erreicht, lassen die folgenden Fenster den Schalter 30 Tage lang von Anfang an aus. Das kurze
+Einschalten passiert also einmal statt jede Nacht. Ein neuer Schalter, eine neue Ladegrenze oder
+30 Tage, und es wird erneut versucht. Im Protokoll steht beim ersten Mal
+`The charge limit did not hold with ... switched on` und danach
+`Grid charging stays off this window`.
+
+In der Nacht vom 24. auf den 25. Oktober 2026 las KOSTAL KORE Register 1038 eine Sekunde nach dem
+Einschalten als 21 460 W zurück, nach dem Ausschalten als 0 W und später in der Nacht als 245 W
+und 53 W, jedes Mal nachdem 1000 W geschrieben worden waren. Ein Lesen von 1038 ist keine
+verlässliche Bestätigung des geschriebenen Werts.
 
 **Eine Grenze in 1038 verfällt, wenn sie nicht neu geschrieben wird.** 1000 W um 23:01 geschrieben
 und bestätigt, um 23:12 etwa 8 kW Ladeleistung, ohne dass sonst etwas in das Register schrieb: Ohne
