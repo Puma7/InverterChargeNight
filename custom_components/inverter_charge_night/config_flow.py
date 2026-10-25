@@ -536,6 +536,16 @@ def _validate_user_input(
     return errors
 
 
+def _grid_limit_set(data: Mapping[str, Any]) -> bool:
+    """The house connection limit is on: a grid import *and* a budget.
+
+    A grid import alone may only serve the efficiency measurement (plan 017).
+    """
+    return bool(data.get(CONF_GRID_IMPORT_ENTITY)) and (
+        data.get(CONF_GRID_MAX_CONTINUOUS_W) is not None or data.get(CONF_MAIN_FUSE_A) is not None
+    )
+
+
 def _errors_for(step_keys: tuple[str, ...], errors: Mapping[str, str]) -> dict[str, str]:
     """Keep only the errors that belong to fields of the given step."""
     return {key: reason for key, reason in errors.items() if key in step_keys}
@@ -791,7 +801,7 @@ def _schema_power(defaults: Mapping[str, Any]) -> vol.Schema:
         return _required(key, defaults) if needed else _optional(key, defaults.get(key))
 
     efficiency = bool(defaults.get(CONF_AUTO_EFFICIENT_CHARGE))
-    control_needed = efficiency or bool(defaults.get(CONF_GRID_IMPORT_ENTITY))
+    control_needed = efficiency or _grid_limit_set(defaults)
     return vol.Schema(
         {
             vol.Required(CONF_AUTO_EFFICIENT_CHARGE, default=efficiency): _bool_selector(),
@@ -1150,7 +1160,7 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
         return self.async_show_menu(step_id="features", menu_options=[
             "charging", "grid", "efficiency", "planning_features", "advanced_features", "setup"],
             description_placeholders={"efficiency": "✓" if self._data.get(CONF_AUTO_EFFICIENT_CHARGE) else "—",
-                                      "grid": "✓" if self._data.get(CONF_GRID_IMPORT_ENTITY) else "—"})
+                                      "grid": "✓" if _grid_limit_set(self._data) else "—"})
 
     async def async_step_planning_features(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(step_id="planning_features", menu_options=[
@@ -1339,14 +1349,20 @@ class GuidedSetupMixin(ConfigEntryBaseFlow):
         return await self._save_disabled_feature()
 
     async def async_step_grid_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        self._data.pop(CONF_GRID_IMPORT_ENTITY, None)
+        if self._data.get(CONF_CHARGE_POWER_HOUSE_ENTITY):
+            # The efficiency search still reads the grid import for the AC side
+            # (plan 017): the limit goes, the measurement stays (Codex on #45)
+            self._data.pop(CONF_GRID_MAX_CONTINUOUS_W, None)
+            self._data.pop(CONF_MAIN_FUSE_A, None)
+        else:
+            self._data.pop(CONF_GRID_IMPORT_ENTITY, None)
         self._explicit_features = {*(self._explicit_features or set()), CONF_GRID_IMPORT_ENTITY}
         return await self._save_disabled_feature()
 
     async def async_step_charging_off(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             return await self.async_step_disable_features()
-        if self._data.get(CONF_AUTO_EFFICIENT_CHARGE) or self._data.get(CONF_GRID_IMPORT_ENTITY):
+        if self._data.get(CONF_AUTO_EFFICIENT_CHARGE) or _grid_limit_set(self._data):
             return self.async_show_form(step_id="charging_off", data_schema=vol.Schema({}),
                                         errors={"base": "disable_dependent_features"}, last_step=False)
         self._data.pop(CONF_CHARGE_POWER_ENTITY, None)

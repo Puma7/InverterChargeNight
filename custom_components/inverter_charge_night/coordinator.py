@@ -419,6 +419,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # charge limit on this inverter (plan 017)
     _grid_switch_forced_charge: tuple[str, str] | None = None
     _grid_switch_forced_this_window: bool = False
+    # The battery level once grid charging read off after the forced charge
+    _grid_switch_off_soc: float | None = None
     _grid_stop_pending: bool = False
     _grid_stop_retries: int = 0
     _last_trusted_soc: tuple[float, datetime] | None = None
@@ -681,14 +683,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for unsubscribe in getattr(self, "_communication_unsubscribers", []):
             unsubscribe()
         self._communication_unsubscribers: list[CALLBACK_TYPE] = []
+        # The grid import only belongs here when it protects the connection; read
+        # for the efficiency measurement alone (plan 017) its loss must not stop
+        # the night (Codex on #45)
+        meter_keys = (CONF_GRID_IMPORT_ENTITY,) if self._grid_limit_configured() else ()
         entities = [self.config[key] for key in (
             CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY, CONF_GRID_CHARGE_SWITCH,
-            CONF_CHARGE_POWER_ENTITY, CONF_GRID_IMPORT_ENTITY, CONF_BACKUP_MODE_ENTITY,
+            CONF_CHARGE_POWER_ENTITY, *meter_keys, CONF_BACKUP_MODE_ENTITY,
             CONF_FORCE_DISCHARGE_SWITCH,
         ) if self.config.get(key)]
         numeric = {self.config[key] for key in (
             CONF_BATTERY_SOC_ENTITY, CONF_MIN_SOC_ENTITY,
-            CONF_CHARGE_POWER_ENTITY, CONF_GRID_IMPORT_ENTITY,
+            CONF_CHARGE_POWER_ENTITY, *meter_keys,
         ) if self.config.get(key)}
 
         def unreadable(state: Any) -> bool:
@@ -770,7 +776,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.config.get(CONF_BATTERY_SOC_ENTITY) and self._current_battery_soc() is None:
             faults.append("battery_soc")
         meter = self.config.get(CONF_GRID_IMPORT_ENTITY)
-        if meter and self._read_grid_import_w(str(meter)) is None:
+        # Only a meter that protects the connection stops charging when it is
+        # lost; one read for the efficiency measurement alone costs that
+        # measurement a trial, nothing more (Codex on #45)
+        if meter and self._grid_limit_configured() and self._read_grid_import_w(str(meter)) is None:
             faults.append("grid_meter")
         return sorted(set(faults))
 
@@ -6901,6 +6910,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.error("Error parsing configuration values: %s", e)
             return inactive_data
 
+        self._note_switch_off_baseline()
+
         # Use initial SOC calculated at window start, or recalculate if initial failed
         calculated_soc: float | None
         if self.initial_calculated_soc is not None:
@@ -7405,6 +7416,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Remembered at the window end if the floor then did the charging
         # (plan 017): see _remember_forced_charge
         self._grid_switch_forced_this_window = True
+        self._grid_switch_off_soc = None
         self._persist_state()
         _LOGGER.warning(
             "The charge limit did not hold with %s switched on - grid charging stays off "
@@ -7424,8 +7436,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         without grid charging for weeks.
         """
         found = self._grid_switch_forced_this_window
+        baseline = self._grid_switch_off_soc
         self._grid_switch_forced_this_window = False
+        self._grid_switch_off_soc = None
         if not found or not self.target_reached or self.is_discharge_mode:
+            return
+        # The charge has to have happened with the switch confirmed off: a
+        # pause that never took effect leaves the forced charge to reach the
+        # target, which proves nothing about the floor (Codex on #45)
+        target = self.current_target_soc()
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        switch = self.hass.states.get(str(switch_id)) if switch_id else None
+        if (baseline is None or target is None or baseline > target - 1.0
+                or switch is None or switch.state != "off" or self._grid_stop_pending):
             return
         self._grid_switch_forced_charge = (
             self._grid_switch_signature(), dt_util.now().isoformat(),
@@ -7436,6 +7459,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "switched off - the switch stays off for the next %d days",
             GRID_SWITCH_FORCED_CHARGE_MEMORY_DAYS,
         )
+
+    def _note_switch_off_baseline(self) -> None:
+        """Where the battery stood once grid charging read off after a forced charge.
+
+        Taken once per window, on the first poll that sees the switch off with
+        no stop still unconfirmed: only a charge from there on is the floor's.
+        """
+        if not self._grid_switch_forced_this_window or self._grid_switch_off_soc is not None:
+            return
+        if self._grid_stop_pending:
+            return
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        switch = self.hass.states.get(str(switch_id)) if switch_id else None
+        if switch is None or switch.state != "off":
+            return
+        self._grid_switch_off_soc = self._current_battery_soc()
 
     def _grid_switch_signature(self) -> str:
         """Which switch and which limit the forced-charge finding is about."""
@@ -8317,6 +8356,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ac_limit_rewrites = 0
         self._floor_released_soc = None
         self._grid_switch_suspended = self._grid_switch_known_forced()
+        self._grid_switch_forced_this_window = False
+        self._grid_switch_off_soc = None
         if self._grid_switch_suspended and self._grid_switch_forced_charge is not None:
             _LOGGER.info(
                 "Grid charging stays off this window: on %s switching it on lifted the charge "

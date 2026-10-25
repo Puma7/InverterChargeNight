@@ -22,7 +22,8 @@ from tests.test_grid_limit import BATTERY, GRID
 NEXT_NIGHT = WINDOW_START + timedelta(days=1)
 
 
-async def _run_night(hass: Any, coordinator: Any, clock: Any, start: Any, *, charge: bool) -> None:
+async def _run_night(hass: Any, coordinator: Any, clock: Any, start: Any, *, charge: bool,
+                     switch_stuck_on: bool = False, on_while: Any = None) -> None:
     clock.now = start
     hass.states.get(BATTERY).state = "33"
     await coordinator._on_window_start(start)
@@ -31,6 +32,10 @@ async def _run_night(hass: Any, coordinator: Any, clock: Any, start: Any, *, cha
     while clock.now < start + timedelta(hours=5):
         _fresh(hass, clock)
         await coordinator._async_update_data()
+        if switch_stuck_on and coordinator._grid_switch_suspended:
+            hass.states.get(GRID).state = "on"  # the turn_off never took
+        if on_while is not None and coordinator._grid_switch_suspended:
+            hass.states.get(GRID).state = "on" if on_while(soc) else "off"
         if charge:
             soc = min(44.0, soc + .75)  # the floor charges, about 1 kW
             hass.states.get(BATTERY).state = str(soc)
@@ -67,6 +72,34 @@ async def test_a_night_that_did_not_charge_proves_nothing(night):  # noqa: F811
     await _run_night(hass, coordinator, clock, NEXT_NIGHT, charge=False)
 
     assert _turn_ons_since(hass, before) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_switch_that_never_read_off_proves_nothing(night):  # noqa: F811
+    """Codex on #45: then the forced charge itself may have reached the target."""
+    hass, coordinator, clock = night
+    await _run_night(hass, coordinator, clock, WINDOW_START, charge=True, switch_stuck_on=True)
+
+    assert coordinator._grid_switch_forced_charge is None
+
+
+@pytest.mark.asyncio
+async def test_a_switch_that_reads_on_again_at_the_end_proves_nothing(night):  # noqa: F811
+    hass, coordinator, clock = night
+    await _run_night(hass, coordinator, clock, WINDOW_START, charge=True,
+                     on_while=lambda soc: soc >= 43.5)
+
+    assert coordinator._grid_switch_forced_charge is None
+
+
+@pytest.mark.asyncio
+async def test_a_switch_that_read_off_only_at_the_target_proves_nothing(night):  # noqa: F811
+    """The charge up to the target happened with the switch on."""
+    hass, coordinator, clock = night
+    await _run_night(hass, coordinator, clock, WINDOW_START, charge=True,
+                     on_while=lambda soc: soc < 43.1)
+
+    assert coordinator._grid_switch_forced_charge is None
 
 
 @pytest.mark.asyncio

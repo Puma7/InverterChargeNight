@@ -323,3 +323,68 @@ def test_grid_import_without_house_still_needs_a_budget(mock_hass, entity_regist
     errors = _validate(mock_hass, {CONF_GRID_IMPORT_ENTITY: GRID, CONF_CHARGE_POWER_ENTITY: AC_LIMIT})
 
     assert errors[CONF_MAIN_FUSE_A] == "required_value"
+
+
+# --- Codex on #45 ---------------------------------------------------------------
+
+
+@pytest.fixture
+def guide(mock_hass, entity_registry, draft_store):  # noqa: F811
+    from .test_config_flow import _config_flow
+
+    return _config_flow(mock_hass)
+
+
+@pytest.mark.asyncio
+async def test_disabling_the_limit_keeps_the_meter_the_measurement_reads(guide):
+    await guide.async_step_user()
+    guide._data.update({**DERIVED, CONF_MAIN_FUSE_A: 63, "grid_max_continuous_w": 40000})
+
+    await guide.async_step_grid_off()
+
+    assert guide._data[CONF_GRID_IMPORT_ENTITY] == GRID
+    assert CONF_MAIN_FUSE_A not in guide._data
+    assert "grid_max_continuous_w" not in guide._data
+    assert not flow_module._grid_limit_set(guide._data)
+
+
+@pytest.mark.asyncio
+async def test_without_house_consumption_the_limit_takes_the_meter_along(guide):
+    await guide.async_step_user()
+    guide._data.update({CONF_GRID_IMPORT_ENTITY: GRID, CONF_MAIN_FUSE_A: 63})
+
+    await guide.async_step_grid_off()
+
+    assert CONF_GRID_IMPORT_ENTITY not in guide._data
+
+
+def test_a_meter_read_only_for_the_measurement_stops_no_charging(mock_hass):
+    """Lost, it costs a trial - not the night (no grid_meter fault without a budget)."""
+    coordinator = _derived(mock_hass)
+    mock_hass.states.async_set(GRID, "unavailable")
+
+    assert "grid_meter" not in coordinator._communication_faults()
+
+    limited = _make(mock_hass, {**DERIVED, CONF_MAIN_FUSE_A: 63})
+    assert "grid_meter" in limited._communication_faults()
+
+
+@pytest.mark.asyncio
+async def test_the_diagnostics_show_the_derived_ac_side(mock_hass):
+    """CodeRabbit on #45: with no sent sensor the AC power read None."""
+    from custom_components.inverter_charge_night.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+
+    coordinator = _derived(mock_hass)
+    coordinator.entry.runtime_data = coordinator
+    mock_hass.states.async_set(GRID, "1575", {"unit_of_measurement": "W"})
+    mock_hass.states.async_set(HOUSE, "495", {"unit_of_measurement": "W"})
+
+    report = await async_get_config_entry_diagnostics(mock_hass, coordinator.entry)
+
+    control = report["state"]["charge_control"]
+    assert control["ac_charge_power_w"] == 1080
+    assert control["ac_side_derived"] is True
+    assert control["input_configured"]["charge_power_house_entity"] is True
+    assert control["input_configured"]["grid_import_entity"] is True

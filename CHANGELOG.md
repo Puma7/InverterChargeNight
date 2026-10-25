@@ -35,7 +35,15 @@ battery side counts charging as negative. The search never got to a second power
   the window then reached its target under the raised min SOC, later windows leave the switch off
   from the start, for 30 days or until the switch or the limit entity changes. Before, every night
   switched it on again, and for the seconds until that was noticed the Kostal could draw at its
-  own 21.4 kW limit. A window that did not reach its target that way remembers nothing.
+  own 21.4 kW limit. A window that did not reach its target that way remembers nothing, and
+  neither does one whose switch never read off: then the forced charge itself may have charged.
+- **A grid import read only for the efficiency search does not stop charging when it is lost.**
+  It only counts as a communication fault while it protects the house connection (a budget is
+  set); otherwise a lost reading costs a trial. Switching the house connection limit off keeps
+  the meter when house consumption is set and removes only the budget, and the setup overview
+  shows the limit as on only with a budget.
+- **Diagnostics show the AC side the efficiency search reads**, including the derived one, and
+  which of the house consumption and grid import entities are set.
 - **No write-back of the rounded floor.** Charged to a min SOC rounded up to the next step, the
   verification wrote it one step down once the target was met, every night. It now keeps that
   step.
