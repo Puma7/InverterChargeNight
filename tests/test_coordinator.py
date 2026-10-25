@@ -440,6 +440,7 @@ def test_persist_state_round_trip_next_to_auto_efficiency_data(mock_hass):
         "snow_nights": 3,
         "pv_yield": first._pv_yield.snapshot(),
         "temperature_log": {"days": {}},
+        "use_learned_values": True,
         "hands_off_until": None,
         "adhoc_until": None,
         "adhoc_reason": None,
@@ -617,6 +618,7 @@ async def test_unload_cancels_the_pending_window_check(mock_hass, mock_config_en
     coordinator = MagicMock()
     coordinator.is_active = False
     coordinator._stop_periodic_verification = AsyncMock()
+    coordinator.async_unload_learning = AsyncMock()
     mock_config_entry.runtime_data = coordinator
     mock_hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
 

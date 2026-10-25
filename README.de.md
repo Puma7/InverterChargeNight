@@ -52,6 +52,8 @@ Sonne von morgen frei.
   bevor die Hauptsicherung es tut.
 - 📉 **Effizienzsuche.** Sie misst, bei welcher Ladeleistung dein Wechselrichter am wenigsten
   Energie verliert.
+- 🎓 **Lernt aus deinen Daten.** Sie findet je Jahreszeit heraus, wie weit deine PV-Prognose
+  danebenliegt und was dein Akku wirklich speichert und verliert.
 - 🔌 **Erkennt Stromausfälle.** Im Inselbetrieb gibt sie den Wechselrichter sofort frei.
 - ↩️ **Was sie ändert, gibt sie zurück.** Min-SOC, Schalter und Grenzen stellt sie am Ende des
   Fensters wieder her, auch nach einem Neustart.
@@ -84,6 +86,7 @@ Schritt für Schritt: [Installation und Einrichtung](https://github.com/Puma7/In
 | [Alle Einstellungen](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/configuration.md) | Jede Einstellung mit Vorgabewert, dazu Empfehlungen |
 | [Sicherheit](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/safety.md) | Rückgabe der Einstellungen, Hausanschluss, Stromausfall, Kommunikationsverlust |
 | [Effizienzsuche](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/efficiency-search.md) | Die Ladeleistung mit dem geringsten Verlust finden |
+| [Was ICN selbst lernt](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/learning.md) | Die Prognose je Jahreszeit, die nutzbare Kapazität, beide Wirkungsgrade |
 | [Ausnahmen und Extras](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/extras.md) | Aussetzen, Vorgabe von Hand, Schneenächte, Hochpreisrettung, PV-Ausfall, Abregelung |
 | [Entitäten und Aktionen](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/entities-and-actions.md) | Alle Entitäten und Attribute, Aktionen, Beispiel-Automationen |
 | [Dashboard](https://github.com/Puma7/InverterChargeNight/blob/main/docs/de/dashboard.md) | Eine fertige Dashboard-Ansicht |

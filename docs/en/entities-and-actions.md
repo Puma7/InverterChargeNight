@@ -19,6 +19,7 @@ version, check the ids on the device page.
 | Automation | `switch.inverter_charge_night_automation` | The main switch. Off: everything ICN changed is given back, and it controls nothing until switched on again. |
 | Skip the next window (24 h) | `switch.inverter_charge_night_skip_the_next_window_24_h` | Skips one window, then expires by itself. |
 | High-price rescue (hold and charge) | `switch.inverter_charge_night_high_price_rescue_hold_and_charge` | Lets the [high-price rescue](extras.md#high-price-rescue) act. Off by default. |
+| Use learned values | `switch.inverter_charge_night_use_learned_values` | Plans with what ICN has [learned](learning.md): forecast correction, capacity, efficiencies. On by default. |
 | Efficiency search | `switch.inverter_charge_night_efficiency_search` | Starts the [efficiency search](efficiency-search.md). Switches itself off when it is done. |
 | Operation mode | `select.inverter_charge_night_operation_mode` | *Night charge* or *Morning discharge (experimental)*. Switching during a window resets the inverter first. |
 | Target SOC override | `number.inverter_charge_night_target_soc_override` | Replaces the planner's target until the window ends. |
@@ -38,6 +39,8 @@ version, check the ids on the device page.
 | Efficiency search | `sensor.inverter_charge_night_efficiency_search` | What the search is doing and what it has measured. |
 | Most efficient charge power | `sensor.inverter_charge_night_most_efficient_charge_power` | The result of the efficiency search. |
 | Curtailment outlook | `sensor.inverter_charge_night_curtailment_outlook` | PV lost to a feed-in cap. Disabled by default. |
+| PV forecast correction | `sensor.inverter_charge_night_pv_forecast_correction` | The [learned](learning.md) factor for this season, in %, with the band and the error before and after. |
+| Usable battery capacity | `sensor.inverter_charge_night_usable_battery_capacity` | The [learned](learning.md) capacity in kWh, with both efficiencies and what the plan uses. |
 
 ### Attributes of *Target SOC*
 

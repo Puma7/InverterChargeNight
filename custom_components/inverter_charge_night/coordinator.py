@@ -28,8 +28,12 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.recorder import DATA_INSTANCE, get_instance
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
+
+from . import battery_learning as bl
+from . import forecast_learning as fl
 
 from .heating import (
     STATUS_ACTIVE,
@@ -207,6 +211,13 @@ from .const import (
     GRID_LIMIT_STALE_AFTER_S,
     GRID_LIMIT_MIN_WRITE_INTERVAL_S,
     GRID_OWN_DRAW_MAX_LOSS,
+    BATTERY_STATISTICS_DAYS,
+    FORECAST_AHEAD_FROM_HOUR,
+    FORECAST_BACKFILL_DAYS,
+    FORECAST_TODAY_UNTIL_HOUR,
+    LEARNING_SAVE_DELAY_S,
+    LEARNING_STORE_VERSION,
+    PV_ACTUAL_LOOKBACK_DAYS,
 )
 from .calculation import calculate_required_soc
 from .prices import PriceSeries, mean_price_ct, parse_price_series, rescue_purchase_pays
@@ -415,6 +426,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Replaced per instance in __init__; the class value only serves objects a
     # test builds without it, and nothing writes to it there
     _temperature_log: TemperatureLog = TemperatureLog()
+    # Plan 018, for the same reason
+    use_learned_values: bool = True
+    _forecast_log: fl.ForecastLog = fl.ForecastLog()
+    _battery_log: bl.BatteryLog = bl.BatteryLog()
+    _learning_store: "Store[dict[str, Any]] | None" = None
     _grid_switch_suspended: bool = False
     # (switch and limit signature, when): switching grid charging on lifted the
     # charge limit on this inverter (plan 017)
@@ -517,6 +533,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # forecast and recorder look-ups behind the temperature factor, and
         # what the last plan made of them
         self._temperature_log = TemperatureLog()
+        # Plan 018: what the house's own data says about the forecast and the
+        # battery. Collected always; applied while this is on and a value has
+        # enough data behind it. The diaries live in their own store, too
+        # large for the entry options.
+        self.use_learned_values = True
+        self._forecast_log = fl.ForecastLog()
+        self._battery_log = bl.BatteryLog()
+        self._learning_store: Store[dict[str, Any]] | None = None
+        self._forecast_backfilled = False
+        # Which entities each kind of learned value came from: a new forecast
+        # provider or meter must not inherit the old one's history (Codex on #46)
+        self._learning_sources: dict[str, Any] = {}
+        # Per battery kind, when its source last changed: the recorder still
+        # holds the old battery's runs, and they must not come back (Codex on #46)
+        self._learning_since: dict[str, float] = {}
+        self._learning_sources_unsaved = False
+        self._learning_refreshed: date | None = None
+        self._learning_task: asyncio.Task[None] | None = None
+        self._battery_learning_status = bl.STATUS_LEARNING
         # Each keyed by its source entity too: an options change that swaps the
         # entity must not be answered from the old one's cache (Codex on #42)
         self._forecast_temp_cache: tuple[datetime, str, date, float | None] | None = None
@@ -892,6 +927,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "snow_nights": self.snow_nights,
             "pv_yield": self._pv_yield.snapshot(),
             "temperature_log": self._temperature_log.snapshot(),
+            "use_learned_values": self.use_learned_values,
         }
         self.hass.config_entries.async_update_entry(self.entry, options=options)
 
@@ -907,6 +943,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.is_enabled = state["is_enabled"]
         if isinstance(state.get("evening_rescue_charge"), bool):
             self.evening_rescue_charge = state["evening_rescue_charge"]
+        if isinstance(state.get("use_learned_values"), bool):
+            self.use_learned_values = state["use_learned_values"]
         self.override_soc = self._restore_soc(state, "override_soc")
         self.original_min_soc = self._restore_soc(state, "original_min_soc")
         self.initial_calculated_soc = self._restore_soc(state, "initial_calculated_soc")
@@ -1523,7 +1561,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         state = self.hass.states.get(entity_id)
         if not state:
             return 0.0, False
+        return self._forecast_energy_from_state(state, entity_id)
 
+    @staticmethod
+    def _forecast_energy_from_state(state: Any, entity_id: str) -> tuple[float, bool]:
+        """:meth:`_parse_forecast_energy` for a state at hand, a recorded one too."""
         # Primary: parse entity state value directly (only when state is available)
         if state.state not in ("unknown", "unavailable", None):
             value = _as_float(state.state)
@@ -1960,6 +2002,481 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pv_shape_cache = (now, str(entity_id), shape)
         return shape
 
+    # Plan 018: learning from the house's own data -------------------------
+
+    async def async_load_learning(self) -> None:
+        """Open this entry's learning store and read what it holds."""
+        store: Store[dict[str, Any]] = Store(
+            self.hass, LEARNING_STORE_VERSION, f"{DOMAIN}.learning.{self.entry.entry_id}"
+        )
+        self._learning_store = store
+        try:
+            raw = await store.async_load()
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.warning("Could not read the learning store, starting it afresh: %s", err)
+            raw = None
+        if isinstance(raw, dict):
+            self._forecast_log = fl.ForecastLog(raw.get("pv"))
+            self._battery_log = bl.BatteryLog(raw.get("battery"))
+            self._forecast_backfilled = raw.get("backfilled") is True
+            sources = raw.get("sources")
+            self._learning_sources = dict(sources) if isinstance(sources, dict) else {}
+            since = raw.get("since")
+            self._learning_since = {
+                str(kind): float(ts) for kind, ts in (since.items() if isinstance(since, dict) else ())
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool) and math.isfinite(ts)
+            }
+        # Written with the next refresh, so the change and its cut-off are
+        # recognised once, not again at every load
+        self._learning_sources_unsaved = self._check_learning_sources()
+
+    async def async_unload_learning(self) -> None:
+        """Write the diaries once more and close the store for this coordinator.
+
+        ``async_save`` drops a delayed write still pending, and with the store
+        gone no later save can be scheduled - not by a refresh still running,
+        not over the next setup's store, not after the entry's removal.
+        """
+        task = self._learning_task
+        if task is not None and not task.done():
+            task.cancel()
+        store = self._learning_store
+        self._learning_store = None
+        if store is None:
+            return
+        try:
+            await store.async_save(self._learning_snapshot())
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.warning("Could not write the learning store at unload: %s", err)
+
+    def _learning_snapshot(self) -> dict[str, Any]:
+        return {
+            "pv": self._forecast_log.snapshot(),
+            "battery": self._battery_log.snapshot(),
+            "backfilled": self._forecast_backfilled,
+            "sources": dict(self._learning_sources),
+            "since": dict(self._learning_since),
+        }
+
+    def _current_learning_sources(self) -> dict[str, Any]:
+        """Per kind of learned value, the entities it is measured with."""
+        def entity(key: str) -> str | None:
+            value = self.config.get(key)
+            return str(value) if value else None
+
+        battery = [entity(CONF_BATTERY_SOC_ENTITY), entity(CONF_CHARGE_POWER_RECEIVED_ENTITY)]
+        ac_side = [entity(CONF_CHARGE_POWER_HOUSE_ENTITY), entity(CONF_GRID_IMPORT_ENTITY),
+                   entity(CONF_PV_ENERGY_TODAY_ENTITY)]
+        return {
+            fl.KIND_AHEAD: entity(CONF_PV_FORECAST_ENTITY),
+            fl.KIND_TODAY: entity(CONF_PV_FORECAST_TODAY_ENTITY),
+            fl.KIND_ACTUAL: entity(CONF_PV_ENERGY_TODAY_ENTITY),
+            # A new battery on the same sensors is a new battery (Codex on #46)
+            bl.KIND_CAPACITY: [*battery, self._nameplate_capacity_kwh()],
+            bl.KIND_CHARGE: [*battery, *ac_side],
+            bl.KIND_DISCHARGE: [*battery, *ac_side],
+        }
+
+    def _check_learning_sources(self) -> bool:
+        """Forget what was learned from entities that are no longer configured.
+
+        Only the kinds whose sources changed: a new today entity keeps the
+        evening forecasts and the yields. A diary from before sources were
+        recorded is taken as this setup's. True when anything was forgotten.
+        """
+        current = self._current_learning_sources()
+        known = self._learning_sources
+        changed = False
+        for kind, source in current.items():
+            if kind in known and known[kind] != source:
+                if kind in (fl.KIND_AHEAD, fl.KIND_TODAY, fl.KIND_ACTUAL):
+                    changed |= self._forecast_log.clear(kind)
+                    if kind != fl.KIND_ACTUAL:
+                        self._forecast_backfilled = False  # fill in the new one
+                else:
+                    changed |= self._battery_log.clear([kind])
+                    # The statistics are read again tomorrow: only runs from now on
+                    self._learning_since[kind] = dt_util.utcnow().timestamp()
+                _LOGGER.info("The %s source changed - starting what is learned from it afresh", kind)
+                changed = True
+        if known != current:
+            self._learning_sources = current
+            changed = True
+        return changed
+
+    def _save_learning(self) -> None:
+        if self._learning_store is not None:
+            self._learning_store.async_delay_save(self._learning_snapshot, LEARNING_SAVE_DELAY_S)
+
+    def _observe_forecasts(self) -> None:
+        """Note the evening's forecast for tomorrow and the morning's for today.
+
+        Overwritten until the cut-off, so what stays is the last value before
+        it: the one the night plans with, and the one the day decides with.
+        """
+        now = dt_util.now()
+        # An options change swaps self.config in place: check on every poll
+        changed = self._check_learning_sources()
+        tomorrow_id = self.config.get(CONF_PV_FORECAST_ENTITY)
+        if tomorrow_id and now.hour >= FORECAST_AHEAD_FROM_HOUR:
+            kwh, available = self._parse_forecast_energy(str(tomorrow_id))
+            if available:
+                changed |= self._forecast_log.note(now.date() + timedelta(days=1), fl.KIND_AHEAD, kwh)
+        today_id = self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)
+        if today_id and now.hour < FORECAST_TODAY_UNTIL_HOUR:
+            kwh, available = self._parse_forecast_energy(str(today_id))
+            if available:
+                changed |= self._forecast_log.note(now.date(), fl.KIND_TODAY, kwh)
+        if changed:
+            self._save_learning()
+
+    def _schedule_learning_refresh(self) -> None:
+        """Once a day, read the yields and the battery's balance from the recorder."""
+        if DATA_INSTANCE not in self.hass.data or self._learning_store is None:
+            return
+        if self._learning_refreshed == dt_util.now().date():
+            return
+        if self._learning_task is not None and not self._learning_task.done():
+            return
+        self._learning_task = self.hass.async_create_background_task(
+            self.async_refresh_learning(), name=f"{DOMAIN} learning"
+        )
+
+    async def async_refresh_learning(self) -> None:
+        """Fill in the diaries from the recorder; each step on its own.
+
+        Done for the day only when every step got its answer: a recorder that
+        is still starting up is asked again on the next poll.
+        """
+        today = dt_util.now().date()
+        changed = self._forecast_log.prune(today) or self._learning_sources_unsaved
+        self._learning_sources_unsaved = False
+        complete = True
+        try:
+            if not self._forecast_backfilled:
+                changed |= await self._backfill_forecasts()
+                self._forecast_backfilled = True
+                changed = True
+            changed |= await self._read_pv_actuals(today)
+        except Exception as err:  # pylint: disable=broad-except
+            complete = False
+            _LOGGER.debug("Reading the PV history failed: %s", err)
+        try:
+            changed |= await self._learn_battery()
+        except Exception as err:  # pylint: disable=broad-except
+            complete = False
+            _LOGGER.debug("Reading the battery statistics failed: %s", err)
+        if complete:
+            self._learning_refreshed = today
+        if changed:
+            self._save_learning()
+
+    async def _backfill_forecasts(self) -> bool:
+        """What the recorder still knows of the forecasts, filled in once."""
+        tomorrow_id = self.config.get(CONF_PV_FORECAST_ENTITY)
+        today_id = self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)
+        ids = [str(entity) for entity in (tomorrow_id, today_id) if entity]
+        if not ids:
+            return False
+        from homeassistant.components.recorder.history import get_significant_states
+
+        now = dt_util.utcnow()
+        start = now - timedelta(days=FORECAST_BACKFILL_DAYS)
+        history = await get_instance(self.hass).async_add_executor_job(
+            lambda: get_significant_states(
+                self.hass, start, now, ids, significant_changes_only=False
+            )
+        )
+        changed = False
+        local_now = dt_util.now()
+        zone = local_now.tzinfo
+        for offset in range(FORECAST_BACKFILL_DAYS, 0, -1):
+            day = local_now.date() - timedelta(days=offset)
+            # The same cut-offs as the live notes: the last value before
+            # midnight, and before the morning hour (Codex on #46)
+            if tomorrow_id:
+                before = datetime.combine(day + timedelta(days=1), time(0, 0), tzinfo=zone)
+                kwh = self._recorded_forecast(list(history.get(str(tomorrow_id), [])), before)
+                changed |= self._forecast_log.note_missing(day + timedelta(days=1), fl.KIND_AHEAD, kwh)
+            if today_id:
+                before = datetime.combine(day, time(FORECAST_TODAY_UNTIL_HOUR, 0), tzinfo=zone)
+                kwh = self._recorded_forecast(list(history.get(str(today_id), [])), before)
+                changed |= self._forecast_log.note_missing(day, fl.KIND_TODAY, kwh)
+        if changed:
+            _LOGGER.info("Filled in the PV forecasts of the last %d days from the recorder",
+                         FORECAST_BACKFILL_DAYS)
+        return changed
+
+    def _recorded_forecast(self, states: list[Any], before: datetime) -> float | None:
+        """The last recorded forecast strictly before ``before``; None if unknown.
+
+        Strictly: at midnight the tomorrow entity rolls over to the next day.
+        """
+        current: Any = None
+        for state in states:
+            stamp = getattr(state, "last_updated", None)
+            if not isinstance(stamp, datetime):
+                continue
+            if stamp >= before:
+                break
+            current = state
+        if current is None:
+            return None
+        kwh, available = self._forecast_energy_from_state(current, str(getattr(current, "entity_id", "")))
+        return kwh if available else None
+
+    @staticmethod
+    def _energy_factor(unit: str) -> float:
+        """Recorder statistics of an energy meter, to kWh."""
+        if unit in ("wh", "watthour", "watthours"):
+            return 0.001
+        if unit in ("mwh", "megawatthour", "megawatthours"):
+            return 1000.0
+        return 1.0
+
+    async def _read_pv_actuals(self, today: date) -> bool:
+        """The PV meter's daily yield for each forecast day still without one."""
+        meter = self.config.get(CONF_PV_ENERGY_TODAY_ENTITY)
+        if not meter:
+            return False
+        cutoff = today - timedelta(days=PV_ACTUAL_LOOKBACK_DAYS)
+        days = [day for day in self._forecast_log.days_without_actual(today) if day >= cutoff]
+        if not days:
+            return False
+        from homeassistant.components.recorder.statistics import statistics_during_period
+
+        start = dt_util.as_utc(datetime.combine(days[0], time(0, 0), tzinfo=dt_util.now().tzinfo))
+        rows = await get_instance(self.hass).async_add_executor_job(
+            lambda: statistics_during_period(
+                self.hass, start, None, {str(meter)}, "hour", None, {"change"}
+            )
+        )
+        factor = self._energy_factor(_unit_of(self.hass.states.get(str(meter))))
+        totals: dict[date, float] = {}
+        hours: dict[date, int] = {}
+        for row in rows.get(str(meter), []):
+            start_ts, change = row.get("start"), row.get("change")
+            if not isinstance(start_ts, (int, float)) or not isinstance(change, (int, float)):
+                continue
+            local = dt_util.as_local(dt_util.utc_from_timestamp(start_ts))
+            hours[local.date()] = hours.get(local.date(), 0) + 1
+            if change >= 0:
+                totals[local.date()] = totals.get(local.date(), 0.0) + float(change) * factor
+        changed = False
+        for day in days:
+            # A day covered only in part stays open: kept now, it would be a
+            # low yield for good, and a later read could not repair it
+            # (Codex on #46)
+            if hours.get(day, 0) >= fl.MIN_DAY_HOURS:
+                changed |= self._forecast_log.note(day, fl.KIND_ACTUAL, totals.get(day, 0.0))
+        return changed
+
+    def _battery_balance_entities(self) -> dict[str, str] | None:
+        """The SOC and battery power, and the AC side where it can be read."""
+        soc = self.config.get(CONF_BATTERY_SOC_ENTITY)
+        battery = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
+        if not soc or not battery:
+            return None
+        ids = {"soc": str(soc), "battery": str(battery)}
+        house = self.config.get(CONF_CHARGE_POWER_HOUSE_ENTITY)
+        grid = self.config.get(CONF_GRID_IMPORT_ENTITY)
+        pv = self.config.get(CONF_PV_ENERGY_TODAY_ENTITY)
+        if house and grid and pv:
+            ids.update(house=str(house), grid=str(grid), pv=str(pv))
+        return ids
+
+    @staticmethod
+    def _power_factor(unit: str) -> float:
+        return 1000.0 if unit in ("kw", "kilowatt", "kilowatts") else 1.0
+
+    async def _learn_battery(self) -> bool:
+        """Capacity and efficiency samples from the recorder's five-minute means."""
+        ids = self._battery_balance_entities()
+        if ids is None:
+            self._battery_learning_status = bl.STATUS_NO_SENSORS
+            return False
+        from homeassistant.components.recorder.statistics import statistics_during_period
+
+        now = dt_util.utcnow()
+        start = now - timedelta(days=BATTERY_STATISTICS_DAYS)
+        rows = await get_instance(self.hass).async_add_executor_job(
+            lambda: statistics_during_period(
+                self.hass, start, None, set(ids.values()), "5minute", None, {"mean", "change"}
+            )
+        )
+
+        def series(role: str, key: str) -> dict[float, float]:
+            if role not in ids:
+                return {}
+            unit = _unit_of(self.hass.states.get(ids[role]))
+            factor = (self._energy_factor(unit) if key == "change"
+                      else (1.0 if role == "soc" else self._power_factor(unit)))
+            out: dict[float, float] = {}
+            for row in rows.get(ids[role], []):
+                start_ts, value = row.get("start"), row.get(key)
+                if (isinstance(start_ts, (int, float)) and isinstance(value, (int, float))
+                        and math.isfinite(value)):
+                    out[float(start_ts)] = float(value) * factor
+            return out
+
+        soc, battery = series("soc", "mean"), series("battery", "mean")
+        if not soc or not battery:
+            self._battery_learning_status = bl.STATUS_NO_STATISTICS
+            return False
+        house, grid, pv = series("house", "mean"), series("grid", "mean"), series("pv", "change")
+        buckets = [
+            bl.Bucket(ts, soc[ts], battery[ts], house.get(ts), grid.get(ts), pv.get(ts))
+            for ts in sorted(soc) if ts in battery
+        ]
+        samples = [
+            sample for sample in bl.segment_samples(buckets, self._nameplate_capacity_kwh())
+            if sample.start >= self._learning_since.get(sample.kind, -math.inf)
+        ]
+        changed = self._battery_log.add(samples)
+        changed |= self._battery_log.prune(now.timestamp())
+        self._battery_learning_status = (
+            bl.STATUS_ACTIVE if self.learned_capacity_kwh() is not None else bl.STATUS_LEARNING
+        )
+        if samples:
+            _LOGGER.debug("Battery balance: %d sample(s) from the last %d days",
+                          len(samples), BATTERY_STATISTICS_DAYS)
+        return changed
+
+    # The values the plan works with: learned where allowed and known ------
+
+    def _nameplate_capacity_kwh(self) -> float:
+        return float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
+
+    def learned_capacity_kwh(self) -> float | None:
+        return bl.bounded_capacity(
+            self._battery_log.estimate(bl.KIND_CAPACITY, dt_util.utcnow().timestamp()),
+            self._nameplate_capacity_kwh(),
+        )
+
+    def _capacity_kwh(self) -> float:
+        """The battery's usable capacity: learned (plan 018), else the setting."""
+        learned = self.learned_capacity_kwh() if self.use_learned_values else None
+        return learned if learned is not None else self._nameplate_capacity_kwh()
+
+    def learned_charge_efficiency(self, soc: float | None = None) -> tuple[float | None, str | None]:
+        """(efficiency, source): the efficiency search first, then the balance.
+
+        At ``soc``, default the battery's now: the loss of the band whose
+        optimum the night charges at there (Codex on #46).
+        """
+        loss = self._measured_best_loss(self._current_battery_soc() if soc is None else soc)
+        if (loss is not None
+                and AUTO_TEST_MIN_PLAUSIBLE_LOSS <= loss <= AUTO_TEST_MAX_PLAUSIBLE_LOSS):
+            # The search measured it at the power the night charges at
+            return bl.bounded_efficiency(1.0 - float(loss)), "efficiency_search"
+        balance = bl.bounded_efficiency(
+            self._battery_log.estimate(bl.KIND_CHARGE, dt_util.utcnow().timestamp())
+        )
+        return (balance, "energy_balance") if balance is not None else (None, None)
+
+    def _measured_best_loss(self, soc: float | None = None) -> float | None:
+        """The efficiency search's lowest loss, while it still belongs to this setup.
+
+        For the band ``soc`` falls into where ``best_charge_power_w`` takes
+        that band's optimum, battery-wide otherwise.
+        """
+        data = self.entry.options.get(CONF_AUTO_EFFICIENCY_DATA)
+        if not isinstance(data, Mapping):
+            return None
+        bounds = data.get("bounds_w")
+        current = [int(self.config.get(CONF_MIN_CHARGE_POWER_W, 1000)),
+                   int(self.config.get(CONF_MAX_CHARGE_POWER_W, 10000))]
+        if data.get("measurement_signature") != self._efficiency_signature() or (
+                isinstance(bounds, list) and [int(b) for b in bounds] != current):
+            return None
+        band = self._searched_band(data, soc)
+        loss = (band if band is not None else data).get("best_loss")
+        if isinstance(loss, bool) or not isinstance(loss, (int, float)) or not math.isfinite(loss):
+            return None
+        return float(loss)
+
+    def _charge_efficiency(self, soc: float | None = None) -> float:
+        learned = self.learned_charge_efficiency(soc)[0] if self.use_learned_values else None
+        if learned is not None:
+            return learned
+        return float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY))
+
+    def learned_discharge_efficiency(self) -> float | None:
+        return bl.bounded_efficiency(
+            self._battery_log.estimate(bl.KIND_DISCHARGE, dt_util.utcnow().timestamp())
+        )
+
+    def _discharge_efficiency(self) -> float:
+        learned = self.learned_discharge_efficiency() if self.use_learned_values else None
+        if learned is not None:
+            return learned
+        return float(self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY))
+
+    def forecast_calibration(self, kind: str, day: date | None = None) -> fl.Calibration:
+        """What the season says about ``kind`` forecasts of ``day`` (default today)."""
+        if not self.config.get(CONF_PV_ENERGY_TODAY_ENTITY):
+            return fl.Calibration(fl.STATUS_NO_METER)
+        today = dt_util.now().date()
+        return self._forecast_log.calibrate(day or today, kind, today)
+
+    def _forecast_kind(self, entity_id: str | None) -> str:
+        """Which diary a forecast entity's value is judged against."""
+        today_entity = self.config.get(CONF_PV_FORECAST_TODAY_ENTITY)
+        return fl.KIND_TODAY if entity_id and entity_id == today_entity else fl.KIND_AHEAD
+
+    def _learned_forecast(self, kwh: float, kind: str, day: date) -> tuple[float, float, float]:
+        """(forecast, less-sun margin %, more-sun margin %) the plan works with."""
+        configured = float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0))
+        if not self.use_learned_values:
+            return kwh, configured, configured
+        calibration = self.forecast_calibration(kind, day)
+        if not calibration.active:
+            return kwh, configured, configured
+        return (
+            kwh * calibration.factor,
+            calibration.margin_low_pct if calibration.margin_low_pct is not None else configured,
+            calibration.margin_high_pct if calibration.margin_high_pct is not None else configured,
+        )
+
+    def _plan_forecast(self, kwh: float, entity_id: str | None) -> tuple[float, float, float]:
+        """:meth:`_learned_forecast` for the entity the plan read it from."""
+        kind = self._forecast_kind(entity_id)
+        now = dt_util.now()
+        day = self._window_end_datetime(now).date() if kind == fl.KIND_AHEAD else now.date()
+        return self._learned_forecast(kwh, kind, day)
+
+    def forecast_learning_attributes(self) -> dict[str, Any]:
+        """The correction sensor's attributes: both diaries, calibrated for today."""
+        ahead = self.forecast_calibration(fl.KIND_AHEAD)
+        today = self.forecast_calibration(fl.KIND_TODAY)
+        return {
+            "applied": self.use_learned_values and ahead.active,
+            **ahead.snapshot(),
+            "today": today.snapshot(),
+            "logged_days": len(self._forecast_log.days),
+        }
+
+    def battery_learning_attributes(self) -> dict[str, Any]:
+        """The capacity sensor's attributes."""
+        charge, source = self.learned_charge_efficiency()
+        discharge = self.learned_discharge_efficiency()
+        capacity = self.learned_capacity_kwh()
+        return {
+            "status": self._battery_learning_status,
+            "applied": self.use_learned_values,
+            "nameplate_kwh": self._nameplate_capacity_kwh(),
+            "learned_capacity_kwh": round(capacity, 2) if capacity is not None else None,
+            "charge_efficiency": round(charge, 3) if charge is not None else None,
+            "charge_efficiency_source": source,
+            "discharge_efficiency": round(discharge, 3) if discharge is not None else None,
+            "capacity_samples": self._battery_log.count(bl.KIND_CAPACITY),
+            "charge_samples": self._battery_log.count(bl.KIND_CHARGE),
+            "discharge_samples": self._battery_log.count(bl.KIND_DISCHARGE),
+            "capacity_kwh_used": round(self._capacity_kwh(), 2),
+            "charge_efficiency_used": round(self._charge_efficiency(), 3),
+            "discharge_efficiency_used": round(self._discharge_efficiency(), 3),
+        }
+
     def _observe_outdoor_temperature(self) -> None:
         """Add this poll's outdoor temperature to the diary (plan 015 stage D).
 
@@ -2174,7 +2691,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return peaks if seen else None
 
     async def _build_plan_input(
-        self, forecast_kwh: float, forecast_available: bool
+        self, forecast_kwh: float, forecast_available: bool, *, entity_id: str | None = None
     ) -> tuple[PlanInput, datetime, str | None]:
         """Gather every state the planner needs.
 
@@ -2186,8 +2703,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Split out of :meth:`_plan_target` so that a caller can run the planner
         without the side effects - the ``plan_target_soc`` action answers with a
         plan and must not move the window's target while it does so.
+
+        ``entity_id`` is the forecast entity the value was read from; None
+        means the one the plan reads (:meth:`_get_active_forecast_entity`).
+        It decides which learned correction applies (plan 018).
         """
-        capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
+        capacity = self._capacity_kwh()
+        configured_margin = float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0))
+        margin_low = margin_high = configured_margin
+        if forecast_available:
+            forecast_kwh, margin_low, margin_high = self._plan_forecast(
+                forecast_kwh, entity_id if entity_id is not None else self._get_active_forecast_entity()
+            )
         now = dt_util.now()
         window_end = self._window_end_datetime(now)
         sunrise, sunset = self._sun_times(now, window_end)
@@ -2239,17 +2766,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
             forecast_kwh_next_day=forecast_kwh,
             forecast_available=forecast_available,
-            error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
+            error_margin_pct=margin_low,
+            error_margin_high_pct=margin_high,
             window_end=window_end,
             pv_crossover=pv_crossover,
             sunset=sunset,
             house_load_kw_profile=await self._house_load_need_profile(window_end.date()),
             room_load_kw_profile=await self._house_load_profile(),
             reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
-            charge_efficiency=float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
-            discharge_efficiency=float(
-                self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)
-            ),
+            charge_efficiency=self._charge_efficiency(),
+            discharge_efficiency=self._discharge_efficiency(),
             prices_ct=prices_ct,
             # Measured from the window end: the evening the battery has to
             # reach is the one on the solar day this window is planning for.
@@ -2365,10 +2891,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         sunrise, sunset = self._sun_times(now, now)
         forecast_kwh, forecast_available = self._parse_forecast_energy(today_entity)
+        if forecast_available:
+            # The learned bias, not its band: the rescue reckons tight (plan 016)
+            forecast_kwh = self._learned_forecast(forecast_kwh, fl.KIND_TODAY, now.date())[0]
         try:
             return evening_outlook(
                 now=now,
-                capacity_kwh=float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)),
+                capacity_kwh=self._capacity_kwh(),
                 current_soc=current_soc,
                 user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
                 user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
@@ -2381,12 +2910,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # the cheap night, and too little costs only the difference
                 # between two day tariffs.
                 margin_pct=0.0,
-                charge_efficiency=float(
-                    self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)
-                ),
-                discharge_efficiency=float(
-                    self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)
-                ),
+                charge_efficiency=self._charge_efficiency(),
+                discharge_efficiency=self._discharge_efficiency(),
                 sunrise=sunrise,
                 sunset=sunset,
                 forecast_kwh_today=forecast_kwh,
@@ -2421,27 +2946,30 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         reserve_floor = 0.0
         try:
-            plan_input, _, _ = await self._build_plan_input(forecast_kwh, forecast_available)
+            plan_input, _, _ = await self._build_plan_input(
+                forecast_kwh, forecast_available, entity_id=str(today_entity)
+            )
             reserve_floor = evening_reserve_soc(plan_input)
         except (ValueError, TypeError) as err:
             # No reserve is a weaker floor, not a wrong one: the user minimum
             # still holds, and the sensor writes nothing either way.
             _LOGGER.debug("No evening reserve for the curtailment outlook: %s", err)
+        curtail_kwh, curtail_margin, _ = self._learned_forecast(
+            forecast_kwh, fl.KIND_TODAY, now.date()
+        )
         try:
             return curtailment_outlook(
-                capacity_kwh=float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)),
+                capacity_kwh=self._capacity_kwh(),
                 user_min_soc=float(self.config.get(CONF_USER_MIN_SOC, 8.0)),
                 user_max_soc=float(self.config.get(CONF_USER_MAX_SOC, 100.0)),
                 house_load_kw_profile=await self._house_load_profile(),
                 sunrise=sunrise,
                 sunset=sunset,
-                forecast_kwh_today=forecast_kwh,
+                forecast_kwh_today=curtail_kwh,
                 forecast_available=forecast_available,
-                error_margin_pct=float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0)),
+                error_margin_pct=curtail_margin,
                 limit_w=float(limit_w),
-                charge_efficiency=float(
-                    self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)
-                ),
+                charge_efficiency=self._charge_efficiency(),
                 evening_reserve_soc_pct=reserve_floor,
             )
         except (ValueError, TypeError) as err:
@@ -2649,9 +3177,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             required = required_charge_power_w(
                 target_soc,
                 current_soc,
-                float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)),
+                self._capacity_kwh(),
                 hours_remaining,
-                float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
+                self._charge_efficiency(current_soc),
             )
         except ValueError as err:
             _LOGGER.error("Cannot plan the charge power: %s", err)
@@ -2697,7 +3225,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.info(
             "Planned charge power %.0f W (%.2f kWh missing in %.2f h, required %.0f W)",
             setpoint,
-            max(0.0, (target_soc - current_soc) / 100.0 * float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))),
+            max(0.0, (target_soc - current_soc) / 100.0 * self._capacity_kwh()),
             hours_remaining,
             required,
         )
@@ -4797,21 +5325,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         so an installation that measured before this existed keeps its result.
         """
         data = self.get_auto_efficiency_data()
+        band = self._searched_band(data, soc)
+        if band is not None:
+            return int(band["best_power_w"])
         overall = data.get("best_power_w")
-        overall_w = overall if isinstance(overall, int) else None
-        if soc is None:
-            return overall_w
+        return overall if isinstance(overall, int) else None
+
+    def _searched_band(self, data: Mapping[str, Any], soc: float | None) -> Mapping[str, Any] | None:
+        """The band ``soc`` falls into, if it has been searched and has an optimum."""
         bands = data.get("bands")
-        if not isinstance(bands, dict):
-            return overall_w
+        if soc is None or not isinstance(bands, Mapping):
+            return None
         band = bands.get(self._efficiency_band(soc))
-        if not isinstance(band, dict):
-            return overall_w
+        if not isinstance(band, Mapping):
+            return None
         history = band.get("history")
         best = band.get("best_power_w")
-        if not isinstance(history, dict) or len(history) < EFFICIENCY_BAND_MIN_SAMPLES:
-            return overall_w
-        return best if isinstance(best, int) else overall_w
+        if (not isinstance(history, Mapping) or len(history) < EFFICIENCY_BAND_MIN_SAMPLES
+                or isinstance(best, bool) or not isinstance(best, int)):
+            return None
+        return band
 
     def _record_band_sample(self, data: dict[str, Any], power_w: int, loss: float) -> None:
         """File a finished measurement under the band it was taken in."""
@@ -5313,9 +5846,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         if elapsed_seconds(self._window_end_datetime(now), now) < trial_s:
             return False  # the window end would cut it short
-        capacity_wh = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0)) * 1000.0
+        capacity_wh = self._capacity_kwh() * 1000.0
         missing_wh = max(0.0, target - soc) / 100.0 * capacity_wh
-        efficiency = float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY))
+        efficiency = self._charge_efficiency()
         # The settling, then the minimum time AND the minimum energy: 0.29 kWh
         # left could never finish a trial that needs 0.3 kWh measured, yet one
         # started and measured nothing for half an hour (21/22 October 2026)
@@ -5698,8 +6231,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         try:
             # Get configuration values
-            battery_capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
-            error_margin = float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0))
+            battery_capacity = self._capacity_kwh()
             user_min_soc = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
             user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, 100.0))
 
@@ -5757,10 +6289,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if plan is not None:
                 calculated_soc = plan.target_soc
             else:
+                # The room kept free for the sun: the learned forecast and its
+                # more-sun margin (plan 018)
+                headroom_kwh, _, headroom_margin = self._plan_forecast(
+                    forecast_energy, pv_forecast_entity
+                )
                 calculated_soc = calculate_required_soc(
-                    forecast_energy,
+                    headroom_kwh,
                     battery_capacity,
-                    error_margin,
+                    headroom_margin,
                     user_min_soc,
                     user_max_soc,
                 )
@@ -5952,7 +6489,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # next poll (CodeRabbit on #44). An action asked for by hand still
             # may - that is a new request, not this one coming back.
             return
-        capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
+        capacity = self._capacity_kwh()
         spare_kwh = (outlook.projected_soc - outlook.required_soc) / 100.0 * capacity
         if rescuing and spare_kwh >= EVENING_RESCUE_RELEASE_KWH:
             _LOGGER.info(
@@ -6038,8 +6575,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         pays = rescue_purchase_pays(
             before_ct,
             period_ct,
-            float(self.config.get(CONF_CHARGE_EFFICIENCY, DEFAULT_CHARGE_EFFICIENCY)),
-            float(self.config.get(CONF_DISCHARGE_EFFICIENCY, DEFAULT_DISCHARGE_EFFICIENCY)),
+            self._charge_efficiency(),
+            self._discharge_efficiency(),
             EVENING_RESCUE_BUY_MARGIN_CT,
         )
         _LOGGER.debug(
@@ -6799,6 +7336,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Observe lost channels before control, retaining independent stop paths."""
         self._observe_pv_yield()
         self._observe_outdoor_temperature()
+        self._observe_forecasts()
+        self._schedule_learning_refresh()
         faults = self._update_communication_health()
         if faults and self.is_active and not self._ending and not self._unloading:
             # No raised ceiling may replace a protective zero while the stop
@@ -6908,8 +7447,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return inactive_data
 
         try:
-            battery_capacity = float(self.config.get(CONF_BATTERY_CAPACITY, 10.0))
-            error_margin = float(self.config.get(CONF_FORECAST_ERROR_MARGIN, 10.0))
+            battery_capacity = self._capacity_kwh()
             user_min_soc = float(self.config.get(CONF_USER_MIN_SOC, 8.0))
             user_max_soc = float(self.config.get(CONF_USER_MAX_SOC, 100.0))
         except (ValueError, TypeError) as e:
@@ -6941,10 +7479,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if plan is not None:
                 calculated_soc = plan.target_soc
             else:
+                # The room kept free for the sun: the learned forecast and its
+                # more-sun margin (plan 018)
+                headroom_kwh, _, headroom_margin = self._plan_forecast(
+                    forecast_energy, pv_forecast_entity
+                )
                 calculated_soc = calculate_required_soc(
-                    forecast_energy,
+                    headroom_kwh,
                     battery_capacity,
-                    error_margin,
+                    headroom_margin,
                     user_min_soc,
                     user_max_soc,
                 )

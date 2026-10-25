@@ -5,6 +5,59 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.0] - 2026-10-25
+
+ICN learns from the house's own data (plan 018). The PV forecast does not know the roof, the
+battery's nameplate is what it had when new, and both efficiencies were estimates typed into a
+form. Each of these is now read from what the house measured, bounded, and applied only once
+enough data stands behind it. Until then, and with the new switch off, the settings apply as
+before.
+
+### Added
+- **The PV forecast, corrected by season.**
+  - ICN keeps a diary: the evening's forecast for tomorrow, the morning's for today, and the PV
+    meter's yield, for three years. At the first start it fills in what the recorder still knows.
+  - For the planned day it uses the days within 45 days of the calendar date, in every year.
+    Older years count half as much, so ageing panels come in by themselves.
+  - From 14 such days it learns a **factor** (kWh against kWh) and a **band**. Each edge is
+    one-sided: four days in five the sun delivered at least the lower edge, four days in five at
+    most the upper one. The band is never narrower than 5 % either way.
+  - The night plans with the corrected forecast. The less-sun side takes the lower edge, the room
+    for the sun the upper one (new `error_margin_high_pct` in the planner).
+  - The high-price rescue and the evening outlook take the morning forecast's factor, still
+    without a band. The curtailment outlook takes its factor and lower edge.
+- **Usable capacity, charge and discharge efficiency from the energy balance.**
+  - Once a day ICN reads the recorder's five-minute means and finds stretches of steady charging
+    or discharging: at least 300 W, 30 minutes and 10 % SOC.
+  - The battery energy against the SOC change gives the capacity. With no PV, house consumption
+    and grid import against the battery energy give both efficiencies.
+  - The battery power's sign is read from the data. Implausible samples are dropped.
+  - A value applies from three samples, recent ones weighted more. The capacity is bounded to
+    60–105 % of the nameplate, the efficiencies to 0.75–0.99.
+- **The charge efficiency the efficiency search measured** now reaches the planner, the charge
+  power and the trial planning. Before, the setting's 0.90 stayed in force. Where a SOC band has
+  its own optimum, its loss is taken along with its power.
+- **Switch *Use learned values*,** on by default. Off, everything is still collected.
+- **Sensors *PV forecast correction*** (factor, band, days, error before and after) **and *Usable
+  battery capacity*** (with both efficiencies and what the plan uses). Both are also in the
+  diagnostics.
+- The learned data lives in its own store and is deleted with the entry. It records which
+  entities each kind of value came from: a new forecast entity, PV meter or battery sensor starts
+  that kind afresh and keeps the rest. A new nameplate capacity starts the capacity afresh. Runs
+  from before a battery change are not read back from the recorder's statistics.
+- A day the PV meter's statistics cover for fewer than 20 hours is not taken as a yield. It stays
+  open and is read again later.
+- Unloading writes the store and closes it, so no delayed save of the old coordinator lands over a
+  reload's new one or recreates a removed entry's file.
+
+### Lab
+- `check_real_ha` calls the forecast backfill, the yield read and the battery balance against the
+  real recorder. It also checks that the store is written and deleted with the entry.
+
+### Docs
+- New page *What ICN learns by itself* (DE/EN). The configuration, how-it-works and entities pages
+  point to it.
+
 ## [3.13.0] - 2026-10-25
 
 The efficiency search measures what it is meant to measure (plan 017). On 24/25 October 2026 it

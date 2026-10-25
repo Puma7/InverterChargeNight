@@ -190,7 +190,37 @@ async def main() -> None:
             await service("switch", "turn_on", {"entity_id": "switch.icn_lab_online"})
             check("inverter reconnect restores telemetry",
                   state("sensor.icn_lab_battery_soc") != "unavailable")
+            # Plan 018: the real recorder answers every question the learning
+            # asks. The coordinator swallows these errors on purpose, so each
+            # step is called directly here where an API mismatch would raise.
+            from homeassistant.components.recorder import get_instance
+            from custom_components.inverter_charge_night import battery_learning as bl
+            from custom_components.inverter_charge_night import forecast_learning as fl
+            await get_instance(hass).async_block_till_done()
+            coordinator.config = {**coordinator.config,
+                                  "pv_energy_today_entity": "sensor.icn_lab_pv_energy"}
+            today = dt_util.now().date()
+            coordinator._forecast_log.note(today - timedelta(days=1), fl.KIND_AHEAD, 12.0)
+            backfilled = await coordinator._backfill_forecasts()
+            actuals = await coordinator._read_pv_actuals(today)
+            await coordinator._learn_battery()
+            check("the real recorder answers the forecast backfill, the yields and the balance",
+                  isinstance(backfilled, bool) and isinstance(actuals, bool)
+                  and coordinator._battery_learning_status in (
+                      bl.STATUS_NO_STATISTICS, bl.STATUS_LEARNING, bl.STATUS_ACTIVE),
+                  coordinator._battery_learning_status)
+            await coordinator._learning_store.async_save(coordinator._learning_snapshot())
+            learning_file = root / ".storage" / f"inverter_charge_night.learning.{entry.entry_id}"
+            check("what the entry learned is persisted to its own store", learning_file.is_file())
+            registry = er.async_get(hass)
+            names = [item.unique_id for item in er.async_entries_for_config_entry(registry, entry.entry_id)]
+            check("the learning sensors and the switch are registered",
+                  all(any(n.endswith(suffix) for n in names) for suffix in (
+                      "pv_forecast_correction", "usable_battery_capacity", "use_learned_values")))
             check("entry unload cleans up successfully", await hass.config_entries.async_unload(entry.entry_id))
+            await hass.config_entries.async_remove(entry.entry_id)
+            await hass.async_block_till_done()
+            check("removing the entry deletes its learning store", not learning_file.exists())
         finally:
             await hass.async_stop()
             reports = LAB / "reports"

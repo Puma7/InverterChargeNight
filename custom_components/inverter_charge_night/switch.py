@@ -33,8 +33,47 @@ async def async_setup_entry(
             AutoEfficientChargeSwitch(coordinator, entry),
             SkipNextSwitch(coordinator, entry),
             EveningRescueChargeSwitch(coordinator, entry),
+            UseLearnedValuesSwitch(coordinator, entry),
         ]
     )
+
+
+class UseLearnedValuesSwitch(InverterChargeNightEntity, SwitchEntity):
+    """Plan with what the house's own data says (plan 018).
+
+    On by default. Off, the data is still collected - nothing is lost by
+    trying the settings for a while - but every plan uses the configured
+    capacity, efficiencies and forecast margin again.
+    """
+
+    _attr_translation_key = "use_learned_values"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: InverterChargeNightCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the switch."""
+        super().__init__(coordinator, entry, "use_learned_values")
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether learned values are applied."""
+        return bool(self.coordinator.use_learned_values)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Apply the learned values where enough data stands behind them."""
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Plan with the configured values; keep collecting."""
+        await self._set(False)
+
+    async def _set(self, value: bool) -> None:
+        if self.coordinator.use_learned_values == value:
+            return
+        _LOGGER.info("Learned values %s", "are used for planning" if value else "are no longer used")
+        self.coordinator.use_learned_values = value
+        self.coordinator._persist_state()
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
 
 
 class InverterChargeNightSwitch(InverterChargeNightEntity, SwitchEntity):

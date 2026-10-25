@@ -19,6 +19,7 @@ einem Update von einer älteren Version prüfst du die IDs auf der Geräteseite.
 | Automatik | `switch.inverter_charge_night_automatik` | Der Hauptschalter. Aus: Alles, was ICN geändert hat, wird zurückgegeben, und ICN steuert nichts mehr, bis du ihn wieder einschaltest. |
 | Nächstes Fenster überspringen (24 h) | `switch.inverter_charge_night_nachstes_fenster_uberspringen_24_h` | Überspringt ein Fenster und läuft dann von selbst ab. |
 | Hochpreisrettung (festhalten und nachladen) | `switch.inverter_charge_night_hochpreisrettung_festhalten_und_nachladen` | Erlaubt der [Hochpreisrettung](extras.md#hochpreisrettung) einzugreifen. Standardmäßig aus. |
+| Gelernte Werte verwenden | `switch.inverter_charge_night_gelernte_werte_verwenden` | Plant mit dem, was ICN [gelernt](learning.md) hat: Prognosekorrektur, Kapazität, Wirkungsgrade. Standardmäßig an. |
 | Effizienzsuche | `switch.inverter_charge_night_effizienzsuche` | Startet die [Effizienzsuche](efficiency-search.md). Schaltet sich selbst aus, wenn sie fertig ist. |
 | Betriebsart | `select.inverter_charge_night_betriebsart` | *Nachtladung* oder *Morgenentladung (experimentell)*. Ein Wechsel während eines Fensters setzt zuerst den Wechselrichter zurück. |
 | Zielladestand überschreiben | `number.inverter_charge_night_zielladestand_uberschreiben` | Ersetzt das Ziel des Planers, bis das Fenster endet. |
@@ -38,6 +39,8 @@ einem Update von einer älteren Version prüfst du die IDs auf der Geräteseite.
 | Effizienzsuche | `sensor.inverter_charge_night_effizienzsuche` | Was die Suche gerade tut und was sie gemessen hat. |
 | Effizienteste Ladeleistung | `sensor.inverter_charge_night_effizienteste_ladeleistung` | Das Ergebnis der Effizienzsuche. |
 | Abregelungsvorschau | `sensor.inverter_charge_night_abregelungsvorschau` | PV-Ertrag, der durch eine Einspeisegrenze verloren geht. Standardmäßig deaktiviert. |
+| PV-Prognosekorrektur | `sensor.inverter_charge_night_pv_prognosekorrektur` | Der [gelernte](learning.md) Faktor dieser Jahreszeit in %, mit Band und Fehler vorher und nachher. |
+| Nutzbare Akkukapazität | `sensor.inverter_charge_night_nutzbare_akkukapazitat` | Die [gelernte](learning.md) Kapazität in kWh, mit beiden Wirkungsgraden und dem, womit der Plan rechnet. |
 
 ### Attribute von *Zielladestand*
 

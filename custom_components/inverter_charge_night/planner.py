@@ -104,6 +104,18 @@ class PlanInput:
     bridge_model: str = BRIDGE_MODEL_FIXED_DELAY
     sunrise: datetime | None = None
     pv_hourly_shape: Sequence[float] | None = None
+    # Plan 018: a forecast learned to be off by different amounts either way.
+    # ``error_margin_pct`` is then how much less sun there may be (the need
+    # side), this how much more (the room side). None: the same margin both
+    # ways, which is what a caller that predates it gets.
+    error_margin_high_pct: float | None = None
+
+
+def _margins(p: PlanInput) -> tuple[float, float]:
+    """(less sun, more sun) as fractions of the forecast."""
+    low = max(0.0, p.error_margin_pct) / 100.0
+    high = low if p.error_margin_high_pct is None else max(0.0, p.error_margin_high_pct) / 100.0
+    return low, high
 
 
 @dataclass(frozen=True)
@@ -256,8 +268,8 @@ def surplus_kwh(p: PlanInput, *, cautious: bool = False) -> float:
     # (less surplus credited to it).
     profile = p.house_load_kw_profile if cautious else _room_profile(p)
     daytime_load_kwh = integrate_load(profile, p.pv_crossover, p.sunset)
-    margin = max(0.0, p.error_margin_pct) / 100.0
-    factor = max(0.0, 1 - margin) if cautious else 1 + margin
+    low, high = _margins(p)
+    factor = max(0.0, 1 - low) if cautious else 1 + high
     forecast_with_margin = max(0.0, p.forecast_kwh_next_day) * factor
     return max(0.0, forecast_with_margin - daytime_load_kwh)
 
@@ -378,9 +390,9 @@ def day_balance(p: PlanInput) -> DayBalance | None:
     cutoff = evening[0] if evening is not None and evening[0] < p.sunset else p.sunset
     if end <= p.window_end:
         return None
-    margin = max(0.0, p.error_margin_pct) / 100.0
+    low, high = _margins(p)
     forecast = max(0.0, p.forecast_kwh_next_day)
-    low_kwh, high_kwh = forecast * max(0.0, 1 - margin), forecast * (1 + margin)
+    low_kwh, high_kwh = forecast * max(0.0, 1 - low), forecast * (1 + high)
     evening_factor = 1 + max(0.0, p.reserve_margin_pct) / 100.0
     efficiency = min(1.0, max(0.01, p.discharge_efficiency))
     room = _room_profile(p)

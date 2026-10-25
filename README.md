@@ -51,6 +51,8 @@ charges it to exactly that level, and leaves the rest of the capacity free for t
   before the main fuse does.
 - 📉 **Efficiency search.** It measures at which charge power your inverter loses the least
   energy.
+- 🎓 **Learns from your data.** It finds out, season by season, how far your PV forecast is off,
+  and what your battery really holds and loses.
 - 🔌 **Power cut aware.** In island operation it lets go of the inverter at once.
 - ↩️ **Everything it changes, it gives back.** It restores the minimum SOC, the switches and the
   limits at the end of the window, also after a restart.
@@ -82,6 +84,7 @@ Step by step: [Installation and first setup](https://github.com/Puma7/InverterCh
 | [Configuration reference](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/configuration.md) | Every setting with its default, and suggested setups |
 | [Safety](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/safety.md) | Restoring settings, house connection, power cut, lost communication |
 | [Efficiency search](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/efficiency-search.md) | Finding the charge power with the smallest loss |
+| [What ICN learns by itself](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/learning.md) | The forecast by season, the usable capacity, both efficiencies |
 | [Exceptions and extras](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/extras.md) | Skip, override, snow nights, high-price rescue, PV shortfall, curtailment |
 | [Entities and actions](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/entities-and-actions.md) | All entities and attributes, actions, automation examples |
 | [Dashboard](https://github.com/Puma7/InverterChargeNight/blob/main/docs/en/dashboard.md) | A ready-made dashboard view |

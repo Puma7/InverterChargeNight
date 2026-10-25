@@ -17,6 +17,7 @@ async def test_async_unload_entry_active_resets(mock_hass, mock_config_entry):
     coordinator._remove_battery_soc_listener = MagicMock()
     coordinator._remove_inverter_min_soc_listener = MagicMock()
     coordinator._stop_periodic_verification = AsyncMock()
+    coordinator.async_unload_learning = AsyncMock()
 
     async def assert_writers_stopped_before_reset():
         assert coordinator._unloading
@@ -50,6 +51,7 @@ async def test_async_unload_entry_removes_all_listeners(mock_hass, mock_config_e
     coordinator = MagicMock()
     coordinator.is_active = False
     coordinator._stop_periodic_verification = AsyncMock()
+    coordinator.async_unload_learning = AsyncMock()
 
     mock_config_entry.runtime_data = coordinator
     mock_hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)

@@ -93,7 +93,7 @@ are optional and make the result more accurate.
 | Field | Default | Meaning |
 |---|---|---|
 | Planner Mode (`planner_mode`) | Headroom | *Headroom*: only keeps room for the forecast. *Bridge*: also covers the house from the window end until the PV takes over ([how](how-it-works.md#bridge-recommended)). |
-| Additional battery headroom for PV generation (`forecast_error_margin`) | 10 % | How far the forecast may be off. Applied on the safe side: more room for the sun, less sun for the evening. |
+| Additional battery headroom for PV generation (`forecast_error_margin`) | 10 % | How far the forecast may be off. Applied on the safe side: more room for the sun, less sun for the evening. Replaced by the [learned band](learning.md) once 14 days of the season are known. |
 | Fallback minimum SOC when restoring (`default_min_soc`) | the lower bound | Only used when the original minimum SOC could not be read. A new setup takes the lower bound of page 2. |
 | PV energy forecast for today (`pv_forecast_today_entity`) | – | Needed for windows after midnight, the evening outlook and the curtailment outlook. |
 | House Consumption Energy Meter (`house_load_entity`) | – | Cumulative kWh meter. ICN learns an hourly profile from the last 14 days. |

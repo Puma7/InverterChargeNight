@@ -48,6 +48,10 @@ ein. Wenn du über Mitternacht lädst, richte beide ein. Solcast, Forecast.Solar
 Sensor, der den Ertrag eines Tages in kWh meldet, funktionieren. ICN liest den Zustand oder die
 üblichen Prognose-Attribute, in Wh oder kWh.
 
+ICN korrigiert die Prognose um das, was dieses Dach zu dieser Jahreszeit geliefert hat, und
+ersetzt die feste Marge durch die gemessene Streuung der Jahreszeit, siehe
+[Was ICN selbst lernt](learning.md).
+
 **Ohne brauchbare Prognose** lädt ICN nicht auf 100 %. Freiraum plant sichere 50 %. Überbrückung
 plant 50 % oder ihre Untergrenze plus den Puffer, je nachdem, was höher ist. Beides wird in deinen
 Min- und Max-SOC eingegrenzt.

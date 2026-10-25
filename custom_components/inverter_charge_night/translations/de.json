@@ -1626,6 +1626,12 @@
       },
       "curtailment_outlook": {
         "name": "Abregelungsvorschau"
+      },
+      "pv_forecast_correction": {
+        "name": "PV-Prognosekorrektur"
+      },
+      "usable_battery_capacity": {
+        "name": "Nutzbare Akkukapazität"
       }
     },
     "switch": {
@@ -1640,6 +1646,9 @@
       },
       "evening_rescue_charge": {
         "name": "Hochpreisrettung (festhalten und nachladen)"
+      },
+      "use_learned_values": {
+        "name": "Gelernte Werte verwenden"
       }
     },
     "select": {

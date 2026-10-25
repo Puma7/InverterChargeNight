@@ -27,12 +27,15 @@ from custom_components.inverter_charge_night.sensor import (
     NextHighPriceWindowSensor,
     PriceSignalSensor,
     GridChargeHeadroomSensor,
+    PVForecastCorrectionSensor,
+    UsableBatteryCapacitySensor,
 )
 from custom_components.inverter_charge_night.switch import (
     AutoEfficientChargeSwitch,
     InverterChargeNightSwitch,
     EveningRescueChargeSwitch,
     SkipNextSwitch,
+    UseLearnedValuesSwitch,
 )
 
 COMPONENT_DIR = Path(binary_sensor.__file__).parent
@@ -52,6 +55,8 @@ PLATFORM_ENTITIES = {
             (EveningOutlookSensor, "evening_outlook"),
             (PriceSignalSensor, "price_signal"),
             (CurtailmentOutlookSensor, "curtailment_outlook"),
+            (PVForecastCorrectionSensor, "pv_forecast_correction"),
+            (UsableBatteryCapacitySensor, "usable_battery_capacity"),
         ],
     ),
     "number": (
@@ -65,6 +70,7 @@ PLATFORM_ENTITIES = {
             (AutoEfficientChargeSwitch, "auto_efficient_charge"),
             (SkipNextSwitch, "skip_next"),
             (EveningRescueChargeSwitch, "evening_rescue_charge"),
+            (UseLearnedValuesSwitch, "use_learned_values"),
         ],
     ),
     "select": (select, [(OperationModeSelect, "operation_mode")]),

@@ -14,6 +14,8 @@
 
 - [Safety](safety.md): restoring settings, house connection, power cut, lost communication.
 - [Efficiency search](efficiency-search.md): the charge power with the smallest loss.
+- [What ICN learns by itself](learning.md): the forecast by season, the usable capacity, both
+  efficiencies.
 - [Exceptions and extras](extras.md): skip, override, snow nights, high-price rescue, PV shortfall,
   curtailment.
 - [Morning discharge](morning-discharge.md): the experimental opposite mode.

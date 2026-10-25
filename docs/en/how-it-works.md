@@ -47,6 +47,9 @@ is missing. If you charge across midnight, configure both. Solcast, Forecast.Sol
 any other sensor that reports a day's yield in kWh work. ICN reads the state, or the usual
 forecast attributes, in Wh or kWh.
 
+ICN corrects the forecast by what this roof delivered at this time of year, and replaces the
+fixed margin by the season's measured spread: see [what ICN learns by itself](learning.md).
+
 **Without a usable forecast** ICN does not charge to 100 %. Headroom plans a safe 50 %. Bridge
 plans 50 % or its lower bound plus the buffer, whichever is higher. Both are clamped into your
 minimum and maximum SOC.
