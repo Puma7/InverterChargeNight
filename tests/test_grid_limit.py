@@ -1082,7 +1082,7 @@ async def test_the_listener_forwards_a_state_change(mock_hass, limited):
     """The registered callback really reaches the throttling code."""
     with patch(TRACK) as track:
         limited._setup_grid_import_listener()
-    assert track.call_args.args[1] == GRID_IMPORT
+    assert list(track.call_args.args[1]) == [GRID_IMPORT]
     callback = track.call_args.args[2]
     limited._react_to_grid_import = AsyncMock()
 

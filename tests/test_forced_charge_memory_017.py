@@ -21,14 +21,15 @@ from unittest.mock import AsyncMock
 from tests.test_forced_charge_night import (  # noqa: F401
     CONFIG, WINDOW_START, _calls, _fresh, night,
 )
-from tests.test_grid_limit import BATTERY, GRID, _make_coordinator
+from tests.test_grid_limit import BATTERY, GRID, SUN, _make_coordinator
 
 NEXT_NIGHT = WINDOW_START + timedelta(days=1)
 
 
 async def _run_night(hass: Any, coordinator: Any, clock: Any, start: Any, *, charge: bool,
                      switch_stuck_on: bool = False, on_while: Any = None,
-                     switch_stale: bool = False) -> None:
+                     switch_stale: bool = False, sun_up_while: Any = None,
+                     sun_up_at_end: bool = False) -> None:
     clock.now = start
     hass.states.get(BATTERY).state = "33"
     await coordinator._on_window_start(start)
@@ -48,8 +49,13 @@ async def _run_night(hass: Any, coordinator: Any, clock: Any, start: Any, *, cha
         if charge:
             soc = min(44.0, soc + .75)  # the floor charges, about 1 kW
             hass.states.get(BATTERY).state = str(soc)
+        if sun_up_while is not None:
+            hass.states.get(SUN).state = "above_horizon" if sun_up_while(soc) else "below_horizon"
         clock.now += timedelta(minutes=15)
+    if sun_up_at_end:
+        hass.states.get(SUN).state = "above_horizon"
     await coordinator._on_window_end(clock.now)
+    hass.states.get(SUN).state = "below_horizon"
 
 
 def _hold_stale_off(hass: Any, start: Any) -> None:
@@ -126,6 +132,28 @@ async def test_a_switch_on_again_after_the_baseline_takes_it_along(night):  # no
                      on_while=lambda soc: 40 <= soc < 43.1)
 
     assert float(hass.states.get(BATTERY).state) >= 43.1
+    assert coordinator._grid_switch_forced_charge is None
+
+
+@pytest.mark.asyncio
+async def test_a_charge_the_sun_may_have_done_proves_nothing(night):  # noqa: F811
+    """Codex on #45: the panels raise the SOC with the switch off too.
+
+    An evening window: the sun is up for part of the charge and down by its end.
+    """
+    hass, coordinator, clock = night
+    await _run_night(hass, coordinator, clock, WINDOW_START, charge=True,
+                     sun_up_while=lambda soc: soc < 38)
+
+    assert float(hass.states.get(BATTERY).state) >= 43.1
+    assert coordinator._grid_switch_forced_charge is None
+
+
+@pytest.mark.asyncio
+async def test_a_sun_up_at_the_window_end_proves_nothing(night):  # noqa: F811
+    hass, coordinator, clock = night
+    await _run_night(hass, coordinator, clock, WINDOW_START, charge=True, sun_up_at_end=True)
+
     assert coordinator._grid_switch_forced_charge is None
 
 

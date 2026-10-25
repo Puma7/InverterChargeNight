@@ -176,6 +176,11 @@ DEFAULT_GRID_CONTINUOUS_PCT = 80
 DEFAULT_GRID_HEADROOM_W = 500
 GRID_LIMIT_STALE_AFTER_S = 300  # after this the grid import counts as unknown
 GRID_LIMIT_MIN_WRITE_INTERVAL_S = 30  # debounce for the grid import listener
+# Grid import minus house consumption as the battery's own draw is bounded by
+# the battery power: two meters that report at different moments can show a
+# rising house load as charger draw. The charger takes at most this much more
+# than reaches the battery (plan 017, Codex on #45).
+GRID_OWN_DRAW_MAX_LOSS = 0.2
 # Additional discharge block for explicit reservations/evening rescue. Auto
 # chooses a vendor switch, discharge limit, then a raised min-SOC floor.
 # Scheduled nights only use the planned target floor, regardless of this mode.

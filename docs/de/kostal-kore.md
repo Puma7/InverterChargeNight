@@ -77,7 +77,9 @@ Inverter Charge Night schreibt die Grenze direkt nach dem Einschalten erneut und
 danach noch einmal. Hat der Schalter sie angehoben, wird das Netzladen für den Rest des Fensters
 wieder ausgeschaltet, und der angehobene Min-SOC übernimmt das Laden. Hat ein Fenster sein Ziel
 so erreicht, lassen die folgenden Fenster den Schalter 30 Tage lang von Anfang an aus. Das kurze
-Einschalten passiert also einmal statt jede Nacht. Ein neuer Schalter, eine neue Ladegrenze oder
+Einschalten passiert also einmal statt jede Nacht. Es zählt nur eine Ladung, nachdem der Schalter
+„aus“ gemeldet hat, und nur, wenn die Sonne von da an bis zum Fensterende unter dem Horizont
+war. Ein neuer Schalter, eine neue Ladegrenze oder
 30 Tage, und es wird erneut versucht. Im Protokoll steht beim ersten Mal
 `The charge limit did not hold with ... switched on` und danach
 `Grid charging stays off this window`.

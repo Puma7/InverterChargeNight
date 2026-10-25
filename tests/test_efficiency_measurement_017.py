@@ -157,11 +157,41 @@ def test_the_house_connection_limit_credits_the_derived_draw(mock_hass):
     coordinator._planned_setpoint_written_w = 3000
     _fresh(mock_hass, GRID, "2600")
     _fresh(mock_hass, HOUSE, "600")
+    _fresh(mock_hass, RECEIVED, "-1850")  # a Kostal counts charging as negative
 
     with patch(NOW, return_value=START):
         assert coordinator._own_charge_draw_w() == 2000
         _fresh(mock_hass, HOUSE, "unavailable")
         assert coordinator._own_charge_draw_w() == 0.0
+
+
+def test_a_house_load_the_house_sensor_has_not_reported_yet_is_not_credited(mock_hass):
+    """Codex on #45: the grid meter reports a rising house load first.
+
+    Charging at 1 kW, the house goes from 0.5 to 5.5 kW: the grid import reads
+    6.5 kW while the house sensor still says 0.5 kW. Credited as 5 kW of own
+    draw, the limit would let the battery keep 4.5 kW of a 6 kW connection.
+    """
+    coordinator = _derived(mock_hass)
+    coordinator._planned_setpoint_written_w = 5000
+    _fresh(mock_hass, GRID, "6500")
+    _fresh(mock_hass, HOUSE, "500")
+    _fresh(mock_hass, RECEIVED, "-1000")
+
+    with patch(NOW, return_value=START):
+        assert coordinator._own_charge_draw_w() == pytest.approx(1250)
+        _fresh(mock_hass, RECEIVED, "unavailable")
+        assert coordinator._own_charge_draw_w() == 0.0
+
+
+def test_a_house_update_is_answered_like_a_grid_update(mock_hass):
+    coordinator = _make(mock_hass, {**DERIVED, CONF_MAIN_FUSE_A: 63})
+    coordinator.is_active = True
+    with patch("custom_components.inverter_charge_night.coordinator."
+               "async_track_state_change_event") as track:
+        coordinator._setup_grid_import_listener()
+
+    assert list(track.call_args.args[1]) == [GRID, HOUSE]
 
 
 # --- A sensor that counts charging as negative --------------------------------

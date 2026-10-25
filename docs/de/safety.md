@@ -77,7 +77,11 @@ die der Plan verlangt. Braucht der Rest des Hauses das ganze Budget, geht die La
 solange das anhält.
 
 - *Was der Akku selbst zieht* ist die gemessene AC-Ladeleistung (höchstens der Sollwert). Ohne
-  diesen Sensor zählt der gesamte Bezug als andere Last. Das ist die sichere Seite.
+  diesen Sensor zählt der gesamte Bezug als andere Last. Das ist die sichere Seite. Kommt sie aus
+  Netzbezug minus Hausverbrauch, zählt sie höchstens so viel wie die Akkuleistung plus 25 %. Die
+  beiden Zähler melden zu verschiedenen Zeitpunkten, und ein gerade gestiegener Hausverbrauch
+  sähe sonst wie Ladeaufnahme aus. Auf eine Meldung des Hausverbrauchs reagiert ICN wie auf eine
+  des Netzbezugs.
 - Es lädt immer nur **weniger**. Ein Netzbezugssensor, der nicht verfügbar ist, seit fünf Minuten
   nichts gemeldet hat oder keine Einheit W oder kW hat, pausiert das Laden (0 W), bis er wieder
   einen Wert liefert.

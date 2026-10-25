@@ -206,6 +206,7 @@ from .const import (
     DEFAULT_MAX_CHARGE_POWER_W,
     GRID_LIMIT_STALE_AFTER_S,
     GRID_LIMIT_MIN_WRITE_INTERVAL_S,
+    GRID_OWN_DRAW_MAX_LOSS,
 )
 from .calculation import calculate_required_soc
 from .prices import PriceSeries, mean_price_ct, parse_price_series, rescue_purchase_pays
@@ -421,6 +422,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _grid_switch_forced_this_window: bool = False
     # The battery level once grid charging read off after the forced charge
     _grid_switch_off_soc: float | None = None
+    # The sun was up after that: the panels may have done the charging
+    _grid_switch_off_sunlit: bool = False
     # When grid charging was last asked to go off: only a report after it shows
     # the switch off (CodeRabbit on #45)
     _grid_off_requested_at: datetime | None = None
@@ -7426,6 +7429,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # (plan 017): see _remember_forced_charge
         self._grid_switch_forced_this_window = True
         self._grid_switch_off_soc = None
+        self._grid_switch_off_sunlit = False
         self._grid_off_requested_at = dt_util.now()
         self._persist_state()
         _LOGGER.warning(
@@ -7447,9 +7451,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         found = self._grid_switch_forced_this_window
         baseline = self._grid_switch_off_soc
+        sunlit = self._grid_switch_off_sunlit or not self._sun_below_horizon()
         self._grid_switch_forced_this_window = False
         self._grid_switch_off_soc = None
+        self._grid_switch_off_sunlit = False
         if not found or not self.target_reached or self.is_discharge_mode:
+            return
+        if sunlit:
+            # Charged with the switch off, but perhaps by the panels: that says
+            # nothing about the floor charging from the grid (Codex on #45)
+            _LOGGER.debug("Forced charge not remembered: the sun was up during the charge")
             return
         # The charge has to have happened with the switch confirmed off: a
         # pause that never took effect leaves the forced charge to reach the
@@ -7473,12 +7484,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Taken once per window, on the first poll that sees the switch off with
         no stop still unconfirmed: only a charge from there on is the floor's.
+        Every poll after it notes whether the sun was up.
         """
-        if not self._grid_switch_forced_this_window or self._grid_switch_off_soc is not None:
+        if not self._grid_switch_forced_this_window:
             return
-        if not self._grid_switch_reported_off():
-            return
-        self._grid_switch_off_soc = self._current_battery_soc()
+        if self._grid_switch_off_soc is None:
+            if not self._grid_switch_reported_off():
+                return
+            self._grid_switch_off_soc = self._current_battery_soc()
+            self._grid_switch_off_sunlit = False
+        if not self._sun_below_horizon():
+            self._grid_switch_off_sunlit = True
+
+    def _sun_below_horizon(self) -> bool:
+        """The sun is down for sure; a missing sun entity does not say so."""
+        sun = self.hass.states.get(SUN_ENTITY_ID)
+        return sun is not None and sun.state == "below_horizon"
 
     def _grid_switch_reported_off(self) -> bool:
         """The switch reads off, reported after the last turn_off went out.
@@ -8379,6 +8400,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._grid_switch_suspended = self._grid_switch_known_forced()
         self._grid_switch_forced_this_window = False
         self._grid_switch_off_soc = None
+        self._grid_switch_off_sunlit = False
         if self._grid_switch_suspended and self._grid_switch_forced_charge is not None:
             _LOGGER.info(
                 "Grid charging stays off this window: on %s switching it on lifted the charge "
@@ -8652,11 +8674,36 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             value = self._charge_input_w()
             if value is not None and value >= 0:
                 measured = value
+        if measured is not None and len(input_entities) == 2:
+            measured = self._bounded_by_battery_side(measured, now)
         if measured is None:
             return 0.0
         if written is None:
             return measured
         return min(measured, float(written))
+
+    def _bounded_by_battery_side(self, derived_w: float, now: datetime) -> float | None:
+        """Grid import minus house consumption, no more than the battery takes.
+
+        The two meters report at their own moments: a house load that has just
+        risen shows in the grid import before the house sensor has it, and the
+        difference reads as charger draw - credited, it lets the battery take
+        the connection the house needs (Codex on #45). The battery power is an
+        independent measurement; without a fresh one nothing is credited.
+        """
+        received_id = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
+        state = self.hass.states.get(str(received_id)) if received_id else None
+        age_s = self._state_age_s(state, now) if state else None
+        if not (age_s is not None and 0 <= age_s <= GRID_LIMIT_STALE_AFTER_S
+                and _unit_of(state) in ("w", "watt", "watts", "kw", "kilowatt", "kilowatts")):
+            return None
+        battery_w = self._get_power_w(str(received_id))
+        if battery_w is None:
+            return None
+        # Either sign: a Kostal counts charging as negative. A discharging
+        # battery leaves the grid import below the house load, so the
+        # difference is not positive and nothing is credited anyway.
+        return min(derived_w, abs(battery_w) / (1.0 - GRID_OWN_DRAW_MAX_LOSS))
 
     async def _enforce_grid_limit_now(self) -> None:
         """Keep the written charge limit within what the connection carries.
@@ -8829,9 +8876,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as e:  # pylint: disable=broad-except
                 _LOGGER.error("Unexpected error in grid import listener: %s", e, exc_info=True)
 
+        # With the battery's draw taken from grid import minus house
+        # consumption, a house update changes it too (Codex on #45)
         self._grid_limit_listener = async_track_state_change_event(
             self.hass,
-            str(entity_id),
+            list(dict.fromkeys([str(entity_id), *self._charge_input_entities()[1:]])),
             _on_grid_import_change,
         )
         _LOGGER.debug("Set up grid import listener for %s", entity_id)

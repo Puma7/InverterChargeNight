@@ -70,7 +70,10 @@ the several kW the plan asks for. If the rest of the house uses the whole budget
 power goes to 0 for as long as that lasts.
 
 - *What the battery draws itself* is the measured AC charge power (at most the setpoint). Without
-  that sensor, all import counts as other load, which is the safe side.
+  that sensor, all import counts as other load, which is the safe side. Taken as grid import
+  minus house consumption, it counts for no more than the battery power plus 25 %: the two
+  meters report at different moments, and a house load that has just risen would otherwise read
+  as charger draw. A house consumption update is answered like a grid import update.
 - It only ever charges **less**. An unavailable grid import sensor, one that has not reported for
   five minutes, or one without a unit of W or kW pauses charging (0 W) until it reads again.
 - Between the polls, a listener on the grid import lowers the setpoint within about 30 seconds

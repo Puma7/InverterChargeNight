@@ -75,7 +75,8 @@ Charge Night writes the limit again right after switching on and rechecks it sho
 the switch lifted it, grid charging goes off again for the rest of the window and the raised min
 SOC does the charging. Once a window has reached its target that way, later windows leave the
 switch off from the start for 30 days, so the short switch-on happens once rather than every
-night. A new switch or charge limit entity, or 30 days, and it is tried again. The log says
+night. Only a charge after the switch has reported off, and with the sun down from then until
+the window ends, counts. A new switch or charge limit entity, or 30 days, and it is tried again. The log says
 `The charge limit did not hold with ... switched on` the first time, and
 `Grid charging stays off this window` after that.
 
