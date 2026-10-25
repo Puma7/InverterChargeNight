@@ -113,7 +113,7 @@ kWh. Die Attribute sind:
 - Jeder gelernte Wert ist begrenzt und wirkt erst mit genug Daten dahinter.
 - Fehlende Sensoren oder Statistiken lassen die Einstellung stehen.
 - Eine neue Prognose-Entität, ein neuer PV-Zähler oder ein neuer Akkusensor beginnt das, was aus
-  ihm gelernt wird, von vorn. Eine neue *Heute*-Entität etwa behält die Abendprognosen und die
+  ihm gelernt wird, von vorn. Eine neue eingetragene Akkukapazität beginnt die Kapazität von vorn. Eine neue *Heute*-Entität etwa behält die Abendprognosen und die
   Erträge.
 - Eine kleinere Kapazität heißt mehr Prozent je kWh und ein höheres Ziel. Das ist die sichere
   Richtung. Eine größere ist auf 105 % des Nennwerts gedeckelt.

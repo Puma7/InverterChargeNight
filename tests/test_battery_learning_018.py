@@ -388,3 +388,17 @@ def test_a_new_house_sensor_keeps_the_capacity(coordinator):
 
     assert coordinator._battery_log.count(bl.KIND_CAPACITY) == 3
     assert coordinator._battery_log.count(bl.KIND_DISCHARGE) == 0
+
+
+def test_a_new_battery_on_the_same_sensors_starts_the_capacity_afresh(coordinator):
+    """Codex on #46: 10 kWh learned, 20 kWh installed - the old samples are another battery's."""
+    _learned(coordinator, bl.KIND_CAPACITY, 31.0)
+    _learned(coordinator, bl.KIND_CHARGE, 0.93)
+    coordinator._check_learning_sources()
+    coordinator.config = {**coordinator.config, "battery_capacity": 2 * NAMEPLATE}
+
+    coordinator._check_learning_sources()
+
+    assert coordinator._battery_log.count(bl.KIND_CAPACITY) == 0
+    assert coordinator._battery_log.count(bl.KIND_CHARGE) == 3
+    assert coordinator._capacity_kwh() == 2 * NAMEPLATE

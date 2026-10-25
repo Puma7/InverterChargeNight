@@ -109,7 +109,8 @@ kWh. Its attributes are:
 
 - Every learned value is bounded, and it applies only with enough data behind it.
 - Missing sensors or statistics leave the setting in place.
-- A new forecast entity, PV meter or battery sensor starts what is learned from it afresh. A new
+- A new forecast entity, PV meter or battery sensor starts what is learned from it afresh, and so
+  does a new battery capacity setting for the capacity. A new
   *today* entity, for example, keeps the evening forecasts and the yields.
 - A smaller capacity means more percent per kWh and a higher target: that is the safe direction.
   A larger one is capped at 105 % of the nameplate.

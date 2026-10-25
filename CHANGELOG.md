@@ -42,7 +42,7 @@ before.
   diagnostics.
 - The learned data lives in its own store and is deleted with the entry. It records which
   entities each kind of value came from: a new forecast entity, PV meter or battery sensor starts
-  that kind afresh and keeps the rest.
+  that kind afresh and keeps the rest. A new nameplate capacity starts the capacity afresh.
 - A day the PV meter's statistics cover for fewer than 20 hours is not taken as a yield. It stays
   open and is read again later.
 - Unloading writes the store and closes it, so no delayed save of the old coordinator lands over a

@@ -347,15 +347,21 @@ def _state(value: str, when: datetime, unit: str = "kWh") -> SimpleNamespace:
 @pytest.mark.asyncio
 async def test_the_recorder_fills_in_the_last_days_once(coordinator):
     history = {PV: [_state("15", _at(12, TODAY - timedelta(days=3))),
-                    _state("11", _at(22, TODAY - timedelta(days=3))),
-                    _state("99", _at(23, TODAY - timedelta(days=3)) + timedelta(minutes=30))]}
+                    _state("11", _at(23, TODAY - timedelta(days=3)) + timedelta(minutes=30)),
+                    # Midnight: the entity now forecasts the day after
+                    _state("99", _at(0, TODAY - timedelta(days=2)) + timedelta(seconds=20))],
+               PV_TODAY: [_state("20", _at(6, TODAY - timedelta(days=3))),
+                          _state("10", _at(8, TODAY - timedelta(days=3)) + timedelta(minutes=30)),
+                          _state("14", _at(9, TODAY - timedelta(days=3)))]}
     with patch(NOW, return_value=_at(12)), _recorder(coordinator), patch(
         "homeassistant.components.recorder.history.get_significant_states", return_value=history
     ):
         assert await coordinator._backfill_forecasts() is True
 
-    # In force at 23:00: the 22:00 value, not the one after it
-    assert coordinator._forecast_log.days[TODAY - timedelta(days=2)] == {fl.KIND_AHEAD: 11.0}
+    # The same cut-offs as the live notes (Codex on #46): the last value before
+    # midnight, not the rollover; the last before 09:00, the 08:30 revision
+    assert coordinator._forecast_log.days[TODAY - timedelta(days=2)][fl.KIND_AHEAD] == 11.0
+    assert coordinator._forecast_log.days[TODAY - timedelta(days=3)][fl.KIND_TODAY] == 10.0
 
 
 @pytest.mark.asyncio

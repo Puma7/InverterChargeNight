@@ -2061,7 +2061,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             fl.KIND_AHEAD: entity(CONF_PV_FORECAST_ENTITY),
             fl.KIND_TODAY: entity(CONF_PV_FORECAST_TODAY_ENTITY),
             fl.KIND_ACTUAL: entity(CONF_PV_ENERGY_TODAY_ENTITY),
-            bl.KIND_CAPACITY: battery,
+            # A new battery on the same sensors is a new battery (Codex on #46)
+            bl.KIND_CAPACITY: [*battery, self._nameplate_capacity_kwh()],
             bl.KIND_CHARGE: [*battery, *ac_side],
             bl.KIND_DISCHARGE: [*battery, *ac_side],
         }
@@ -2178,27 +2179,32 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         zone = local_now.tzinfo
         for offset in range(FORECAST_BACKFILL_DAYS, 0, -1):
             day = local_now.date() - timedelta(days=offset)
+            # The same cut-offs as the live notes: the last value before
+            # midnight, and before the morning hour (Codex on #46)
             if tomorrow_id:
-                at = datetime.combine(day, time(23, 0), tzinfo=zone)
-                kwh = self._recorded_forecast(list(history.get(str(tomorrow_id), [])), at)
+                before = datetime.combine(day + timedelta(days=1), time(0, 0), tzinfo=zone)
+                kwh = self._recorded_forecast(list(history.get(str(tomorrow_id), [])), before)
                 changed |= self._forecast_log.note_missing(day + timedelta(days=1), fl.KIND_AHEAD, kwh)
             if today_id:
-                at = datetime.combine(day, time(FORECAST_TODAY_UNTIL_HOUR - 1, 0), tzinfo=zone)
-                kwh = self._recorded_forecast(list(history.get(str(today_id), [])), at)
+                before = datetime.combine(day, time(FORECAST_TODAY_UNTIL_HOUR, 0), tzinfo=zone)
+                kwh = self._recorded_forecast(list(history.get(str(today_id), [])), before)
                 changed |= self._forecast_log.note_missing(day, fl.KIND_TODAY, kwh)
         if changed:
             _LOGGER.info("Filled in the PV forecasts of the last %d days from the recorder",
                          FORECAST_BACKFILL_DAYS)
         return changed
 
-    def _recorded_forecast(self, states: list[Any], at: datetime) -> float | None:
-        """The forecast in force at ``at``, from recorded states; None if unknown."""
+    def _recorded_forecast(self, states: list[Any], before: datetime) -> float | None:
+        """The last recorded forecast strictly before ``before``; None if unknown.
+
+        Strictly: at midnight the tomorrow entity rolls over to the next day.
+        """
         current: Any = None
         for state in states:
             stamp = getattr(state, "last_updated", None)
             if not isinstance(stamp, datetime):
                 continue
-            if stamp > at:
+            if stamp >= before:
                 break
             current = state
         if current is None:
