@@ -5,6 +5,26 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.1] - 2026-10-26
+
+What the night of 25/26 October 2026 logged about itself. That night was as planned: 68 % in the
+battery against a 35.7 % target, nothing to charge, the min SOC held at 35 % and given back at
+the window end, two writes in all. Four of its lines were wrong or far too many. Behaviour is
+unchanged.
+
+### Fixed
+
+- **The min SOC listener** compares the inverter's value with the floor at the step the inverter
+  takes, as the verification does. The 35 % written for a 35.7 % target no longer reads as a
+  deviation, and no verification runs for it.
+- **"The battery cannot draw from the grid - not writing"** is logged once, and again only after
+  it changed or a new window began. It stood 6905 times in six hours, twice for every poll.
+- **"Battery SOC already at or above target"** no longer says "at startup": the check also runs
+  after a target was raised in the middle of the window.
+- **"Target reached, but the house connection limit stays in force until the window ends"**: it
+  said the limit "stays on the inverter", although none had been written that night. The limit
+  is still watched until the window ends.
+
 ## [3.14.0] - 2026-10-25
 
 ICN learns from the house's own data (plan 018). The PV forecast does not know the roof, the
