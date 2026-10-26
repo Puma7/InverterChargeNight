@@ -460,6 +460,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _grid_limited: bool = False
     _grid_stale_logged: bool = False
     _grid_own_draw_logged: bool = False
+    _grid_idle_noted: bool = False  # "cannot draw from the grid" said, until it changes
     _backup_unreadable_logged: bool = False
     _auto_range_warned: bool = False
     _grid_plan_request_w: float | None = None
@@ -6178,6 +6179,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.initial_calculated_soc = None
                 self.minimum_calculated_soc = None
         self._window_started_at = now
+        self._grid_idle_noted = False
         self.is_active = True
         self.target_reached = False
         # This window owns the inverter now: a reset still pending from the
@@ -7580,7 +7582,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         if not self.target_reached:
                             direction = "below" if self.is_discharge_mode else "above"
                             _LOGGER.info(
-                                "Battery SOC (%.1f%%) already at or %s target (%.1f%%) at startup",
+                                "Battery SOC (%.1f%%) already at or %s target (%.1f%%) - nothing to charge",
                                 current_battery_soc,
                                 direction,
                                 target_soc,
@@ -8478,7 +8480,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the rest of the house (wallboxes) may still be running. The
             # window-end reset restores the user's own value.
             _LOGGER.debug(
-                "Target reached, but the house connection limit stays on the inverter "
+                "Target reached, but the house connection limit stays in force "
                 "until the window ends"
             )
             await self._enforce_grid_limit_now()
@@ -8591,10 +8593,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             try:
                 current_inverter_soc = float(new_state.state)
-                # The written value is the floor, not the charge target (plan 009)
-                floor_soc = self.inverter_floor_soc()
+                # The written value is the floor, not the charge target (plan
+                # 009), at the step the inverter takes - as the verification
+                # compares it, or the written 35 % reads as off from 35.7 %
+                target_soc = self.current_target_soc()
+                floor_soc = self._charging_floor_soc(target_soc) if target_soc is not None else None
+                if floor_soc is None:
+                    floor_soc = self.inverter_floor_soc()
 
                 if floor_soc is None:
+                    return
+                if target_soc is not None and self._floor_already_holds(
+                        current_inverter_soc, target_soc, floor_soc):
                     return
 
                 # Check if inverter min SOC doesn't match the floor (with tolerance)
@@ -9273,8 +9283,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.config.get(CONF_GRID_IMPORT_ENTITY) or self._grid_budget() is None:
             return
         if self._battery_idle_on_grid():
-            _LOGGER.debug("House connection limit: the battery cannot draw from the grid - not writing")
+            # Asked on every grid and SOC update: said once until it changes
+            if not self._grid_idle_noted:
+                _LOGGER.debug("House connection limit: the battery cannot draw from the grid - not writing")
+                self._grid_idle_noted = True
             return
+        self._grid_idle_noted = False
         reference = self._planned_setpoint_written_w
         if reference is None:
             reference = float(self.config.get(CONF_MAX_CHARGE_POWER_W, DEFAULT_MAX_CHARGE_POWER_W))
