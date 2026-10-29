@@ -4265,7 +4265,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         battery_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY))
         if battery_w is None:
             return True
-        return abs(abs(battery_w) - actual_w) <= max(KEEPALIVE_IDLE_W, 0.25 * actual_w)
+        # At 300 W read, 0 W drawn is as close as the tolerance: not charging (CodeRabbit on #48)
+        return (abs(battery_w) >= KEEPALIVE_IDLE_W
+                and abs(abs(battery_w) - actual_w) <= max(KEEPALIVE_IDLE_W, 0.25 * actual_w))
 
     async def _rewrite_limit_if_lifted(self) -> None:
         """Write the limit in force again when the inverter reads it higher.

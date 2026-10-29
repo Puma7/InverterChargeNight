@@ -61,13 +61,18 @@ async def test_a_battery_charging_at_the_lower_limit_is_left_alone(night, batter
     assert _calls(hass) == []
 
 
+@pytest.mark.parametrize(("reading", "battery_w"), [("800", "0"), ("300", "0"), ("450", "-150")])
 @pytest.mark.asyncio
-async def test_a_lower_reading_the_battery_does_not_charge_at_is_kept(night):
-    """800 W read while the battery rests: the Kostal's allowance, not a limit."""
+async def test_a_lower_reading_the_battery_does_not_charge_at_is_kept(night, reading, battery_w):
+    """800 W read while the battery rests: the Kostal's allowance, not a limit.
+
+    Without KORE's record of the command. 300 W read and nothing drawn sits
+    right at the tolerance (CodeRabbit on #48).
+    """
     hass, coordinator, clock = night
     _charging(hass, coordinator)
-    _with_battery_power(hass, coordinator, "0")
-    hass.states.get(AC_LIMIT).state = "800"
+    _with_battery_power(hass, coordinator, battery_w)
+    hass.states.get(AC_LIMIT).state = reading
 
     await coordinator._keep_charge_limit_alive()
 
