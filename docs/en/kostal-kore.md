@@ -90,6 +90,21 @@ its timeout (30-60 s) the inverter goes back to its own battery management. Inve
 writes the limit in force again every 20 s - for KostalKore's control only, whose value lapses - while the battery can draw from the grid in a window
 (KOSTAL KORE and evcc write it cyclically too), and never outside a window.
 
+**1038 reads what the battery is allowed right now, not what was written.** While the battery
+charges that is the limit; once it stands at its floor it is about 50 W (28/29 October 2026). A
+lower reading is told apart by what KOSTAL KORE (3.0.16 or later) shows as `last_commanded_value`,
+the last value written to 1038 on any path: a lower command - evcc's, the user's, a 0 W stop - is
+left alone, even before 1038 is read again; is the last command still this integration's, the
+limit in force is written again, so it does not lapse. Once a lower command has lapsed and the
+Kostal still reads its own maximum a minute after the command was first seen (two of KORE's slow
+polls, so the reading is not the one from before the command), the limit in force is written
+again too. Before 3.0.16, and
+after a Modbus reconnect until the next write, KORE shows no command. A lower reading of at least
+300 W then counts as another limit only while the battery draws at least 300 W, close to that
+reading; without a battery power sensor, any lower reading of at least 300 W counts as one. KOSTAL KORE does not repeat a write to
+1038 by itself - its keepalive covers the G3 registers 1280/1282 only - so whoever holds a limit
+there has to write it again (KostalKore#92).
+
 **The charge limit reads back as a float.** A written 1000 W reads 997.9 to 999.9 W. KOSTAL KORE
 compares its readback exactly and reports such a write as unconfirmed; Inverter Charge Night
 accepts it once the next reading has moved to within 100 W of the written value.

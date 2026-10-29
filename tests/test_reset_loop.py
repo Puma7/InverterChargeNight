@@ -244,6 +244,7 @@ async def test_a_pending_reset_does_not_poll_every_fifteen_seconds(mock_hass):
     _register_field_entities(mock_hass)
     coordinator = _make_coordinator(mock_hass, CONFIG, FIELD_STATE)
     assert coordinator._pending_reset is True
+    coordinator._reset_retry_count = 1  # past its first retry
     # As set up for real: the health monitor records the pending reset as
     # "write_unconfirmed" (CodeRabbit on #36 - without this the test was blind).
     coordinator.enable_communication_monitoring()

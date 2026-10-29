@@ -83,6 +83,7 @@ async def test_pending_reset_remains_visible_until_it_succeeds(rig):
     co.enable_communication_monitoring()
     co._async_calculate_and_control = AsyncMock(return_value={})
     co._pending_reset = True
+    co._reset_retry_count = 1  # a retry, not only the window end, came back unconfirmed
     with patch("homeassistant.components.persistent_notification.async_create") as notify:
         await co._async_update_data()
         assert co.communication_diagnostics()["faults"] == ["write_unconfirmed"]

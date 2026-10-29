@@ -35,7 +35,9 @@ ist immer null. Bei einem Kostal mit KOSTAL KORE ist das *Grid to Battery Power*
 lehnt sie deshalb ab.
 
 Ein Akkusensor, der Laden negativ zählt, wie die *Battery Power* des Kostal, wird für die Messung
-umgedreht, und das Protokoll sagt es einmal.
+umgedreht, und das Protokoll sagt es einmal. Das Vorzeichen wird am ersten Wert von mindestens
+einem Viertel der Testleistung beurteilt, nicht an einem Akku, der noch gar nicht lädt, und es
+bleibt für die nächsten Nächte gespeichert.
 
 Schalte sie mit der Seite *Effizienzsuche einrichten* oder mit dem Schalter **Effizienzsuche** ein.
 Sie schaltet sich selbst aus, wenn sie fertig ist. Die beiden Sensoren *Effizienzsuche* und

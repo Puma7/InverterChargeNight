@@ -5,6 +5,36 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.2] - 2026-10-29
+
+The night of 28/29 October 2026, the first in which the efficiency search measured: 6.69 % loss
+at 1000 W, 2.97 % at 3000 W, the 5000 W trial ended by the target. Three things around it went
+wrong.
+
+### Fixed
+
+- **The charge limit lapsed for hours (house connection protection).** The Kostal's register
+  1038 reads what the battery is allowed right now, about 50 W once it stands at its floor. The
+  keepalive took that for somebody else's lower limit and stopped at 00:26; the 5000 W written was
+  not held until 03:10. A lower reading is now judged by KOSTAL KORE's `last_commanded_value`
+  (3.0.16 or later): a lower command (a 0 W stop, evcc) is left alone, even before 1038 is read
+  again; the integration's own command still standing, or a lower one that still reads as lapsed
+  a minute after it was first seen, means the limit in force is written again. Without that record (older KORE, after a Modbus reconnect) a
+  lower reading of at least 300 W counts as another limit only while the battery draws at least
+  300 W, close to it; without a battery power sensor, any such reading counts as one. KOSTAL KORE does
+  not repeat a write to 1038 at all - its keepalive covers the G3 registers 1280/1282 - so the
+  writer has to (KostalKore#92).
+- **The first efficiency trial read a loss of 193 %.** The sign of the battery power was fixed
+  from a single reading, taken before the battery charged. It is now judged on the first reading
+  of at least a quarter of the trial's power, what was summed before turns with it, and the sign
+  is kept for the next nights. A second such trial in a night would have ended the search with a
+  false repair.
+- **Every morning "communication interrupted", a quarter of an hour later "recovered".** The
+  restored charge limit's reading arrives with the Kostal's slow registers, half a minute later;
+  the retry a minute later confirms it. The window end's first retry is now routine (logged at
+  info, no notification); a retry that fails again, or grid charging that is not off, is reported
+  as before. A retry that succeeds reports the recovery at once.
+
 ## [3.14.1] - 2026-10-26
 
 What the night of 25/26 October 2026 logged about itself. That night was as planned: 68 % in the

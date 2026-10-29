@@ -34,7 +34,9 @@ a Kostal with KOSTAL KORE that is *Grid to Battery Power*, which the setup refus
 reason.
 
 A battery sensor that counts charging as negative, as the Kostal's *Battery Power* does, is
-turned for the measurement and the log says so once.
+turned for the measurement and the log says so once. The sign is judged on the first reading of
+at least a quarter of the trial's power, not on a battery that has not begun to charge yet, and
+it is remembered for the next nights.
 
 Switch it on with the page *Set up efficiency search* or the switch **Efficiency search**. It
 switches itself off when it is done. The two sensors *Efficiency search* and *Most efficient

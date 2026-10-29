@@ -304,6 +304,14 @@ EXPIRING_LIMIT_PLATFORMS = frozenset({"kostal_kore"})
 # A lapse the reading still shows this long after the first keepalive saw it,
 # writes acknowledged or not, is verified: two of KORE's slow polls and more
 KEEPALIVE_LAPSE_GRACE_S = 75
+# Below this a battery is not charging, and a Kostal's limit register reads
+# what the battery takes right now - about 50 W at rest - not what was written
+# (28/29 October 2026). Nobody's limit, so the keepalive goes on.
+KEEPALIVE_IDLE_W = 300.0
+# A lower command KORE recorded is taken for lapsed only once 1038 has read
+# above the limit this long after the command was first seen: two of its slow
+# polls, the reading before may still be the old one (CodeRabbit on #48)
+LOWER_COMMAND_SETTLE_S = 60.0
 SKIP_NEXT_DURATION = timedelta(hours=24)
 # A bridge longer than this means the sunrise or the window end is off; the plan
 # is still made, but it is worth a warning in the log.
@@ -332,6 +340,15 @@ def _as_float(value: Any) -> float | None:
         _LOGGER.debug("Ignoring non-finite numeric value %r", value)
         return None
     return number
+
+
+def _charge_limit_in_w(state: Any, value: float) -> float:
+    """A value of the charge limit entity in W: one whose maximum is below 1000 counts kW."""
+    if not _unit_of(state):
+        entity_max = _as_float(getattr(state, "attributes", {}).get("max"))
+        if entity_max is not None and 0 < entity_max < 1000:
+            return value * 1000.0
+    return value
 
 
 def _as_float_strict(value: Any) -> float:
@@ -423,6 +440,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     _auto_implausible_trials: tuple[str, int] | None = None
     _auto_sent_sign: float = 1.0
     _auto_received_sign: float = 1.0
+    # Judged from a reading clear of rest; until then each sample asks again
+    _auto_sent_sign_decided: bool = False
+    _auto_received_sign_decided: bool = False
+    # The sign convention each power sensor was seen with, kept across nights
+    _power_signs: dict[str, float] | None = None
     # Replaced per instance in __init__; the class value only serves objects a
     # test builds without it, and nothing writes to it there
     _temperature_log: TemperatureLog = TemperatureLog()
@@ -597,6 +619,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._verification_task: asyncio.Task[None] | None = None
         self._keepalive_task: asyncio.Task[None] | None = None
         self._keepalive_lapse_since: datetime | None = None
+        # The lower command KORE recorded and when the keepalive first saw it
+        self._lower_command_seen: tuple[float, datetime] | None = None
         # turn_off commands sent by _pause_grid_charge, to tell whether a call
         # in between has already paused
         self._grid_pause_requests = 0
@@ -615,6 +639,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # The sign each side is read with in the running trial (plan 017)
         self._auto_sent_sign = 1.0
         self._auto_received_sign = 1.0
+        self._auto_sent_sign_decided = False
+        self._auto_received_sign_decided = False
         self._auto_orientation_logged: set[str] = set()
         self._auto_meter_start: tuple[float, float] | None = None
         self._auto_sample_listener: CALLBACK_TYPE | None = None
@@ -831,9 +857,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if health is None:
             return []
         faults = self._communication_faults()
-        if self._pending_reset or self._reset_abandoned:
+        if self._reset_abandoned or (self._pending_reset and (
+                self._reset_retry_count > 0 or not self._grid_charge_reads_off())):
             # Giving up on the restore is not a recovery: the notification
-            # keeps saying the stop is unconfirmed until it really is.
+            # keeps saying the stop is unconfirmed until it really is. A limit
+            # whose reading is still on its way gets its first retry first:
+            # every morning said "interrupted" and a quarter of an hour later
+            # "recovered" for a reading half a minute late (28/29 October 2026).
             faults.append("write_unconfirmed")
         switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
         switch = self.hass.states.get(switch_id) if switch_id else None
@@ -929,6 +959,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "pv_yield": self._pv_yield.snapshot(),
             "temperature_log": self._temperature_log.snapshot(),
             "use_learned_values": self.use_learned_values,
+            "power_signs": dict(self._power_signs or {}),
         }
         self.hass.config_entries.async_update_entry(self.entry, options=options)
 
@@ -946,6 +977,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.evening_rescue_charge = state["evening_rescue_charge"]
         if isinstance(state.get("use_learned_values"), bool):
             self.use_learned_values = state["use_learned_values"]
+        signs = state.get("power_signs")
+        if isinstance(signs, dict):
+            self._power_signs = {
+                str(entity): float(sign) for entity, sign in signs.items()
+                if isinstance(sign, (int, float)) and not isinstance(sign, bool) and sign in (1, -1)
+            }
         self.override_soc = self._restore_soc(state, "override_soc")
         self.original_min_soc = self._restore_soc(state, "original_min_soc")
         self.initial_calculated_soc = self._restore_soc(state, "initial_calculated_soc")
@@ -3955,20 +3992,33 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return self._get_power_w(entities[0])
         return None
 
-    def _charge_orientation(self, value_w: float, label: str) -> float:
-        """+1, or -1 for a sensor that counts charging as negative.
+    def _charge_orientation(self, value_w: float, label: str) -> tuple[float, bool]:
+        """(+1, or -1 for a sensor that counts charging as negative; judged or not).
 
         Judged while the trial is charging: a reading of at least a quarter of
         the trial's power below zero is a sign convention, not a discharge.
         Kostal reports the battery power that way, and taken as it is every
         trial read a loss of 200 % (24/25 October 2026). A grid import minus
         house consumption is positive by its definition and never turned.
+
+        A reading closer to zero says nothing: the battery has not begun to
+        charge. Then the sign this sensor was last seen with stands in, and
+        the next samples judge again - one reading at rest fixed it for the
+        whole trial, which read a loss of 193 % (28/29 October 2026).
         """
         power_w = self._auto_test_power_w
         if label == "sent" and len(self._charge_input_entities()) == 2:
-            return 1.0
-        if power_w is None or value_w > -AUTO_TEST_IDLE_RATIO * power_w:
-            return 1.0
+            return 1.0, True
+        entity = self._orientation_entity(label)
+        known = (self._power_signs or {}).get(entity, 1.0) if entity else 1.0
+        if power_w is None or abs(value_w) < AUTO_TEST_IDLE_RATIO * power_w:
+            return known, False
+        sign = -1.0 if value_w < 0 else 1.0
+        if entity and (self._power_signs or {}).get(entity) != sign:
+            self._power_signs = {**(self._power_signs or {}), entity: sign}
+            self._persist_state()
+        if sign > 0:
+            return 1.0, True
         if label not in self._auto_orientation_logged:
             self._auto_orientation_logged.add(label)
             _LOGGER.info(
@@ -3977,19 +4027,68 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "AC side" if label == "sent" else "battery side",
                 value_w,
             )
-        return -1.0
+        return -1.0, True
+
+    def _orientation_entity(self, label: str) -> str | None:
+        if label == "sent":
+            entities = self._charge_input_entities()
+            return entities[0] if entities else None
+        entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
+        return str(entity) if entity else None
+
+    def _judge_orientation(self, label: str, raw_w: float) -> None:
+        """Decide a sign still open; what was summed under the wrong one turns with it.
+
+        The blocks already closed belong to the ramp, before the battery took
+        the trial's power: under a wrong sign each read a loss far off, and
+        left in they would stand for an uncertainty the charger does not have
+        (Codex on #48). They go once the sign is known.
+        """
+        if label == "sent":
+            if self._auto_sent_sign_decided:
+                return
+            sign, decided = self._charge_orientation(raw_w, label)
+            if sign != self._auto_sent_sign:
+                self._auto_energy_sent_wh = -self._auto_energy_sent_wh
+                self._auto_block_sent_wh = -self._auto_block_sent_wh
+                if self._auto_last_sent_w is not None:
+                    self._auto_last_sent_w = -self._auto_last_sent_w
+            self._auto_sent_sign, self._auto_sent_sign_decided = sign, decided
+        else:
+            if self._auto_received_sign_decided:
+                return
+            sign, decided = self._charge_orientation(raw_w, label)
+            if sign != self._auto_received_sign:
+                self._auto_energy_received_wh = -self._auto_energy_received_wh
+                self._auto_block_received_wh = -self._auto_block_received_wh
+                if self._auto_last_received_w is not None:
+                    self._auto_last_received_w = -self._auto_last_received_w
+            self._auto_received_sign, self._auto_received_sign_decided = sign, decided
+        if decided:
+            self._auto_block_losses = []
 
     def _get_ac_charge_limit_w(self, entity_id: str | None) -> float | None:
         """Read the charge control with the same unit inference used for writes."""
         value = self._get_power_w(entity_id)
         if value is None or not entity_id:
             return None
+        return _charge_limit_in_w(self.hass.states.get(entity_id), value)
+
+    def _commanded_ac_charge_limit_w(self, entity_id: str) -> float | None:
+        """The charge limit last commanded through KostalKore, in W, or None.
+
+        KORE records every write to 1038 on any path - this integration's, the
+        user's, evcc's - and shows it as ``last_commanded_value`` until the
+        Modbus link reconnects, from KostalKore 3.0.16 on. The state is the
+        limit in effect, this is the command.
+        """
         state = self.hass.states.get(entity_id)
-        if not _unit_of(state):
-            entity_max = _as_float(getattr(state, "attributes", {}).get("max"))
-            if entity_max is not None and 0 < entity_max < 1000:
-                return value * 1000.0
-        return value
+        value = _as_float(getattr(state, "attributes", {}).get("last_commanded_value"))
+        if value is None:
+            return None
+        if _unit_of(state) in ("kw", "kilowatt", "kilowatts"):
+            return value * 1000.0  # as _get_power_w reads the state (Codex on #48)
+        return _charge_limit_in_w(state, value)
 
     def _ac_charge_limit_target(self) -> tuple[str, str] | None:
         """Return (entity_id, domain) of the AC charge limit entity, or None if unusable."""
@@ -4060,6 +4159,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 blocking=True,
             )
         except Exception as e:
+            # KORE records a rejected write as the last command too: a stop
+            # after it is a new one, with its own settling (Codex on #48)
+            self._lower_command_seen = None
             if keepalive:
                 # The same value once more: KORE's exact readback says nothing
                 # new, and the verification judges what the inverter holds
@@ -4078,6 +4180,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return True
             _LOGGER.error("Error writing AC charge limit (%s): %s", what, e, exc_info=True)
             return False
+        self._lower_command_seen = None  # superseded: a stop after it is a new one
         if keepalive:
             _LOGGER.debug("%s to %.3f (%s)", what, value, unit or "unitless")
         else:
@@ -4105,7 +4208,26 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._battery_idle_on_grid():
             return
         actual = self._get_ac_charge_limit_w(target[0])
-        if actual is not None and actual < written - PLANNED_POWER_WRITE_THRESHOLD_W:
+        commanded = self._commanded_ac_charge_limit_w(target[0])
+        if commanded is not None and commanded < written - PLANNED_POWER_WRITE_THRESHOLD_W:
+            # KORE's record comes first: 1038 is read every 30 s, a stop is
+            # recorded at once (CodeRabbit on #48). A reading above the limit
+            # written a while after it is a lapse - the limit is written again.
+            now = dt_util.now()
+            if self._lower_command_seen is None or self._lower_command_seen[0] != commanded:
+                self._lower_command_seen = (commanded, now)
+            lowered = (
+                actual is None or actual <= written + PLANNED_POWER_WRITE_THRESHOLD_W
+                or elapsed_seconds(now, self._lower_command_seen[1]) < LOWER_COMMAND_SETTLE_S
+            )
+        else:
+            self._lower_command_seen = None
+            lowered = (
+                commanded is None and actual is not None
+                and actual < written - PLANNED_POWER_WRITE_THRESHOLD_W
+                and self._lower_limit_is_in_force(actual)
+            )
+        if lowered:
             # Lowered by someone else - the user, evcc. The verification leaves
             # a lower limit alone, and so does the keepalive (CodeRabbit on #38)
             self._keepalive_lapse_since = None  # no lapse to time (Codex on #38)
@@ -4148,6 +4270,29 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "verifying it now", written, actual,
         )
         await self._verify_ac_charge_limit()
+
+    def _lower_limit_is_in_force(self, actual_w: float) -> bool:
+        """A lower reading of the charge limit is somebody's limit, not the battery at rest.
+
+        The Kostal's register reads what the battery is allowed right now: the
+        limit while it charges, about 50 W once it stands at its floor. Taken
+        for a limit of someone else's, that reading stopped the keepalive at
+        00:26, and the 5000 W written was not held until 03:10 (28/29 October
+        2026).
+
+        Only asked without KORE's record of the last command, which settles it
+        (Codex on #48) - before KostalKore 3.0.16, and after a reconnect until
+        the next write. A limit in force is then one the battery charges at;
+        without a battery power, a reading of some hundred watts still counts.
+        """
+        if actual_w < KEEPALIVE_IDLE_W:
+            return False
+        battery_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY))
+        if battery_w is None:
+            return True
+        # At 300 W read, 0 W drawn is as close as the tolerance: not charging (CodeRabbit on #48)
+        return (abs(battery_w) >= KEEPALIVE_IDLE_W
+                and abs(abs(battery_w) - actual_w) <= max(KEEPALIVE_IDLE_W, 0.25 * actual_w))
 
     async def _rewrite_limit_if_lifted(self) -> None:
         """Write the limit in force again when the inverter reads it higher.
@@ -4350,7 +4495,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not await self._confirm_ac_limit_restore(
                 entity_id, state, before_value, before_reported, original,
             ):
-                _LOGGER.error("AC charge limit restore has no fresh matching feedback: %s", entity_id)
+                # Before the first retry a slow register's reading, not a fault
+                _LOGGER.log(
+                    logging.INFO if self._reset_retry_count == 0 and not self._pending_reset
+                    else logging.ERROR,
+                    "AC charge limit restore has no fresh matching feedback: %s", entity_id,
+                )
                 return False
         if self._original_ac_charge_power != original:
             return False
@@ -4789,6 +4939,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_last_received_w = None
         self._auto_sent_sign = 1.0
         self._auto_received_sign = 1.0
+        self._auto_sent_sign_decided = False
+        self._auto_received_sign_decided = False
         self._auto_meter_start = None
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
@@ -4897,6 +5049,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auto_last_received_w = None
         self._auto_sent_sign = 1.0
         self._auto_received_sign = 1.0
+        self._auto_sent_sign_decided = False
+        self._auto_received_sign_decided = False
         self._auto_meter_start = None
         self._auto_energy_sent_wh = 0.0
         self._auto_energy_received_wh = 0.0
@@ -5061,8 +5215,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sent_w = self._charge_input_w()
         received_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY))
         if sent_w is not None and received_w is not None:
-            self._auto_sent_sign = self._charge_orientation(sent_w, "sent")
-            self._auto_received_sign = self._charge_orientation(received_w, "received")
+            self._auto_sent_sign, self._auto_sent_sign_decided = (
+                self._charge_orientation(sent_w, "sent"))
+            self._auto_received_sign, self._auto_received_sign_decided = (
+                self._charge_orientation(received_w, "received"))
             sent_w *= self._auto_sent_sign
             received_w *= self._auto_received_sign
         self._auto_last_sent_w = sent_w
@@ -5118,8 +5274,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sent_w = self._charge_input_w()
         received_w = self._get_power_w(received_entity)
         if sent_w is not None:
+            self._judge_orientation("sent", sent_w)
             sent_w *= self._auto_sent_sign
         if received_w is not None:
+            self._judge_orientation("received", received_w)
             received_w *= self._auto_received_sign
         for entity in (*self._charge_input_entities(), received_entity):
             state = self.hass.states.get(entity) if entity else None
@@ -6180,6 +6338,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.minimum_calculated_soc = None
         self._window_started_at = now
         self._grid_idle_noted = False
+        self._lower_command_seen = None  # a stop seen last night is no stop of this window
         self.is_active = True
         self.target_reached = False
         # This window owns the inverter now: a reset still pending from the
@@ -6994,7 +7153,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             await self._retry_reset()
 
         self._reset_retry_unsub = async_call_later(self.hass, delay, _run_reset_retry)
-        _LOGGER.warning(
+        # The first retry is routine: the Kostal's charge limit is a slow
+        # register, its reading follows a restore half a minute later, and
+        # every morning ended in a warning that the next minute took back
+        # (28/29 October 2026). A retry that is needed again is worth one.
+        _LOGGER.log(
+            logging.INFO if self._reset_retry_count == 0 else logging.WARNING,
             "Inverter settings are not reset yet - retrying in %d seconds (attempt %d)",
             delay,
             self._reset_retry_count + 1,
@@ -7058,6 +7222,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._reset_abandoned = False
         ir.async_delete_issue(self.hass, DOMAIN, self._reset_issue_id())
 
+    def _grid_charge_reads_off(self) -> bool:
+        """The grid charge switch, where there is one, reads off."""
+        switch_id = self.config.get(CONF_GRID_CHARGE_SWITCH)
+        if not switch_id:
+            return True
+        switch = self.hass.states.get(switch_id)
+        return switch is not None and switch.state == "off"
+
     def _record_reset_outcome(self, ok: bool) -> None:
         """Record whether the inverter is back at its original settings.
 
@@ -7068,10 +7240,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         would fire on a coordinator that no longer exists), but the flag is
         persisted, so the next setup picks the retry up again.
         """
+        was_pending = self._pending_reset
         self._pending_reset = not ok
         if ok:
             self._clear_reset_abandoned()
             self._cancel_reset_retry()
+            if was_pending:
+                # Said at once, not with the next quarter-hour poll
+                self._update_communication_health()
         elif self._reset_abandoned:
             # Out of attempts: only a window start, a manual reset or a success
             # brings the automatic restore back.
@@ -8696,8 +8872,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if task is asyncio.current_task():
                 continue  # cancelling ourselves; the loop exits on its own
             await asyncio.gather(task, return_exceptions=True)
-        # A lapse is timed within one run of the keepalive (Codex on #38)
+        # A lapse is timed within one run of the keepalive (Codex on #38), and
+        # so is a stop's settling (CodeRabbit on #48)
         self._keepalive_lapse_since = None
+        self._lower_command_seen = None
         _LOGGER.debug("Stopped periodic verification task")
 
     async def _verify_ac_charge_limit(self) -> None:
