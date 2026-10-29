@@ -223,3 +223,54 @@ def test_the_ramp_blocks_do_not_count_as_uncertainty(mock_hass):
     assert losses
     assert all(loss == pytest.approx(1 - 1000 / 1072, abs=0.005) for loss in losses)
     assert pstdev(losses) < 0.001
+
+
+# --- KORE's record of the last command (Codex on #48) --------------------------------
+
+
+def _commanded(hass: Any, reading: str, commanded: float) -> None:
+    attributes = {**hass.states.get(AC_LIMIT).attributes, "last_commanded_value": commanded}
+    hass.states.async_set(AC_LIMIT, reading, attributes)
+
+
+@pytest.mark.parametrize(("reading", "commanded", "battery_w"), [
+    ("0", 0.0, "0"),          # the user's stop: the battery takes nothing, as told
+    ("54", 0.0, "0"),         # the same stop, read as the Kostal's 50 W allowance
+    ("800", 800.0, "0"),      # 800 W in a charging pause
+    ("800", 800.0, "-310"),   # 800 W, the battery takes less than it may
+])
+@pytest.mark.asyncio
+async def test_a_lower_command_is_left_alone_whatever_the_battery_draws(night, reading,
+                                                                         commanded, battery_w):
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+    _with_battery_power(hass, coordinator, battery_w)
+    _commanded(hass, reading, commanded)
+
+    await coordinator._keep_charge_limit_alive()
+
+    assert _calls(hass) == []
+
+
+@pytest.mark.parametrize(("reading", "battery_w"), [("54", "0"), ("500", "-500")])
+@pytest.mark.asyncio
+async def test_the_own_command_standing_is_kept_alive(night, reading, battery_w):
+    """The 1000 W written is the last command: the lower reading is the battery's allowance."""
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+    _with_battery_power(hass, coordinator, battery_w)
+    _commanded(hass, reading, 1000.0)
+
+    await coordinator._keep_charge_limit_alive()
+
+    assert _calls(hass) == [("number", "set_value", AC_LIMIT)]
+    assert hass.services.async_call.await_args_list[0].args[2]["value"] == 1000.0
+
+
+def test_a_command_in_kilowatts_counts_in_watts(mock_hass):
+    from tests.test_efficiency_measurement_017 import _derived
+
+    coordinator = _derived(mock_hass)
+    mock_hass.states.async_set("number.kw_limit", "0.05", {"max": 22.0, "last_commanded_value": 0.8})
+
+    assert coordinator._commanded_ac_charge_limit_w("number.kw_limit") == 800.0

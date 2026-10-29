@@ -338,6 +338,15 @@ def _as_float(value: Any) -> float | None:
     return number
 
 
+def _charge_limit_in_w(state: Any, value: float) -> float:
+    """A value of the charge limit entity in W: one whose maximum is below 1000 counts kW."""
+    if not _unit_of(state):
+        entity_max = _as_float(getattr(state, "attributes", {}).get("max"))
+        if entity_max is not None and 0 < entity_max < 1000:
+            return value * 1000.0
+    return value
+
+
 def _as_float_strict(value: Any) -> float:
     """Like :func:`_as_float`, but raises instead of returning None.
 
@@ -4057,12 +4066,21 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         value = self._get_power_w(entity_id)
         if value is None or not entity_id:
             return None
+        return _charge_limit_in_w(self.hass.states.get(entity_id), value)
+
+    def _commanded_ac_charge_limit_w(self, entity_id: str) -> float | None:
+        """The charge limit last commanded through KostalKore, in W, or None.
+
+        KORE records every write to 1038 on any path - this integration's, the
+        user's, evcc's - and shows it as ``last_commanded_value`` until the
+        Modbus link reconnects. The state is the limit in effect, this is the
+        command.
+        """
         state = self.hass.states.get(entity_id)
-        if not _unit_of(state):
-            entity_max = _as_float(getattr(state, "attributes", {}).get("max"))
-            if entity_max is not None and 0 < entity_max < 1000:
-                return value * 1000.0
-        return value
+        value = _as_float(getattr(state, "attributes", {}).get("last_commanded_value"))
+        if value is None:
+            return None
+        return _charge_limit_in_w(state, value)
 
     def _ac_charge_limit_target(self) -> tuple[str, str] | None:
         """Return (entity_id, domain) of the AC charge limit entity, or None if unusable."""
@@ -4179,7 +4197,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         actual = self._get_ac_charge_limit_w(target[0])
         if (actual is not None and actual < written - PLANNED_POWER_WRITE_THRESHOLD_W
-                and self._lower_limit_is_in_force(actual)):
+                and self._lower_limit_is_in_force(target[0], actual, written)):
             # Lowered by someone else - the user, evcc. The verification leaves
             # a lower limit alone, and so does the keepalive (CodeRabbit on #38)
             self._keepalive_lapse_since = None  # no lapse to time (Codex on #38)
@@ -4223,16 +4241,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         await self._verify_ac_charge_limit()
 
-    def _lower_limit_is_in_force(self, actual_w: float) -> bool:
+    def _lower_limit_is_in_force(self, entity_id: str, actual_w: float, written_w: float) -> bool:
         """A lower reading of the charge limit is somebody's limit, not the battery at rest.
 
         The Kostal's register reads what the battery is allowed right now: the
         limit while it charges, about 50 W once it stands at its floor. Taken
         for a limit of someone else's, that reading stopped the keepalive at
         00:26, and the 5000 W written was not held until 03:10 (28/29 October
-        2026). A limit in force is one the battery charges at; without a
-        battery power, a reading of some hundred watts still counts as one.
+        2026).
+
+        KORE's record of the last command settles it: a lower command - a 0 W
+        stop, an 800 W limit in a charging pause - is left alone, however much
+        the battery draws; the own command still standing means the reading is
+        the battery's allowance (Codex on #48). Without a record - a reconnect
+        clears it - a limit in force is one the battery charges at, and a
+        reading of some hundred watts without a battery power still counts.
         """
+        commanded = self._commanded_ac_charge_limit_w(entity_id)
+        if commanded is not None:
+            return commanded < written_w - PLANNED_POWER_WRITE_THRESHOLD_W
         if actual_w < KEEPALIVE_IDLE_W:
             return False
         battery_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY))
