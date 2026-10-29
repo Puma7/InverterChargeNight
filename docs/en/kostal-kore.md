@@ -90,6 +90,12 @@ its timeout (30-60 s) the inverter goes back to its own battery management. Inve
 writes the limit in force again every 20 s - for KostalKore's control only, whose value lapses - while the battery can draw from the grid in a window
 (KOSTAL KORE and evcc write it cyclically too), and never outside a window.
 
+**1038 reads what the battery is allowed right now, not what was written.** While the battery
+charges that is the limit; once it stands at its floor it is about 50 W (28/29 October 2026). A
+lower reading counts as somebody else's limit - evcc, the user - only while the battery charges
+at it. Otherwise the limit in force is written again, so it does not lapse. KOSTAL KORE up to
+3.0.17 does not keep a BMS-limited 1038 value alive on its own (KostalKore#92).
+
 **The charge limit reads back as a float.** A written 1000 W reads 997.9 to 999.9 W. KOSTAL KORE
 compares its readback exactly and reports such a write as unconfirmed; Inverter Charge Night
 accepts it once the next reading has moved to within 100 W of the written value.

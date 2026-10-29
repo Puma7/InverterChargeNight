@@ -216,15 +216,15 @@ def test_a_battery_that_discharges_briefly_is_not_turned(mock_hass):
     coordinator = _derived(mock_hass)
     coordinator._auto_test_power_w = 1000
 
-    assert coordinator._charge_orientation(-200.0, "received") == 1.0
-    assert coordinator._charge_orientation(-900.0, "received") == -1.0
+    assert coordinator._charge_orientation(-200.0, "received") == (1.0, False)  # judged later
+    assert coordinator._charge_orientation(-900.0, "received") == (-1.0, True)
 
 
 def test_grid_import_minus_house_is_never_turned(mock_hass):
     coordinator = _derived(mock_hass)
     coordinator._auto_test_power_w = 1000
 
-    assert coordinator._charge_orientation(-900.0, "sent") == 1.0
+    assert coordinator._charge_orientation(-900.0, "sent") == (1.0, True)
 
 
 # --- The same side twice, and stopping instead of repeating it ----------------

@@ -97,6 +97,13 @@ erneut — nur für die Steuerung über KostalKore, deren Wert verfällt —, so
 Fenster aus dem Netz laden kann (KOSTAL KORE und evcc schreiben sie ebenfalls zyklisch), und nie
 außerhalb eines Fensters.
 
+**1038 liest, was der Akku gerade darf, nicht was geschrieben wurde.** Solange der Akku lädt, ist
+das die Grenze; steht er an seiner Untergrenze, sind es etwa 50 W (28./29. Oktober 2026). Ein
+niedrigerer Wert gilt nur dann als Grenze von jemand anderem – evcc, du selbst –, wenn der Akku
+auch mit dieser Leistung lädt. Sonst wird die geltende Grenze erneut geschrieben, damit sie nicht
+verfällt. KOSTAL KORE bis 3.0.17 hält einen vom BMS begrenzten Wert in 1038 nicht selbst am Leben
+(KostalKore#92).
+
 **Die Ladegrenze wird als Gleitkommazahl zurückgelesen.** Geschriebene 1000 W lesen sich als 997,9
 bis 999,9 W. KOSTAL KORE vergleicht den zurückgelesenen Wert exakt und meldet einen solchen
 Schreibvorgang als unbestätigt; Inverter Charge Night akzeptiert ihn, sobald der nächste Messwert
