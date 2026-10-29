@@ -272,10 +272,16 @@ async def test_the_own_command_standing_is_kept_alive(night, reading, battery_w)
     assert hass.services.async_call.await_args_list[0].args[2]["value"] == 1000.0
 
 
-def test_a_command_in_kilowatts_counts_in_watts(mock_hass):
+@pytest.mark.parametrize("attributes", [
+    {"max": 22.0},                       # no unit, a maximum below 1000: kW
+    {"unit_of_measurement": "kW"},       # labelled kW (Codex on #48)
+])
+def test_a_command_in_kilowatts_counts_in_watts(mock_hass, attributes):
     from tests.test_efficiency_measurement_017 import _derived
 
     coordinator = _derived(mock_hass)
-    mock_hass.states.async_set("number.kw_limit", "0.05", {"max": 22.0, "last_commanded_value": 0.8})
+    mock_hass.states.async_set("number.kw_limit", "0.05", {**attributes, "last_commanded_value": 1.0})
 
-    assert coordinator._commanded_ac_charge_limit_w("number.kw_limit") == 800.0
+    assert coordinator._commanded_ac_charge_limit_w("number.kw_limit") == 1000.0
+    # The own 1 kW still stands: the 50 W read is the battery's allowance
+    assert coordinator._lower_limit_is_in_force("number.kw_limit", 50.0, 1000.0) is False

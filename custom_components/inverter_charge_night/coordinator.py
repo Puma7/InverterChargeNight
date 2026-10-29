@@ -4080,6 +4080,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         value = _as_float(getattr(state, "attributes", {}).get("last_commanded_value"))
         if value is None:
             return None
+        if _unit_of(state) in ("kw", "kilowatt", "kilowatts"):
+            return value * 1000.0  # as _get_power_w reads the state (Codex on #48)
         return _charge_limit_in_w(state, value)
 
     def _ac_charge_limit_target(self) -> tuple[str, str] | None:
