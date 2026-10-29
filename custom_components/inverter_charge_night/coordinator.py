@@ -4159,6 +4159,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 blocking=True,
             )
         except Exception as e:
+            # KORE records a rejected write as the last command too: a stop
+            # after it is a new one, with its own settling (Codex on #48)
+            self._lower_command_seen = None
             if keepalive:
                 # The same value once more: KORE's exact readback says nothing
                 # new, and the verification judges what the inverter holds
@@ -4177,6 +4180,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return True
             _LOGGER.error("Error writing AC charge limit (%s): %s", what, e, exc_info=True)
             return False
+        self._lower_command_seen = None  # superseded: a stop after it is a new one
         if keepalive:
             _LOGGER.debug("%s to %.3f (%s)", what, value, unit or "unitless")
         else:
@@ -6334,6 +6338,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.minimum_calculated_soc = None
         self._window_started_at = now
         self._grid_idle_noted = False
+        self._lower_command_seen = None  # a stop seen last night is no stop of this window
         self.is_active = True
         self.target_reached = False
         # This window owns the inverter now: a reset still pending from the
@@ -8867,8 +8872,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if task is asyncio.current_task():
                 continue  # cancelling ourselves; the loop exits on its own
             await asyncio.gather(task, return_exceptions=True)
-        # A lapse is timed within one run of the keepalive (Codex on #38)
+        # A lapse is timed within one run of the keepalive (Codex on #38), and
+        # so is a stop's settling (CodeRabbit on #48)
         self._keepalive_lapse_since = None
+        self._lower_command_seen = None
         _LOGGER.debug("Stopped periodic verification task")
 
     async def _verify_ac_charge_limit(self) -> None:

@@ -315,3 +315,85 @@ async def test_a_lower_command_that_lapsed_gets_the_limit_back(night):
 
     assert _calls(hass) == [("number", "set_value", AC_LIMIT)]
     assert hass.services.async_call.await_args_list[0].args[2]["value"] == 1000.0
+
+
+@pytest.mark.asyncio
+async def test_a_new_stop_after_the_own_write_gets_its_own_settling(night):
+    """Codex on #48: a 0 W stop lapsed, the keepalive wrote the limit again -
+    and before the next round a new 0 W stop, 1038 still at the old 22 kW.
+
+    The new stop waits its own minute instead of inheriting the old one's.
+    """
+    from datetime import timedelta
+    from unittest.mock import patch
+
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.inverter_charge_night.coordinator import LOWER_COMMAND_SETTLE_S
+
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+    now = dt_util.now()
+    coordinator._lower_command_seen = (0.0, now - timedelta(seconds=10 * LOWER_COMMAND_SETTLE_S))
+    _commanded(hass, "22027.8", 0.0)
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=now):
+        await coordinator._keep_charge_limit_alive()  # the lapse: written again
+        assert _calls(hass) == [("number", "set_value", AC_LIMIT)]
+        hass.services.async_call.reset_mock()
+
+        await coordinator._keep_charge_limit_alive()  # the new stop, same value
+
+    assert _calls(hass) == []
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+@pytest.mark.asyncio
+async def test_any_own_write_supersedes_a_stop_seen_before(night, accepted):
+    """KORE records a rejected write as the last command as well."""
+    from homeassistant.util import dt as dt_util
+
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+    if accepted:
+        hass.services.async_call.side_effect = None
+    coordinator._lower_command_seen = (0.0, dt_util.now())
+
+    await coordinator._write_ac_charge_limit(AC_LIMIT, "number", 1000.0, "Set AC charge limit")
+
+    assert coordinator._lower_command_seen is None
+
+
+@pytest.mark.asyncio
+async def test_a_new_window_forgets_the_stop_seen_last_night(mock_hass):
+    from unittest.mock import patch
+
+    from homeassistant.util import dt as dt_util
+
+    from tests import test_discharge_block as window
+    from tests.test_grid_limit import NOW
+
+    window._register(mock_hass, battery="70")
+    made = window._make(mock_hass)
+    made._lower_command_seen = (0.0, dt_util.now())
+    try:
+        with patch(NOW, return_value=window.INSIDE_WINDOW):
+            await made._on_window_start(window.WINDOW_START)
+        assert made._lower_command_seen is None
+    finally:
+        await made._stop_periodic_verification()
+
+
+@pytest.mark.asyncio
+async def test_the_keepalive_stopping_forgets_the_stop_seen(mock_hass):
+    """CodeRabbit on #48: the settling belongs to one run of the keepalive."""
+    from homeassistant.util import dt as dt_util
+
+    from tests import test_discharge_block as window
+
+    window._register(mock_hass, battery="70")
+    made = window._make(mock_hass)
+    made._lower_command_seen = (0.0, dt_util.now())
+
+    await made._stop_periodic_verification()
+
+    assert made._lower_command_seen is None
