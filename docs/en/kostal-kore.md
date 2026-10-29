@@ -97,8 +97,9 @@ the last value written to 1038 on any path: a lower command - evcc's, the user's
 left alone, even before 1038 is read again; is the last command still this integration's, the
 limit in force is written again, so it does not lapse. Once a lower command has lapsed and the
 Kostal reads its own maximum again, the limit in force is written again too. Before 3.0.16, and
-after a Modbus reconnect until the next write, KORE shows no command; a lower reading then counts
-as another limit only while the battery charges at it. KOSTAL KORE does not repeat a write to
+after a Modbus reconnect until the next write, KORE shows no command. A lower reading of at least
+300 W then counts as another limit only while the battery draws at least 300 W, close to that
+reading; without a battery power sensor, any lower reading of at least 300 W counts as one. KOSTAL KORE does not repeat a write to
 1038 by itself - its keepalive covers the G3 registers 1280/1282 only - so whoever holds a limit
 there has to write it again (KostalKore#92).
 

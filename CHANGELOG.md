@@ -20,7 +20,8 @@ wrong.
   (3.0.16 or later): a lower command (a 0 W stop, evcc) is left alone, even before 1038 is read
   again; the integration's own command still standing, or a lower one that lapsed, means the
   limit in force is written again. Without that record (older KORE, after a Modbus reconnect) a
-  lower reading counts as another limit only while the battery charges at it. KOSTAL KORE does
+  lower reading of at least 300 W counts as another limit only while the battery draws at least
+  300 W, close to it; without a battery power sensor, any such reading counts as one. KOSTAL KORE does
   not repeat a write to 1038 at all - its keepalive covers the G3 registers 1280/1282 - so the
   writer has to (KostalKore#92).
 - **The first efficiency trial read a loss of 193 %.** The sign of the battery power was fixed

@@ -105,8 +105,9 @@ evcc, von dir, ein Stopp mit 0 W – bleibt unangetastet, auch bevor 1038 neu ge
 letzte Befehl noch der dieser Integration, wird die geltende Grenze erneut geschrieben, damit sie
 nicht verfällt. Ist ein niedrigerer Befehl verfallen und liest der Kostal wieder sein eigenes
 Maximum, wird die geltende Grenze ebenfalls erneut geschrieben. Vor 3.0.16 und nach einem
-Modbus-Neuaufbau bis zum nächsten Schreiben zeigt KORE keinen Befehl; ein niedrigerer Wert gilt dann
-nur als fremde Grenze, wenn der Akku auch mit dieser Leistung lädt. KOSTAL KORE wiederholt einen Schreibvorgang
+Modbus-Neuaufbau bis zum nächsten Schreiben zeigt KORE keinen Befehl. Ein niedrigerer Wert ab 300 W
+gilt dann nur als fremde Grenze, wenn der Akku mindestens 300 W zieht, nahe an diesem Wert; ohne
+Sensor für die Akkuleistung gilt jeder niedrigere Wert ab 300 W als eine. KOSTAL KORE wiederholt einen Schreibvorgang
 in 1038 nicht selbst – sein Keepalive gilt nur den G3-Registern 1280/1282 –, wer dort eine Grenze
 hält, muss sie selbst neu schreiben (KostalKore#92).
 
