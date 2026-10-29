@@ -341,7 +341,8 @@ async def test_a_new_stop_after_the_own_write_gets_its_own_settling(night):
         assert _calls(hass) == [("number", "set_value", AC_LIMIT)]
         hass.services.async_call.reset_mock()
 
-        await coordinator._keep_charge_limit_alive()  # the new stop, same value
+        _commanded(hass, "22027.8", 0.0)  # the new stop, 1038 not read again
+        await coordinator._keep_charge_limit_alive()
 
     assert _calls(hass) == []
 
