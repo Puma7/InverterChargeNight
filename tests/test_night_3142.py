@@ -243,6 +243,7 @@ def _commanded(hass: Any, reading: str, commanded: float) -> None:
     ("54", 0.0, "0"),         # the same stop, read as the Kostal's 50 W allowance
     ("800", 800.0, "0"),      # 800 W in a charging pause
     ("800", 800.0, "-310"),   # 800 W, the battery takes less than it may
+    ("998.5", 0.0, "-1000"),  # the stop is recorded, 1038 not read again yet (CodeRabbit on #48)
 ])
 @pytest.mark.asyncio
 async def test_a_lower_command_is_left_alone_whatever_the_battery_draws(night, reading,
@@ -283,5 +284,16 @@ def test_a_command_in_kilowatts_counts_in_watts(mock_hass, attributes):
     mock_hass.states.async_set("number.kw_limit", "0.05", {**attributes, "last_commanded_value": 1.0})
 
     assert coordinator._commanded_ac_charge_limit_w("number.kw_limit") == 1000.0
-    # The own 1 kW still stands: the 50 W read is the battery's allowance
-    assert coordinator._lower_limit_is_in_force("number.kw_limit", 50.0, 1000.0) is False
+
+
+@pytest.mark.asyncio
+async def test_a_lower_command_that_lapsed_gets_the_limit_back(night):
+    """Somebody's 0 W stop, not kept alive: the Kostal reads its own 22 kW again."""
+    hass, coordinator, clock = night
+    _charging(hass, coordinator)
+    _commanded(hass, "22027.8", 0.0)
+
+    await coordinator._keep_charge_limit_alive()
+
+    assert _calls(hass) == [("number", "set_value", AC_LIMIT)]
+    assert hass.services.async_call.await_args_list[0].args[2]["value"] == 1000.0

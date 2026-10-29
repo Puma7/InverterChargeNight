@@ -16,9 +16,10 @@ wrong.
 - **The charge limit lapsed for hours (house connection protection).** The Kostal's register
   1038 reads what the battery is allowed right now, about 50 W once it stands at its floor. The
   keepalive took that for somebody else's lower limit and stopped at 00:26; the 5000 W written was
-  not held until 03:10. A lower reading is now judged by KOSTAL KORE's `last_commanded_value`: a
-  lower command (a 0 W stop, evcc) is left alone, the integration's own command still standing
-  means the limit in force is written again. Without that record (after a Modbus reconnect) a
+  not held until 03:10. A lower reading is now judged by KOSTAL KORE's `last_commanded_value`
+  (3.0.16 or later): a lower command (a 0 W stop, evcc) is left alone, even before 1038 is read
+  again; the integration's own command still standing, or a lower one that lapsed, means the
+  limit in force is written again. Without that record (older KORE, after a Modbus reconnect) a
   lower reading counts as another limit only while the battery charges at it. KOSTAL KORE does
   not repeat a write to 1038 at all - its keepalive covers the G3 registers 1280/1282 - so the
   writer has to (KostalKore#92).

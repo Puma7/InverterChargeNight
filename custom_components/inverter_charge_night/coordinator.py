@@ -4073,8 +4073,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         KORE records every write to 1038 on any path - this integration's, the
         user's, evcc's - and shows it as ``last_commanded_value`` until the
-        Modbus link reconnects. The state is the limit in effect, this is the
-        command.
+        Modbus link reconnects, from KostalKore 3.0.16 on. The state is the
+        limit in effect, this is the command.
         """
         state = self.hass.states.get(entity_id)
         value = _as_float(getattr(state, "attributes", {}).get("last_commanded_value"))
@@ -4198,8 +4198,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._battery_idle_on_grid():
             return
         actual = self._get_ac_charge_limit_w(target[0])
-        if (actual is not None and actual < written - PLANNED_POWER_WRITE_THRESHOLD_W
-                and self._lower_limit_is_in_force(target[0], actual, written)):
+        commanded = self._commanded_ac_charge_limit_w(target[0])
+        lowered = (
+            # KORE's record comes first: 1038 is read every 30 s, a stop is
+            # recorded at once (CodeRabbit on #48). A reading above the limit
+            # written is a lapse - the limit in force is written again.
+            commanded < written - PLANNED_POWER_WRITE_THRESHOLD_W
+            and (actual is None or actual <= written + PLANNED_POWER_WRITE_THRESHOLD_W)
+            if commanded is not None
+            else actual is not None and actual < written - PLANNED_POWER_WRITE_THRESHOLD_W
+            and self._lower_limit_is_in_force(actual)
+        )
+        if lowered:
             # Lowered by someone else - the user, evcc. The verification leaves
             # a lower limit alone, and so does the keepalive (CodeRabbit on #38)
             self._keepalive_lapse_since = None  # no lapse to time (Codex on #38)
@@ -4243,7 +4253,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         await self._verify_ac_charge_limit()
 
-    def _lower_limit_is_in_force(self, entity_id: str, actual_w: float, written_w: float) -> bool:
+    def _lower_limit_is_in_force(self, actual_w: float) -> bool:
         """A lower reading of the charge limit is somebody's limit, not the battery at rest.
 
         The Kostal's register reads what the battery is allowed right now: the
@@ -4252,16 +4262,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         00:26, and the 5000 W written was not held until 03:10 (28/29 October
         2026).
 
-        KORE's record of the last command settles it: a lower command - a 0 W
-        stop, an 800 W limit in a charging pause - is left alone, however much
-        the battery draws; the own command still standing means the reading is
-        the battery's allowance (Codex on #48). Without a record - a reconnect
-        clears it - a limit in force is one the battery charges at, and a
-        reading of some hundred watts without a battery power still counts.
+        Only asked without KORE's record of the last command, which settles it
+        (Codex on #48) - before KostalKore 3.0.16, and after a reconnect until
+        the next write. A limit in force is then one the battery charges at;
+        without a battery power, a reading of some hundred watts still counts.
         """
-        commanded = self._commanded_ac_charge_limit_w(entity_id)
-        if commanded is not None:
-            return commanded < written_w - PLANNED_POWER_WRITE_THRESHOLD_W
         if actual_w < KEEPALIVE_IDLE_W:
             return False
         battery_w = self._get_power_w(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY))
