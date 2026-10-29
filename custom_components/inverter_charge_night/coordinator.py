@@ -308,6 +308,10 @@ KEEPALIVE_LAPSE_GRACE_S = 75
 # what the battery takes right now - about 50 W at rest - not what was written
 # (28/29 October 2026). Nobody's limit, so the keepalive goes on.
 KEEPALIVE_IDLE_W = 300.0
+# A lower command KORE recorded is taken for lapsed only once 1038 has read
+# above the limit this long after the command was first seen: two of its slow
+# polls, the reading before may still be the old one (CodeRabbit on #48)
+LOWER_COMMAND_SETTLE_S = 60.0
 SKIP_NEXT_DURATION = timedelta(hours=24)
 # A bridge longer than this means the sunrise or the window end is off; the plan
 # is still made, but it is worth a warning in the log.
@@ -615,6 +619,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._verification_task: asyncio.Task[None] | None = None
         self._keepalive_task: asyncio.Task[None] | None = None
         self._keepalive_lapse_since: datetime | None = None
+        # The lower command KORE recorded and when the keepalive first saw it
+        self._lower_command_seen: tuple[float, datetime] | None = None
         # turn_off commands sent by _pause_grid_charge, to tell whether a call
         # in between has already paused
         self._grid_pause_requests = 0
@@ -4199,16 +4205,24 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         actual = self._get_ac_charge_limit_w(target[0])
         commanded = self._commanded_ac_charge_limit_w(target[0])
-        lowered = (
+        if commanded is not None and commanded < written - PLANNED_POWER_WRITE_THRESHOLD_W:
             # KORE's record comes first: 1038 is read every 30 s, a stop is
             # recorded at once (CodeRabbit on #48). A reading above the limit
-            # written is a lapse - the limit in force is written again.
-            commanded < written - PLANNED_POWER_WRITE_THRESHOLD_W
-            and (actual is None or actual <= written + PLANNED_POWER_WRITE_THRESHOLD_W)
-            if commanded is not None
-            else actual is not None and actual < written - PLANNED_POWER_WRITE_THRESHOLD_W
-            and self._lower_limit_is_in_force(actual)
-        )
+            # written a while after it is a lapse - the limit is written again.
+            now = dt_util.now()
+            if self._lower_command_seen is None or self._lower_command_seen[0] != commanded:
+                self._lower_command_seen = (commanded, now)
+            lowered = (
+                actual is None or actual <= written + PLANNED_POWER_WRITE_THRESHOLD_W
+                or elapsed_seconds(now, self._lower_command_seen[1]) < LOWER_COMMAND_SETTLE_S
+            )
+        else:
+            self._lower_command_seen = None
+            lowered = (
+                commanded is None and actual is not None
+                and actual < written - PLANNED_POWER_WRITE_THRESHOLD_W
+                and self._lower_limit_is_in_force(actual)
+            )
         if lowered:
             # Lowered by someone else - the user, evcc. The verification leaves
             # a lower limit alone, and so does the keepalive (CodeRabbit on #38)

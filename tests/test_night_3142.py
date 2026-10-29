@@ -288,12 +288,30 @@ def test_a_command_in_kilowatts_counts_in_watts(mock_hass, attributes):
 
 @pytest.mark.asyncio
 async def test_a_lower_command_that_lapsed_gets_the_limit_back(night):
-    """Somebody's 0 W stop, not kept alive: the Kostal reads its own 22 kW again."""
+    """Somebody's 0 W stop, not kept alive: the Kostal reads its own 22 kW again.
+
+    Not on the first look: 1038 is read every 30 s, the 22 kW may be the
+    reading from before the stop (CodeRabbit on #48).
+    """
+    from datetime import timedelta
+    from unittest.mock import patch
+
+    from homeassistant.util import dt as dt_util
+
+    from custom_components.inverter_charge_night.coordinator import LOWER_COMMAND_SETTLE_S
+
     hass, coordinator, clock = night
     _charging(hass, coordinator)
     _commanded(hass, "22027.8", 0.0)
 
-    await coordinator._keep_charge_limit_alive()
+    now = dt_util.now()
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=now):
+        await coordinator._keep_charge_limit_alive()
+    assert _calls(hass) == []
+
+    later = now + timedelta(seconds=LOWER_COMMAND_SETTLE_S)
+    with patch("custom_components.inverter_charge_night.coordinator.dt_util.now", return_value=later):
+        await coordinator._keep_charge_limit_alive()
 
     assert _calls(hass) == [("number", "set_value", AC_LIMIT)]
     assert hass.services.async_call.await_args_list[0].args[2]["value"] == 1000.0

@@ -103,8 +103,9 @@ niedrigerer Wert wird an dem unterschieden, was KOSTAL KORE (ab 3.0.16) als `las
 zeigt, dem zuletzt auf irgendeinem Weg in 1038 geschriebenen Wert: Ein niedrigerer Befehl – von
 evcc, von dir, ein Stopp mit 0 W – bleibt unangetastet, auch bevor 1038 neu gelesen ist; ist der
 letzte Befehl noch der dieser Integration, wird die geltende Grenze erneut geschrieben, damit sie
-nicht verfällt. Ist ein niedrigerer Befehl verfallen und liest der Kostal wieder sein eigenes
-Maximum, wird die geltende Grenze ebenfalls erneut geschrieben. Vor 3.0.16 und nach einem
+nicht verfällt. Ist ein niedrigerer Befehl verfallen und liest der Kostal eine Minute nach dem
+ersten Sehen des Befehls noch sein eigenes Maximum (zwei langsame Abfragen von KORE, der Wert ist
+also nicht mehr der von vor dem Befehl), wird die geltende Grenze ebenfalls erneut geschrieben. Vor 3.0.16 und nach einem
 Modbus-Neuaufbau bis zum nächsten Schreiben zeigt KORE keinen Befehl. Ein niedrigerer Wert ab 300 W
 gilt dann nur als fremde Grenze, wenn der Akku mindestens 300 W zieht, nahe an diesem Wert; ohne
 Sensor für die Akkuleistung gilt jeder niedrigere Wert ab 300 W als eine. KOSTAL KORE wiederholt einen Schreibvorgang

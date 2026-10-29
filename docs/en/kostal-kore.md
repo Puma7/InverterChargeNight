@@ -96,7 +96,9 @@ lower reading is told apart by what KOSTAL KORE (3.0.16 or later) shows as `last
 the last value written to 1038 on any path: a lower command - evcc's, the user's, a 0 W stop - is
 left alone, even before 1038 is read again; is the last command still this integration's, the
 limit in force is written again, so it does not lapse. Once a lower command has lapsed and the
-Kostal reads its own maximum again, the limit in force is written again too. Before 3.0.16, and
+Kostal still reads its own maximum a minute after the command was first seen (two of KORE's slow
+polls, so the reading is not the one from before the command), the limit in force is written
+again too. Before 3.0.16, and
 after a Modbus reconnect until the next write, KORE shows no command. A lower reading of at least
 300 W then counts as another limit only while the battery draws at least 300 W, close to that
 reading; without a battery power sensor, any lower reading of at least 300 W counts as one. KOSTAL KORE does not repeat a write to
