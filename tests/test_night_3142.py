@@ -208,3 +208,18 @@ def test_the_first_retry_is_routine(rig, caplog, retries, level):
 
     [record] = [r for r in caplog.records if "not reset yet" in r.getMessage()]
     assert record.levelname == level
+
+
+def test_the_ramp_blocks_do_not_count_as_uncertainty(mock_hass):
+    """Codex on #48: two ramp blocks under the wrong sign, then eighteen right ones."""
+    from statistics import pstdev
+
+    from tests.test_efficiency_measurement_017 import _derived
+
+    coordinator = _derived(mock_hass)
+    _rest_then_charge(coordinator, mock_hass, rest_samples=4, ramp_w=150.0)
+
+    losses = coordinator._auto_block_losses
+    assert losses
+    assert all(loss == pytest.approx(1 - 1000 / 1072, abs=0.005) for loss in losses)
+    assert pstdev(losses) < 0.001

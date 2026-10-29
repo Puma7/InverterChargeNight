@@ -4022,7 +4022,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return str(entity) if entity else None
 
     def _judge_orientation(self, label: str, raw_w: float) -> None:
-        """Decide a sign still open; what was summed under the wrong one turns with it."""
+        """Decide a sign still open; what was summed under the wrong one turns with it.
+
+        The blocks already closed belong to the ramp, before the battery took
+        the trial's power: under a wrong sign each read a loss far off, and
+        left in they would stand for an uncertainty the charger does not have
+        (Codex on #48). They go once the sign is known.
+        """
         if label == "sent":
             if self._auto_sent_sign_decided:
                 return
@@ -4033,16 +4039,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if self._auto_last_sent_w is not None:
                     self._auto_last_sent_w = -self._auto_last_sent_w
             self._auto_sent_sign, self._auto_sent_sign_decided = sign, decided
-            return
-        if self._auto_received_sign_decided:
-            return
-        sign, decided = self._charge_orientation(raw_w, label)
-        if sign != self._auto_received_sign:
-            self._auto_energy_received_wh = -self._auto_energy_received_wh
-            self._auto_block_received_wh = -self._auto_block_received_wh
-            if self._auto_last_received_w is not None:
-                self._auto_last_received_w = -self._auto_last_received_w
-        self._auto_received_sign, self._auto_received_sign_decided = sign, decided
+        else:
+            if self._auto_received_sign_decided:
+                return
+            sign, decided = self._charge_orientation(raw_w, label)
+            if sign != self._auto_received_sign:
+                self._auto_energy_received_wh = -self._auto_energy_received_wh
+                self._auto_block_received_wh = -self._auto_block_received_wh
+                if self._auto_last_received_w is not None:
+                    self._auto_last_received_w = -self._auto_last_received_w
+            self._auto_received_sign, self._auto_received_sign_decided = sign, decided
+        if decided:
+            self._auto_block_losses = []
 
     def _get_ac_charge_limit_w(self, entity_id: str | None) -> float | None:
         """Read the charge control with the same unit inference used for writes."""
