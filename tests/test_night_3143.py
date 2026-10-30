@@ -168,6 +168,8 @@ def test_the_battery_reaching_its_floor_during_a_trial_is_no_lowered_limit(mock_
     assert "may take only 51 W" in coordinator._auto_last_result["discarded"]
     with patch(NOW, return_value=START):
         assert coordinator._auto_search_stopped() is None
+        # Counted, or the same power would be tried again (Codex on #49)
+        assert coordinator.get_auto_efficiency_data()["failed"] == {"3000": 1}
 
 
 @pytest.mark.parametrize(("commanded", "waiting"), [(7000.0, True), (None, True)])
@@ -287,3 +289,65 @@ async def test_the_first_restore_without_fresh_feedback_is_routine(mock_hass, ca
 
     [record] = [r for r in caplog.records if "no fresh matching feedback" in r.getMessage()]
     assert record.levelname == level
+
+
+@pytest.mark.asyncio
+async def test_the_verification_at_the_deadline_judges_like_the_sampler(mock_hass):
+    """Codex on #49: at the deadline the verification counted a failed start
+    without looking at KORE's record; the battery at rest is an idle trial."""
+    from tests.test_electrical_safety import INSIDE, _make as safety_make, _register
+    from tests.test_electrical_safety import NOW as SAFETY_NOW, GRID
+    from tests.test_electrical_safety import AC_LIMIT as SAFETY_LIMIT
+
+    with patch(SAFETY_NOW, return_value=INSIDE):
+        _register(mock_hass)
+        mock_hass.states.async_set(GRID, "on")
+        coordinator = safety_make(mock_hass)
+        coordinator.is_active = True
+        coordinator.auto_efficient_charge = True
+        coordinator._planned_setpoint_written_w = 7000
+        coordinator._auto_test_active = True
+        coordinator._auto_test_power_w = 7000
+        coordinator._auto_test_start = INSIDE - timedelta(seconds=AUTO_TEST_START_WAIT_S + 5)
+        coordinator._auto_test_limit_confirmed = False
+        coordinator._auto_trial_telemetry = MagicMock(return_value=True)  # type: ignore[method-assign]
+        coordinator._auto_trial_drawn_w = MagicMock(return_value=0.0)  # type: ignore[method-assign]
+        mock_hass.states.async_set(
+            SAFETY_LIMIT, "51", {"unit_of_measurement": "W", "last_commanded_value": 7000.0},
+        )
+
+        await coordinator._verify_ac_charge_limit()
+
+    assert not coordinator._auto_test_active
+    assert coordinator._auto_start_failures is None
+    assert coordinator._auto_idle_trials is not None and coordinator._auto_idle_trials[1] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_verification_counts_a_floor_during_the_measurement(mock_hass):
+    """The verification's twin of the sampler's case: counted, no window stop."""
+    from tests.test_electrical_safety import INSIDE, _make as safety_make, _register
+    from tests.test_electrical_safety import NOW as SAFETY_NOW, GRID
+    from tests.test_electrical_safety import AC_LIMIT as SAFETY_LIMIT
+
+    with patch(SAFETY_NOW, return_value=INSIDE):
+        _register(mock_hass)
+        mock_hass.states.async_set(GRID, "on")
+        coordinator = safety_make(mock_hass)
+        coordinator.is_active = True
+        coordinator.auto_efficient_charge = True
+        coordinator._planned_setpoint_written_w = 3000
+        coordinator._auto_test_active = True
+        coordinator._auto_test_power_w = 3000
+        coordinator._auto_test_start = INSIDE - timedelta(minutes=8)
+        coordinator._auto_measure_start = INSIDE - timedelta(minutes=5)
+        coordinator._auto_test_limit_confirmed = True
+        mock_hass.states.async_set(
+            SAFETY_LIMIT, "51", {"unit_of_measurement": "W", "last_commanded_value": 3000.0},
+        )
+
+        await coordinator._verify_ac_charge_limit()
+
+        assert not coordinator._auto_test_active
+        assert coordinator._auto_search_stopped() is None
+        assert coordinator.get_auto_efficiency_data()["failed"] == {"3000": 1}

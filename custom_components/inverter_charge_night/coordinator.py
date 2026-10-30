@@ -5242,10 +5242,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                    and actual_w < requested_w - PLANNED_POWER_WRITE_THRESHOLD_W)
         if lowered and self._auto_trial_command_stands():
             # Our own command stands: the battery takes less now - at its
-            # floor or tapering - and no one holds a lower limit
+            # floor or tapering - and no one holds a lower limit. Counted, so
+            # the same power is not tried again and again (Codex on #49).
             self._discard_auto_test(
                 "the battery may take only %.0f W of the trial's %s W now", actual_w, requested_w,
             )
+            if requested_w is not None:
+                self._record_failed_attempt(requested_w, too_short=False)
             return
         if lowered:
             self._discard_auto_test("inverter limit fell below the efficiency trial setpoint")
@@ -9023,6 +9026,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             # The trial waits for the battery to take its power
                             # up; it judges the start itself when that is over
                             return
+                    if self._auto_measure_start is None:
+                        # The wait is over: judged as the sampler judges it -
+                        # KORE's record of the command and the power sensors
+                        # included (Codex on #49)
+                        self._begin_auto_measurement(self._efficiency_now())
+                        return
                     # Never confirmed: a slow register may still show the
                     # previous, lower trial (CI on #41). A start not taken.
                     self._discard_auto_test("charge limit was never confirmed for this trial")
@@ -9030,10 +9039,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     return
                 if self._auto_trial_command_stands():
                     # Our own command stands: the battery takes less now
+                    power_w = self._auto_test_power_w
                     self._discard_auto_test(
-                        "the battery may take only %.0f W of the trial's %s W now",
-                        actual_w, self._auto_test_power_w,
+                        "the battery may take only %.0f W of the trial's %s W now", actual_w, power_w,
                     )
+                    if power_w is not None:
+                        self._record_failed_attempt(power_w, too_short=False)
                     return
                 self._discard_auto_test("inverter limit fell below the efficiency trial setpoint")
                 # The inverter holds a lower limit of its own; writing the next
