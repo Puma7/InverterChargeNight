@@ -62,8 +62,8 @@ die Suche zu verfolgen.
    Unsicherheit, speichert sie die beste Leistung und schaltet sich aus.
 
 Ein Fenster von sechs Stunden reicht meist. Ein Versuch beginnt nur, wenn das Fenster noch genug
-Zeit und genug zu ladende Energie übrig hat, um ihn abzuschließen (sonst
-`not_enough_charge_left`).
+Zeit und genug zu ladende Energie übrig hat, um ihn abzuschließen, die 15 Minuten Warten auf den
+Akku eingerechnet (sonst `not_enough_charge_left`).
 
 Von da an lädt ICN bevorzugt mit dem Optimum und hört beim Ziel auf, statt ein weniger effizientes
 Rinnsal über das Fenster zu verteilen. Die Frist kann mehr Leistung verlangen, und die größte

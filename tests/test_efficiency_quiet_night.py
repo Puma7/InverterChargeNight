@@ -259,17 +259,18 @@ async def test_a_restart_inside_the_window_keeps_the_stop(night):  # noqa: F811
 
 @pytest.mark.asyncio
 async def test_no_trial_the_window_end_cuts_short_of_its_energy(night):  # noqa: F811
-    """CodeRabbit on #40: 0.3 kWh at 1 kW takes 18 minutes after settling;
-    ten minutes before the end is not enough, twenty-five are."""
+    """CodeRabbit on #40: 0.3 kWh at 1 kW takes 18 minutes once measuring,
+    and the measurement may begin 15 minutes in (CodeRabbit on #49); twenty-
+    five minutes before the end are not enough, forty are."""
     hass, coordinator = night
     end = coordinator._window_end_datetime(START)
 
-    with patch(NOW, return_value=end - timedelta(minutes=10)):
+    with patch(NOW, return_value=end - timedelta(minutes=25)):
         await coordinator._handle_auto_charge()
     coordinator._start_auto_test.assert_not_awaited()
     assert coordinator._auto_wait_reason == "not_enough_charge_left"
 
-    with patch(NOW, return_value=end - timedelta(minutes=25)):
+    with patch(NOW, return_value=end - timedelta(minutes=40)):
         await coordinator._handle_auto_charge()
     coordinator._start_auto_test.assert_awaited_once_with(1000)
 
@@ -501,17 +502,20 @@ def _with_meters(hass, coordinator):
 @pytest.mark.asyncio
 async def test_a_metered_trial_gets_the_time_and_charge_for_its_longest_run(night):  # noqa: F811
     """Codex on #40: with energy counters a trial runs its full 20 minutes.
-    At 10 kW the power sensors need 2 + 5 minutes and 1.2 kWh; the meters
-    need 2 + 20 minutes and 3.7 kWh."""
+    At 10 kW the power sensors need 15 + 5 minutes and 1.2 kWh; the meters
+    need 15 + 20 minutes and 3.7 kWh. The 15 are the wait for the battery,
+    after which the measurement begins at the latest (CodeRabbit on #49)."""
     hass, coordinator = night
     end = coordinator._window_end_datetime(START)
     coordinator.config = {**coordinator.config, CONF_BATTERY_CAPACITY: 36.25}  # 4 kWh to go
 
-    with patch(NOW, return_value=end - timedelta(minutes=15)):
+    with patch(NOW, return_value=end - timedelta(minutes=19)):
+        assert not coordinator._enough_charge_left_for(10000)
+    with patch(NOW, return_value=end - timedelta(minutes=28)):
         assert coordinator._enough_charge_left_for(10000)
         _with_meters(hass, coordinator)
         assert not coordinator._enough_charge_left_for(10000)
-    with patch(NOW, return_value=end - timedelta(minutes=25)):
+    with patch(NOW, return_value=end - timedelta(minutes=38)):
         assert coordinator._enough_charge_left_for(10000)
 
     coordinator.config = {**coordinator.config, CONF_BATTERY_CAPACITY: 18.2}  # 2 kWh to go

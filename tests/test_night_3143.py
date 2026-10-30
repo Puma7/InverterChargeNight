@@ -434,3 +434,21 @@ async def test_a_reading_gone_stale_at_the_deadline_is_a_lost_trial(mock_hass, b
     assert coordinator._auto_idle_trials is None
     assert coordinator.get_auto_efficiency_data().get("failed", {}) == {}
     assert coordinator._auto_telemetry_losses is not None
+
+
+def test_a_stale_reading_never_starts_the_measurement(mock_hass):
+    """CodeRabbit on #49: a stale reading that looks like charging would be the
+    first sample, and the next fresh one would integrate it."""
+    from tests.test_efficiency_finder import SENT
+
+    coordinator = _make(mock_hass)
+    _trial(mock_hass, coordinator, 7000, reading="7000", commanded=7000.0)
+    _power(mock_hass, 7000, 6700)
+    mock_hass.states.get(SENT).last_reported = START + timedelta(seconds=60)
+
+    _sample(coordinator, AUTO_TEST_SETTLE_S + 80)
+
+    assert not coordinator._auto_test_active
+    assert coordinator._auto_measure_start is None
+    assert "stale" in coordinator._auto_last_result["discarded"]
+    assert coordinator._auto_telemetry_losses is not None

@@ -59,7 +59,8 @@ charge power* are disabled by default; enable them on the device page to follow 
    stores the best power and switches itself off.
 
 A six-hour window is usually enough. A trial only starts when the window has enough time and
-charge left to finish it (`not_enough_charge_left` otherwise).
+charge left to finish it, the 15 minutes of waiting for the battery included
+(`not_enough_charge_left` otherwise).
 
 From then on, charging prefers the optimum and stops at the target, instead of spreading a less
 efficient trickle over the window. The deadline may need more power, and the maximum charge power

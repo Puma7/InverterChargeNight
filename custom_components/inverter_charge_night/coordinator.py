@@ -5276,11 +5276,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._discard_auto_test("charge limit has no matching feedback after settling")
             self._count_failed_start()  # never confirmed: a start not taken
             return
+        if self._discard_auto_test_if_telemetry_stale():
+            # A reading that stopped is no battery at rest, nor a first sample
+            # to count from - from the sampler or the verification alike
+            # (Codex and CodeRabbit on #49)
+            return
         if self._auto_trial_telemetry() and not self._auto_trial_charging():
-            if self._discard_auto_test_if_telemetry_stale():
-                # A reading that stopped is no battery at rest - from the
-                # sampler or the verification alike (Codex on #49)
-                return
             # Taken - read back, or recorded with the battery at rest - but in
             # all the wait the battery did not take the power up
             self._confirm_auto_test_limit()
@@ -6107,7 +6108,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             AUTO_TEST_MAX_DURATION_S if self._energy_meter_entities() is not None
             else AUTO_TEST_MIN_DURATION_S
         )
-        trial_s = AUTO_TEST_SETTLE_S + max(
+        # The measurement may begin only once the wait for the battery is
+        # over, 15 minutes in (CodeRabbit on #49)
+        trial_s = AUTO_TEST_START_WAIT_S + max(
             measured_s, AUTO_TEST_MIN_ENERGY_WH * 3600.0 / lowest_draw_w
         )
         if elapsed_seconds(self._window_end_datetime(now), now) < trial_s:

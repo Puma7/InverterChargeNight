@@ -24,7 +24,9 @@ The night of 29/30 October 2026: the keepalive held the charge limit all night, 
   the wait the periodic verification judges the start like the sampler. A battery that takes less
   than the trial's power under its standing command counts a failed attempt for that power, so the
   same power is not tried again and again. With grid import minus house consumption as the AC
-  side, a negative difference - the battery feeding the house - is no draw.
+  side, a negative difference - the battery feeding the house - is no draw. A stale power reading
+  never starts the measurement and is never taken for a battery at rest: it is a lost trial. A
+  trial starts only when the window leaves time for the whole wait and the measurement.
 - **A trial discarded between polls hands the limit back to the plan at once.** The 7000 W stood
   13 minutes after the trial was discarded, until the next 15-minute poll.
 - **The morning's first restore of the charge limit is no error.** 3.14.2 meant to log it at
