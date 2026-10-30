@@ -44,7 +44,11 @@ charge power* are disabled by default; enable them on the device page to follow 
 
 ## How it measures
 
-1. It writes a trial power and waits **two minutes** for the inverter to settle.
+1. It writes a trial power and waits **two minutes** for the inverter to settle. The measurement
+   then starts once the battery takes the power up - a Kostal answers a raised min SOC minutes
+   late, and its register 1038 reads about 50 W while the battery still rests. After **15
+   minutes** without a draw the trial counts as idle; a power the inverter never read back, and
+   KOSTAL KORE never recorded, counts as a start not taken.
 2. It measures for at least **five minutes and 0.3 kWh**, and until the standard error of the
    per-minute loss is **below 0.15 percentage points** (at most 20 minutes). With energy meters a
    trial always runs 20 minutes.

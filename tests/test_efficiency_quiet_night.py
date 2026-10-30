@@ -16,6 +16,7 @@ import pytest
 
 from custom_components.inverter_charge_night.const import (
     AUTO_TEST_MAX_START_FAILURES,
+    AUTO_TEST_START_WAIT_S,
     CONF_AUTO_EFFICIENCY_DATA,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
@@ -76,11 +77,9 @@ async def test_a_battery_that_does_not_charge_ends_the_trial_and_the_night(night
     inverter with a minimum charge rate idles at 1 kW and charges at 3 kW);
     a second idle trial at another power ends the window's search."""
     hass, coordinator = night
-    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 6, minutes=6)
+    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 14, minutes=14)
 
-    with patch(NOW, return_value=end):
-        await coordinator._handle_auto_charge()
-
+    # The wait for the battery is over: an idle trial, judged by the sampler
     assert not coordinator._auto_test_active
     assert "trying another power" in coordinator._auto_last_result["discarded"]
     with patch(NOW, return_value=end):
@@ -89,7 +88,7 @@ async def test_a_battery_that_does_not_charge_ends_the_trial_and_the_night(night
     coordinator._start_auto_test.assert_awaited_once_with(3000)
     coordinator._start_auto_test.reset_mock()
 
-    end = _measure(coordinator, hass, power_w=3000, samples=[(0, 0)] * 6, minutes=6)
+    end = _measure(coordinator, hass, power_w=3000, samples=[(0, 0)] * 14, minutes=14)
     with patch(NOW, return_value=end):
         await coordinator._handle_auto_charge()
     assert "not charging" in coordinator._auto_last_result["discarded"]
@@ -111,7 +110,7 @@ async def test_a_battery_that_does_not_charge_ends_the_trial_and_the_night(night
 async def test_a_restart_keeps_the_idle_trial_count(night):  # noqa: F811
     """An idle trial, a reload, another idle trial: two in the window, the search stops."""
     hass, coordinator = night
-    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 6, minutes=6)
+    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 14, minutes=14)
     with patch(NOW, return_value=end):
         await coordinator._handle_auto_charge()
 
@@ -123,7 +122,7 @@ async def test_a_restart_keeps_the_idle_trial_count(night):  # noqa: F811
     restarted._grid_switch_suspended = True
     restarted.initial_calculated_soc = 44.0
     restarted._start_auto_test = AsyncMock()
-    end = _measure(restarted, hass, power_w=3000, samples=[(0, 0)] * 6, minutes=6)
+    end = _measure(restarted, hass, power_w=3000, samples=[(0, 0)] * 14, minutes=14)
     with patch(NOW, return_value=end):
         await restarted._handle_auto_charge()
         assert restarted._auto_search_stopped() == "battery_not_charging"
@@ -299,7 +298,10 @@ async def test_an_idle_trial_asks_for_a_refresh_at_its_minimum(night):  # noqa: 
     """Codex on #41: the 15-s check refreshes at the five minutes, not only
     for a complete trial, so the idle stop does not wait for the next poll."""
     hass, coordinator = night
-    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 6, minutes=6)
+    # Short of the start wait: the trial still waits for the battery
+    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 12, minutes=12)
+    assert coordinator._auto_test_active
+    end += timedelta(minutes=1, seconds=1)
     coordinator.async_request_refresh = AsyncMock()
     module = "custom_components.inverter_charge_night.coordinator"
     with patch(f"{module}.async_track_time_interval") as interval, \
@@ -385,7 +387,7 @@ async def test_a_trial_never_confirmed_is_a_start_not_taken_not_a_lowered_limit(
         coordinator._planned_setpoint_written_w = 13000
         coordinator._auto_test_active = True
         coordinator._auto_test_power_w = 13000
-        coordinator._auto_test_start = INSIDE - timedelta(minutes=3)
+        coordinator._auto_test_start = INSIDE - timedelta(seconds=AUTO_TEST_START_WAIT_S + 60)
         coordinator._auto_test_limit_confirmed = False
         mock_hass.states.async_set(AC_LIMIT, "11000", {"unit_of_measurement": "W"})
 
@@ -399,7 +401,7 @@ async def test_a_trial_never_confirmed_is_a_start_not_taken_not_a_lowered_limit(
         coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
         await coordinator._start_auto_test(13000)
         assert coordinator._auto_start_failures[1] == 1
-        coordinator._auto_test_start = INSIDE - timedelta(minutes=3)
+        coordinator._auto_test_start = INSIDE - timedelta(seconds=AUTO_TEST_START_WAIT_S + 60)
         await coordinator._verify_ac_charge_limit()
         assert coordinator._auto_search_stopped() == "charge_limit_not_taken"
 
