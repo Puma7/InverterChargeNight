@@ -19,7 +19,11 @@ The night of 29/30 October 2026: the keepalive held the charge limit all night, 
   now waits after its settling until the limit reads back and the battery takes at least a
   quarter of the power, up to 15 minutes from its start. A limit KOSTAL KORE recorded under a
   battery at rest is no failed start, and once a trial measures, the battery reaching its floor
-  ends only the trial, not the search for the window.
+  ends only the trial, not the search for the window. A readback that falls back to the battery's
+  rest value inside the wait, under the trial's command, keeps the trial waiting, and at the end of
+  the wait the periodic verification judges the start like the sampler. A battery that takes less
+  than the trial's power under its standing command counts a failed attempt for that power, so the
+  same power is not tried again and again.
 - **A trial discarded between polls hands the limit back to the plan at once.** The 7000 W stood
   13 minutes after the trial was discarded, until the next 15-minute poll.
 - **The morning's first restore of the charge limit is no error.** 3.14.2 meant to log it at
