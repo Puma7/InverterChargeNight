@@ -382,3 +382,28 @@ async def test_a_confirmed_trial_keeps_waiting_when_the_readback_falls_to_rest(m
         assert coordinator._auto_measure_start is None
         assert coordinator.get_auto_efficiency_data().get("failed", {}) == {}
         mock_hass.services.async_call.assert_not_awaited()
+
+
+def test_a_battery_feeding_the_house_is_no_draw_on_the_derived_side(mock_hass):
+    """CodeRabbit on #49: grid import minus house load below zero is the
+    battery feeding the house; taken as a size it started the measurement."""
+    from tests.test_efficiency_measurement_017 import DERIVED, GRID, HOUSE
+    from tests.test_efficiency_finder import RECEIVED
+
+    coordinator = _make(mock_hass, DERIVED)
+    _trial(mock_hass, coordinator, 3000, reading="51", commanded=3000.0)
+    for entity, value in ((GRID, "300"), (HOUSE, "4000"), (RECEIVED, "3500")):
+        mock_hass.states.async_set(entity, value, {"unit_of_measurement": "W"})
+
+    _sample(coordinator, AUTO_TEST_SETTLE_S + 1)
+    assert coordinator._auto_test_active
+    assert coordinator._auto_measure_start is None
+
+    for entity in (GRID, HOUSE, RECEIVED):
+        mock_hass.states.async_set(entity, mock_hass.states.get(entity).state, {"unit_of_measurement": "W"})
+    _sample(coordinator, AUTO_TEST_START_WAIT_S)
+
+    assert not coordinator._auto_test_active
+    assert "the battery drew 0 W on average" in coordinator._auto_last_result["discarded"]
+    assert coordinator.get_auto_efficiency_data().get("failed", {}) == {}
+    assert coordinator._auto_idle_trials is not None and coordinator._auto_idle_trials[1] == 1

@@ -5214,9 +5214,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return self._charge_input_w() is not None and received is not None
 
     def _auto_trial_drawn_w(self) -> float | None:
-        """What the charger takes on the AC side right now, either sign, or None."""
+        """What the charger takes on the AC side right now, or None.
+
+        A "sent" sensor may count charging as negative, so either sign. Grid
+        import minus house consumption is positive by its definition: below
+        zero the battery feeds the house and takes nothing (CodeRabbit on #49).
+        """
         sent_w = self._charge_input_w()
-        return None if sent_w is None else abs(sent_w)
+        if sent_w is None:
+            return None
+        if len(self._charge_input_entities()) == 2:
+            return max(sent_w, 0.0)
+        return abs(sent_w)
 
     def _auto_trial_charging(self) -> bool:
         """The trial's limit reads back and the battery takes a share of it."""
