@@ -5284,9 +5284,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._auto_trial_telemetry() and not self._auto_trial_charging():
             # Taken - read back, or recorded with the battery at rest - but in
             # all the wait the battery did not take the power up
-            self._confirm_auto_test_limit()
             drawn_w = self._auto_trial_drawn_w() or 0.0
             power_w = self._auto_test_power_w
+            if power_w is not None and drawn_w >= AUTO_TEST_MIN_FOLLOW_RATIO * power_w:
+                # It takes the trial's power, but the limit the measurement is
+                # tied to never read back: no fault of this power, a start the
+                # readback did not follow (CodeRabbit on #49)
+                self._discard_auto_test(
+                    "the battery takes the trial's %s W, but its limit reads %s",
+                    power_w, self._get_ac_charge_limit_w(self.config.get(CONF_CHARGE_POWER_ENTITY)),
+                )
+                self._count_failed_start()  # not confirmed: two in a row end the search
+                return
+            self._confirm_auto_test_limit()
             if power_w is not None and drawn_w >= AUTO_TEST_IDLE_RATIO * power_w:
                 # It charges, under less than the trial's power: another power
                 allowed_w = self._get_ac_charge_limit_w(self.config.get(CONF_CHARGE_POWER_ENTITY))

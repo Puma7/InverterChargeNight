@@ -452,3 +452,30 @@ def test_a_stale_reading_never_starts_the_measurement(mock_hass):
     assert coordinator._auto_measure_start is None
     assert "stale" in coordinator._auto_last_result["discarded"]
     assert coordinator._auto_telemetry_losses is not None
+
+
+def test_a_full_draw_without_a_readback_is_no_fault_of_the_power(mock_hass):
+    """CodeRabbit on #49: the battery takes the trial's 7000 W, 1038 never
+    follows; the measurement needs that readback, the power did nothing wrong."""
+    coordinator = _make(mock_hass)
+    _trial(mock_hass, coordinator, 7000, reading="51", commanded=7000.0)
+    _power(mock_hass, 7000, 6700)
+
+    _sample(coordinator, AUTO_TEST_SETTLE_S + 1)
+    assert coordinator._auto_test_active
+    _power(mock_hass, 7000, 6700)
+    _sample(coordinator, AUTO_TEST_START_WAIT_S)
+
+    assert not coordinator._auto_test_active
+    assert "takes the trial's 7000 W, but its limit reads 51" in coordinator._auto_last_result["discarded"]
+    assert coordinator._auto_start_failures is not None and coordinator._auto_start_failures[1] == 1
+    with patch(NOW, return_value=START):
+        assert coordinator.get_auto_efficiency_data().get("failed", {}) == {}
+
+    # A second one in a row ends the search: the count is not reset on the way
+    _trial(mock_hass, coordinator, 7000, reading="51", commanded=7000.0)
+    _power(mock_hass, 7000, 6700)
+    _sample(coordinator, AUTO_TEST_START_WAIT_S)
+    assert coordinator._auto_start_failures is not None and coordinator._auto_start_failures[1] == 2
+    with patch(NOW, return_value=START):
+        assert coordinator._auto_search_stopped() == "charge_limit_not_taken"
