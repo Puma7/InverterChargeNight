@@ -16,6 +16,7 @@ import pytest
 
 from custom_components.inverter_charge_night.const import (
     AUTO_TEST_MAX_START_FAILURES,
+    AUTO_TEST_START_WAIT_S,
     CONF_AUTO_EFFICIENCY_DATA,
     CONF_BATTERY_CAPACITY,
     CONF_CHARGE_ENERGY_RECEIVED_ENTITY,
@@ -76,11 +77,9 @@ async def test_a_battery_that_does_not_charge_ends_the_trial_and_the_night(night
     inverter with a minimum charge rate idles at 1 kW and charges at 3 kW);
     a second idle trial at another power ends the window's search."""
     hass, coordinator = night
-    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 6, minutes=6)
+    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 14, minutes=14)
 
-    with patch(NOW, return_value=end):
-        await coordinator._handle_auto_charge()
-
+    # The wait for the battery is over: an idle trial, judged by the sampler
     assert not coordinator._auto_test_active
     assert "trying another power" in coordinator._auto_last_result["discarded"]
     with patch(NOW, return_value=end):
@@ -89,7 +88,7 @@ async def test_a_battery_that_does_not_charge_ends_the_trial_and_the_night(night
     coordinator._start_auto_test.assert_awaited_once_with(3000)
     coordinator._start_auto_test.reset_mock()
 
-    end = _measure(coordinator, hass, power_w=3000, samples=[(0, 0)] * 6, minutes=6)
+    end = _measure(coordinator, hass, power_w=3000, samples=[(0, 0)] * 14, minutes=14)
     with patch(NOW, return_value=end):
         await coordinator._handle_auto_charge()
     assert "not charging" in coordinator._auto_last_result["discarded"]
@@ -111,7 +110,7 @@ async def test_a_battery_that_does_not_charge_ends_the_trial_and_the_night(night
 async def test_a_restart_keeps_the_idle_trial_count(night):  # noqa: F811
     """An idle trial, a reload, another idle trial: two in the window, the search stops."""
     hass, coordinator = night
-    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 6, minutes=6)
+    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 14, minutes=14)
     with patch(NOW, return_value=end):
         await coordinator._handle_auto_charge()
 
@@ -123,7 +122,7 @@ async def test_a_restart_keeps_the_idle_trial_count(night):  # noqa: F811
     restarted._grid_switch_suspended = True
     restarted.initial_calculated_soc = 44.0
     restarted._start_auto_test = AsyncMock()
-    end = _measure(restarted, hass, power_w=3000, samples=[(0, 0)] * 6, minutes=6)
+    end = _measure(restarted, hass, power_w=3000, samples=[(0, 0)] * 14, minutes=14)
     with patch(NOW, return_value=end):
         await restarted._handle_auto_charge()
         assert restarted._auto_search_stopped() == "battery_not_charging"
@@ -260,17 +259,18 @@ async def test_a_restart_inside_the_window_keeps_the_stop(night):  # noqa: F811
 
 @pytest.mark.asyncio
 async def test_no_trial_the_window_end_cuts_short_of_its_energy(night):  # noqa: F811
-    """CodeRabbit on #40: 0.3 kWh at 1 kW takes 18 minutes after settling;
-    ten minutes before the end is not enough, twenty-five are."""
+    """CodeRabbit on #40: 0.3 kWh at 1 kW takes 18 minutes once measuring,
+    and the measurement may begin 15 minutes in (CodeRabbit on #49); twenty-
+    five minutes before the end are not enough, forty are."""
     hass, coordinator = night
     end = coordinator._window_end_datetime(START)
 
-    with patch(NOW, return_value=end - timedelta(minutes=10)):
+    with patch(NOW, return_value=end - timedelta(minutes=25)):
         await coordinator._handle_auto_charge()
     coordinator._start_auto_test.assert_not_awaited()
     assert coordinator._auto_wait_reason == "not_enough_charge_left"
 
-    with patch(NOW, return_value=end - timedelta(minutes=25)):
+    with patch(NOW, return_value=end - timedelta(minutes=40)):
         await coordinator._handle_auto_charge()
     coordinator._start_auto_test.assert_awaited_once_with(1000)
 
@@ -299,7 +299,10 @@ async def test_an_idle_trial_asks_for_a_refresh_at_its_minimum(night):  # noqa: 
     """Codex on #41: the 15-s check refreshes at the five minutes, not only
     for a complete trial, so the idle stop does not wait for the next poll."""
     hass, coordinator = night
-    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 6, minutes=6)
+    # Short of the start wait: the trial still waits for the battery
+    end = _measure(coordinator, hass, power_w=1000, samples=[(0, 0)] * 12, minutes=12)
+    assert coordinator._auto_test_active
+    end += timedelta(minutes=1, seconds=1)
     coordinator.async_request_refresh = AsyncMock()
     module = "custom_components.inverter_charge_night.coordinator"
     with patch(f"{module}.async_track_time_interval") as interval, \
@@ -385,7 +388,7 @@ async def test_a_trial_never_confirmed_is_a_start_not_taken_not_a_lowered_limit(
         coordinator._planned_setpoint_written_w = 13000
         coordinator._auto_test_active = True
         coordinator._auto_test_power_w = 13000
-        coordinator._auto_test_start = INSIDE - timedelta(minutes=3)
+        coordinator._auto_test_start = INSIDE - timedelta(seconds=AUTO_TEST_START_WAIT_S + 60)
         coordinator._auto_test_limit_confirmed = False
         mock_hass.states.async_set(AC_LIMIT, "11000", {"unit_of_measurement": "W"})
 
@@ -399,7 +402,7 @@ async def test_a_trial_never_confirmed_is_a_start_not_taken_not_a_lowered_limit(
         coordinator._set_ac_charge_limit_w = AsyncMock(return_value=True)
         await coordinator._start_auto_test(13000)
         assert coordinator._auto_start_failures[1] == 1
-        coordinator._auto_test_start = INSIDE - timedelta(minutes=3)
+        coordinator._auto_test_start = INSIDE - timedelta(seconds=AUTO_TEST_START_WAIT_S + 60)
         await coordinator._verify_ac_charge_limit()
         assert coordinator._auto_search_stopped() == "charge_limit_not_taken"
 
@@ -499,17 +502,20 @@ def _with_meters(hass, coordinator):
 @pytest.mark.asyncio
 async def test_a_metered_trial_gets_the_time_and_charge_for_its_longest_run(night):  # noqa: F811
     """Codex on #40: with energy counters a trial runs its full 20 minutes.
-    At 10 kW the power sensors need 2 + 5 minutes and 1.2 kWh; the meters
-    need 2 + 20 minutes and 3.7 kWh."""
+    At 10 kW the power sensors need 15 + 5 minutes and 1.2 kWh; the meters
+    need 15 + 20 minutes and 3.7 kWh. The 15 are the wait for the battery,
+    after which the measurement begins at the latest (CodeRabbit on #49)."""
     hass, coordinator = night
     end = coordinator._window_end_datetime(START)
     coordinator.config = {**coordinator.config, CONF_BATTERY_CAPACITY: 36.25}  # 4 kWh to go
 
-    with patch(NOW, return_value=end - timedelta(minutes=15)):
+    with patch(NOW, return_value=end - timedelta(minutes=19)):
+        assert not coordinator._enough_charge_left_for(10000)
+    with patch(NOW, return_value=end - timedelta(minutes=28)):
         assert coordinator._enough_charge_left_for(10000)
         _with_meters(hass, coordinator)
         assert not coordinator._enough_charge_left_for(10000)
-    with patch(NOW, return_value=end - timedelta(minutes=25)):
+    with patch(NOW, return_value=end - timedelta(minutes=38)):
         assert coordinator._enough_charge_left_for(10000)
 
     coordinator.config = {**coordinator.config, CONF_BATTERY_CAPACITY: 18.2}  # 2 kWh to go

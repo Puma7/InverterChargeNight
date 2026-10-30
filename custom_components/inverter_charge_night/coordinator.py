@@ -87,6 +87,7 @@ from .const import (
     EFFICIENCY_FINE_STEP_W,
     AUTO_TEST_MIN_FOLLOW_RATIO,
     AUTO_TEST_SETTLE_S,
+    AUTO_TEST_START_WAIT_S,
     AUTO_TEST_STATE_FINISHED,
     AUTO_TEST_STATE_IDLE,
     AUTO_TEST_STATE_MEASURING,
@@ -391,7 +392,10 @@ def _within_entity_range(state: Any, value: float, entity_id: str, what: str) ->
     if low is not None and clamped < low:
         clamped = low
     if clamped != value:
-        _LOGGER.warning(
+        # Down to the maximum is the inverter's own "unlimited" - every
+        # morning on a Kostal G3 - and nothing to warn about
+        _LOGGER.log(
+            logging.INFO if clamped == high else logging.WARNING,
             "%s: the captured value %.3f lies outside what %s accepts (%s - %s); "
             "restoring %.3f instead",
             what,
@@ -785,14 +789,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async def check_staleness(now: datetime) -> None:
             # A silent sensor does not emit an unavailable state. Check the
             # existing meter freshness policy even with a long planning poll.
+            ended = False
             if self._auto_test_active:
                 self._accumulate_auto_energy()
+                # A trial ended between polls hands the limit back to the plan
+                # now, not at the next 15-minute poll (30 October 2026)
+                ended = not self._auto_test_active
             # A pending reset is not a reason: its retry timer owns the next
             # attempt, and a refresh every 15 s only persisted state for nothing.
             # Nor is its "write_unconfirmed" in the health monitor (CodeRabbit on #36).
             # An idle trial ends at its minimum, not at the next 15-minute poll
             # (Codex on #41)
-            if (self._auto_measurement_is_complete()
+            if (ended or self._auto_measurement_is_complete()
                     or self._auto_idle_average_w() is not None
                     or self._communication_faults()) or (
                 self._communication is not None
@@ -4497,8 +4505,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ):
                 # Before the first retry a slow register's reading, not a fault
                 _LOGGER.log(
-                    logging.INFO if self._reset_retry_count == 0 and not self._pending_reset
-                    else logging.ERROR,
+                    # _pending_reset is set already once the min SOC is back
+                    # (crash safety), so only the retry count tells (30 October)
+                    logging.INFO if self._reset_retry_count == 0 else logging.ERROR,
                     "AC charge limit restore has no fresh matching feedback: %s", entity_id,
                 )
                 return False
@@ -5173,6 +5182,59 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return (actual_w is not None and requested_w is not None
                 and abs(actual_w - requested_w) <= PLANNED_POWER_WRITE_THRESHOLD_W)
 
+    def _auto_trial_command_stands(self) -> bool:
+        """KORE's record still shows the trial's power as the last command.
+
+        1038 reads what the battery may take right now - about 50 W at rest -
+        so a lower reading under a command that stands is the battery, not a
+        limit of somebody's (3.14.2).
+        """
+        entity_id = self.config.get(CONF_CHARGE_POWER_ENTITY)
+        requested_w = self._auto_test_power_w
+        if not entity_id or requested_w is None:
+            return False
+        commanded = self._commanded_ac_charge_limit_w(str(entity_id))
+        return commanded is not None and abs(commanded - requested_w) <= PLANNED_POWER_WRITE_THRESHOLD_W
+
+    def _discard_auto_test_if_telemetry_stale(self) -> bool:
+        """Discard a trial whose power sensors stopped reporting; True if so."""
+        received_entity = self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY)
+        for entity in (*self._charge_input_entities(), received_entity):
+            state = self.hass.states.get(entity) if entity else None
+            age = self._state_age_s(state, dt_util.now())
+            if age is not None and (age < -5 or age > 60):
+                self._discard_auto_test("power telemetry is stale; retrying after recovery")
+                self._count_trial_lost_to_telemetry()
+                return True
+        return False
+
+    def _auto_trial_telemetry(self) -> bool:
+        """Both sides of the trial read a number right now."""
+        received = self._get_power_w(self.config.get(CONF_CHARGE_POWER_RECEIVED_ENTITY))
+        return self._charge_input_w() is not None and received is not None
+
+    def _auto_trial_drawn_w(self) -> float | None:
+        """What the charger takes on the AC side right now, or None.
+
+        A "sent" sensor may count charging as negative, so either sign. Grid
+        import minus house consumption is positive by its definition: below
+        zero the battery feeds the house and takes nothing (CodeRabbit on #49).
+        """
+        sent_w = self._charge_input_w()
+        if sent_w is None:
+            return None
+        if len(self._charge_input_entities()) == 2:
+            return max(sent_w, 0.0)
+        return abs(sent_w)
+
+    def _auto_trial_charging(self) -> bool:
+        """The trial's limit reads back and the battery takes a share of it."""
+        power_w = self._auto_test_power_w
+        drawn_w = self._auto_trial_drawn_w()
+        return (power_w is not None and drawn_w is not None
+                and drawn_w >= AUTO_TEST_IDLE_RATIO * power_w
+                and self._auto_limit_matches_feedback())
+
     def _discard_auto_test_for_its_limit(self, reason: str) -> None:
         """Discard a trial whose limit feedback no longer matches.
 
@@ -5187,6 +5249,16 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         lowered = (self._auto_test_limit_confirmed
                    and actual_w is not None and requested_w is not None
                    and actual_w < requested_w - PLANNED_POWER_WRITE_THRESHOLD_W)
+        if lowered and self._auto_trial_command_stands():
+            # Our own command stands: the battery takes less now - at its
+            # floor or tapering - and no one holds a lower limit. Counted, so
+            # the same power is not tried again and again (Codex on #49).
+            self._discard_auto_test(
+                "the battery may take only %.0f W of the trial's %s W now", actual_w, requested_w,
+            )
+            if requested_w is not None:
+                self._record_failed_attempt(requested_w, too_short=False)
+            return
         if lowered:
             self._discard_auto_test("inverter limit fell below the efficiency trial setpoint")
             self._stop_auto_search_for_window("inverter_lowered_limit")
@@ -5194,10 +5266,47 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._discard_auto_test(reason)
 
     def _begin_auto_measurement(self, now: datetime) -> None:
-        """Start counting: the inverter has had its settling time."""
-        if not self._auto_limit_matches_feedback():
+        """Start counting: the inverter has had its settling time.
+
+        Called once the battery charges at the trial's limit, or when the wait
+        for it is over. A limit that never read back is a start not taken; one
+        KORE recorded, under which the battery did not charge, is an idle trial.
+        """
+        if not self._auto_limit_matches_feedback() and not self._auto_trial_command_stands():
             self._discard_auto_test("charge limit has no matching feedback after settling")
             self._count_failed_start()  # never confirmed: a start not taken
+            return
+        if self._discard_auto_test_if_telemetry_stale():
+            # A reading that stopped is no battery at rest, nor a first sample
+            # to count from - from the sampler or the verification alike
+            # (Codex and CodeRabbit on #49)
+            return
+        if self._auto_trial_telemetry() and not self._auto_trial_charging():
+            # Taken - read back, or recorded with the battery at rest - but in
+            # all the wait the battery did not take the power up
+            drawn_w = self._auto_trial_drawn_w() or 0.0
+            power_w = self._auto_test_power_w
+            if power_w is not None and drawn_w >= AUTO_TEST_MIN_FOLLOW_RATIO * power_w:
+                # It takes the trial's power, but the limit the measurement is
+                # tied to never read back: no fault of this power, a start the
+                # readback did not follow (CodeRabbit on #49)
+                self._discard_auto_test(
+                    "the battery takes the trial's %s W, but its limit reads %s",
+                    power_w, self._get_ac_charge_limit_w(self.config.get(CONF_CHARGE_POWER_ENTITY)),
+                )
+                self._count_failed_start()  # not confirmed: two in a row end the search
+                return
+            self._confirm_auto_test_limit()
+            if power_w is not None and drawn_w >= AUTO_TEST_IDLE_RATIO * power_w:
+                # It charges, under less than the trial's power: another power
+                allowed_w = self._get_ac_charge_limit_w(self.config.get(CONF_CHARGE_POWER_ENTITY))
+                self._discard_auto_test(
+                    "the battery may take only %.0f W of the trial's %s W now",
+                    allowed_w if allowed_w is not None else drawn_w, power_w,
+                )
+                self._record_failed_attempt(power_w, too_short=False)
+                return
+            self._count_idle_trial(drawn_w)
             return
         self._confirm_auto_test_limit()
         self._auto_measure_start = now
@@ -5261,7 +5370,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         now = self._efficiency_now()
         if self._auto_measure_start is None:
-            if elapsed_seconds(now, self._auto_test_start) < AUTO_TEST_SETTLE_S:
+            waited_s = elapsed_seconds(now, self._auto_test_start)
+            if waited_s < AUTO_TEST_SETTLE_S:
+                return
+            if (waited_s < AUTO_TEST_START_WAIT_S and self._auto_trial_telemetry()
+                    and not self._auto_trial_charging()):
+                # Measured from when the battery charges: a Kostal takes minutes
+                # to answer a raised min SOC (29/30 October 2026). Sensors that
+                # fall silent meanwhile are a lost trial, not an idle battery.
+                self._discard_auto_test_if_telemetry_stale()
                 return
             self._begin_auto_measurement(now)
             return
@@ -5279,13 +5396,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if received_w is not None:
             self._judge_orientation("received", received_w)
             received_w *= self._auto_received_sign
-        for entity in (*self._charge_input_entities(), received_entity):
-            state = self.hass.states.get(entity) if entity else None
-            age = self._state_age_s(state, dt_util.now())
-            if age is not None and (age < -5 or age > 60):
-                self._discard_auto_test("power telemetry is stale; retrying after recovery")
-                self._count_trial_lost_to_telemetry()
-                return
+        if self._discard_auto_test_if_telemetry_stale():
+            return
         if sent_w is None or received_w is None:
             self._discard_auto_test("power telemetry is unavailable; retrying after recovery")
             self._count_trial_lost_to_telemetry()
@@ -5343,9 +5455,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         async def _on_charge_power_change(event: Event[EventStateChangedData]) -> None:
             try:
+                active = self._auto_test_active
                 self._accumulate_auto_energy()
             except Exception as e:  # pylint: disable=broad-except
                 _LOGGER.error("Unexpected error while sampling the charge power: %s", e)
+                return
+            if active and not self._auto_test_active:
+                # Discarded between polls: the plan's limit goes back on now. A
+                # 7000 W trial stood 13 minutes after it ended (30 October 2026)
+                await self.async_request_refresh()
 
         self._auto_sample_listener = async_track_state_change_event(
             self.hass,
@@ -6000,7 +6118,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             AUTO_TEST_MAX_DURATION_S if self._energy_meter_entities() is not None
             else AUTO_TEST_MIN_DURATION_S
         )
-        trial_s = AUTO_TEST_SETTLE_S + max(
+        # The measurement may begin only once the wait for the battery is
+        # over, 15 minutes in (CodeRabbit on #49)
+        trial_s = AUTO_TEST_START_WAIT_S + max(
             measured_s, AUTO_TEST_MIN_ENERGY_WH * 3600.0 / lowest_draw_w
         )
         if elapsed_seconds(self._window_end_datetime(now), now) < trial_s:
@@ -8879,6 +8999,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("Stopped periodic verification task")
 
     async def _verify_ac_charge_limit(self) -> None:
+        """Verify the charge limit; a trial this ends hands it back to the plan.
+
+        The keepalive and the min SOC verification call this outside a poll.
+        A trial discarded here - at the end of its wait, or for a limit that
+        fell - left its power standing until the next one, up to 15 minutes
+        (CodeRabbit on #49). Scheduled, not awaited: the verification may run
+        inside a refresh itself.
+        """
+        active = self._auto_test_active
+        await self._check_ac_charge_limit()
+        if active and not self._auto_test_active:
+            self.hass.async_create_task(
+                self.async_request_refresh(), name="inverter_charge_night_trial_ended",
+            )
+
+    async def _check_ac_charge_limit(self) -> None:
         """Check that the charge limit we wrote is the one the inverter holds.
 
         A service call that returns without raising is not proof of anything:
@@ -8924,16 +9060,37 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Hardware I/O can finish before the HA number publishes the
                 # new setpoint. Give initial feedback the existing settling
                 # interval, then reject it; never record an unconfirmed trial.
-                # Once matched, a lower value is real drift and ends it now.
-                if not self._auto_test_limit_confirmed:
+                # Once matched, a lower value is real drift and ends it now -
+                # unless our own command stands before the measurement: a
+                # Kostal reads the trial back and then its 50 W at rest until
+                # the raised floor takes hold (CodeRabbit on #49).
+                if self._auto_measure_start is None and (
+                        not self._auto_test_limit_confirmed or self._auto_trial_command_stands()):
                     if self._auto_test_start is not None:
                         pending_s = elapsed_seconds(self._efficiency_now(), self._auto_test_start)
-                        if 0 <= pending_s < AUTO_TEST_SETTLE_S:
+                        if 0 <= pending_s < AUTO_TEST_START_WAIT_S:
+                            # The trial waits for the battery to take its power
+                            # up; it judges the start itself when that is over
                             return
+                    # The wait is over: judged as the sampler judges it -
+                    # KORE's record of the command and the power sensors
+                    # included (Codex on #49)
+                    self._begin_auto_measurement(self._efficiency_now())
+                    return
+                if not self._auto_test_limit_confirmed:
                     # Never confirmed: a slow register may still show the
                     # previous, lower trial (CI on #41). A start not taken.
                     self._discard_auto_test("charge limit was never confirmed for this trial")
                     self._count_failed_start()
+                    return
+                if self._auto_trial_command_stands():
+                    # Our own command stands: the battery takes less now
+                    power_w = self._auto_test_power_w
+                    self._discard_auto_test(
+                        "the battery may take only %.0f W of the trial's %s W now", actual_w, power_w,
+                    )
+                    if power_w is not None:
+                        self._record_failed_attempt(power_w, too_short=False)
                     return
                 self._discard_auto_test("inverter limit fell below the efficiency trial setpoint")
                 # The inverter holds a lower limit of its own; writing the next

@@ -202,6 +202,11 @@ ATTR_DISCHARGE_BLOCK = "discharge_block"  # switch | limit | min_soc | off
 CONF_CHARGE_ENERGY_SENT_ENTITY = "charge_energy_sent_entity"  # kWh meter, optional but exact
 CONF_CHARGE_ENERGY_RECEIVED_ENTITY = "charge_energy_received_entity"  # kWh meter, optional
 AUTO_TEST_SETTLE_S = 120  # the ramp to the new setpoint is not part of the measurement
+# How long a trial waits for the battery to take up its power. A Kostal answers
+# a raised min SOC minutes late: 1038 read its 51 W at rest for 2.5 minutes
+# after the floor went up, and once the battery drew nothing for 7 minutes
+# under a limit it already read back (29/30 October 2026).
+AUTO_TEST_START_WAIT_S = 900
 AUTO_TEST_MIN_DURATION_S = 300  # measured time after settling
 AUTO_TEST_MIN_ENERGY_WH = 300.0  # ... and this much energy, so 20 kW is measurable too
 AUTO_TEST_MIN_FOLLOW_RATIO = 0.8  # the inverter has to draw what it was told to draw

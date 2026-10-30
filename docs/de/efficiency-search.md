@@ -47,7 +47,11 @@ die Suche zu verfolgen.
 ## Wie sie misst
 
 1. Sie schreibt eine Versuchsleistung und wartet **zwei Minuten**, bis sich der Wechselrichter
-   eingeschwungen hat.
+   eingeschwungen hat. Gemessen wird dann ab dem Moment, in dem der Akku die Leistung aufnimmt –
+   ein Kostal setzt eine angehobene Untergrenze erst Minuten später um, und sein Register 1038
+   liest etwa 50 W, solange der Akku noch ruht. Zieht er **15 Minuten** lang nichts, gilt der
+   Versuch als Leerlauf; eine Leistung, die der Wechselrichter nie zurückmeldet und die KOSTAL
+   KORE nie aufgezeichnet hat, gilt als nicht angenommener Start.
 2. Sie misst mindestens **fünf Minuten und 0,3 kWh** lang, und so lange, bis der Standardfehler
    des Verlusts pro Minute **unter 0,15 Prozentpunkten** liegt (höchstens 20 Minuten). Mit
    Energiezählern läuft ein Versuch immer 20 Minuten.
@@ -58,8 +62,8 @@ die Suche zu verfolgen.
    Unsicherheit, speichert sie die beste Leistung und schaltet sich aus.
 
 Ein Fenster von sechs Stunden reicht meist. Ein Versuch beginnt nur, wenn das Fenster noch genug
-Zeit und genug zu ladende Energie übrig hat, um ihn abzuschließen (sonst
-`not_enough_charge_left`).
+Zeit und genug zu ladende Energie übrig hat, um ihn abzuschließen, die 15 Minuten Warten auf den
+Akku eingerechnet (sonst `not_enough_charge_left`).
 
 Von da an lädt ICN bevorzugt mit dem Optimum und hört beim Ziel auf, statt ein weniger effizientes
 Rinnsal über das Fenster zu verteilen. Die Frist kann mehr Leistung verlangen, und die größte

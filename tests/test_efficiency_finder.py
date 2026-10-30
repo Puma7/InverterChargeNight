@@ -174,6 +174,7 @@ def test_the_ramp_to_the_setpoint_is_not_part_of_the_measurement(mock_hass, find
     assert finder._auto_energy_sent_wh == 0.0
 
     mock_hass.states.async_set(AC_LIMIT, "10000", {"unit_of_measurement": "W"})
+    _power(mock_hass, 9800, 9000)  # the battery has taken the power up
     with patch(NOW, return_value=START + timedelta(seconds=AUTO_TEST_SETTLE_S + 1)):
         finder._accumulate_auto_energy()
 

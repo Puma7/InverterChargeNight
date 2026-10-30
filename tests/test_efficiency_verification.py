@@ -5,6 +5,7 @@ from datetime import timedelta
 import pytest
 
 from tests.test_electrical_safety import AC_LIMIT, GRID, GRID_IMPORT, INSIDE, NOW, _ac_writes, _make, _register, _service_calls
+from custom_components.inverter_charge_night.const import AUTO_TEST_START_WAIT_S
 
 
 @pytest.fixture
@@ -109,10 +110,15 @@ async def test_new_trial_waits_for_first_matching_ha_limit_then_rejects_downward
 
 
 @pytest.mark.asyncio
-async def test_missing_initial_limit_feedback_discards_trial_at_settling_deadline(mock_hass, active_trial):
+async def test_missing_initial_limit_feedback_discards_trial_at_the_start_deadline(mock_hass, active_trial):
+    """The trial waits for the battery as long as AUTO_TEST_START_WAIT_S (30 October 2026)."""
     active_trial._auto_test_limit_confirmed = False
     mock_hass.states.async_set(AC_LIMIT, "8000", {"unit_of_measurement": "W"})
     with patch.object(active_trial, "_efficiency_now", return_value=INSIDE + timedelta(seconds=120)):
+        await active_trial._verify_ac_charge_limit()
+    assert active_trial._auto_test_active
+    with patch.object(active_trial, "_efficiency_now",
+                      return_value=INSIDE + timedelta(seconds=AUTO_TEST_START_WAIT_S)):
         await active_trial._verify_ac_charge_limit()
     assert not active_trial._auto_test_active
     assert active_trial._auto_last_result["loss"] is None
@@ -146,6 +152,11 @@ def test_unconfirmed_limit_cannot_begin_measurement_without_periodic_verifier(mo
     active_trial._auto_test_limit_confirmed = False
     mock_hass.states.async_set(AC_LIMIT, "8000", {"unit_of_measurement": "W"})
     with patch.object(active_trial, "_efficiency_now", return_value=INSIDE + timedelta(seconds=120)):
+        active_trial._accumulate_auto_energy()
+    assert active_trial._auto_test_active  # waiting for the battery
+    assert active_trial._auto_measure_start is None
+    with patch.object(active_trial, "_efficiency_now",
+                      return_value=INSIDE + timedelta(seconds=AUTO_TEST_START_WAIT_S)):
         active_trial._accumulate_auto_energy()
     assert not active_trial._auto_test_active
     assert active_trial._auto_measure_start is None

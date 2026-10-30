@@ -5,6 +5,38 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.3] - 2026-10-30
+
+The night of 29/30 October 2026: the keepalive held the charge limit all night, from 23:01 to
+04:57. Two efficiency trials were thrown away for the Kostal's slow answer to a raised min SOC.
+
+### Fixed
+
+- **An efficiency trial is measured from when the battery charges.** At 00:08 the min SOC went up
+  to 61 % and 7000 W were written; register 1038 read the battery's 51 W at rest until 00:10:49,
+  and the settling ended at 00:10:27 - the trial was discarded as a start not taken. At 23:01
+  5000 W read back, but the battery drew nothing for seven minutes - discarded as idle. A trial
+  now waits after its settling until the limit reads back and the battery takes at least a
+  quarter of the power, up to 15 minutes from its start. A limit KOSTAL KORE recorded under a
+  battery at rest is no failed start, and once a trial measures, the battery reaching its floor
+  ends only the trial, not the search for the window. A readback that falls back to the battery's
+  rest value inside the wait, under the trial's command, keeps the trial waiting, and at the end of
+  the wait the periodic verification judges the start like the sampler. A battery that takes less
+  than the trial's power under its standing command counts a failed attempt for that power, so the
+  same power is not tried again and again. With grid import minus house consumption as the AC
+  side, a negative difference - the battery feeding the house - is no draw. A stale power reading
+  never starts the measurement and is never taken for a battery at rest: it is a lost trial. A
+  trial starts only when the window leaves time for the whole wait and the measurement. A battery
+  that takes the trial's whole power while the limit never reads back is a start not taken, not a
+  power it cannot take.
+- **A trial discarded between polls hands the limit back to the plan at once.** The 7000 W stood
+  13 minutes after the trial was discarded, until the next 15-minute poll. This holds whether the
+  power sampler, the 15-second check or the verification of the limit ends the trial.
+- **The morning's first restore of the charge limit is no error.** 3.14.2 meant to log it at
+  info, but the min SOC restore marks the reset pending just before, so it still read ERROR. And
+  capping the captured 22047 W to the entity's 12540 W maximum - the inverter's own "unlimited",
+  every morning - is info, not a warning.
+
 ## [3.14.2] - 2026-10-29
 
 The night of 28/29 October 2026, the first in which the efficiency search measured: 6.69 % loss
