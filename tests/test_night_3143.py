@@ -479,3 +479,38 @@ def test_a_full_draw_without_a_readback_is_no_fault_of_the_power(mock_hass):
     assert coordinator._auto_start_failures is not None and coordinator._auto_start_failures[1] == 2
     with patch(NOW, return_value=START):
         assert coordinator._auto_search_stopped() == "charge_limit_not_taken"
+
+
+@pytest.mark.parametrize("deadline_passed", [True, False])
+@pytest.mark.asyncio
+async def test_a_trial_the_verification_ends_asks_for_the_plan_at_once(mock_hass, deadline_passed):
+    """CodeRabbit on #49: the keepalive and the min SOC check call the
+    verification outside a poll; a trial it ended kept its power standing."""
+    from tests.test_electrical_safety import INSIDE, _make as safety_make, _register
+    from tests.test_electrical_safety import NOW as SAFETY_NOW, GRID
+    from tests.test_electrical_safety import AC_LIMIT as SAFETY_LIMIT
+
+    with patch(SAFETY_NOW, return_value=INSIDE):
+        _register(mock_hass)
+        mock_hass.states.async_set(GRID, "on")
+        coordinator = safety_make(mock_hass)
+        coordinator.is_active = True
+        coordinator.auto_efficient_charge = True
+        coordinator._planned_setpoint_written_w = 7000
+        coordinator._auto_test_active = True
+        coordinator._auto_test_power_w = 7000
+        waited = AUTO_TEST_START_WAIT_S + 5 if deadline_passed else AUTO_TEST_SETTLE_S + 60
+        coordinator._auto_test_start = INSIDE - timedelta(seconds=waited)
+        coordinator._auto_test_limit_confirmed = False
+        coordinator._auto_trial_telemetry = MagicMock(return_value=True)  # type: ignore[method-assign]
+        coordinator._auto_trial_drawn_w = MagicMock(return_value=0.0)  # type: ignore[method-assign]
+        mock_hass.states.async_set(
+            SAFETY_LIMIT, "51", {"unit_of_measurement": "W", "last_commanded_value": 7000.0},
+        )
+        mock_hass.async_create_task.reset_mock()
+
+        await coordinator._verify_ac_charge_limit()
+
+    names = [call.kwargs.get("name") for call in mock_hass.async_create_task.call_args_list]
+    assert coordinator._auto_test_active is not deadline_passed
+    assert ("inverter_charge_night_trial_ended" in names) is deadline_passed

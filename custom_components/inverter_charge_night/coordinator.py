@@ -8999,6 +8999,22 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.debug("Stopped periodic verification task")
 
     async def _verify_ac_charge_limit(self) -> None:
+        """Verify the charge limit; a trial this ends hands it back to the plan.
+
+        The keepalive and the min SOC verification call this outside a poll.
+        A trial discarded here - at the end of its wait, or for a limit that
+        fell - left its power standing until the next one, up to 15 minutes
+        (CodeRabbit on #49). Scheduled, not awaited: the verification may run
+        inside a refresh itself.
+        """
+        active = self._auto_test_active
+        await self._check_ac_charge_limit()
+        if active and not self._auto_test_active:
+            self.hass.async_create_task(
+                self.async_request_refresh(), name="inverter_charge_night_trial_ended",
+            )
+
+    async def _check_ac_charge_limit(self) -> None:
         """Check that the charge limit we wrote is the one the inverter holds.
 
         A service call that returns without raising is not proof of anything:

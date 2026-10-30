@@ -30,7 +30,8 @@ The night of 29/30 October 2026: the keepalive held the charge limit all night, 
   that takes the trial's whole power while the limit never reads back is a start not taken, not a
   power it cannot take.
 - **A trial discarded between polls hands the limit back to the plan at once.** The 7000 W stood
-  13 minutes after the trial was discarded, until the next 15-minute poll.
+  13 minutes after the trial was discarded, until the next 15-minute poll. This holds whether the
+  power sampler, the 15-second check or the verification of the limit ends the trial.
 - **The morning's first restore of the charge limit is no error.** 3.14.2 meant to log it at
   info, but the min SOC restore marks the reset pending just before, so it still read ERROR. And
   capping the captured 22047 W to the entity's 12540 W maximum - the inverter's own "unlimited",
