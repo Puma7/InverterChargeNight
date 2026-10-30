@@ -5277,6 +5277,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._count_failed_start()  # never confirmed: a start not taken
             return
         if self._auto_trial_telemetry() and not self._auto_trial_charging():
+            if self._discard_auto_test_if_telemetry_stale():
+                # A reading that stopped is no battery at rest - from the
+                # sampler or the verification alike (Codex on #49)
+                return
             # Taken - read back, or recorded with the battery at rest - but in
             # all the wait the battery did not take the power up
             self._confirm_auto_test_limit()

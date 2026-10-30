@@ -407,3 +407,30 @@ def test_a_battery_feeding_the_house_is_no_draw_on_the_derived_side(mock_hass):
     assert "the battery drew 0 W on average" in coordinator._auto_last_result["discarded"]
     assert coordinator.get_auto_efficiency_data().get("failed", {}) == {}
     assert coordinator._auto_idle_trials is not None and coordinator._auto_idle_trials[1] == 1
+
+
+@pytest.mark.parametrize("by_verification", [False, True])
+@pytest.mark.asyncio
+async def test_a_reading_gone_stale_at_the_deadline_is_a_lost_trial(mock_hass, by_verification):
+    """Codex on #49: a 0 W reading from second 830 is fresh at the 885-s check
+    and stale at 900 s; it says nothing of the battery and excludes no power."""
+    from tests.test_efficiency_finder import SENT
+
+    coordinator = _make(mock_hass)
+    _trial(mock_hass, coordinator, 7000, reading="51.5", commanded=7000.0)
+    _power(mock_hass, 0, 0)
+    _sample(coordinator, AUTO_TEST_SETTLE_S + 1)
+    assert coordinator._auto_test_active
+
+    mock_hass.states.get(SENT).last_reported = START + timedelta(seconds=830)
+    with patch(NOW, return_value=START + timedelta(seconds=AUTO_TEST_START_WAIT_S)):
+        if by_verification:
+            coordinator._begin_auto_measurement(START + timedelta(seconds=AUTO_TEST_START_WAIT_S))
+        else:
+            coordinator._accumulate_auto_energy()
+
+    assert not coordinator._auto_test_active
+    assert "stale" in coordinator._auto_last_result["discarded"]
+    assert coordinator._auto_idle_trials is None
+    assert coordinator.get_auto_efficiency_data().get("failed", {}) == {}
+    assert coordinator._auto_telemetry_losses is not None
