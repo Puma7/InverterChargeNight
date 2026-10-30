@@ -351,3 +351,34 @@ async def test_the_verification_counts_a_floor_during_the_measurement(mock_hass)
         assert not coordinator._auto_test_active
         assert coordinator._auto_search_stopped() is None
         assert coordinator.get_auto_efficiency_data()["failed"] == {"3000": 1}
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_trial_keeps_waiting_when_the_readback_falls_to_rest(mock_hass):
+    """CodeRabbit on #49: a Kostal reads the trial back, then its 51 W at rest
+    until the raised floor takes hold; inside the wait that is no ended trial."""
+    from tests.test_electrical_safety import INSIDE, _make as safety_make, _register
+    from tests.test_electrical_safety import NOW as SAFETY_NOW, GRID
+    from tests.test_electrical_safety import AC_LIMIT as SAFETY_LIMIT
+
+    with patch(SAFETY_NOW, return_value=INSIDE):
+        _register(mock_hass)
+        mock_hass.states.async_set(GRID, "on")
+        coordinator = safety_make(mock_hass)
+        coordinator.is_active = True
+        coordinator.auto_efficient_charge = True
+        coordinator._planned_setpoint_written_w = 3000
+        coordinator._auto_test_active = True
+        coordinator._auto_test_power_w = 3000
+        coordinator._auto_test_start = INSIDE - timedelta(minutes=4)
+        coordinator._auto_test_limit_confirmed = True
+        mock_hass.states.async_set(
+            SAFETY_LIMIT, "51", {"unit_of_measurement": "W", "last_commanded_value": 3000.0},
+        )
+
+        await coordinator._verify_ac_charge_limit()
+
+        assert coordinator._auto_test_active
+        assert coordinator._auto_measure_start is None
+        assert coordinator.get_auto_efficiency_data().get("failed", {}) == {}
+        mock_hass.services.async_call.assert_not_awaited()

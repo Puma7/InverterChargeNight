@@ -9018,20 +9018,24 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Hardware I/O can finish before the HA number publishes the
                 # new setpoint. Give initial feedback the existing settling
                 # interval, then reject it; never record an unconfirmed trial.
-                # Once matched, a lower value is real drift and ends it now.
-                if not self._auto_test_limit_confirmed:
+                # Once matched, a lower value is real drift and ends it now -
+                # unless our own command stands before the measurement: a
+                # Kostal reads the trial back and then its 50 W at rest until
+                # the raised floor takes hold (CodeRabbit on #49).
+                if self._auto_measure_start is None and (
+                        not self._auto_test_limit_confirmed or self._auto_trial_command_stands()):
                     if self._auto_test_start is not None:
                         pending_s = elapsed_seconds(self._efficiency_now(), self._auto_test_start)
                         if 0 <= pending_s < AUTO_TEST_START_WAIT_S:
                             # The trial waits for the battery to take its power
                             # up; it judges the start itself when that is over
                             return
-                    if self._auto_measure_start is None:
-                        # The wait is over: judged as the sampler judges it -
-                        # KORE's record of the command and the power sensors
-                        # included (Codex on #49)
-                        self._begin_auto_measurement(self._efficiency_now())
-                        return
+                    # The wait is over: judged as the sampler judges it -
+                    # KORE's record of the command and the power sensors
+                    # included (Codex on #49)
+                    self._begin_auto_measurement(self._efficiency_now())
+                    return
+                if not self._auto_test_limit_confirmed:
                     # Never confirmed: a slow register may still show the
                     # previous, lower trial (CI on #41). A start not taken.
                     self._discard_auto_test("charge limit was never confirmed for this trial")
