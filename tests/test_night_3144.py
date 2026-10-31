@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
@@ -26,6 +26,13 @@ def _refusing(error: Exception) -> AsyncMock:
         if service == "set_value":
             raise error
     return AsyncMock(side_effect=call)
+
+
+def _assert_zero_was_written(hass: Any) -> None:
+    """The protective command went to the charge limit, as 0 W, and waited for it."""
+    assert hass.services.async_call.await_args_list[0] == call(
+        "number", "set_value", {"entity_id": LIMIT, "value": 0.0}, blocking=True,
+    )
 
 
 def _write_errors(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -47,6 +54,7 @@ async def test_a_write_the_device_refuses_is_a_warning_without_a_traceback(mock_
         written = await coordinator._write_ac_charge_limit(LIMIT, "number", 0.0, "Set AC charge limit")
 
     assert written is False
+    _assert_zero_was_written(mock_hass)
     records = _write_errors(caplog)
     assert [r.levelno for r in records] == [logging.WARNING]
     assert records[0].exc_info is None
@@ -70,6 +78,7 @@ async def test_anything_else_stays_an_error_with_its_traceback(mock_hass, caplog
         written = await coordinator._write_ac_charge_limit(LIMIT, "number", 0.0, "Set AC charge limit")
 
     assert written is False
+    _assert_zero_was_written(mock_hass)
     records = _write_errors(caplog)
     assert [r.levelno for r in records] == [logging.ERROR]
     assert records[0].exc_info is not None
