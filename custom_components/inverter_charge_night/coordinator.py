@@ -17,7 +17,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.event import (
     EventStateChangedData,
     async_call_later,
@@ -4186,7 +4186,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     what, value, unit or "unitless", e, PLANNED_POWER_WRITE_THRESHOLD_W,
                 )
                 return True
-            _LOGGER.error("Error writing AC charge limit (%s): %s", what, e, exc_info=True)
+            if isinstance(e, HomeAssistantError) and not isinstance(e, ServiceValidationError):
+                # The integration reports that the device refused the write: the
+                # Kostal's internal error at 03:10 lasts about 15 s every night,
+                # and the next write after it succeeds (20-31 October 2026). A
+                # traceback of KOSTAL KORE's Modbus stack adds nothing to that.
+                _LOGGER.warning("Error writing AC charge limit (%s): %s", what, e)
+            else:
+                _LOGGER.error("Error writing AC charge limit (%s): %s", what, e, exc_info=True)
             return False
         self._lower_command_seen = None  # superseded: a stop after it is a new one
         if keepalive:
