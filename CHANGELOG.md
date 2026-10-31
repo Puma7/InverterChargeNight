@@ -5,6 +5,22 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.4] - 2026-10-31
+
+The night of 30/31 October 2026, the first on 3.14.3: the efficiency trials waited for the
+battery and measured. The search finished in one night, 2.00 % loss at 9000 W, and 9000 W charged
+the rest of the window. The morning restore logged at INFO only.
+
+### Fixed
+
+- **The Kostal's nightly internal error is a warning, not an error with a traceback.** At about
+  03:10 every night the inverter reports *Server device failure* for about 15 seconds. The grid
+  meter goes stale, the protection writes 0 W into the fault, and KOSTAL KORE gives up after its
+  retries. The next write, 3 seconds later, succeeds. Since 20 October that left an ERROR with a
+  50-line traceback in every night's log. A write the integration reports as refused by the device
+  is now a WARNING without a traceback. A rejected value and any unexpected exception stay ERRORs
+  with their traceback.
+
 ## [3.14.3] - 2026-10-30
 
 The night of 29/30 October 2026: the keepalive held the charge limit all night, from 23:01 to
