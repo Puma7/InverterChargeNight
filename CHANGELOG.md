@@ -5,6 +5,21 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.5] - 2026-11-02
+
+The night of 1/2 November 2026: the window charged at the 9000 W the efficiency search found and
+reached its target at 00:25. Nothing else stood out - except that the 03:10 ERROR of 3.14.4 was
+still there.
+
+### Fixed
+
+- **The nightly 03:10 refusal is a warning, for KOSTAL KORE's own error too.** 3.14.4 logged a
+  `HomeAssistantError` as a warning, but KOSTAL KORE raises its own `ModbusWriteError`, a plain
+  `Exception`, so the ERROR with its traceback stayed. An exception the integration defines itself
+  now counts as the device's refusal, logged as a WARNING with its type and without a traceback. A
+  standard library exception (a bug), a rejected value (`ServiceValidationError`) and invalid
+  service data keep the ERROR with traceback.
+
 ## [3.14.4] - 2026-10-31
 
 The night of 30/31 October 2026, the first on 3.14.3: the efficiency trials waited for the

@@ -10,10 +10,11 @@ import hashlib
 import json
 import logging
 import math
+import sys
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant
@@ -31,6 +32,13 @@ from homeassistant.helpers.recorder import DATA_INSTANCE, get_instance
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
+
+# HA aliases this module to probatio on the current Python 3.14 runtime.
+# Reflect that in static checks while retaining the older HA runtime import.
+if TYPE_CHECKING and sys.version_info >= (3, 14):
+    import probatio as vol
+else:
+    import voluptuous as vol
 
 from . import battery_learning as bl
 from . import forecast_learning as fl
@@ -364,6 +372,19 @@ def _as_float_strict(value: Any) -> float:
     if number is None:
         raise ValueError(f"not a usable number: {value!r}")
     return number
+
+
+def _refused_by_device(err: Exception) -> bool:
+    """A service call the target integration refused, as opposed to a bug or a bad value.
+
+    KOSTAL KORE raises its own ``ModbusWriteError``, a plain ``Exception``, not
+    a ``HomeAssistantError``, for the Kostal's nightly internal error at 03:10
+    (1/2 November 2026). An exception of the standard library points at a bug
+    and a rejected value at a wrong command; both keep their traceback.
+    """
+    if isinstance(err, (ServiceValidationError, vol.Invalid)):
+        return False
+    return isinstance(err, HomeAssistantError) or type(err).__module__ != "builtins"
 
 
 def _unit_of(state: Any) -> str:
@@ -4186,12 +4207,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     what, value, unit or "unitless", e, PLANNED_POWER_WRITE_THRESHOLD_W,
                 )
                 return True
-            if isinstance(e, HomeAssistantError) and not isinstance(e, ServiceValidationError):
+            if _refused_by_device(e):
                 # The integration reports that the device refused the write: the
                 # Kostal's internal error at 03:10 lasts about 15 s every night,
                 # and the next write after it succeeds (20-31 October 2026). A
                 # traceback of KOSTAL KORE's Modbus stack adds nothing to that.
-                _LOGGER.warning("Error writing AC charge limit (%s): %s", what, e)
+                _LOGGER.warning(
+                    "Error writing AC charge limit (%s): %s: %s", what, type(e).__name__, e,
+                )
             else:
                 _LOGGER.error("Error writing AC charge limit (%s): %s", what, e, exc_info=True)
             return False
