@@ -15,10 +15,11 @@ still there.
 
 - **The nightly 03:10 refusal is a warning, for KOSTAL KORE's own error too.** 3.14.4 logged a
   `HomeAssistantError` as a warning, but KOSTAL KORE raises its own `ModbusWriteError`, a plain
-  `Exception`, so the ERROR with its traceback stayed. An exception the integration defines itself
-  now counts as the device's refusal, logged as a WARNING with its type and without a traceback. A
-  standard library exception (a bug), a rejected value (`ServiceValidationError`) and invalid
-  service data keep the ERROR with traceback.
+  `Exception`, so the ERROR with its traceback stayed. An exception a custom integration defines
+  itself (a type under `custom_components`) now counts as the device's refusal too, logged as a
+  WARNING with its type and without a traceback. A standard library exception (a bug, including
+  ones like `socket.gaierror`), a rejected value (`ServiceValidationError`) and invalid service
+  data keep the ERROR with traceback.
 
 ## [3.14.4] - 2026-10-31
 

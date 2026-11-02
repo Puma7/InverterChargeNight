@@ -379,12 +379,15 @@ def _refused_by_device(err: Exception) -> bool:
 
     KOSTAL KORE raises its own ``ModbusWriteError``, a plain ``Exception``, not
     a ``HomeAssistantError``, for the Kostal's nightly internal error at 03:10
-    (1/2 November 2026). An exception of the standard library points at a bug
-    and a rejected value at a wrong command; both keep their traceback.
+    (1/2 November 2026). Only an error a custom integration defines for itself
+    counts besides it: any other exception - the standard library's, including
+    its modules such as ``socket.gaierror`` (CodeRabbit on #51) - points at a
+    bug, and a rejected value at a wrong command; both keep their traceback.
     """
     if isinstance(err, (ServiceValidationError, vol.Invalid)):
         return False
-    return isinstance(err, HomeAssistantError) or type(err).__module__ != "builtins"
+    return (isinstance(err, HomeAssistantError)
+            or type(err).__module__.partition(".")[0] == "custom_components")
 
 
 def _unit_of(state: Any) -> str:

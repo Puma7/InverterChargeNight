@@ -7,7 +7,9 @@ that 3.14.4 and its tests assumed.
 """
 from __future__ import annotations
 
+import json
 import logging
+import socket
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -24,6 +26,10 @@ class ModbusClientError(Exception):
 
 class ModbusWriteError(ModbusClientError):
     """Raised by KORE's number entity when a register write fails."""
+
+
+# Where Home Assistant loads them from
+ModbusClientError.__module__ = ModbusWriteError.__module__ = "custom_components.kostal_kore.modbus_client"
 
 
 @pytest.mark.asyncio
@@ -51,9 +57,12 @@ async def test_kore_s_own_write_error_is_a_warning_without_a_traceback(mock_hass
 @pytest.mark.parametrize(("error", "refused"), [
     (ModbusWriteError("device refused"), True),
     (TimeoutError("no answer"), False),
+    (socket.gaierror("name resolution failed"), False),
+    (json.JSONDecodeError("bad reply", "", 0), False),
     (KeyError("value"), False),
     (vol.Invalid("expected float"), False),
 ])
 def test_only_an_integration_s_own_error_counts_as_a_refusal(error, refused):
-    """A standard library exception points at a bug, an invalid value at a wrong command."""
+    """A standard library exception - its modules included - points at a bug, an invalid
+    value at a wrong command (CodeRabbit on #51)."""
     assert _refused_by_device(error) is refused
