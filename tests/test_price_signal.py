@@ -247,7 +247,7 @@ async def test_a_cheap_evening_reaches_the_plan(mock_hass):
             return_value=(NOW.replace(hour=7), NOW.replace(hour=19))
         )
         with patch(f"{COORDINATOR}.dt_util.now", return_value=NOW.replace(hour=2)):
-            plan_input, _, _ = await coordinator._build_plan_input(0.0, True)
+            plan_input, _, _, _ = await coordinator._build_plan_input(0.0, True)
         return plan_input
 
     dear = await _plan(dear_evening)
@@ -338,7 +338,7 @@ async def _plan_prices(coordinator, sunrise=SUNRISE_0700):
     coordinator._house_load_profile = AsyncMock(return_value=[0.5] * 24)
     coordinator._sun_times = MagicMock(return_value=(sunrise, sunrise + timedelta(hours=12)))
     with patch(f"{COORDINATOR}.dt_util.now", return_value=NOW):
-        plan_input, _, source = await coordinator._build_plan_input(10.0, True)
+        plan_input, _, source, _ = await coordinator._build_plan_input(10.0, True)
     return plan_input.prices_ct, source
 
 

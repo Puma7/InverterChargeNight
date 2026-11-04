@@ -253,7 +253,7 @@ async def test_the_plan_input_carries_what_was_learned(coordinator):
     _learned(coordinator, bl.KIND_DISCHARGE, 0.92)
 
     with patch(NOW, return_value=datetime(2026, 1, 14, 23, 0)):
-        plan_input, _, _ = await coordinator._build_plan_input(5.0, True)
+        plan_input, _, _, _ = await coordinator._build_plan_input(5.0, True)
 
     assert plan_input.capacity_kwh == pytest.approx(31.0)
     assert plan_input.charge_efficiency == pytest.approx(0.93)

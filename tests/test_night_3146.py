@@ -9,9 +9,11 @@ and less than nothing above it. And the log line said nothing about a factor.
 from __future__ import annotations
 
 import logging
-from unittest.mock import patch
+from datetime import date, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from homeassistant.util import dt as dt_util
 
 from custom_components.inverter_charge_night.const import (
     CONF_WEATHER_FACTOR_MAX,
@@ -28,6 +30,7 @@ from custom_components.inverter_charge_night.heating import (
     temperature_factor,
 )
 from custom_components.inverter_charge_night import config_flow
+from custom_components.inverter_charge_night.coordinator import _hours_in_local_day
 from tests.test_config_flow_validation import _errors
 from tests.test_planner_015 import (
     COORDINATOR,
@@ -38,6 +41,19 @@ from tests.test_planner_015 import (
     _fortnight,
     _weather_coordinator,
 )
+
+WEATHER = "weather.home"
+COLD = [{"datetime": "2026-01-15T11:00:00+00:00", "temperature": -2.0, "templow": -8.0}]
+FROST = [{"datetime": "2026-01-15T11:00:00+00:00", "temperature": -12.0, "templow": -18.0}]
+FORTNIGHT = [2.0 + (i % 7) for i in range(14)]
+
+
+def _asked_for_the_daily_forecast(calls):
+    """The forecast came from weather.get_forecasts, daily, for the configured entity."""
+    assert calls, "no forecast asked for"
+    domain, service, data, kwargs = calls[0]
+    assert (domain, service, data) == ("weather", "get_forecasts", {"type": "daily"})
+    assert kwargs["target"] == {"entity_id": WEATHER} and kwargs["return_response"] is True
 
 LIMIT = 15.0
 # The fortnight of late October 2026: daily means between 6.4 and 12.4 °C
@@ -75,7 +91,7 @@ async def test_the_night_of_3_4_november_plans_what_the_fortnight_drew(mock_hass
     """The model of that night leaves the need as learned: no 87 % for 5.7 °C."""
     coordinator = _weather_coordinator(mock_hass)
     _fortnight(coordinator, OCTOBER, base=-4.7, slope=5.124)
-    _forecast_service(mock_hass, daily=[
+    calls = _forecast_service(mock_hass, daily=[
         {"datetime": "2026-01-15T11:00:00+00:00", "temperature": 8.0, "templow": 3.4},
     ])
     unscaled = list(await coordinator._house_load_profile())
@@ -85,6 +101,7 @@ async def test_the_night_of_3_4_november_plans_what_the_fortnight_drew(mock_hass
     assert status["status"] == "learning"
     assert status["factor"] == 1.0
     assert status["base_kwh_per_day"] == pytest.approx(-4.7)
+    _asked_for_the_daily_forecast(calls)
 
 
 @pytest.mark.asyncio
@@ -92,7 +109,7 @@ async def test_the_bridge_plan_line_names_the_weather_factor(mock_hass, caplog):
     """Nothing in the log said why the target rose; now the line says it."""
     coordinator = _weather_coordinator(mock_hass)
     _fortnight(coordinator, [2.0 + (i % 7) for i in range(14)])
-    _forecast_service(mock_hass, daily=[
+    calls = _forecast_service(mock_hass, daily=[
         {"datetime": "2026-01-15T11:00:00+00:00", "temperature": -2.0, "templow": -8.0},
     ])
     with caplog.at_level(logging.INFO), patch(f"{COORDINATOR}.dt_util.now", return_value=NIGHT):
@@ -102,6 +119,7 @@ async def test_the_bridge_plan_line_names_the_weather_factor(mock_hass, caplog):
     factor = coordinator.weather_status["factor"]
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Bridge plan:")]
     assert lines and lines[-1].endswith(f", load x{factor:.2f} for -5.0 °C")
+    _asked_for_the_daily_forecast(calls)
 
 
 @pytest.mark.asyncio
@@ -115,11 +133,80 @@ async def test_without_a_factor_the_line_stays_as_it_was(mock_hass, caplog):
     assert lines and "load x" not in lines[-1]
 
 
+@pytest.mark.asyncio
+async def test_the_line_names_this_plans_factor_not_a_projections(mock_hass, caplog):
+    """A projection that runs meanwhile rewrites weather_status (Sourcery on #52)."""
+    coordinator = _weather_coordinator(mock_hass)
+    _fortnight(coordinator, [2.0 + (i % 7) for i in range(14)])
+    calls = _forecast_service(mock_hass, daily=COLD)
+    profile = coordinator._house_load_profile
+    impostor = {"status": "active", "factor": 1.3, "forecast_temp_c": 20.0}
+
+    async def meanwhile():
+        if coordinator.weather_status.get("forecast_temp_c") == -5.0:
+            coordinator.weather_status = impostor  # the projection's day
+        return await profile()
+
+    coordinator._house_load_profile = AsyncMock(side_effect=meanwhile)
+    with caplog.at_level(logging.INFO), patch(f"{COORDINATOR}.dt_util.now", return_value=NIGHT):
+        plan = await coordinator._plan_target(9.0, True)
+
+    assert plan is not None and coordinator.weather_status is impostor
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Bridge plan:")]
+    assert lines and lines[-1].endswith(" for -5.0 °C")
+    _asked_for_the_daily_forecast(calls)
+
+
+@pytest.fixture
+def berlin():
+    previous = dt_util.get_default_time_zone()
+    dt_util.set_default_time_zone(dt_util.get_time_zone("Europe/Berlin"))
+    try:
+        yield
+    finally:
+        dt_util.set_default_time_zone(previous)
+
+
+def test_the_days_the_clocks_change(berlin):
+    assert _hours_in_local_day(date(2026, 10, 25)) == 25
+    assert _hours_in_local_day(date(2026, 3, 29)) == 23
+    assert _hours_in_local_day(date(2026, 11, 3)) == 24
+
+
+@pytest.mark.asyncio
+async def test_the_day_the_clocks_go_back_is_a_whole_day(mock_hass, berlin):
+    """25 October 2026 has 25 hours; the 13 days behind 4 November include it (Sourcery on #52)."""
+    coordinator = _weather_coordinator(mock_hass)
+    days = [date(2026, 11, 4) - timedelta(days=13 - i) for i in range(13)]
+    assert date(2026, 10, 25) in days
+    samples = [[] for _ in range(24)]
+    for day, temperature in zip(days, OCTOBER):
+        daily = 10.0 + 0.8 * heating_degrees(temperature, LIMIT)
+        hours = _hours_in_local_day(day)
+        for hour in range(24):
+            samples[hour].append((day, daily / hours))
+        if hours == 25:
+            samples[2].append((day, daily / hours))  # 02:00-03:00 twice
+        coordinator._temperature_log.days[day] = temperature
+    # A first day only partly in the window is no whole day
+    samples[23].append((date(2026, 10, 21), 0.4))
+    coordinator._temperature_log.days[date(2026, 10, 21)] = 8.0
+    coordinator._house_load_samples = samples
+    calls = _forecast_service(mock_hass, daily=[
+        {"datetime": "2026-11-04T11:00:00+00:00", "temperature": 2.0, "templow": -2.0},
+    ])
+
+    await coordinator._house_load_need_profile(date(2026, 11, 4))
+
+    status = coordinator.weather_status
+    assert status["learning_days"] == 13
+    assert status["status"] == "active"
+    assert status["factor"] > 1.2
+    _asked_for_the_daily_forecast(calls)
+
+
 # --- the house's own cap on the weather factor (Pascal, 4 November 2026) ------
 
-COLD = [{"datetime": "2026-01-15T11:00:00+00:00", "temperature": -2.0, "templow": -8.0}]
-FROST = [{"datetime": "2026-01-15T11:00:00+00:00", "temperature": -12.0, "templow": -18.0}]
-FORTNIGHT = [2.0 + (i % 7) for i in range(14)]
 
 
 def test_the_presets_are_the_four_houses():
@@ -161,7 +248,7 @@ async def test_a_ground_source_house_plans_less_for_the_same_cold(mock_hass, opt
     """18 kWh at 5 °C would be 26 kWh at -5 °C; a ground-source house caps it at 1.2."""
     coordinator = _weather_coordinator(mock_hass, {CONF_WEATHER_FACTOR_MAX: option})
     _fortnight(coordinator, FORTNIGHT)
-    _forecast_service(mock_hass, daily=COLD)
+    calls = _forecast_service(mock_hass, daily=COLD)
     unscaled = list(await coordinator._house_load_profile())
 
     need = await coordinator._house_load_need_profile(PLAN_DAY)
@@ -171,18 +258,20 @@ async def test_a_ground_source_house_plans_less_for_the_same_cold(mock_hass, opt
     assert status["factor_max"] == cap
     assert status["factor"] == pytest.approx(cap)
     assert need == pytest.approx([kwh * cap for kwh in unscaled])
+    _asked_for_the_daily_forecast(calls)
 
 
 @pytest.mark.asyncio
 async def test_without_the_option_the_cap_is_1_5_as_before(mock_hass):
     coordinator = _weather_coordinator(mock_hass)
     _fortnight(coordinator, FORTNIGHT)
-    _forecast_service(mock_hass, daily=FROST)
+    calls = _forecast_service(mock_hass, daily=FROST)
 
     await coordinator._house_load_need_profile(PLAN_DAY)
 
     assert coordinator.weather_status["factor_max"] == 1.5
     assert coordinator.weather_status["factor"] == pytest.approx(1.5)
+    _asked_for_the_daily_forecast(calls)
 
 
 @pytest.mark.asyncio
@@ -190,25 +279,27 @@ async def test_direct_heating_may_draw_more_than_1_5(mock_hass):
     """At -15 °C the fortnight's 18 kWh become 34: 1.89, more than the old cap."""
     coordinator = _weather_coordinator(mock_hass, {CONF_WEATHER_FACTOR_MAX: "poor_insulation"})
     _fortnight(coordinator, FORTNIGHT)
-    _forecast_service(mock_hass, daily=FROST)
+    calls = _forecast_service(mock_hass, daily=FROST)
 
     await coordinator._house_load_need_profile(PLAN_DAY)
 
     status = coordinator.weather_status
     assert status["factor_max"] == 2.0
     assert 1.8 < status["factor"] < 2.0
+    _asked_for_the_daily_forecast(calls)
 
 
 @pytest.mark.asyncio
 async def test_a_cap_that_means_nothing_falls_back_to_1_5(mock_hass):
     coordinator = _weather_coordinator(mock_hass, {CONF_WEATHER_FACTOR_MAX: "viel"})
     _fortnight(coordinator, FORTNIGHT)
-    _forecast_service(mock_hass, daily=FROST)
+    calls = _forecast_service(mock_hass, daily=FROST)
 
     await coordinator._house_load_need_profile(PLAN_DAY)
 
     assert coordinator.weather_status["factor_max"] == 1.5
     assert coordinator.weather_status["factor"] == pytest.approx(1.5)
+    _asked_for_the_daily_forecast(calls)
 
 
 def _factor_field(defaults):

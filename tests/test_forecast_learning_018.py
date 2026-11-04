@@ -283,7 +283,7 @@ async def test_the_night_plan_works_with_the_corrected_forecast(coordinator):
     _season(coordinator._forecast_log, ratio=0.8)
 
     with patch(NOW, return_value=_at(23)):
-        plan_input, _, _ = await coordinator._build_plan_input(10.0, True)
+        plan_input, _, _, _ = await coordinator._build_plan_input(10.0, True)
 
     assert plan_input.forecast_kwh_next_day == pytest.approx(8.0)
     assert plan_input.error_margin_pct == fl.MARGIN_FLOOR_PCT
@@ -295,7 +295,7 @@ async def test_without_learning_the_plan_keeps_the_configured_margin(coordinator
     coordinator.config = {**coordinator.config, CONF_FORECAST_ERROR_MARGIN: 12.0}
 
     with patch(NOW, return_value=_at(23)):
-        plan_input, _, _ = await coordinator._build_plan_input(10.0, True)
+        plan_input, _, _, _ = await coordinator._build_plan_input(10.0, True)
 
     assert plan_input.forecast_kwh_next_day == 10.0
     assert (plan_input.error_margin_pct, plan_input.error_margin_high_pct) == (12.0, 12.0)
@@ -308,7 +308,7 @@ async def test_the_morning_forecast_is_judged_by_its_own_diary(coordinator):
     _season(coordinator._forecast_log, ratio=0.5, kind=fl.KIND_TODAY)
 
     with patch(NOW, return_value=_at(10)):
-        plan_input, _, _ = await coordinator._build_plan_input(10.0, True, entity_id=PV_TODAY)
+        plan_input, _, _, _ = await coordinator._build_plan_input(10.0, True, entity_id=PV_TODAY)
 
     assert plan_input.forecast_kwh_next_day == pytest.approx(5.0)
 

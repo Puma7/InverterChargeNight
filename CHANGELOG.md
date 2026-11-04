@@ -22,6 +22,10 @@ went into a sunny day far too full.
 - **The bridge plan's log line names the weather factor.** Nothing in the log said why the target
   rose; while the factor scales the load the line now ends with `load x1.48 for 5.7 °C`. The
   `weather` attribute and the diagnostics also show the model's base load (`base_kwh_per_day`).
+  The note comes from the plan's own weather result, not from one a projection wrote meanwhile.
+- **The day the clocks change counts as a whole day.** It has 23 or 25 hours, and a whole day
+  was 24. With 13 days required, the factor would have stayed off for two weeks after every
+  change of the clocks, as it does right now after 25 October.
 
 ### Added
 
