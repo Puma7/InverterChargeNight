@@ -138,6 +138,7 @@
           "weather_entity": "Wettervorhersage-Entität",
           "outdoor_temperature_entity": "Außentemperatur-Sensor",
           "heating_limit_c": "Heizgrenztemperatur",
+          "weather_factor_max": "Höchster Wetterfaktor",
           "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
@@ -170,6 +171,7 @@
           "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
           "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
           "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "weather_factor_max": "Wie weit ein kalter Tag den geplanten Verbrauch über die letzten 14 Tage anheben darf. Wähle, was zum Haus passt, oder gib eine eigene Zahl zwischen 1,0 und 3,0 ein (1,0: nie mehr). Gut gedämmt mit Erdwärmepumpe 1,2: die Sole bleibt warm, Frost kostet wenig zusätzlich. Gut gedämmt mit Luftwärmepumpe 1,3. Mittlere Dämmung 1,5 (wie bisher). Schlechte Dämmung oder Direktheizung wie Durchlauferhitzer und Heizstrahler 2,0.",
           "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       },
@@ -310,6 +312,7 @@
           "weather_entity": "Wettervorhersage-Entität",
           "outdoor_temperature_entity": "Außentemperatur-Sensor",
           "heating_limit_c": "Heizgrenztemperatur",
+          "weather_factor_max": "Höchster Wetterfaktor",
           "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
@@ -342,6 +345,7 @@
           "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
           "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
           "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "weather_factor_max": "Wie weit ein kalter Tag den geplanten Verbrauch über die letzten 14 Tage anheben darf. Wähle, was zum Haus passt, oder gib eine eigene Zahl zwischen 1,0 und 3,0 ein (1,0: nie mehr). Gut gedämmt mit Erdwärmepumpe 1,2: die Sole bleibt warm, Frost kostet wenig zusätzlich. Gut gedämmt mit Luftwärmepumpe 1,3. Mittlere Dämmung 1,5 (wie bisher). Schlechte Dämmung oder Direktheizung wie Durchlauferhitzer und Heizstrahler 2,0.",
           "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       },
@@ -719,6 +723,7 @@
           "weather_entity": "Wettervorhersage-Entität",
           "outdoor_temperature_entity": "Außentemperatur-Sensor",
           "heating_limit_c": "Heizgrenztemperatur",
+          "weather_factor_max": "Höchster Wetterfaktor",
           "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
@@ -727,6 +732,7 @@
           "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
           "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
           "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "weather_factor_max": "Wie weit ein kalter Tag den geplanten Verbrauch über die letzten 14 Tage anheben darf. Wähle, was zum Haus passt, oder gib eine eigene Zahl zwischen 1,0 und 3,0 ein (1,0: nie mehr). Gut gedämmt mit Erdwärmepumpe 1,2: die Sole bleibt warm, Frost kostet wenig zusätzlich. Gut gedämmt mit Luftwärmepumpe 1,3. Mittlere Dämmung 1,5 (wie bisher). Schlechte Dämmung oder Direktheizung wie Durchlauferhitzer und Heizstrahler 2,0.",
           "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       }
@@ -739,6 +745,7 @@
       "invalid_current": "Die Sicherungsgröße muss größer als 0 sein",
       "invalid_date": "Ungültiges Datum (JJJJ-MM-TT)",
       "invalid_efficiency": "Der Ladewirkungsgrad muss zwischen 0 und 1 liegen",
+      "invalid_weather_factor_max": "Wähle eine Vorgabe oder gib eine Zahl zwischen 1,0 und 3,0 ein.",
       "invalid_entity": "Diese Entität gibt es nicht",
       "invalid_phases": "Die Phasenzahl muss 1 oder 3 sein",
       "invalid_power": "Die Leistung muss größer als 0 sein",
@@ -909,6 +916,7 @@
           "weather_entity": "Wettervorhersage-Entität",
           "outdoor_temperature_entity": "Außentemperatur-Sensor",
           "heating_limit_c": "Heizgrenztemperatur",
+          "weather_factor_max": "Höchster Wetterfaktor",
           "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
@@ -941,6 +949,7 @@
           "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
           "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
           "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "weather_factor_max": "Wie weit ein kalter Tag den geplanten Verbrauch über die letzten 14 Tage anheben darf. Wähle, was zum Haus passt, oder gib eine eigene Zahl zwischen 1,0 und 3,0 ein (1,0: nie mehr). Gut gedämmt mit Erdwärmepumpe 1,2: die Sole bleibt warm, Frost kostet wenig zusätzlich. Gut gedämmt mit Luftwärmepumpe 1,3. Mittlere Dämmung 1,5 (wie bisher). Schlechte Dämmung oder Direktheizung wie Durchlauferhitzer und Heizstrahler 2,0.",
           "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       },
@@ -1314,6 +1323,7 @@
           "weather_entity": "Wettervorhersage-Entität",
           "outdoor_temperature_entity": "Außentemperatur-Sensor",
           "heating_limit_c": "Heizgrenztemperatur",
+          "weather_factor_max": "Höchster Wetterfaktor",
           "bridge_model": "Wie Morgen und Tag überbrückt werden"
         },
         "data_description": {
@@ -1322,6 +1332,7 @@
           "weather_entity": "Optional, für eine Wärmepumpe oder andere elektrische Heizung: eine Wetter-Entität (Met.no, DWD, OpenWeatherMap …). ICN holt daraus die Vorhersage für morgen und lernt aus dem Verbrauchszähler, wie viel mehr das Haus pro Grad Kälte braucht. Ein Tag kälter als die letzten zwei Wochen plant dann mehr Energie ein, ein wärmerer weniger (höchstens +50 % / −15 %). Ohne wetterabhängige Heizung bleibt der gelernte Anstieg nahe null, und es ändert sich nichts. Benötigt den Hausverbrauchszähler.",
           "outdoor_temperature_entity": "Optional: ein Außentemperatur-Sensor mit Langzeitstatistik. ICN lernt dann sofort aus den letzten zwei Wochen. Ohne ihn zeichnet ICN die aktuelle Temperatur der Wetter-Entität selbst auf und braucht etwa zehn Tage, bis die Vorhersage wirkt.",
           "heating_limit_c": "Tagesmittel der Außentemperatur, unter dem das Haus heizt (Standard 15 °C). Jedes Grad darunter zählt als ein Heizgrad.",
+          "weather_factor_max": "Wie weit ein kalter Tag den geplanten Verbrauch über die letzten 14 Tage anheben darf. Wähle, was zum Haus passt, oder gib eine eigene Zahl zwischen 1,0 und 3,0 ein (1,0: nie mehr). Gut gedämmt mit Erdwärmepumpe 1,2: die Sole bleibt warm, Frost kostet wenig zusätzlich. Gut gedämmt mit Luftwärmepumpe 1,3. Mittlere Dämmung 1,5 (wie bisher). Schlechte Dämmung oder Direktheizung wie Durchlauferhitzer und Heizstrahler 2,0.",
           "bridge_model": "Feste Verzögerung (wie bisher): Der Akku versorgt das Haus vom Fensterende bis Sonnenaufgang plus Übergangsverzögerung sowie den Hochpreisabend. Modelliert: ICN rechnet den morgigen Tag in Fünf-Minuten-Schritten durch, Hausverbrauch gegen die PV-Kurve der Prognose, vom Fensterende bis zum Ende des Hochpreisabends. Ein sonniger Tag übernimmt früh und braucht weniger; ein trüber Dezembertag trägt das Haus womöglich nie, dann wird der ganze Tag überbrückt. Ist der PV-Tageszähler gesetzt, lernt ICN die PV-Kurve aus den letzten zwei Wochen (Dachausrichtung, Verschattung, Jahreszeit) statt einer Schönwetterkurve."
         }
       }
@@ -1334,6 +1345,7 @@
       "invalid_current": "Die Sicherungsgröße muss größer als 0 sein",
       "invalid_date": "Ungültiges Datum (JJJJ-MM-TT)",
       "invalid_efficiency": "Der Ladewirkungsgrad muss zwischen 0 und 1 liegen",
+      "invalid_weather_factor_max": "Wähle eine Vorgabe oder gib eine Zahl zwischen 1,0 und 3,0 ein.",
       "invalid_entity": "Diese Entität gibt es nicht",
       "invalid_phases": "Die Phasenzahl muss 1 oder 3 sein",
       "invalid_power": "Die Leistung muss größer als 0 sein",
@@ -1394,6 +1406,14 @@
         "mean": "Durchschnitt (wie bisher)",
         "p75": "Sicher (75. Perzentil)",
         "p90": "Sehr sicher (90. Perzentil)"
+      }
+    },
+    "weather_factor_max": {
+      "options": {
+        "ground_source": "1,2 – gut gedämmt, Erdwärmepumpe",
+        "air_source": "1,3 – gut gedämmt, Luftwärmepumpe",
+        "medium_insulation": "1,5 – mittlere Dämmung (wie bisher)",
+        "poor_insulation": "2,0 – schlechte Dämmung oder Direktheizung"
       }
     },
     "bridge_model": {

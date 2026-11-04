@@ -113,6 +113,7 @@ are optional and make the result more accurate.
 | Weather forecast entity (`weather_entity`) | – | Optional, for electric heating: tomorrow's temperature scales the planned load. |
 | Outdoor temperature sensor (`outdoor_temperature_entity`) | – | Optional: lets ICN learn from the last two weeks right away. |
 | Heating limit temperature (`heating_limit_c`) | 15 °C | Daily mean below which the house heats. |
+| Highest weather factor (`weather_factor_max`) | 1.5 | How far a cold day may raise the planned load. Presets: 1.2 well insulated with a ground-source heat pump, 1.3 well insulated with an air-source heat pump, 1.5 average insulation, 2.0 poor insulation or direct electric heating. Or type your own number between 1.0 and 3.0. |
 
 ### Reserve for expensive evening hours
 

@@ -386,7 +386,7 @@ async def test_a_conflict_is_priced_on_the_modelled_bridge(mock_hass):
     coordinator = _coordinator(mock_hass, {CONF_BRIDGE_MODEL: "modelled"})
     coordinator._conflict_prices = MagicMock(return_value=((20.0, 50.0, 8.0), "entity"))
     with patch(f"{COORDINATOR}.dt_util.now", return_value=NIGHT):
-        plan_input, crossover, source = await coordinator._build_plan_input(2.0, True)
+        plan_input, crossover, source, _ = await coordinator._build_plan_input(2.0, True)
 
     assert crossover == SUN[1]  # a dull day: never carried
     assert coordinator._conflict_prices.call_args.args[4] == crossover
@@ -455,7 +455,7 @@ async def test_a_plan_made_before_sunset_uses_the_planned_days_sunset(mock_hass)
         "next_setting": "2026-01-14T17:00:00",
     })
     with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 14, 16, 30)):
-        plan_input, crossover, _ = await coordinator._build_plan_input(20.0, True)
+        plan_input, crossover, _, _ = await coordinator._build_plan_input(20.0, True)
 
     assert plan_input.window_end == datetime(2026, 1, 15, 5, 0)
     assert plan_input.sunset == datetime(2026, 1, 15, 17, 0)
@@ -482,7 +482,7 @@ async def test_the_sunset_is_the_planned_days(mock_hass, start, end, now, settin
         "next_rising": "2026-01-15T07:30:00", "next_setting": setting,
     })
     with patch(f"{COORDINATOR}.dt_util.now", return_value=now):
-        plan_input, _, _ = await coordinator._build_plan_input(20.0, True)
+        plan_input, _, _, _ = await coordinator._build_plan_input(20.0, True)
 
     assert plan_input.sunset == expected
 
@@ -494,6 +494,6 @@ async def test_without_the_sun_entity_the_assumed_day_is_kept(mock_hass):
     coordinator = _coordinator(mock_hass, {CONF_START_TIME: "12:00", CONF_END_TIME: "20:00"})
     del coordinator._sun_times
     with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 14, 13, 0)):
-        plan_input, _, _ = await coordinator._build_plan_input(20.0, True)
+        plan_input, _, _, _ = await coordinator._build_plan_input(20.0, True)
 
     assert plan_input.sunset == datetime(2026, 1, 15, 8, 0)

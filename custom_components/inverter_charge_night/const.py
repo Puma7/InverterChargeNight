@@ -123,6 +123,23 @@ CONF_WEATHER_ENTITY = "weather_entity"
 CONF_OUTDOOR_TEMPERATURE_ENTITY = "outdoor_temperature_entity"
 CONF_HEATING_LIMIT_C = "heating_limit_c"
 DEFAULT_HEATING_LIMIT_C = 15.0
+# How far a cold day may raise the planned load (3.14.6). A ground-source heat
+# pump in a well-insulated house draws far less extra on a frosty day than
+# direct electric heating; each house picks a preset or types its own number.
+CONF_WEATHER_FACTOR_MAX = "weather_factor_max"
+WEATHER_FACTOR_GROUND_SOURCE = "ground_source"
+WEATHER_FACTOR_AIR_SOURCE = "air_source"
+WEATHER_FACTOR_MEDIUM = "medium_insulation"
+WEATHER_FACTOR_DIRECT = "poor_insulation"
+WEATHER_FACTOR_PRESETS = {
+    WEATHER_FACTOR_GROUND_SOURCE: 1.2,
+    WEATHER_FACTOR_AIR_SOURCE: 1.3,
+    WEATHER_FACTOR_MEDIUM: 1.5,
+    WEATHER_FACTOR_DIRECT: 2.0,
+}
+# 1.5 was the fixed cap until 3.14.5: an update changes nothing
+DEFAULT_WEATHER_FACTOR_MAX = WEATHER_FACTOR_MEDIUM
+WEATHER_FACTOR_MAX_RANGE = (1.0, 3.0)
 WEATHER_FORECAST_CACHE_S = 1800  # 30 minutes
 # A weather integration that hangs must not hold up the poll that steers the
 # inverter (CodeRabbit on #42)

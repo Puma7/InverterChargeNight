@@ -157,19 +157,28 @@ Verschattung und Jahreszeit ab. Sonst verwendet ICN eine Glockenkurve für klare
 Sonnenaufgang und Sonnenuntergang.
 
 **Wetter (optional, für eine Wärmepumpe).** Eine `weather.*`-Entität (Met.no, DWD,
-OpenWeatherMap…), optional ein Außentemperatursensor, und die Heizgrenze (15 °C).
+OpenWeatherMap…), optional ein Außentemperatursensor, die Heizgrenze (15 °C) und der höchste
+Wetterfaktor (1,5).
 
 - ICN passt `Tages-kWh = a + b × max(0, Heizgrenze − T)` über die Tage an, die hinter dem
   Lastprofil stehen. Dann skaliert es den geplanten Verbrauch mit dem, was diese Formel für die
-  vorhergesagte Temperatur von morgen im Vergleich zu den letzten zwei Wochen ergibt: höchstens
-  +50 %, mindestens −15 %.
-- Das greift nur, wenn zehn Tage, drei Kelvin Temperaturspanne, eine positive Steigung und
-  R² ≥ 0,3 zeigen, dass der Zusammenhang echt ist. Ein Haus ohne elektrische Heizung behält den
-  Faktor 1.
+  vorhergesagte Temperatur von morgen im Vergleich zu den letzten zwei Wochen ergibt: mindestens
+  −15 %, höchstens der höchste Wetterfaktor.
+- Diese Obergrenze hängt vom Haus ab. Eine Erdwärmepumpe holt ihre Wärme aus Sole, die warm
+  bleibt, Frost kostet sie also wenig zusätzlich (1,2 bei guter Dämmung). Eine Luftwärmepumpe
+  verliert Wirkungsgrad, je kälter die Luft wird (1,3). Mittlere Dämmung ist 1,5, wie vor 3.14.6.
+  Schlechte Dämmung oder Direktheizung wie Durchlauferhitzer und Heizstrahler ist 2,0. Wähle eine
+  Vorgabe oder gib eine eigene Zahl zwischen 1,0 und 3,0 ein.
+- Das greift nur, wenn jeder ganze Tag der zwei Wochen (13), drei Kelvin Temperaturspanne, eine
+  positive Steigung, R² ≥ 0,3 und eine Grundlast `a` von mindestens 0 zeigen, dass der
+  Zusammenhang echt ist. Eine Grundlast unter null wäre ein Haus, das oberhalb der Heizgrenze
+  weniger als nichts verbraucht: Die Tage erklärt dann nicht die Heizung, und die Steigung ist zu
+  steil. Ein Haus ohne elektrische Heizung behält den Faktor 1.
 - Die Temperaturen kommen aus den Statistiken des Sensors oder aus einem Tagebuch, das ICN über die
-  aktuelle Temperatur der Wetter-Entität führt. Dieses Tagebuch braucht etwa zehn Tage.
+  aktuelle Temperatur der Wetter-Entität führt. Dieses Tagebuch braucht etwa zwei Wochen.
 - Das Attribut `weather` zeigt den Status (`off`, `learning`, `active`, `forecast_unavailable`),
-  die gelernten kWh pro Kelvin und den Faktor.
+  die gelernten kWh pro Kelvin, die Grundlast, den Faktor und seine Obergrenze (`factor_max`). Solange der Faktor den Verbrauch
+  skaliert, endet die Log-Zeile `Bridge plan` mit `load x1.25 for 5.7 °C`.
 
 ### Die Abendreserve
 

@@ -115,6 +115,7 @@ das Ergebnis genauer.
 | Wettervorhersage-Entität (`weather_entity`) | – | Optional, für elektrisches Heizen: Die Temperatur von morgen skaliert den geplanten Verbrauch. |
 | Außentemperatur-Sensor (`outdoor_temperature_entity`) | – | Optional: Damit lernt ICN sofort aus den letzten zwei Wochen. |
 | Heizgrenztemperatur (`heating_limit_c`) | 15 °C | Tagesmittel, unter dem das Haus heizt. |
+| Höchster Wetterfaktor (`weather_factor_max`) | 1,5 | Wie weit ein kalter Tag den geplanten Verbrauch anheben darf. Vorgaben: 1,2 gut gedämmt mit Erdwärmepumpe, 1,3 gut gedämmt mit Luftwärmepumpe, 1,5 mittlere Dämmung, 2,0 schlechte Dämmung oder Direktheizung. Oder eine eigene Zahl zwischen 1,0 und 3,0. |
 
 ### Reserve für die teuren Abendstunden
 

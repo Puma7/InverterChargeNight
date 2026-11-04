@@ -53,6 +53,7 @@ from .heating import (
     fit_heating_model,
     heating_degrees,
     hourly_mean_from_forecast,
+    parse_factor_max,
     temperature_factor,
     to_celsius,
 )
@@ -140,6 +141,7 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_HEATING_LIMIT_C,
+    CONF_WEATHER_FACTOR_MAX,
     CONF_BRIDGE_MODEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
@@ -158,6 +160,9 @@ from .const import (
     LOAD_QUANTILE_MIN_SAMPLES,
     LOAD_SAFETY_QUANTILES,
     DEFAULT_HEATING_LIMIT_C,
+    DEFAULT_WEATHER_FACTOR_MAX,
+    WEATHER_FACTOR_MAX_RANGE,
+    WEATHER_FACTOR_PRESETS,
     WEATHER_FORECAST_CACHE_S,
     WEATHER_SERVICE_TIMEOUT_S,
     OUTDOOR_TEMPERATURE_CACHE_S,
@@ -372,6 +377,13 @@ def _as_float_strict(value: Any) -> float:
     if number is None:
         raise ValueError(f"not a usable number: {value!r}")
     return number
+
+
+def _hours_in_local_day(day: date) -> int:
+    """23, 24 or 25: the hours of a local calendar day, by the clocks' changes."""
+    start = dt_util.as_utc(dt_util.start_of_local_day(day))
+    end = dt_util.as_utc(dt_util.start_of_local_day(day + timedelta(days=1)))
+    return round((end - start).total_seconds() / 3600)
 
 
 def _refused_by_device(err: Exception) -> bool:
@@ -2654,6 +2666,28 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._outdoor_daily_cache = (now, str(sensor_id), learned)
         return {**days, **learned}
 
+    @staticmethod
+    def _weather_factor_note(status: Mapping[str, Any]) -> str:
+        """The weather factor for the bridge plan's log line, when it scales the load.
+
+        Nothing in the log said why the target rose from 64 % to 87 % at 00:16
+        (3/4 November 2026). ``status`` is the plan's own ``weather_status``: a
+        projection built meanwhile overwrites the attribute (Sourcery on #52).
+        """
+        factor = status.get("factor")
+        if status.get("status") != STATUS_ACTIVE or not isinstance(factor, (int, float)) or factor == 1.0:
+            return ""
+        return f", load x{factor:.2f} for {status.get('forecast_temp_c')} °C"
+
+    def _weather_factor_max(self) -> float:
+        """The house's cap on the weather factor: preset, typed number, or the default."""
+        allowed = WEATHER_FACTOR_MAX_RANGE
+        value = parse_factor_max(
+            self.config.get(CONF_WEATHER_FACTOR_MAX, DEFAULT_WEATHER_FACTOR_MAX),
+            WEATHER_FACTOR_PRESETS, allowed,
+        )
+        return value if value is not None else WEATHER_FACTOR_PRESETS[DEFAULT_WEATHER_FACTOR_MAX]
+
     async def _weather_factor(self, day: date) -> float:
         """How much more the planned day draws than the fortnight (plan 015 stage D).
 
@@ -2665,6 +2699,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.weather_status = {"status": STATUS_OFF}
             return 1.0
         limit = float(self.config.get(CONF_HEATING_LIMIT_C, DEFAULT_HEATING_LIMIT_C))
+        max_factor = self._weather_factor_max()
         forecast_c = await self._forecast_mean_temperature(day)
         temperatures = await self._daily_outdoor_c()
         daily_kwh: dict[date, float] = {}
@@ -2673,9 +2708,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for sample_day, kwh in values:
                 daily_kwh[sample_day] = daily_kwh.get(sample_day, 0.0) + kwh
                 hours[sample_day] = hours.get(sample_day, 0) + 1
-        # Only whole days: a day half in the fortnight is half a day's use
+        # Only whole days: a day half in the fortnight is half a day's use. The
+        # day the clocks change has 23 or 25 hours (Sourcery on #52): with 24
+        # it would drop out, and 13 days would not be met for two weeks
         pairs = [(temperatures[d], kwh) for d, kwh in daily_kwh.items()
-                 if hours[d] == 24 and d in temperatures]
+                 if hours[d] == _hours_in_local_day(d) and d in temperatures]
         model = fit_heating_model(pairs, limit)
         profile_c = sum(t for t, _ in pairs) / len(pairs) if pairs else None
         status: dict[str, Any] = {
@@ -2684,8 +2721,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "profile_temp_c": round(profile_c, 1) if profile_c is not None else None,
             "learning_days": len(pairs),
             "kwh_per_kelvin": round(model.slope_kwh_per_k, 3) if model else None,
+            "base_kwh_per_day": round(model.intercept_kwh, 2) if model else None,
             "r2": round(model.r2, 2) if model else None,
             "heating_limit_c": limit,
+            "factor_max": max_factor,
         }
         if forecast_c is None:
             self.weather_status = {**status, "status": STATUS_FORECAST_UNAVAILABLE, "factor": 1.0}
@@ -2694,7 +2733,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.weather_status = {**status, "status": STATUS_LEARNING, "factor": 1.0}
             return 1.0
         profile_degrees = sum(heating_degrees(t, limit) for t, _ in pairs) / len(pairs)
-        factor = temperature_factor(model, forecast_c, profile_degrees, limit)
+        factor = temperature_factor(model, forecast_c, profile_degrees, limit, max_factor)
         self.weather_status = {**status, "status": STATUS_ACTIVE, "factor": round(factor, 3)}
         return factor
 
@@ -2762,11 +2801,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _build_plan_input(
         self, forecast_kwh: float, forecast_available: bool, *, entity_id: str | None = None
-    ) -> tuple[PlanInput, datetime, str | None]:
+    ) -> tuple[PlanInput, datetime, str | None, str]:
         """Gather every state the planner needs.
 
-        Returns the input, the PV crossover, and where the conflict prices came
-        from (``"entity"``, ``"static"`` or None) - returned rather than stored,
+        Returns the input, the PV crossover, where the conflict prices came
+        from (``"entity"``, ``"static"`` or None) and the weather factor's note
+        for the log line - returned rather than stored,
         so that callers which only want a projection cannot overwrite what the
         last real plan decided on.
 
@@ -2829,6 +2869,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         high_price_window = self._high_price_window(window_end)
         bridge_model = str(self.config.get(CONF_BRIDGE_MODEL, DEFAULT_BRIDGE_MODEL))
+        house_need = await self._house_load_need_profile(window_end.date())
+        # Nothing awaits between the factor and this line: it is this plan's
+        weather_note = self._weather_factor_note(self.weather_status)
         plan_input = PlanInput(
             capacity_kwh=capacity,
             current_soc=current_soc if current_soc is not None else 0.0,
@@ -2841,7 +2884,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             window_end=window_end,
             pv_crossover=pv_crossover,
             sunset=sunset,
-            house_load_kw_profile=await self._house_load_need_profile(window_end.date()),
+            house_load_kw_profile=house_need,
             room_load_kw_profile=await self._house_load_profile(),
             reserve_kwh=float(self.config.get(CONF_BRIDGE_RESERVE_KWH, DEFAULT_BRIDGE_RESERVE_KWH)),
             charge_efficiency=self._charge_efficiency(),
@@ -2880,7 +2923,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 window_ct, series, now, window_end, pv_crossover
             )
             plan_input = replace(plan_input, prices_ct=prices_ct)
-        return plan_input, pv_crossover, prices_source
+        return plan_input, pv_crossover, prices_source, weather_note
 
     async def _evening_reserve_floor(
         self, forecast_kwh: float, forecast_available: bool
@@ -2896,7 +2939,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self.is_discharge_mode or self._high_price_window(dt_util.now()) is None:
             return None
         try:
-            plan_input, _, _ = await self._build_plan_input(forecast_kwh, forecast_available)
+            plan_input, _, _, _ = await self._build_plan_input(forecast_kwh, forecast_available)
             return evening_reserve_soc(plan_input)
         except (ValueError, TypeError) as err:
             _LOGGER.error("Could not work out the evening reserve: %s", err)
@@ -3016,7 +3059,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         reserve_floor = 0.0
         try:
-            plan_input, _, _ = await self._build_plan_input(
+            plan_input, _, _, _ = await self._build_plan_input(
                 forecast_kwh, forecast_available, entity_id=str(today_entity)
             )
             reserve_floor = evening_reserve_soc(plan_input)
@@ -3122,7 +3165,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._get_active_forecast_entity()
         )
         try:
-            plan_input, _, _ = await self._build_plan_input(forecast_kwh, forecast_available)
+            plan_input, _, _, _ = await self._build_plan_input(forecast_kwh, forecast_available)
             return plan_target_soc(plan_input), plan_input
         except (ValueError, TypeError) as err:
             _LOGGER.error("Bridge planner failed: %s", err)
@@ -3135,7 +3178,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         (invalid configuration) is logged and the caller uses the headroom formula.
         """
         try:
-            plan_input, pv_crossover, prices_source = await self._build_plan_input(
+            plan_input, pv_crossover, prices_source, weather_note = await self._build_plan_input(
                 forecast_kwh, forecast_available
             )
             plan = plan_target_soc(plan_input)
@@ -3158,7 +3201,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pv_crossover = pv_crossover
         _LOGGER.info(
             "Bridge plan: target %.1f%% (%s), bridge %.2f kWh until %s, surplus %.2f kWh, "
-            "bounds %.1f-%.1f%%, buffer %.1f%%%s",
+            "bounds %.1f-%.1f%%, buffer %.1f%%%s%s",
             plan.target_soc,
             plan.reason,
             plan.bridge_kwh,
@@ -3168,6 +3211,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             plan.upper_bound_soc,
             plan.buffer_soc,
             " (capped)" if plan.buffer_capped else "",
+            weather_note,
         )
         return plan
 

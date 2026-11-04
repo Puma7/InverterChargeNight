@@ -148,18 +148,27 @@ two weeks. That captures roof orientation, shading and season. Otherwise ICN use
 between sunrise and sunset.
 
 **Weather (optional, for a heat pump).** A `weather.*` entity (Met.no, DWD, OpenWeatherMap…),
-optionally an outdoor temperature sensor, and the heating limit (15 °C).
+optionally an outdoor temperature sensor, the heating limit (15 °C) and the highest weather
+factor (1.5).
 
 - ICN fits `daily kWh = a + b × max(0, limit − T)` over the days behind the load profile. It
   then scales the planned load by what that predicts for tomorrow's forecast temperature against
-  the last two weeks: at most +50 %, at least −15 %.
-- It only applies when ten days, three kelvin of temperature spread, a positive slope and
-  R² ≥ 0.3 show that the relationship is real. A house without electric heating keeps a factor
-  of 1.
+  the last two weeks: at least −15 %, and at most the highest weather factor.
+- That cap depends on the house. A ground-source heat pump draws from brine that stays warm, so
+  frost costs it little extra (1.2 for a well-insulated house). An air-source heat pump loses
+  efficiency as the air gets colder (1.3). Average insulation is 1.5, as before 3.14.6. Poor
+  insulation or direct electric heating, such as instantaneous water heaters and radiant heaters,
+  is 2.0. Pick a preset or type your own number between 1.0 and 3.0.
+- It only applies when every whole day of the fortnight (13), three kelvin of temperature
+  spread, a positive slope, R² ≥ 0.3 and a base load `a` of at least 0 show that the
+  relationship is real. A base load below zero is a house that draws less than nothing above the
+  heating limit: the days are not explained by heating, and the slope is too steep. A house
+  without electric heating keeps a factor of 1.
 - Temperatures come from the sensor's statistics, or from a diary ICN keeps of the weather
-  entity's current temperature. That diary needs about ten days.
+  entity's current temperature. That diary needs about two weeks.
 - The `weather` attribute shows the status (`off`, `learning`, `active`, `forecast_unavailable`),
-  the learned kWh per kelvin and the factor.
+  the learned kWh per kelvin, the base load, the factor and its cap (`factor_max`). While the factor scales the load,
+  the `Bridge plan` log line ends with `load x1.25 for 5.7 °C`.
 
 ### The evening reserve
 

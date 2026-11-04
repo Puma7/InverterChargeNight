@@ -197,11 +197,19 @@ Form statt der Glocke. Weniger Daten bedeuten Glocke wie bisher.
 ```
 HGT(T)       = max(0, T_grenz − T)               T_grenz = 15 °C (Option heating_limit_c)
 Tagesverbrauch E = a + b · HGT(T)                 kleinste Quadrate über die ganzen Tage des 14-Tage-Profils, b ≥ 0
-gültig, wenn ≥ 10 Tage, Spannweite der HGT ≥ 3 K und R² ≥ 0,3
+gültig, wenn ≥ 13 ganze Tage, Spannweite der HGT ≥ 3 K, R² ≥ 0,3 und a ≥ 0 (seit 3.14.6)
 faktor = (a + b · HGT(T_morgen)) / (a + b · HGT(T_profil))
          T_profil = mittlere Temperatur der Tage, aus denen das Lastprofil gelernt ist
-         geklammert auf 0,85 … 1,5
+         geklammert auf 0,85 … Obergrenze (Option weather_factor_max, Standard 1,5; seit 3.14.6)
 ```
+
+**3.14.6 (Nacht 3./4.11.2026):** Ein Modell aus 11 Tagen mit R² 0,56 und einer Grundlast `a` von
+etwa −4,7 kWh hob das Ziel von 64 % auf 87 %. Eine Grundlast unter null ist ein Haus, das oberhalb
+der Heizgrenze weniger als nichts verbraucht. Deshalb gilt das Modell jetzt erst mit `a ≥ 0` und
+allen 13 ganzen Tagen des Fensters. Ein ganzer Tag hat so viele Stunden, wie der lokale Kalendertag
+hat: 23 oder 25 am Tag der Zeitumstellung. Die Obergrenze wählt jedes Haus selbst: 1,2 (gut
+gedämmt, Erdwärmepumpe), 1,3 (gut gedämmt, Luftwärmepumpe), 1,5 (mittlere Dämmung), 2,0
+(schlechte Dämmung oder Direktheizung) oder eine eigene Zahl zwischen 1,0 und 3,0.
 
 - Der Faktor multipliziert **nur das Bedarfsprofil**, also untere Grenze und Überbrückung, nicht das
   Platzprofil. Ein falscher Kälteschätzer kann damit nie den PV-Platz wegnehmen.
@@ -214,13 +222,13 @@ faktor = (a + b · HGT(T_morgen)) / (a + b · HGT(T_profil))
 
 `weather` im Sensor und in der Diagnose:
 - `forecast_temp_c`, `profile_temp_c`;
-- `kwh_per_kelvin` (= b), `samples`, `r2`;
-- `factor`, `status` (`off` / `learning` / `active` / `forecast_unavailable`).
+- `kwh_per_kelvin` (= b), `base_kwh_per_day` (= a), `samples`, `r2`;
+- `factor`, `factor_max`, `status` (`off` / `learning` / `active` / `forecast_unavailable`).
 
 **Tests**:
 - Der Regressionskern passt bekannte Geraden.
 - Zu wenig Daten, zu wenig Spannweite und kleines R² ergeben Faktor 1.
-- Klammer auf 0,85 … 1,5.
+- Klammer auf 0,85 … Obergrenze (1,5 ohne Option).
 - Die Antwort von `weather.get_forecasts` wird geparst: daily mit und ohne `templow`, hourly als
   Rückfall, fehlender Tag, Dienstfehler.
 - Selbstlernen über Polls und Tageswechsel, persistiert über einen Neustart.

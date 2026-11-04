@@ -26,8 +26,11 @@ from typing import Any
 
 # The heating limit of a typical German house: below a daily mean of 15 °C it heats
 DEFAULT_HEATING_LIMIT_C = 15.0
-# Fewer days, or days too alike, and a slope is noise
-MIN_FIT_DAYS = 10
+# Fewer days, or days too alike, and a slope is noise. Every whole day of the
+# fortnight: its hourly window holds 13 whole days for most of the day, and 11
+# drew a slope of 5.1 kWh per kelvin with a base load below zero - 47.5 % more
+# load, 87 % instead of 64 % (3/4 November 2026).
+MIN_FIT_DAYS = 13
 MIN_HEATING_SPREAD_K = 3.0
 MIN_FIT_R2 = 0.3
 # A forecast is a forecast: never let it halve the need, nor more than half again
@@ -69,12 +72,18 @@ class HeatingModel:
 
     @property
     def usable(self) -> bool:
-        """Enough days, enough spread, a real slope and a fit worth the name."""
+        """Enough days, enough spread, a real slope and a fit worth the name.
+
+        A house draws something at the heating limit too: a fit whose base
+        load is below zero says the days are not explained by heating - a
+        washing day, a car charged at home - and its slope is too steep.
+        """
         return (
             self.days >= MIN_FIT_DAYS
             and self.spread_k >= MIN_HEATING_SPREAD_K
             and self.slope_kwh_per_k > 0
             and self.r2 >= MIN_FIT_R2
+            and self.intercept_kwh >= 0
         )
 
     def daily_kwh(self, degrees: float) -> float:
@@ -115,11 +124,13 @@ def temperature_factor(
     forecast_c: float,
     profile_degrees: float,
     limit_c: float,
+    max_factor: float = FACTOR_MAX,
 ) -> float:
     """How much more (or less) tomorrow draws than the days the profile is from.
 
     ``profile_degrees`` is the mean heating degrees of those days. 1.0 for an
-    unusable model; clamped to ``FACTOR_MIN`` .. ``FACTOR_MAX`` otherwise.
+    unusable model; clamped to ``FACTOR_MIN`` .. ``max_factor`` otherwise, the
+    house's own cap (3.14.6, ``FACTOR_MAX`` before).
     """
     if model is None or not model.usable:
         return 1.0
@@ -127,7 +138,32 @@ def temperature_factor(
     if baseline <= 0:
         return 1.0
     expected = model.daily_kwh(heating_degrees(forecast_c, limit_c))
-    return min(FACTOR_MAX, max(FACTOR_MIN, expected / baseline))
+    return min(max_factor, max(FACTOR_MIN, expected / baseline))
+
+
+def parse_factor_max(
+    raw: Any, presets: Mapping[str, float], allowed: tuple[float, float]
+) -> float | None:
+    """The cap a stored option means: a preset's number or a typed one; None if neither.
+
+    The select keeps what was typed as text (``"1.4"``, ``"1,4"``), so both a
+    decimal point and a decimal comma are read. Outside ``allowed`` is None.
+    """
+    if isinstance(raw, str) and raw in presets:
+        return presets[raw]
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, str):
+        try:
+            value = float(raw.strip().replace(",", "."))
+        except ValueError:
+            return None
+    elif isinstance(raw, (int, float)):
+        value = float(raw)
+    else:
+        return None
+    low, high = allowed
+    return value if math.isfinite(value) and low <= value <= high else None
 
 
 def _local_day(raw: Any, to_local: Any) -> date | None:
