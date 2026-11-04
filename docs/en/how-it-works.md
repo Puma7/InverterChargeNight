@@ -153,13 +153,16 @@ optionally an outdoor temperature sensor, and the heating limit (15 °C).
 - ICN fits `daily kWh = a + b × max(0, limit − T)` over the days behind the load profile. It
   then scales the planned load by what that predicts for tomorrow's forecast temperature against
   the last two weeks: at most +50 %, at least −15 %.
-- It only applies when ten days, three kelvin of temperature spread, a positive slope and
-  R² ≥ 0.3 show that the relationship is real. A house without electric heating keeps a factor
-  of 1.
+- It only applies when every whole day of the fortnight (13), three kelvin of temperature
+  spread, a positive slope, R² ≥ 0.3 and a base load `a` of at least 0 show that the
+  relationship is real. A base load below zero is a house that draws less than nothing above the
+  heating limit: the days are not explained by heating, and the slope is too steep. A house
+  without electric heating keeps a factor of 1.
 - Temperatures come from the sensor's statistics, or from a diary ICN keeps of the weather
-  entity's current temperature. That diary needs about ten days.
+  entity's current temperature. That diary needs about two weeks.
 - The `weather` attribute shows the status (`off`, `learning`, `active`, `forecast_unavailable`),
-  the learned kWh per kelvin and the factor.
+  the learned kWh per kelvin, the base load and the factor. While the factor scales the load,
+  the `Bridge plan` log line ends with `load x1.25 for 5.7 °C`.
 
 ### The evening reserve
 

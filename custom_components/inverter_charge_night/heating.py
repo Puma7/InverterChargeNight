@@ -26,8 +26,11 @@ from typing import Any
 
 # The heating limit of a typical German house: below a daily mean of 15 °C it heats
 DEFAULT_HEATING_LIMIT_C = 15.0
-# Fewer days, or days too alike, and a slope is noise
-MIN_FIT_DAYS = 10
+# Fewer days, or days too alike, and a slope is noise. Every whole day of the
+# fortnight: its hourly window holds 13 whole days for most of the day, and 11
+# drew a slope of 5.1 kWh per kelvin with a base load below zero - 47.5 % more
+# load, 87 % instead of 64 % (3/4 November 2026).
+MIN_FIT_DAYS = 13
 MIN_HEATING_SPREAD_K = 3.0
 MIN_FIT_R2 = 0.3
 # A forecast is a forecast: never let it halve the need, nor more than half again
@@ -69,12 +72,18 @@ class HeatingModel:
 
     @property
     def usable(self) -> bool:
-        """Enough days, enough spread, a real slope and a fit worth the name."""
+        """Enough days, enough spread, a real slope and a fit worth the name.
+
+        A house draws something at the heating limit too: a fit whose base
+        load is below zero says the days are not explained by heating - a
+        washing day, a car charged at home - and its slope is too steep.
+        """
         return (
             self.days >= MIN_FIT_DAYS
             and self.spread_k >= MIN_HEATING_SPREAD_K
             and self.slope_kwh_per_k > 0
             and self.r2 >= MIN_FIT_R2
+            and self.intercept_kwh >= 0
         )
 
     def daily_kwh(self, degrees: float) -> float:

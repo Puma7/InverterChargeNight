@@ -5,6 +5,24 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.6] - 2026-11-04
+
+The night of 3/4 November 2026: at 23:01 the plan bought 64.1 %, at 00:16 87.4 %, and the battery
+went into a sunny day far too full.
+
+### Fixed
+
+- **The weather factor needs a heating model that makes physical sense.** At 00:16 the weather
+  factor switched on: 5.7 °C forecast against a fortnight of 8.4 °C, 5.1 kWh more per kelvin,
+  47.5 % more load. The model behind it rested on 11 days with R² 0.56 and a base load of about
+  -4.7 kWh a day - a house that draws less than nothing above the heating limit, so the days were
+  not explained by heating and the slope was too steep. The factor now applies only to a model
+  with a base load of at least 0 and every whole day of the fortnight (13, was 10). Otherwise it
+  stays 1 and the night plans what the fortnight drew.
+- **The bridge plan's log line names the weather factor.** Nothing in the log said why the target
+  rose; while the factor scales the load the line now ends with `load x1.48 for 5.7 °C`. The
+  `weather` attribute and the diagnostics also show the model's base load (`base_kwh_per_day`).
+
 ## [3.14.5] - 2026-11-02
 
 The night of 1/2 November 2026: the window charged at the 9000 W the efficiency search found and

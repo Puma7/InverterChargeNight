@@ -2654,6 +2654,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._outdoor_daily_cache = (now, str(sensor_id), learned)
         return {**days, **learned}
 
+    def _weather_factor_note(self) -> str:
+        """The weather factor for the bridge plan's log line, when it scales the load.
+
+        Nothing in the log said why the target rose from 64 % to 87 % at 00:16
+        (3/4 November 2026).
+        """
+        status = self.weather_status
+        factor = status.get("factor")
+        if status.get("status") != STATUS_ACTIVE or not isinstance(factor, (int, float)) or factor == 1.0:
+            return ""
+        return f", load x{factor:.2f} for {status.get('forecast_temp_c')} °C"
+
     async def _weather_factor(self, day: date) -> float:
         """How much more the planned day draws than the fortnight (plan 015 stage D).
 
@@ -2684,6 +2696,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "profile_temp_c": round(profile_c, 1) if profile_c is not None else None,
             "learning_days": len(pairs),
             "kwh_per_kelvin": round(model.slope_kwh_per_k, 3) if model else None,
+            "base_kwh_per_day": round(model.intercept_kwh, 2) if model else None,
             "r2": round(model.r2, 2) if model else None,
             "heating_limit_c": limit,
         }
@@ -3158,7 +3171,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._pv_crossover = pv_crossover
         _LOGGER.info(
             "Bridge plan: target %.1f%% (%s), bridge %.2f kWh until %s, surplus %.2f kWh, "
-            "bounds %.1f-%.1f%%, buffer %.1f%%%s",
+            "bounds %.1f-%.1f%%, buffer %.1f%%%s%s",
             plan.target_soc,
             plan.reason,
             plan.bridge_kwh,
@@ -3168,6 +3181,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             plan.upper_bound_soc,
             plan.buffer_soc,
             " (capped)" if plan.buffer_capped else "",
+            self._weather_factor_note(),
         )
         return plan
 

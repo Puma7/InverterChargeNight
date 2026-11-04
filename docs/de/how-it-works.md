@@ -163,13 +163,16 @@ OpenWeatherMap…), optional ein Außentemperatursensor, und die Heizgrenze (15 
   Lastprofil stehen. Dann skaliert es den geplanten Verbrauch mit dem, was diese Formel für die
   vorhergesagte Temperatur von morgen im Vergleich zu den letzten zwei Wochen ergibt: höchstens
   +50 %, mindestens −15 %.
-- Das greift nur, wenn zehn Tage, drei Kelvin Temperaturspanne, eine positive Steigung und
-  R² ≥ 0,3 zeigen, dass der Zusammenhang echt ist. Ein Haus ohne elektrische Heizung behält den
-  Faktor 1.
+- Das greift nur, wenn jeder ganze Tag der zwei Wochen (13), drei Kelvin Temperaturspanne, eine
+  positive Steigung, R² ≥ 0,3 und eine Grundlast `a` von mindestens 0 zeigen, dass der
+  Zusammenhang echt ist. Eine Grundlast unter null wäre ein Haus, das oberhalb der Heizgrenze
+  weniger als nichts verbraucht: Die Tage erklärt dann nicht die Heizung, und die Steigung ist zu
+  steil. Ein Haus ohne elektrische Heizung behält den Faktor 1.
 - Die Temperaturen kommen aus den Statistiken des Sensors oder aus einem Tagebuch, das ICN über die
-  aktuelle Temperatur der Wetter-Entität führt. Dieses Tagebuch braucht etwa zehn Tage.
+  aktuelle Temperatur der Wetter-Entität führt. Dieses Tagebuch braucht etwa zwei Wochen.
 - Das Attribut `weather` zeigt den Status (`off`, `learning`, `active`, `forecast_unavailable`),
-  die gelernten kWh pro Kelvin und den Faktor.
+  die gelernten kWh pro Kelvin, die Grundlast und den Faktor. Solange der Faktor den Verbrauch
+  skaliert, endet die Log-Zeile `Bridge plan` mit `load x1.25 for 5.7 °C`.
 
 ### Die Abendreserve
 

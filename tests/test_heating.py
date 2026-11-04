@@ -27,7 +27,7 @@ def _local(value: datetime) -> datetime:
     return value.astimezone(BERLIN)
 
 
-def _heat_pump_days(n=12, base=10.0, slope=0.8, start_c=-2.0):
+def _heat_pump_days(n=13, base=10.0, slope=0.8, start_c=-2.0):
     """A house that draws 10 kWh a day plus 0.8 kWh per degree of heating."""
     return [(start_c + i, base + slope * heating_degrees(start_c + i, LIMIT)) for i in range(n)]
 
@@ -51,10 +51,10 @@ def test_a_heat_pump_house_is_fitted_exactly():
 @pytest.mark.parametrize(
     "days, why",
     [
-        (_heat_pump_days(n=9), "too few days"),
-        ([(10.0 + i * 0.2, 12.0 + i * 0.2) for i in range(12)], "days too alike"),
-        ([(i - 2.0, 30.0 - 0.8 * (17 - i)) for i in range(12)], "more use on warm days"),
-        ([(i - 2.0, 10.0 + (5.0 if i % 2 else -5.0)) for i in range(12)], "a fit explaining nothing"),
+        (_heat_pump_days(n=12), "too few days"),
+        ([(10.0 + i * 0.2, 12.0 + i * 0.2) for i in range(13)], "days too alike"),
+        ([(i - 2.0, 30.0 - 0.8 * (17 - i)) for i in range(13)], "more use on warm days"),
+        ([(i - 2.0, 10.0 + (5.0 if i % 2 else -5.0)) for i in range(13)], "a fit explaining nothing"),
     ],
 )
 def test_an_unusable_model_leaves_the_factor_at_one(days, why):
