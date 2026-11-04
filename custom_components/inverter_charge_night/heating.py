@@ -124,11 +124,13 @@ def temperature_factor(
     forecast_c: float,
     profile_degrees: float,
     limit_c: float,
+    max_factor: float = FACTOR_MAX,
 ) -> float:
     """How much more (or less) tomorrow draws than the days the profile is from.
 
     ``profile_degrees`` is the mean heating degrees of those days. 1.0 for an
-    unusable model; clamped to ``FACTOR_MIN`` .. ``FACTOR_MAX`` otherwise.
+    unusable model; clamped to ``FACTOR_MIN`` .. ``max_factor`` otherwise, the
+    house's own cap (3.14.6, ``FACTOR_MAX`` before).
     """
     if model is None or not model.usable:
         return 1.0
@@ -136,7 +138,32 @@ def temperature_factor(
     if baseline <= 0:
         return 1.0
     expected = model.daily_kwh(heating_degrees(forecast_c, limit_c))
-    return min(FACTOR_MAX, max(FACTOR_MIN, expected / baseline))
+    return min(max_factor, max(FACTOR_MIN, expected / baseline))
+
+
+def parse_factor_max(
+    raw: Any, presets: Mapping[str, float], allowed: tuple[float, float]
+) -> float | None:
+    """The cap a stored option means: a preset's number or a typed one; None if neither.
+
+    The select keeps what was typed as text (``"1.4"``, ``"1,4"``), so both a
+    decimal point and a decimal comma are read. Outside ``allowed`` is None.
+    """
+    if isinstance(raw, str) and raw in presets:
+        return presets[raw]
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, str):
+        try:
+            value = float(raw.strip().replace(",", "."))
+        except ValueError:
+            return None
+    elif isinstance(raw, (int, float)):
+        value = float(raw)
+    else:
+        return None
+    low, high = allowed
+    return value if math.isfinite(value) and low <= value <= high else None
 
 
 def _local_day(raw: Any, to_local: Any) -> date | None:

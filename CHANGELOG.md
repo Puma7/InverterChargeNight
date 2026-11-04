@@ -23,6 +23,16 @@ went into a sunny day far too full.
   rose; while the factor scales the load the line now ends with `load x1.48 for 5.7 °C`. The
   `weather` attribute and the diagnostics also show the model's base load (`base_kwh_per_day`).
 
+### Added
+
+- **The weather factor's cap is the house's own.** It was fixed at 1.5. A ground-source heat pump
+  in a well-insulated house draws far less extra on a frosty day than direct electric heating, so
+  the new option *Highest weather factor* offers four presets: 1.2 (well insulated, ground-source
+  heat pump), 1.3 (well insulated, air-source heat pump), 1.5 (average insulation, the default
+  and the old value) and 2.0 (poor insulation or direct electric heating such as instantaneous
+  water heaters and radiant heaters). Any number between 1.0 and 3.0 can be typed instead. The
+  `weather` attribute shows the cap as `factor_max`.
+
 ## [3.14.5] - 2026-11-02
 
 The night of 1/2 November 2026: the window charged at the 9000 W the efficiency search found and

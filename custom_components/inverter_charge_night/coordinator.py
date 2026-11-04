@@ -53,6 +53,7 @@ from .heating import (
     fit_heating_model,
     heating_degrees,
     hourly_mean_from_forecast,
+    parse_factor_max,
     temperature_factor,
     to_celsius,
 )
@@ -140,6 +141,7 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_HEATING_LIMIT_C,
+    CONF_WEATHER_FACTOR_MAX,
     CONF_BRIDGE_MODEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
@@ -158,6 +160,9 @@ from .const import (
     LOAD_QUANTILE_MIN_SAMPLES,
     LOAD_SAFETY_QUANTILES,
     DEFAULT_HEATING_LIMIT_C,
+    DEFAULT_WEATHER_FACTOR_MAX,
+    WEATHER_FACTOR_MAX_RANGE,
+    WEATHER_FACTOR_PRESETS,
     WEATHER_FORECAST_CACHE_S,
     WEATHER_SERVICE_TIMEOUT_S,
     OUTDOOR_TEMPERATURE_CACHE_S,
@@ -2666,6 +2671,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return ""
         return f", load x{factor:.2f} for {status.get('forecast_temp_c')} °C"
 
+    def _weather_factor_max(self) -> float:
+        """The house's cap on the weather factor: preset, typed number, or the default."""
+        allowed = WEATHER_FACTOR_MAX_RANGE
+        value = parse_factor_max(
+            self.config.get(CONF_WEATHER_FACTOR_MAX, DEFAULT_WEATHER_FACTOR_MAX),
+            WEATHER_FACTOR_PRESETS, allowed,
+        )
+        return value if value is not None else WEATHER_FACTOR_PRESETS[DEFAULT_WEATHER_FACTOR_MAX]
+
     async def _weather_factor(self, day: date) -> float:
         """How much more the planned day draws than the fortnight (plan 015 stage D).
 
@@ -2677,6 +2691,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.weather_status = {"status": STATUS_OFF}
             return 1.0
         limit = float(self.config.get(CONF_HEATING_LIMIT_C, DEFAULT_HEATING_LIMIT_C))
+        max_factor = self._weather_factor_max()
         forecast_c = await self._forecast_mean_temperature(day)
         temperatures = await self._daily_outdoor_c()
         daily_kwh: dict[date, float] = {}
@@ -2699,6 +2714,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "base_kwh_per_day": round(model.intercept_kwh, 2) if model else None,
             "r2": round(model.r2, 2) if model else None,
             "heating_limit_c": limit,
+            "factor_max": max_factor,
         }
         if forecast_c is None:
             self.weather_status = {**status, "status": STATUS_FORECAST_UNAVAILABLE, "factor": 1.0}
@@ -2707,7 +2723,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.weather_status = {**status, "status": STATUS_LEARNING, "factor": 1.0}
             return 1.0
         profile_degrees = sum(heating_degrees(t, limit) for t, _ in pairs) / len(pairs)
-        factor = temperature_factor(model, forecast_c, profile_degrees, limit)
+        factor = temperature_factor(model, forecast_c, profile_degrees, limit, max_factor)
         self.weather_status = {**status, "status": STATUS_ACTIVE, "factor": round(factor, 3)}
         return factor
 

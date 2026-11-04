@@ -13,12 +13,22 @@ from unittest.mock import patch
 
 import pytest
 
+from custom_components.inverter_charge_night.const import (
+    CONF_WEATHER_FACTOR_MAX,
+    DEFAULT_WEATHER_FACTOR_MAX,
+    WEATHER_FACTOR_MAX_RANGE,
+    WEATHER_FACTOR_PRESETS,
+)
 from custom_components.inverter_charge_night.heating import (
+    FACTOR_MAX,
     MIN_FIT_DAYS,
     fit_heating_model,
     heating_degrees,
+    parse_factor_max,
     temperature_factor,
 )
+from custom_components.inverter_charge_night import config_flow
+from tests.test_config_flow_validation import _errors
 from tests.test_planner_015 import (
     COORDINATOR,
     NIGHT,
@@ -103,3 +113,129 @@ async def test_without_a_factor_the_line_stays_as_it_was(mock_hass, caplog):
 
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Bridge plan:")]
     assert lines and "load x" not in lines[-1]
+
+
+# --- the house's own cap on the weather factor (Pascal, 4 November 2026) ------
+
+COLD = [{"datetime": "2026-01-15T11:00:00+00:00", "temperature": -2.0, "templow": -8.0}]
+FROST = [{"datetime": "2026-01-15T11:00:00+00:00", "temperature": -12.0, "templow": -18.0}]
+FORTNIGHT = [2.0 + (i % 7) for i in range(14)]
+
+
+def test_the_presets_are_the_four_houses():
+    assert WEATHER_FACTOR_PRESETS == {
+        "ground_source": 1.2, "air_source": 1.3,
+        "medium_insulation": 1.5, "poor_insulation": 2.0,
+    }
+    # An update keeps the cap it had
+    assert WEATHER_FACTOR_PRESETS[DEFAULT_WEATHER_FACTOR_MAX] == FACTOR_MAX == 1.5
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    ("ground_source", 1.2), ("poor_insulation", 2.0),
+    ("1.4", 1.4), (" 1,75 ", 1.75), (1.1, 1.1), (2, 2.0), ("1.0", 1.0), ("3", 3.0),
+    ("abc", None), ("", None), ("0.9", None), ("3.5", None), ("nan", None), ("inf", None),
+    (True, None), (None, None), ([1.2], None),
+])
+def test_a_stored_cap_is_a_preset_or_a_typed_number(raw, expected):
+    assert parse_factor_max(raw, WEATHER_FACTOR_PRESETS, WEATHER_FACTOR_MAX_RANGE) == expected
+
+
+def test_the_cap_holds_the_factor():
+    model = fit_heating_model(_days(10.0, 0.8, OCTOBER), LIMIT)
+    assert model is not None and model.usable
+    free = temperature_factor(model, -30.0, 6.6, LIMIT, 3.0)
+    assert free > 2.0
+    assert temperature_factor(model, -30.0, 6.6, LIMIT) == 1.5
+    assert temperature_factor(model, -30.0, 6.6, LIMIT, 1.2) == 1.2
+    assert temperature_factor(model, -30.0, 6.6, LIMIT, 2.0) == 2.0
+    # A mild day is not raised by any cap
+    assert temperature_factor(model, 9.0, 6.6, LIMIT, 1.2) < 1.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("option", "cap"), [
+    ("ground_source", 1.2), ("air_source", 1.3), ("1.35", 1.35),
+])
+async def test_a_ground_source_house_plans_less_for_the_same_cold(mock_hass, option, cap):
+    """18 kWh at 5 °C would be 26 kWh at -5 °C; a ground-source house caps it at 1.2."""
+    coordinator = _weather_coordinator(mock_hass, {CONF_WEATHER_FACTOR_MAX: option})
+    _fortnight(coordinator, FORTNIGHT)
+    _forecast_service(mock_hass, daily=COLD)
+    unscaled = list(await coordinator._house_load_profile())
+
+    need = await coordinator._house_load_need_profile(PLAN_DAY)
+
+    status = coordinator.weather_status
+    assert status["status"] == "active"
+    assert status["factor_max"] == cap
+    assert status["factor"] == pytest.approx(cap)
+    assert need == pytest.approx([kwh * cap for kwh in unscaled])
+
+
+@pytest.mark.asyncio
+async def test_without_the_option_the_cap_is_1_5_as_before(mock_hass):
+    coordinator = _weather_coordinator(mock_hass)
+    _fortnight(coordinator, FORTNIGHT)
+    _forecast_service(mock_hass, daily=FROST)
+
+    await coordinator._house_load_need_profile(PLAN_DAY)
+
+    assert coordinator.weather_status["factor_max"] == 1.5
+    assert coordinator.weather_status["factor"] == pytest.approx(1.5)
+
+
+@pytest.mark.asyncio
+async def test_direct_heating_may_draw_more_than_1_5(mock_hass):
+    """At -15 °C the fortnight's 18 kWh become 34: 1.89, more than the old cap."""
+    coordinator = _weather_coordinator(mock_hass, {CONF_WEATHER_FACTOR_MAX: "poor_insulation"})
+    _fortnight(coordinator, FORTNIGHT)
+    _forecast_service(mock_hass, daily=FROST)
+
+    await coordinator._house_load_need_profile(PLAN_DAY)
+
+    status = coordinator.weather_status
+    assert status["factor_max"] == 2.0
+    assert 1.8 < status["factor"] < 2.0
+
+
+@pytest.mark.asyncio
+async def test_a_cap_that_means_nothing_falls_back_to_1_5(mock_hass):
+    coordinator = _weather_coordinator(mock_hass, {CONF_WEATHER_FACTOR_MAX: "viel"})
+    _fortnight(coordinator, FORTNIGHT)
+    _forecast_service(mock_hass, daily=FROST)
+
+    await coordinator._house_load_need_profile(PLAN_DAY)
+
+    assert coordinator.weather_status["factor_max"] == 1.5
+    assert coordinator.weather_status["factor"] == pytest.approx(1.5)
+
+
+def _factor_field(defaults):
+    for marker, field in config_flow._schema_advanced(defaults).schema.items():
+        if marker.schema == CONF_WEATHER_FACTOR_MAX:
+            return marker, field
+    raise AssertionError("no weather factor field")
+
+
+def test_the_options_offer_the_presets_and_a_number_of_your_own():
+    marker, field = _factor_field({})
+    assert marker.default() == "medium_insulation"
+    assert field.config["options"] == list(WEATHER_FACTOR_PRESETS)
+    assert field.config["custom_value"] is True
+    assert field.config["translation_key"] == "weather_factor_max"
+    assert _factor_field({CONF_WEATHER_FACTOR_MAX: "1.4"})[0].default() == "1.4"
+    assert CONF_WEATHER_FACTOR_MAX in config_flow.STEP_ADVANCED_KEYS
+    assert CONF_WEATHER_FACTOR_MAX in config_flow._GUIDED_GROUPS["reserve"]
+
+
+@pytest.mark.parametrize("value", ["ground_source", "poor_insulation", "1.4", "1,25", "3.0"])
+def test_a_preset_or_a_number_in_range_is_accepted(mock_hass, value):
+    assert _errors(mock_hass, **{CONF_WEATHER_FACTOR_MAX: value}) == {}
+
+
+@pytest.mark.parametrize("value", ["viel", "0.8", "4", ""])
+def test_anything_else_is_refused(mock_hass, value):
+    assert _errors(mock_hass, **{CONF_WEATHER_FACTOR_MAX: value}) == {
+        CONF_WEATHER_FACTOR_MAX: "invalid_weather_factor_max",
+    }

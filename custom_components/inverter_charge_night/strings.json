@@ -138,6 +138,7 @@
           "weather_entity": "Weather forecast entity",
           "outdoor_temperature_entity": "Outdoor temperature sensor",
           "heating_limit_c": "Heating limit temperature",
+          "weather_factor_max": "Highest weather factor",
           "bridge_model": "How the morning and the day are bridged"
         },
         "data_description": {
@@ -170,6 +171,7 @@
           "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
           "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
           "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree.",
+          "weather_factor_max": "How far a cold day may raise the planned consumption over the last 14 days. Pick what fits the house, or type a number of your own between 1.0 and 3.0 (1.0: never more). Well insulated with a ground-source heat pump 1.2: the brine stays warm, so frost costs little extra. Well insulated with an air-source heat pump 1.3. Average insulation 1.5 (as before). Poor insulation or direct electric heating such as instantaneous water heaters and radiant heaters 2.0.",
           "bridge_model": "Fixed delay (as before): the battery covers the house from the window end until sunrise plus the PV crossover delay, and the high-price evening. Modelled: ICN runs tomorrow every five minutes, the house load against the PV curve of the forecast, from the window end to the end of the high-price evening. A sunny day takes over early and needs less; a dull December day may never carry the house, and then the whole day is bridged. With the daily PV energy meter set, the PV curve is learned from the last two weeks (roof orientation, shading, season) instead of a clear-sky bell."
         }
       },
@@ -310,6 +312,7 @@
           "weather_entity": "Weather forecast entity",
           "outdoor_temperature_entity": "Outdoor temperature sensor",
           "heating_limit_c": "Heating limit temperature",
+          "weather_factor_max": "Highest weather factor",
           "bridge_model": "How the morning and the day are bridged"
         },
         "data_description": {
@@ -342,6 +345,7 @@
           "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
           "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
           "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree.",
+          "weather_factor_max": "How far a cold day may raise the planned consumption over the last 14 days. Pick what fits the house, or type a number of your own between 1.0 and 3.0 (1.0: never more). Well insulated with a ground-source heat pump 1.2: the brine stays warm, so frost costs little extra. Well insulated with an air-source heat pump 1.3. Average insulation 1.5 (as before). Poor insulation or direct electric heating such as instantaneous water heaters and radiant heaters 2.0.",
           "bridge_model": "Fixed delay (as before): the battery covers the house from the window end until sunrise plus the PV crossover delay, and the high-price evening. Modelled: ICN runs tomorrow every five minutes, the house load against the PV curve of the forecast, from the window end to the end of the high-price evening. A sunny day takes over early and needs less; a dull December day may never carry the house, and then the whole day is bridged. With the daily PV energy meter set, the PV curve is learned from the last two weeks (roof orientation, shading, season) instead of a clear-sky bell."
         }
       },
@@ -719,6 +723,7 @@
           "weather_entity": "Weather forecast entity",
           "outdoor_temperature_entity": "Outdoor temperature sensor",
           "heating_limit_c": "Heating limit temperature",
+          "weather_factor_max": "Highest weather factor",
           "bridge_model": "How the morning and the day are bridged"
         },
         "data_description": {
@@ -727,6 +732,7 @@
           "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
           "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
           "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree.",
+          "weather_factor_max": "How far a cold day may raise the planned consumption over the last 14 days. Pick what fits the house, or type a number of your own between 1.0 and 3.0 (1.0: never more). Well insulated with a ground-source heat pump 1.2: the brine stays warm, so frost costs little extra. Well insulated with an air-source heat pump 1.3. Average insulation 1.5 (as before). Poor insulation or direct electric heating such as instantaneous water heaters and radiant heaters 2.0.",
           "bridge_model": "Fixed delay (as before): the battery covers the house from the window end until sunrise plus the PV crossover delay, and the high-price evening. Modelled: ICN runs tomorrow every five minutes, the house load against the PV curve of the forecast, from the window end to the end of the high-price evening. A sunny day takes over early and needs less; a dull December day may never carry the house, and then the whole day is bridged. With the daily PV energy meter set, the PV curve is learned from the last two weeks (roof orientation, shading, season) instead of a clear-sky bell."
         }
       }
@@ -739,6 +745,7 @@
       "invalid_current": "Fuse size must be greater than 0",
       "invalid_date": "Invalid date format (use YYYY-MM-DD)",
       "invalid_efficiency": "Charge efficiency must be between 0 and 1",
+      "invalid_weather_factor_max": "Choose a preset or enter a number between 1.0 and 3.0.",
       "invalid_entity": "Invalid entity selected",
       "invalid_phases": "Phases must be 1 or 3",
       "invalid_power": "Power must be greater than 0",
@@ -909,6 +916,7 @@
           "weather_entity": "Weather forecast entity",
           "outdoor_temperature_entity": "Outdoor temperature sensor",
           "heating_limit_c": "Heating limit temperature",
+          "weather_factor_max": "Highest weather factor",
           "bridge_model": "How the morning and the day are bridged"
         },
         "data_description": {
@@ -941,6 +949,7 @@
           "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
           "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
           "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree.",
+          "weather_factor_max": "How far a cold day may raise the planned consumption over the last 14 days. Pick what fits the house, or type a number of your own between 1.0 and 3.0 (1.0: never more). Well insulated with a ground-source heat pump 1.2: the brine stays warm, so frost costs little extra. Well insulated with an air-source heat pump 1.3. Average insulation 1.5 (as before). Poor insulation or direct electric heating such as instantaneous water heaters and radiant heaters 2.0.",
           "bridge_model": "Fixed delay (as before): the battery covers the house from the window end until sunrise plus the PV crossover delay, and the high-price evening. Modelled: ICN runs tomorrow every five minutes, the house load against the PV curve of the forecast, from the window end to the end of the high-price evening. A sunny day takes over early and needs less; a dull December day may never carry the house, and then the whole day is bridged. With the daily PV energy meter set, the PV curve is learned from the last two weeks (roof orientation, shading, season) instead of a clear-sky bell."
         }
       },
@@ -1314,6 +1323,7 @@
           "weather_entity": "Weather forecast entity",
           "outdoor_temperature_entity": "Outdoor temperature sensor",
           "heating_limit_c": "Heating limit temperature",
+          "weather_factor_max": "Highest weather factor",
           "bridge_model": "How the morning and the day are bridged"
         },
         "data_description": {
@@ -1322,6 +1332,7 @@
           "weather_entity": "Optional, for a heat pump or other electric heating: a weather entity (Met.no, DWD, OpenWeatherMap …). ICN asks it for tomorrow's forecast and learns from your consumption meter how much more the house draws per degree of cold. A day colder than the last two weeks then plans more energy, a warmer one less (at most +50 % / −15 %). Without heating that depends on the weather, the learned slope stays near zero and nothing changes. Needs the house consumption meter.",
           "outdoor_temperature_entity": "Optional: an outdoor temperature sensor with long-term statistics. ICN then learns from the last two weeks right away. Without it ICN records the weather entity's current temperature itself and needs about ten days before the forecast has an effect.",
           "heating_limit_c": "Daily mean outdoor temperature below which the house heats (default 15 °C). Each degree below it counts as one heating degree.",
+          "weather_factor_max": "How far a cold day may raise the planned consumption over the last 14 days. Pick what fits the house, or type a number of your own between 1.0 and 3.0 (1.0: never more). Well insulated with a ground-source heat pump 1.2: the brine stays warm, so frost costs little extra. Well insulated with an air-source heat pump 1.3. Average insulation 1.5 (as before). Poor insulation or direct electric heating such as instantaneous water heaters and radiant heaters 2.0.",
           "bridge_model": "Fixed delay (as before): the battery covers the house from the window end until sunrise plus the PV crossover delay, and the high-price evening. Modelled: ICN runs tomorrow every five minutes, the house load against the PV curve of the forecast, from the window end to the end of the high-price evening. A sunny day takes over early and needs less; a dull December day may never carry the house, and then the whole day is bridged. With the daily PV energy meter set, the PV curve is learned from the last two weeks (roof orientation, shading, season) instead of a clear-sky bell."
         }
       }
@@ -1334,6 +1345,7 @@
       "invalid_current": "Fuse size must be greater than 0",
       "invalid_date": "Invalid date format (use YYYY-MM-DD)",
       "invalid_efficiency": "Charge efficiency must be between 0 and 1",
+      "invalid_weather_factor_max": "Choose a preset or enter a number between 1.0 and 3.0.",
       "invalid_entity": "Invalid entity selected",
       "invalid_phases": "Phases must be 1 or 3",
       "invalid_power": "Power must be greater than 0",
@@ -1394,6 +1406,14 @@
         "mean": "Average (as before)",
         "p75": "Safe (75th percentile)",
         "p90": "Very safe (90th percentile)"
+      }
+    },
+    "weather_factor_max": {
+      "options": {
+        "ground_source": "1.2 – well insulated, ground-source heat pump",
+        "air_source": "1.3 – well insulated, air-source heat pump",
+        "medium_insulation": "1.5 – average insulation (as before)",
+        "poor_insulation": "2.0 – poor insulation or direct electric heating"
       }
     },
     "bridge_model": {

@@ -48,6 +48,7 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_HEATING_LIMIT_C,
+    CONF_WEATHER_FACTOR_MAX,
     CONF_BRIDGE_MODEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_CHARGE_POWER_ENTITY,
@@ -98,6 +99,9 @@ from .const import (
     DEFAULT_LOAD_SAFETY_LEVEL,
     LOAD_SAFETY_LEVELS,
     DEFAULT_HEATING_LIMIT_C,
+    DEFAULT_WEATHER_FACTOR_MAX,
+    WEATHER_FACTOR_MAX_RANGE,
+    WEATHER_FACTOR_PRESETS,
     DEFAULT_BRIDGE_MODEL,
     BRIDGE_MODELS,
     DEFAULT_CHARGE_EFFICIENCY,
@@ -142,6 +146,7 @@ from .const import (
     DEFAULT_GRID_CONTINUOUS_PCT,
     DEFAULT_GRID_HEADROOM_W,
 )
+from .heating import parse_factor_max
 from .util import parse_time_str
 from .setup_drafts import get_drafts
 
@@ -218,6 +223,7 @@ STEP_ADVANCED_KEYS: tuple[str, ...] = (
     CONF_WEATHER_ENTITY,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_HEATING_LIMIT_C,
+    CONF_WEATHER_FACTOR_MAX,
     CONF_BRIDGE_MODEL,
     CONF_CHARGE_EFFICIENCY,
     CONF_DISCHARGE_EFFICIENCY,
@@ -439,6 +445,11 @@ def _validate_user_input(
     efficiency = user_input.get(CONF_CHARGE_EFFICIENCY)
     if efficiency is not None and not 0 < efficiency <= 1:
         errors[CONF_CHARGE_EFFICIENCY] = "invalid_efficiency"
+    factor_max = user_input.get(CONF_WEATHER_FACTOR_MAX)
+    if factor_max is not None and parse_factor_max(
+        factor_max, WEATHER_FACTOR_PRESETS, WEATHER_FACTOR_MAX_RANGE
+    ) is None:
+        errors[CONF_WEATHER_FACTOR_MAX] = "invalid_weather_factor_max"
     # House connection limit (plan 008). The limit only ever charges less, but a
     # nonsensical value should be caught here rather than silently corrected.
     phases = user_input.get(CONF_GRID_PHASES)
@@ -701,6 +712,21 @@ def _load_safety_level_selector() -> Any:
     )
 
 
+def _weather_factor_max_selector() -> Any:
+    """The four presets, or a number of the house's own (kept as typed text)."""
+    return cast(
+        Any,
+        selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=list(WEATHER_FACTOR_PRESETS),
+                translation_key="weather_factor_max",
+                custom_value=True,
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+    )
+
+
 def _planner_mode_selector() -> Any:
     return cast(
         Any,
@@ -920,6 +946,9 @@ def _schema_advanced(defaults: Mapping[str, Any]) -> vol.Schema:
                 CONF_HEATING_LIMIT_C, defaults, DEFAULT_HEATING_LIMIT_C
             ): _number_selector(5, 25, 0.5, "°C"),
             _required(
+                CONF_WEATHER_FACTOR_MAX, defaults, DEFAULT_WEATHER_FACTOR_MAX
+            ): _weather_factor_max_selector(),
+            _required(
                 CONF_BRIDGE_MODEL, defaults, DEFAULT_BRIDGE_MODEL
             ): _bridge_model_selector(),
             _required(
@@ -1035,7 +1064,8 @@ _GUIDED_GROUPS: dict[str, tuple[str, ...]] = {
                  CONF_AVG_HOUSE_LOAD_KW, CONF_PV_CROSSOVER_DELAY_MIN, CONF_BRIDGE_RESERVE_KWH),
     # Plan 015: how much the night target carries beyond the bare need
     "reserve": (CONF_SAFETY_BUFFER_KWH, CONF_LOAD_SAFETY_LEVEL, CONF_BRIDGE_MODEL,
-                CONF_WEATHER_ENTITY, CONF_OUTDOOR_TEMPERATURE_ENTITY, CONF_HEATING_LIMIT_C),
+                CONF_WEATHER_ENTITY, CONF_OUTDOOR_TEMPERATURE_ENTITY, CONF_HEATING_LIMIT_C,
+                CONF_WEATHER_FACTOR_MAX),
     "evening": (CONF_HIGH_PRICE_START, CONF_HIGH_PRICE_END, CONF_HIGH_PRICE_MARGIN_PCT,
                 CONF_DISCHARGE_BLOCK_MODE, CONF_DISCHARGE_BLOCK_SWITCH),
     "season": (CONF_ACTIVE_START_DATE, CONF_ACTIVE_END_DATE, CONF_ACTIVE_RANGE_YEARLY),
