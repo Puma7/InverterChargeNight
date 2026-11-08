@@ -27,11 +27,21 @@ Nachtladefenster um eins.
 
 Ist **Sehr geringen PV-Ertrag berücksichtigen** eingerichtet (Prognose für heute plus ein Zähler
 für den PV-Tagesertrag), merkt sich ICN die Prognose vom Morgen und vergleicht sie nach
-Sonnenuntergang mit dem, was erzeugt wurde. Mindestens 5 kWh erwartet und höchstens 15 % davon
-geliefert setzt die **nächste** reguläre Nacht auf den Max-SOC, wie eine Schnee-Nacht. Ein
-Reparaturhinweis (*PV-Ertrag stark ausgefallen*) und die `pv_yield`-Attribute des Sensors
-*Zielladestand* erklären die Entscheidung. Geringer Ertrag kann Schnee, Verschattung, einen
-Strangfehler oder eine falsche Prognose bedeuten; ICN versucht nicht, das zu unterscheiden.
+Sonnenuntergang mit dem, was erzeugt wurde. Mindestens 5 kWh erwartet und höchstens 10 % davon
+geliefert ist ein dunkler Tag (zum Beispiel 2 von 20 kWh). Ein dunkler Tag setzt die **nächste**
+reguläre Nacht nur dann auf den Max-SOC, wie eine Schnee-Nacht, wenn Schnee plausibel ist:
+
+- Das Tagesmittel der Außentemperatur lag unter 7 °C (aus der Wetter-Entität oder dem
+  Außentemperatursensor des Wetterfaktors), oder
+- der Vortag war ebenfalls dunkel. Ohne Temperaturquelle gilt nur das.
+
+Ein einzelner dunkler Nebeltag bei 7 °C oder mehr löst nicht aus: Die Prognose für morgen ist
+nicht falsch, nur weil die für heute es war (7. November 2026). Ein Reparaturhinweis (*PV-Ertrag
+stark ausgefallen*) und die `pv_yield`-Attribute des Sensors *Zielladestand* erklären die
+Entscheidung: `status` ist `low_yield_unconfirmed` für einen dunklen Tag, der auf einen zweiten
+wartet, und `trigger` sagt `cold` oder `second_day`. Die Log-Zeile beim Fensterstart nennt den Tag
+und seine Zahlen. Geringer Ertrag kann weiterhin Schnee, Verschattung, einen Strangfehler oder eine
+falsche Prognose bedeuten; ICN versucht nicht, das zu unterscheiden.
 
 ## Hochpreisrettung
 

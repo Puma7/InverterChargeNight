@@ -1751,7 +1751,11 @@
     },
     "pv_yield_shortfall": {
       "title": "Severe PV yield shortfall",
-      "description": "{name}: expected {expected} kWh, measured {actual} kWh. The next regular night charges to the configured maximum SOC. Check the PV system, forecast and possible snow cover. The cause has not been automatically determined."
+      "description": "{name}: expected {expected} kWh, measured {actual} kWh. The next regular night charges to the configured maximum SOC. It was a cold day (below 7 °C) or the second dark day in a row; a single dark day of fog does not arm the full charge. Check the PV system, forecast and possible snow cover. The cause has not been automatically determined."
+    },
+    "battery_not_charging": {
+      "title": "{name}: the battery does not charge",
+      "description": "{name} raised the inverter's min SOC to {floor} % at a {power} W charge limit, but the battery stayed at {soc} % for {minutes} minutes. The charge power is not raised any further, and the min SOC was nudged once (taken down to the battery and raised again). Check whether the inverter charges from the grid under a raised min SOC; a Kostal sometimes starts only after its nightly internal error. The notice goes away when the battery charges again or reaches its target, when the next window starts or when the integration is switched off."
     },
     "reset_incomplete": {
       "title": "{name}: inverter settings not fully restored",

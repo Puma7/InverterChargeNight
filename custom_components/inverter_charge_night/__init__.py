@@ -348,6 +348,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: InverterChargeNightConf
     """
     ir.async_delete_issue(hass, DOMAIN, f"reset_incomplete_{entry.entry_id}")
     ir.async_delete_issue(hass, DOMAIN, f"charge_limit_not_held_{entry.entry_id}")
+    ir.async_delete_issue(hass, DOMAIN, f"battery_not_charging_{entry.entry_id}")
     ir.async_delete_issue(hass, DOMAIN, f"efficiency_sensors_{entry.entry_id}")
     # What the entry learned about this house (plan 018) goes with it
     store: Store[dict[str, Any]] = Store(

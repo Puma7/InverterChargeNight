@@ -61,6 +61,7 @@ einem Update von einer älteren Version prüfst du die IDs auf der Geräteseite.
 | `adhoc_reason`, `adhoc_until` | Eine laufende Hochpreisrettung oder ein Fenster aus einer Aktion. |
 | `original_min_soc`, `pending_reset`, `reset_abandoned` | Der gespeicherte Ausgangswert und der Stand der Rückgabe. |
 | `charge_limit_not_held`, `min_soc_released_for_connection` | Schutzfunktionen des Hausanschlusses, die ausgelöst haben. |
+| `battery_not_charging` | Der Akku hat unter dem angehobenen Min-SOC 20 Minuten nicht geladen: Die Ladeleistung wird gehalten, nicht erhöht ([Fehlersuche](troubleshooting.md)). |
 | `pv_yield` | Die Erkennung von geringem PV-Ertrag. |
 
 ## Aktionen

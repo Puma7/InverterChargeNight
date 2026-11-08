@@ -61,6 +61,7 @@ version, check the ids on the device page.
 | `adhoc_reason`, `adhoc_until` | A running high-price rescue or action window. |
 | `original_min_soc`, `pending_reset`, `reset_abandoned` | The stored original and the state of the restore. |
 | `charge_limit_not_held`, `min_soc_released_for_connection` | Protections of the house connection that have triggered. |
+| `battery_not_charging` | The battery has not charged for 20 minutes under the raised min SOC: the charge power is held, not raised ([troubleshooting](troubleshooting.md)). |
 | `pv_yield` | The PV shortfall detection. |
 
 ## Actions
