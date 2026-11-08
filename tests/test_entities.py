@@ -360,7 +360,9 @@ def test_entities_share_device_info_and_unique_id():
     entry.title = ""
     power_sensor = BestChargePowerSensor(coordinator, entry)
     assert power_sensor.unique_id == "entry_1_best_charge_power"
-    assert power_sensor.device_info == sensor.device_info | {"name": "Inverter Charge Night"}
+    # Home Assistant 2026.11 made DeviceInfo a dataclass with a mapping view:
+    # compared as dicts, which every supported release can give
+    assert dict(power_sensor.device_info) == dict(sensor.device_info) | {"name": "Inverter Charge Night"}
 
 
 # --- Plan 006: planned charge power sensor and plan attributes --------------

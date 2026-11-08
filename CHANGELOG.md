@@ -41,6 +41,8 @@ was at 69 %.
   When the battery charges again, the hold and the notice go, and the plan raises the power if
   the deadline needs it. The next window starts without the notice. The status sensor and the
   diagnostics show `battery_not_charging`.
+- Tests: Home Assistant 2026.11 made `DeviceInfo` a dataclass with a mapping view, and a test
+  merged it with `|` like a dict. It compares the two as dicts now.
 
 ## [3.14.6] - 2026-11-04
 
