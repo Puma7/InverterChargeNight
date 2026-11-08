@@ -138,8 +138,9 @@ das Ergebnis genauer.
 Mit der Prognose für heute und einem Zähler für den PV-Tagesertrag (*Tatsächlicher
 PV-Tagesertrag*, `pv_energy_today_entity`, wird jeden Tag zurückgesetzt) vergleicht ICN die
 Prognose des Tages mit dem, was wirklich erzeugt wurde. Ein Tag mit mindestens 5 kWh erwartetem
-Ertrag und höchstens 15 % davon geliefert setzt die nächste Nacht auf den Max-SOC
-([Details](extras.md#sehr-geringer-pv-ertrag)). Derselbe Zähler speist die gelernte PV-Kurve des
+Ertrag und höchstens 10 % davon geliefert ist ein dunkler Tag. Ein kalter dunkler Tag
+(Tagesmittel unter 7 °C) oder der zweite dunkle Tag in Folge setzt die nächste Nacht auf den
+Max-SOC ([Details](extras.md#sehr-geringer-pv-ertrag)). Derselbe Zähler speist die gelernte PV-Kurve des
 modellierten Tages.
 
 ### Strompreise berücksichtigen

@@ -25,10 +25,20 @@ forecast and the override, and the counter drops by one after each completed nig
 
 With **Account for very low PV yield** configured (forecast for today plus a daily PV energy
 meter), ICN keeps the morning's forecast and compares it after sunset with what was produced. At
-least 5 kWh expected and no more than 15 % delivered arms the **next** regular night at the maximum
-SOC, like a snow night. A repair warning and the `pv_yield` attributes of the *Target SOC* sensor
-explain the decision. Low yield can mean snow, shading, a string fault or a wrong forecast; ICN
-does not try to tell which.
+least 5 kWh expected and no more than 10 % delivered makes a dark day (2 of 20 kWh, for example).
+A dark day arms the **next** regular night at the maximum SOC, like a snow night, only when snow
+is plausible:
+
+- the day's mean outdoor temperature was below 7 °C (from the weather entity or the outdoor
+  temperature sensor of the weather factor), or
+- the day before was dark too. Without a temperature source, only this applies.
+
+A single dark day of fog at 7 °C or more does not arm it: tomorrow's forecast is not wrong because
+today's was (7 November 2026). A repair warning and the `pv_yield` attributes of the *Target SOC*
+sensor explain the decision: `status` is `low_yield_unconfirmed` for a dark day that waits for a
+second one, and `trigger` says `cold` or `second_day`. The log line at the window start names the
+day and its figures. Low yield can still mean snow, shading, a string fault or a wrong forecast;
+ICN does not try to tell which.
 
 ## High-price rescue
 

@@ -240,6 +240,14 @@ AUTO_TEST_MAX_ATTEMPTS = 2  # after this many failures a power counts as unmeasu
 # charging at all - a Kostal ignores a min SOC only 1 % above the battery
 # (21/22 October 2026). That is the night's fault, not the power's.
 AUTO_TEST_IDLE_RATIO = 0.25
+# 3.14.7: a Kostal that does not charge under the raised min SOC. On 7/8
+# November 2026 the battery sat at 17 % from 23:01 to 03:10 under a 100 % floor
+# while the plan raised the limit from 9000 W to 12540 W; it charged only after
+# the inverter's nightly internal error.
+STALL_DETECT_S = 1200  # no rise after this long counts as not charging
+STALL_MIN_EXPECTED_SOC = 2.0  # % the written power should have added by then
+STALL_PROGRESS_RATIO = 0.25  # less than this share of it is no charging
+STALL_NUDGE_SETTLE_S = 12  # KostalKore publishes a min SOC write after its 10 s cooldown
 # Trial starts whose setpoint the inverter did not take before the search
 # stops for the window: each further one is a Modbus write that changes nothing
 AUTO_TEST_MAX_START_FAILURES = 2

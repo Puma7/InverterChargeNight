@@ -80,6 +80,10 @@ from .const import (
     CONF_MAX_CHARGE_POWER_W,
     CONF_CHARGE_POWER_ENTITY,
     AUTO_TEST_IDLE_RATIO,
+    STALL_DETECT_S,
+    STALL_MIN_EXPECTED_SOC,
+    STALL_NUDGE_SETTLE_S,
+    STALL_PROGRESS_RATIO,
     AUTO_TEST_MAX_ATTEMPTS,
     AUTO_TEST_MAX_IMPLAUSIBLE,
     AUTO_TEST_MAX_PLAUSIBLE_LOSS,
@@ -637,6 +641,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # bounded by AC_LIMIT_MAX_REWRITES, then a repair issue instead.
         self._ac_limit_rewrites = 0
         self._ac_limit_not_held = False
+        # 3.14.7: the SOC and time charging was last seen to progress from, and
+        # whether this window's battery does not charge under its raised floor
+        self._progress_soc: float | None = None
+        self._progress_since: datetime | None = None
+        self._charge_stalled = False
+        self._stall_hold_w: float | None = None
+        self._stall_nudged = False
+        self._nudging_min_soc = False
         # The min SOC this window was taken down to because the connection
         # needed a lower charge limit than the inverter could be made to hold
         self._floor_released_soc: float | None = None
@@ -1218,7 +1230,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         energy = self._read_energy_wh(str(entity)) if state is not None else None
         actual = energy / 1000 if energy is not None and age is not None and 0 <= age <= 1800 else None
         before = self._pv_yield.snapshot()
-        incident = self._pv_yield.observe(now, sunrise, sunset, forecast if available else None, actual)
+        incident = self._pv_yield.observe(
+            now, sunrise, sunset, forecast if available else None, actual,
+            self._temperature_log.today_mean(now.date()) if self.config.get(CONF_WEATHER_ENTITY) else None,
+        )
         if before != self._pv_yield.snapshot():
             self._persist_state()
         if incident:
@@ -3261,6 +3276,115 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "planned_charge_power_w": self.planned_charge_power_w,
         }
 
+    def _clear_charge_stall(self, *, new_window: bool) -> None:
+        """Watch this window's progress afresh; a new window also clears the notice."""
+        self._progress_soc = None
+        self._progress_since = None
+        self._charge_stalled = False
+        self._stall_hold_w = None
+        if new_window:
+            self._stall_nudged = False
+            ir.async_delete_issue(self.hass, DOMAIN, self._charge_stall_issue_id)
+
+    @property
+    def _charge_stall_issue_id(self) -> str:
+        return f"battery_not_charging_{self.entry.entry_id}"
+
+    async def _watch_charge_progress(self, current_soc: float, target_soc: float, now: datetime) -> None:
+        """Notice a battery that does not charge under the raised min SOC (3.14.7).
+
+        Charging is commanded while the floor stands above the SOC and a
+        charge limit above 0 W is written. When the SOC has not risen by a
+        quarter of what that limit should have added in 20 minutes - and that
+        is at least 2 % - the battery does not charge: a warning, a repair
+        issue, no higher limit, and once per window a nudge of the min SOC.
+        """
+        written = self._planned_setpoint_written_w
+        floor = self._last_soc_set
+        if (self.is_discharge_mode or self._auto_test_active or not self.is_active
+                or written is None or written <= 0 or floor is None
+                or floor <= current_soc + 1.0 or current_soc >= target_soc - 1.0):
+            # Not commanded to charge right now: nothing to measure against
+            self._progress_soc, self._progress_since = None, None
+            return
+        if self._progress_soc is None or self._progress_since is None or current_soc < self._progress_soc:
+            self._progress_soc, self._progress_since = current_soc, now
+            return
+        elapsed_s = (now - self._progress_since).total_seconds()
+        expected = (written / 1000.0 * elapsed_s / 3600.0 * self._charge_efficiency(current_soc)
+                    / self._capacity_kwh() * 100.0)
+        rose = current_soc - self._progress_soc
+        if expected >= STALL_MIN_EXPECTED_SOC and rose >= STALL_PROGRESS_RATIO * expected:
+            if self._charge_stalled:
+                _LOGGER.info("The battery charges again: %.1f%% -> %.1f%%", self._progress_soc, current_soc)
+                self._charge_stalled = False
+                self._stall_hold_w = None
+                ir.async_delete_issue(self.hass, DOMAIN, self._charge_stall_issue_id)
+            self._progress_soc, self._progress_since = current_soc, now
+            return
+        if elapsed_s < STALL_DETECT_S or expected < STALL_MIN_EXPECTED_SOC or self._charge_stalled:
+            return
+        self._charge_stalled = True
+        self._stall_hold_w = written
+        _LOGGER.warning(
+            "The battery does not charge: %.1f%% for %.0f minutes under a min SOC of %.1f%% at a %.0f W "
+            "limit (%.1f%% expected). Not raising the charge power any further",
+            current_soc, elapsed_s / 60, floor, written, expected,
+        )
+        ir.async_create_issue(
+            self.hass, DOMAIN, self._charge_stall_issue_id,
+            is_fixable=False, severity=ir.IssueSeverity.WARNING,
+            translation_key="battery_not_charging",
+            translation_placeholders={
+                "name": self.entry.title, "soc": f"{current_soc:.0f}",
+                "floor": f"{floor:.0f}", "minutes": f"{elapsed_s / 60:.0f}", "power": f"{written:.0f}",
+            },
+        )
+        if not self._stall_nudged:
+            self._stall_nudged = True
+            await self._nudge_min_soc(current_soc, floor)
+        # The next 20 minutes are measured from here
+        self._progress_soc, self._progress_since = current_soc, now
+
+    async def _nudge_min_soc(self, current_soc: float, floor: float) -> None:
+        """Take the min SOC down to the battery and raise it again, once per window.
+
+        Whether this makes the Kostal start is not known; on 7/8 November only
+        its nightly internal error did. Two writes, under the same guards as
+        the regular floor write.
+        """
+        entity = self.config.get(CONF_MIN_SOC_ENTITY)
+        if not entity:
+            return
+        low = max(float(self.config.get(CONF_USER_MIN_SOC, 8.0)), float(math.floor(current_soc)))
+        if low >= floor:
+            return
+        window_started_at = self._window_started_at
+        self._nudging_min_soc = True
+        try:
+            for value, settle in ((low, STALL_NUDGE_SETTLE_S), (floor, 0)):
+                async with self._min_soc_write_lock:
+                    if (not self.is_active or self._ending or self._unloading
+                            or self._window_started_at != window_started_at):
+                        return
+                    released = self._floor_released_soc
+                    if released is not None and value > released:
+                        return  # taken down for the connection meanwhile
+                    try:
+                        await self.hass.services.async_call(
+                            "number", "set_value", {"entity_id": entity, "value": value}, blocking=True,
+                        )
+                    except Exception as err:  # pylint: disable=broad-except
+                        # The verification puts the floor back if the low write went through
+                        _LOGGER.warning("Nudging the min SOC to %.1f%% failed: %s", value, err)
+                        return
+                self._last_soc_set = value
+                _LOGGER.info("Nudged the inverter min SOC to %.1f%%", value)
+                if settle:
+                    await asyncio.sleep(settle)
+        finally:
+            self._nudging_min_soc = False
+
     async def _plan_charge_power(self, target_soc: float) -> None:
         """Prefer the measured optimum, then apply the connection budget.
 
@@ -3278,6 +3402,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if current_soc is None:
             return
         now = dt_util.now()
+        await self._watch_charge_progress(current_soc, target_soc, now)
         hours_remaining = max(0.0, elapsed_seconds(self._window_end_datetime(now), now) / 3600.0)
         if hours_remaining < MIN_PLAN_HOURS_REMAINING:
             # required_charge_power_w would return infinity and the setpoint
@@ -3314,6 +3439,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # needs more power overrides it; the connection budget always wins.
         preferred = max(required, float(best)) if best is not None else required
         setpoint = float(round(max(min_w, min(preferred, max_w))))
+        if self._charge_stalled and self._stall_hold_w is not None:
+            # More power does not help a battery that does not charge at all:
+            # 7/8 November the plan raised it to 12540 W against 0 W of charging,
+            # and the Kostal then ran at 12 kW once it started (3.14.7)
+            setpoint = min(setpoint, self._stall_hold_w)
         # What the battery would draw without the house connection limit. Kept
         # so the sensor can say whether the limit is actually holding it back.
         self._grid_plan_request_w = setpoint
@@ -6545,6 +6675,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._clear_reset_abandoned()  # this window's end starts a fresh backoff
         if not same_window:
             self._clear_ac_limit_not_held()
+        self._clear_charge_stall(new_window=not same_window)
         self._grid_stop_pending = False
         self._grid_stop_retries = 0
         self._pending_reset = False
@@ -6582,9 +6713,20 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.initial_calculated_soc = user_max_soc
             self.minimum_calculated_soc = user_max_soc
             self.calculated_soc = user_max_soc
-            _LOGGER.info(
-                "Snow mode: charging to %.0f%% (%d night(s) remaining)", user_max_soc, self.snow_nights
-            )
+            if self.snow_nights > 0:
+                _LOGGER.info(
+                    "Snow mode: charging to %.0f%% (%d night(s) remaining)", user_max_soc, self.snow_nights
+                )
+            else:
+                # Not snow nights: the automatic full charge after a dark day.
+                # Its log line said "Snow mode" on 7/8 November 2026.
+                pv = self._pv_yield
+                why = {"cold": ", a cold day", "second_day": ", the second dark day in a row"}
+                _LOGGER.info(
+                    "Very low PV yield on %s (%s of %s kWh%s): charging to %.0f%%",
+                    pv.charge_day - timedelta(days=1) if pv.charge_day else pv.day,
+                    pv.actual_kwh, pv.expected_kwh, why.get(str(pv.trigger), ""), user_max_soc,
+                )
             self._persist_state()
             return
         try:
@@ -7709,8 +7851,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Observe lost channels before control, retaining independent stop paths."""
-        self._observe_pv_yield()
+        # The temperature first: the PV yield check reads today's mean (3.14.7)
         self._observe_outdoor_temperature()
+        self._observe_pv_yield()
         self._observe_forecasts()
         self._schedule_learning_refresh()
         faults = self._update_communication_health()
@@ -9395,6 +9538,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Verify inverter min SOC matches our target and restore if needed."""
         if not self.is_active or not self.is_enabled or self._ending or self._unloading:
             return
+        if self._nudging_min_soc:
+            return  # the nudge's low value is intended; it raises the floor itself
         if self._is_backup_active():
             _LOGGER.debug("Backup mode active - skipping min SOC verification")
             return

@@ -5,6 +5,43 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.7] - 2026-11-08
+
+The night of 7/8 November 2026: a foggy 7 November delivered a tenth of its forecast. The automatic
+full charge armed, and the log called it "Snow mode". At 23:01 the min SOC went to 100 % under a
+9000 W limit, but the Kostal did not charge: the battery sat at 17 % until the nightly internal
+error at 03:10. Meanwhile the plan raised the limit step by step to 12540 W. Once the Kostal
+started it charged at about 12 kW, its controller reached 85 °C, and by the window end at 04:58 it
+was at 69 %.
+
+### Changed
+
+- **A dark day of fog is no snow.** A day now counts as dark at 10 % of its morning forecast or
+  less (2 of 20 kWh; 15 % before). The next night charges to the maximum only when snow is
+  plausible: the day's mean outdoor temperature was below 7 °C, or the day before was dark too.
+  The temperature comes from the weather entity or the outdoor temperature sensor of the weather
+  factor; without one, only the second dark day in a row arms it. A dark day that waits for a
+  second one shows `low_yield_unconfirmed` in the `pv_yield` attributes, and `trigger` says
+  `cold` or `second_day`.
+
+### Fixed
+
+- **The log names the dark day, not snow.** With no snow nights set, the window start logs
+  `Very low PV yield on 2026-11-07 (2.1 of 20.6 kWh, a cold day): charging to 100%` instead of
+  `Snow mode: charging to 100% (0 night(s) remaining)`.
+- **A battery that does not charge is not driven harder.** The min SOC stands above the battery
+  and a charge limit is written, but the SOC has not risen in 20 minutes: less than a quarter of
+  what the limit should have added, and that at least 2 %. ICN then:
+  - logs a warning (`The battery does not charge`) and raises a repair notice;
+  - holds the charge limit where it stood, instead of raising it to the maximum against a
+    battery that does not take it;
+  - once per window, takes the min SOC down to the battery and raises it again, in case that
+    starts the Kostal. Whether it does is not known; the log will show it.
+
+  When the battery charges again, the hold and the notice go, and the plan raises the power if
+  the deadline needs it. The next window starts without the notice. The status sensor and the
+  diagnostics show `battery_not_charging`.
+
 ## [3.14.6] - 2026-11-04
 
 The night of 3/4 November 2026: at 23:01 the plan bought 64.1 %, at 00:16 87.4 %, and the battery

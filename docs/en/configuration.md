@@ -135,7 +135,8 @@ are optional and make the result more accurate.
 
 With today's forecast and a daily PV energy meter (`pv_energy_today_entity`, reset every day),
 ICN compares the day's forecast with what was really produced. A day with at least 5 kWh
-expected and no more than 15 % delivered arms the next night at the maximum SOC
+expected and no more than 10 % delivered is a dark day. A cold dark day (daily mean below 7 °C)
+or the second dark day in a row arms the next night at the maximum SOC
 ([details](extras.md#very-low-pv-yield)). The same meter feeds the learned PV curve of the
 modelled day.
 

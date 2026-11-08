@@ -150,6 +150,8 @@ class CalculatedSOCSensor(InverterChargeNightEntity, SensorEntity):
             # often this window: no further rewrites, a repair issue instead.
             "charge_limit_not_held": self.coordinator._ac_limit_not_held,
             "min_soc_released_for_connection": self.coordinator._floor_released_soc,
+            # 3.14.7: the battery does not charge under the raised min SOC
+            "battery_not_charging": self.coordinator._charge_stalled,
             # Planner v2 (plan 006): only present while a bridge plan exists
             "plan_reason": data.get("plan_reason"),
             "bridge_kwh": data.get("bridge_kwh"),

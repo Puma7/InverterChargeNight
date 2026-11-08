@@ -1218,6 +1218,9 @@ async def test_planned_power_thirty_minutes_left_writes_max(mock_hass, powered):
 
 @pytest.mark.asyncio
 async def test_planned_power_small_change_is_not_written(mock_hass, powered):
+    # Two hours at 41 % under 3000 W is a battery that does not charge (3.14.7);
+    # this test is about the write threshold, tests/test_night_3147.py about that
+    powered._watch_charge_progress = AsyncMock()
     with patch(NOW, return_value=FOUR_HOURS_LEFT):
         await _start_with_target(powered, 60.0)
         await powered._async_update_data()

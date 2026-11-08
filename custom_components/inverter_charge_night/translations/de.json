@@ -1751,7 +1751,11 @@
     },
     "pv_yield_shortfall": {
       "title": "PV-Ertrag stark ausgefallen",
-      "description": "{name}: Erwartet waren {expected} kWh, gemessen wurden {actual} kWh. Die nächste reguläre Nacht lädt bis zum eingestellten Maximal-SoC. Bitte PV-Anlage, Prognose und mögliche Schneeauflage prüfen. Die Ursache ist nicht automatisch bestimmt."
+      "description": "{name}: Erwartet waren {expected} kWh, gemessen wurden {actual} kWh. Die nächste reguläre Nacht lädt bis zum eingestellten Maximal-SoC. Es war ein kalter Tag (unter 7 °C) oder der zweite dunkle Tag in Folge; ein einzelner dunkler Nebeltag löst die Volladung nicht aus. Bitte PV-Anlage, Prognose und mögliche Schneeauflage prüfen. Die Ursache ist nicht automatisch bestimmt."
+    },
+    "battery_not_charging": {
+      "title": "{name}: Der Akku lädt nicht",
+      "description": "{name} hat den Min-SOC des Wechselrichters bei einem Ladelimit von {power} W auf {floor} % angehoben, aber der Akku blieb {minutes} Minuten lang bei {soc} %. Die Ladeleistung wird nicht weiter erhöht, und der Min-SOC wurde einmal angestoßen (auf den Akku gesenkt und wieder angehoben). Prüfe, ob der Wechselrichter unter einem angehobenen Min-SOC aus dem Netz lädt; ein Kostal startet manchmal erst nach seinem nächtlichen internen Fehler. Der Hinweis verschwindet, sobald der Akku wieder lädt oder das nächste Fenster beginnt."
     },
     "reset_incomplete": {
       "title": "{name}: Wechselrichter-Einstellungen nicht vollständig zurückgesetzt",

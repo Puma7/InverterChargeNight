@@ -17,14 +17,15 @@ SET = RISE.replace(hour=17)
 NOW = "custom_components.inverter_charge_night.coordinator.dt_util.now"
 
 
-def observed(expected=20, actual=1):
+def observed(expected=20, actual=1, mean=0.0):
+    """A cold day by default: one dark day arms the full charge (3.14.7)."""
     monitor = PVYieldMonitor()
     assert monitor.observe(RISE, RISE, SET, expected, 0) is False
-    incident = monitor.observe(SET, RISE, SET, expected, actual)
+    incident = monitor.observe(SET, RISE, SET, expected, actual, mean)
     return monitor, incident
 
 
-@pytest.mark.parametrize("expected,actual,low", [(20, 1, True), (10, .5, True), (10, 1.5, True), (10, 1.51, False), (20, 19, False), (4, 0, False), (0, 0, False)])
+@pytest.mark.parametrize("expected,actual,low", [(20, 1, True), (20, 2, True), (10, .5, True), (10, 1.0, True), (10, 1.01, False), (10, 1.5, False), (20, 19, False), (4, 0, False), (0, 0, False)])
 def test_complete_day_threshold(expected, actual, low):
     monitor, incident = observed(expected, actual)
     assert incident is low
@@ -56,9 +57,9 @@ def test_freezes_morning_forecast_not_remaining_energy_in_evening():
     monitor = PVYieldMonitor()
     monitor.observe(RISE, RISE, SET, 10, 0)
     monitor.observe(RISE + timedelta(hours=1), RISE, SET, 20, .1)
-    assert monitor.observe(SET, RISE, SET, 0, 1)
+    assert monitor.observe(SET, RISE, SET, 0, 1, 0.0)
     assert monitor.expected_kwh == 20
-    assert not monitor.observe(SET + timedelta(minutes=1), RISE, SET, 0, 1)
+    assert not monitor.observe(SET + timedelta(minutes=1), RISE, SET, 0, 1, 0.0)
 
 
 def test_next_night_only_and_persists_through_midnight():
@@ -74,7 +75,8 @@ def test_next_night_only_and_persists_through_midnight():
 @pytest.mark.parametrize("raw", [None, [], {"status": []}, {"status": {}}, {"day": "oops", "charge_day": "wrong", "status": "unsafe", "expected_kwh": float('nan'), "actual_kwh": True}])
 def test_restore_rejects_malformed_data(raw):
     monitor = PVYieldMonitor(raw)
-    assert monitor.snapshot() == dict(day=None, expected_kwh=None, actual_kwh=None, charge_day=None, status="learning")
+    assert monitor.snapshot() == dict(day=None, expected_kwh=None, actual_kwh=None, charge_day=None, status="learning",
+                                      low_day=None, day_mean_c=None, trigger=None)
 
 
 def make_co(hass):
@@ -99,6 +101,7 @@ def publish(hass, now, actual, age=0):
 
 def test_coordinator_observation_notice_target_and_recovery(mock_hass):
     co = make_co(mock_hass)
+    co._pv_yield.low_day = DAY - timedelta(days=1)  # the second dark day in a row
     publish(mock_hass, RISE, 0)
     with patch(NOW, return_value=RISE):
         co._observe_pv_yield()
@@ -176,6 +179,7 @@ def test_price_average_preserves_both_folds_of_native_zoneinfo_datetimes():
 async def test_shortfall_sends_localized_persistent_notification(mock_hass):
     co = make_co(mock_hass)
     await co.async_load_communication_translations()
+    co._pv_yield.low_day = DAY - timedelta(days=1)
     co._pv_yield.observe(RISE, RISE, SET, 20, 0)
     publish(mock_hass, SET, 1)
     with patch(NOW, return_value=SET), patch("custom_components.inverter_charge_night.coordinator.ir.async_create_issue"), patch("homeassistant.components.persistent_notification.async_create") as notice:
@@ -183,3 +187,113 @@ async def test_shortfall_sends_localized_persistent_notification(mock_hass):
         notice.assert_called_once()
         assert "20" in notice.call_args.args[1]
         assert notice.call_args.kwargs["notification_id"] == "icn_pv_yield_pv-test"
+
+
+# --- 3.14.7: a dark day of fog is no snow (7/8 November 2026) ------------------
+
+def test_one_foggy_day_does_not_arm_the_full_charge():
+    """7 November: fog, no snow. A dark day at 7 °C and more waits for a second one."""
+    monitor, incident = observed(20, 1, mean=8.0)
+    assert incident is False
+    assert monitor.status == "low_yield_unconfirmed"
+    assert monitor.low_day == DAY and monitor.charge_day is None
+    assert not monitor.active_for(DAY + timedelta(days=1))
+
+
+def test_without_a_temperature_one_dark_day_is_not_enough():
+    monitor, incident = observed(20, 1, mean=None)
+    assert incident is False and monitor.status == "low_yield_unconfirmed"
+
+
+@pytest.mark.parametrize("mean", [6.9, 0.0, -5.0])
+def test_a_cold_dark_day_arms_at_once(mean):
+    monitor, incident = observed(20, 1, mean=mean)
+    assert incident is True
+    assert monitor.trigger == "cold"
+    assert monitor.active_for(DAY + timedelta(days=1))
+
+
+def test_seven_degrees_is_not_cold():
+    assert observed(20, 1, mean=7.0)[1] is False
+
+
+def _next_day(monitor, offset, actual, mean=None, expected=20):
+    rise, set_ = RISE + timedelta(days=offset), SET + timedelta(days=offset)
+    monitor.observe(rise, rise, set_, expected, 0, mean)
+    return monitor.observe(set_, rise, set_, expected, actual, mean)
+
+
+def test_the_second_dark_day_in_a_row_arms_at_any_temperature():
+    monitor, _ = observed(20, 1, mean=None)
+    restored = PVYieldMonitor(monitor.snapshot())  # a restart in between
+    assert _next_day(restored, 1, 1.5, mean=12.0) is True
+    assert restored.trigger == "second_day"
+    assert restored.active_for(DAY + timedelta(days=2))
+
+
+def test_a_bright_day_in_between_breaks_the_row():
+    monitor, _ = observed(20, 1, mean=None)
+    assert _next_day(monitor, 1, 15) is False and monitor.status == "normal"
+    assert _next_day(monitor, 2, 1) is False and monitor.status == "low_yield_unconfirmed"
+
+
+def test_ten_percent_is_the_new_limit():
+    """2 of 20 kWh is dark, 3 of 20 (15 %, dark before 3.14.7) is not."""
+    assert observed(20, 2)[1] is True
+    monitor, incident = observed(20, 3)
+    assert incident is False and monitor.status == "normal"
+
+
+def test_a_foggy_day_raises_no_notice_and_charges_as_planned(mock_hass):
+    co = make_co(mock_hass)
+    co.config["weather_entity"] = "weather.home"
+    mock_hass.states.async_set("weather.home", "fog", {"temperature": 8.0, "temperature_unit": "°C"})
+    with patch(NOW, return_value=RISE):
+        for _ in range(6):
+            co._observe_outdoor_temperature()
+    publish(mock_hass, RISE, 0)
+    with patch(NOW, return_value=RISE):
+        co._observe_pv_yield()
+    publish(mock_hass, SET, 1)
+    with patch(NOW, return_value=SET), patch("custom_components.inverter_charge_night.coordinator.ir.async_create_issue") as create:
+        co._observe_pv_yield()
+    create.assert_not_called()
+    assert co._pv_yield.status == "low_yield_unconfirmed"
+    assert co._pv_yield.day_mean_c == 8.0
+    with patch(NOW, return_value=SET.replace(hour=23, minute=10)):
+        assert not co._automatic_pv_shortfall_active()
+
+
+def test_a_frosty_dark_day_arms_from_the_weather_entity(mock_hass):
+    co = make_co(mock_hass)
+    co.config["weather_entity"] = "weather.home"
+    mock_hass.states.async_set("weather.home", "snowy", {"temperature": -1.0, "temperature_unit": "°C"})
+    with patch(NOW, return_value=RISE):
+        for _ in range(6):
+            co._observe_outdoor_temperature()
+    publish(mock_hass, RISE, 0)
+    with patch(NOW, return_value=RISE):
+        co._observe_pv_yield()
+    publish(mock_hass, SET, 1)
+    with patch(NOW, return_value=SET), patch("custom_components.inverter_charge_night.coordinator.ir.async_create_issue") as create:
+        co._observe_pv_yield()
+    create.assert_called_once()
+    assert co._pv_yield.trigger == "cold"
+    with patch(NOW, return_value=SET.replace(hour=23, minute=10)):
+        assert co._automatic_pv_shortfall_active()
+
+
+@pytest.mark.asyncio
+async def test_the_log_names_the_dark_day_not_snow(mock_hass, caplog):
+    """23:01 on 7/8 November said "Snow mode" with 0 snow nights."""
+    import logging
+    co = make_co(mock_hass)
+    co._pv_yield.low_day = DAY - timedelta(days=1)
+    co._pv_yield.observe(RISE, RISE, SET, 20, 0)
+    co._pv_yield.observe(SET, RISE, SET, 20, 1)
+    with patch(NOW, return_value=SET.replace(hour=23, minute=1)), caplog.at_level(logging.INFO):
+        await co._calculate_initial_soc()
+    lines = [r.getMessage() for r in caplog.records]
+    assert "Very low PV yield on 2026-01-15 (1 of 20 kWh, the second dark day in a row): charging to 95%" in lines
+    assert not any(line.startswith("Snow mode") for line in lines)
+    assert co.calculated_soc == 95
