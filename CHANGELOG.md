@@ -41,6 +41,21 @@ was at 69 %.
   When the battery charges again, the hold and the notice go, and the plan raises the power if
   the deadline needs it. The next window starts without the notice. The status sensor and the
   diagnostics show `battery_not_charging`.
+- Review of #53 (Sourcery and Codex):
+  - Each limit counts only for the time it stood, so a limit the deadline raises does not make a
+    charging battery look stuck.
+  - A falling SOC is no progress and does not restart the clock.
+  - After a stall, recovery is judged on the latest interval, not against the whole idle time.
+  - A stale SOC reading (older than 10 minutes) and a paused 0 W limit are not judged.
+  - A restart inside the window keeps the stall, its hold and its spent nudge.
+  - Reaching the target, a lowered floor or an inactive window ends the stall.
+  - A hold-only ad-hoc window is never watched or nudged.
+  - The nudge writes a min SOC at a step the entity takes.
+  - No limit is written once the window ended during the nudge's 12 seconds.
+  - An outdoor temperature sensor alone is a temperature source.
+  - Today's temperature samples survive a restart.
+  - A dark day without a mean at sunset is confirmed when a later poll finds it cold.
+  - A full charge armed by 3.14.6 on one dark day is judged again by the new rule.
 - Tests: Home Assistant 2026.11 made `DeviceInfo` a dataclass with a mapping view, and a test
   merged it with `|` like a dict. It compares the two as dicts now.
 

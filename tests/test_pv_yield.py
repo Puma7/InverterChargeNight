@@ -297,3 +297,54 @@ async def test_the_log_names_the_dark_day_not_snow(mock_hass, caplog):
     assert "Very low PV yield on 2026-01-15 (1 of 20 kWh, the second dark day in a row): charging to 95%" in lines
     assert not any(line.startswith("Snow mode") for line in lines)
     assert co.calculated_soc == 95
+
+
+# --- review of #53 ------------------------------------------------------------
+
+def test_an_outdoor_sensor_alone_is_a_temperature_source(mock_hass):
+    """Codex and Sourcery: both settings are optional, the sensor works alone."""
+    co = make_co(mock_hass)
+    co.config["outdoor_temperature_entity"] = "sensor.outside"
+    mock_hass.states.async_set("sensor.outside", "-2", {"unit_of_measurement": "°C"})
+    with patch(NOW, return_value=RISE):
+        for _ in range(6):
+            co._observe_outdoor_temperature()
+    publish(mock_hass, RISE, 0)
+    with patch(NOW, return_value=RISE):
+        co._observe_pv_yield()
+    publish(mock_hass, SET, 1)
+    with patch(NOW, return_value=SET), patch("custom_components.inverter_charge_night.coordinator.ir.async_create_issue"):
+        co._observe_pv_yield()
+    assert co._pv_yield.trigger == "cold" and co._pv_yield.day_mean_c == -2.0
+
+
+def test_the_day_so_far_survives_a_restart():
+    """Sourcery: a restart in the afternoon forgot the cold morning."""
+    from custom_components.inverter_charge_night.heating import TemperatureLog
+    log = TemperatureLog()
+    for value in (-4.0, -2.0, 0.0, 2.0):
+        log.observe(DAY, value)
+    restored = TemperatureLog(log.snapshot())
+    restored.observe(DAY, 4.0)
+    assert restored.today_mean(DAY) == pytest.approx(0.0)
+    assert TemperatureLog({"days": {}, "today": {"day": "oops", "sum": 1, "count": 1}}).today_mean(DAY) is None
+
+
+def test_a_later_cold_mean_confirms_the_dark_day():
+    """Sourcery: the first look after sunset had no mean yet."""
+    monitor, incident = observed(20, 1, mean=None)
+    assert incident is False and monitor.status == "low_yield_unconfirmed"
+    assert monitor.observe(SET + timedelta(minutes=15), RISE, SET, 20, 1, 1.5) is True
+    assert monitor.trigger == "cold" and monitor.active_for(DAY + timedelta(days=1))
+    assert monitor.observe(SET + timedelta(minutes=30), RISE, SET, 20, 1, 1.5) is False  # once
+
+
+@pytest.mark.parametrize("actual,status,low_day", [(2.5, "normal", None), (1.0, "low_yield_unconfirmed", DAY)])
+def test_a_decision_of_3_14_6_is_judged_again(actual, status, low_day):
+    """Sourcery: one dark day at 15 % from before the update must not arm tonight."""
+    raw = {"day": DAY.isoformat(), "expected_kwh": 20.0, "actual_kwh": actual,
+           "charge_day": (DAY + timedelta(days=1)).isoformat(), "status": "low_yield"}
+    monitor = PVYieldMonitor(raw)
+    assert monitor.charge_day is None
+    assert not monitor.active_for(DAY + timedelta(days=1))
+    assert monitor.status == status and monitor.low_day == low_day

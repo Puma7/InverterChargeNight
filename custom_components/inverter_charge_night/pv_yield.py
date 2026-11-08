@@ -59,6 +59,17 @@ class PVYieldMonitor:
         status = raw.get("status")
         if isinstance(status, str) and status in STATUSES:
             self.status = status
+        if self.charge_day is not None and self.trigger is None:
+            # Armed by 3.14.6 or older, on one dark day at 15 %: judged again by
+            # today's rule, which waits for a second day without a temperature
+            # (Sourcery on #53)
+            self.charge_day = None
+            dark = (self.expected_kwh is not None and self.actual_kwh is not None
+                    and self.actual_kwh <= self.expected_kwh * LOW_YIELD_RATIO)
+            if dark and self.day is not None:
+                self.status, self.low_day = "low_yield_unconfirmed", self.day
+            else:
+                self.status = "normal"
 
     def snapshot(self) -> dict[str, Any]:
         """Small, JSON-safe state, also used for frontend explanations."""
@@ -91,6 +102,14 @@ class PVYieldMonitor:
             if self.charge_day is not None and self.charge_day < today:
                 self.charge_day = None
                 self.trigger = None
+        if (self.status == "low_yield_unconfirmed" and self.charge_day is None
+                and day_mean_c is not None and math.isfinite(day_mean_c) and day_mean_c < COLD_DAY_C):
+            # The first look after sunset knew no mean yet; a later poll does
+            # (Sourcery on #53)
+            self.day_mean_c = round(day_mean_c, 1)
+            self.status, self.trigger = "low_yield", "cold"
+            self.charge_day = today + timedelta(days=1)
+            return True
         if self.status in {"normal", "low_yield", "low_yield_unconfirmed"}:
             return False
         if forecast_kwh is not None and (not math.isfinite(forecast_kwh) or forecast_kwh < 0):

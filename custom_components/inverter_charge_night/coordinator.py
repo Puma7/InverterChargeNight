@@ -84,6 +84,7 @@ from .const import (
     STALL_MIN_EXPECTED_SOC,
     STALL_NUDGE_SETTLE_S,
     STALL_PROGRESS_RATIO,
+    STALL_SOC_MAX_AGE_S,
     AUTO_TEST_MAX_ATTEMPTS,
     AUTO_TEST_MAX_IMPLAUSIBLE,
     AUTO_TEST_MAX_PLAUSIBLE_LOSS,
@@ -492,6 +493,11 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Replaced per instance in __init__; the class value only serves objects a
     # test builds without it, and nothing writes to it there
     _temperature_log: TemperatureLog = TemperatureLog()
+    # 3.14.7, the same: defaults for objects a test builds without __init__
+    _charge_stalled: bool = False
+    _stall_hold_w: float | None = None
+    _stall_nudged: bool = False
+    _nudging_min_soc: bool = False
     # Plan 018, for the same reason
     use_learned_values: bool = True
     _forecast_log: fl.ForecastLog = fl.ForecastLog()
@@ -645,6 +651,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # whether this window's battery does not charge under its raised floor
         self._progress_soc: float | None = None
         self._progress_since: datetime | None = None
+        self._progress_last: datetime | None = None
+        self._progress_expected = 0.0
         self._charge_stalled = False
         self._stall_hold_w: float | None = None
         self._stall_nudged = False
@@ -979,6 +987,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Bounded per window, a restart inside the window included (Codex on #36)
             "ac_limit_rewrites": self._ac_limit_rewrites,
             "ac_limit_not_held": self._ac_limit_not_held,
+            # 3.14.7: a restart inside the window keeps the stall (Sourcery on #53)
+            "charge_stalled": self._charge_stalled,
+            "stall_hold_w": self._stall_hold_w,
+            "stall_nudged": self._stall_nudged,
             "floor_released_soc": self._floor_released_soc,
             "ac_limit_window": self._ac_limit_window,
             "grid_switch_suspended": self._grid_switch_suspended,
@@ -1082,6 +1094,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if isinstance(rewrites, int) and not isinstance(rewrites, bool) and rewrites > 0:
             self._ac_limit_rewrites = rewrites
         self._ac_limit_not_held = state.get("ac_limit_not_held") is True
+        self._charge_stalled = state.get("charge_stalled") is True
+        self._stall_nudged = state.get("stall_nudged") is True
+        hold = state.get("stall_hold_w")
+        self._stall_hold_w = (float(hold) if isinstance(hold, (int, float)) and not isinstance(hold, bool)
+                              and math.isfinite(hold) and hold > 0 else None)
+        if self._stall_hold_w is None:
+            self._charge_stalled = False
         # Validated like every other persisted SOC (CodeRabbit on #41)
         self._floor_released_soc = self._restore_soc(state, "floor_released_soc")
         window_raw = state.get("ac_limit_window")
@@ -1232,7 +1251,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         before = self._pv_yield.snapshot()
         incident = self._pv_yield.observe(
             now, sunrise, sunset, forecast if available else None, actual,
-            self._temperature_log.today_mean(now.date()) if self.config.get(CONF_WEATHER_ENTITY) else None,
+            self._temperature_log.today_mean(now.date()) if self._temperature_source() else None,
         )
         if before != self._pv_yield.snapshot():
             self._persist_state()
@@ -2580,10 +2599,14 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         From the temperature sensor if one is set, otherwise from the weather
         entity's current conditions. Persisted once a day is complete.
         """
-        if not self.config.get(CONF_WEATHER_ENTITY):
+        if not self._temperature_source():
             return
         if self._temperature_log.observe(dt_util.now().date(), self._current_outdoor_c()):
             self._persist_state()
+
+    def _temperature_source(self) -> bool:
+        """A weather entity or an outdoor sensor - either is enough (Codex on #53)."""
+        return bool(self.config.get(CONF_WEATHER_ENTITY) or self.config.get(CONF_OUTDOOR_TEMPERATURE_ENTITY))
 
     def _current_outdoor_c(self) -> float | None:
         sensor_id = self.config.get(CONF_OUTDOOR_TEMPERATURE_ENTITY)
@@ -2592,7 +2615,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             value = _as_float(state.state) if state is not None else None
             if value is not None and state is not None:
                 return to_celsius(value, state.attributes.get("unit_of_measurement"))
-        weather = self.hass.states.get(str(self.config.get(CONF_WEATHER_ENTITY)))
+        weather_id = self.config.get(CONF_WEATHER_ENTITY)
+        weather = self.hass.states.get(str(weather_id)) if weather_id else None
         if weather is None:
             return None
         raw = weather.attributes.get("temperature")
@@ -3277,52 +3301,98 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
     def _clear_charge_stall(self, *, new_window: bool) -> None:
-        """Watch this window's progress afresh; a new window also clears the notice."""
-        self._progress_soc = None
-        self._progress_since = None
-        self._charge_stalled = False
-        self._stall_hold_w = None
+        """Watch this window's progress afresh; a new window also clears the stall.
+
+        A restart inside the window keeps the stall, its hold and its spent
+        nudge, restored from the runtime state (Sourcery on #53).
+        """
+        self._reset_progress_interval()
         if new_window:
+            self._charge_stalled = False
+            self._stall_hold_w = None
             self._stall_nudged = False
             ir.async_delete_issue(self.hass, DOMAIN, self._charge_stall_issue_id)
+
+    def _reset_progress_interval(self) -> None:
+        self._progress_soc = None
+        self._progress_since = None
+        self._progress_last = None
+        self._progress_expected = 0.0
+
+    def _end_charge_stall(self, why: str) -> None:
+        """The battery charges again, or no longer has to: the hold and the notice go."""
+        if not self._charge_stalled:
+            return
+        _LOGGER.info("The battery %s: no longer holding the charge power", why)
+        self._charge_stalled = False
+        self._stall_hold_w = None
+        ir.async_delete_issue(self.hass, DOMAIN, self._charge_stall_issue_id)
+        self._persist_state()
 
     @property
     def _charge_stall_issue_id(self) -> str:
         return f"battery_not_charging_{self.entry.entry_id}"
 
+    def _battery_soc_fresh(self, now: datetime) -> bool:
+        entity_id = self.config.get(CONF_BATTERY_SOC_ENTITY)
+        state = self.hass.states.get(str(entity_id)) if entity_id else None
+        age = self._state_age_s(state, now) if state is not None else None
+        return age is not None and age <= STALL_SOC_MAX_AGE_S
+
     async def _watch_charge_progress(self, current_soc: float, target_soc: float, now: datetime) -> None:
         """Notice a battery that does not charge under the raised min SOC (3.14.7).
 
         Charging is commanded while the floor stands above the SOC and a
-        charge limit above 0 W is written. When the SOC has not risen by a
-        quarter of what that limit should have added in 20 minutes - and that
-        is at least 2 % - the battery does not charge: a warning, a repair
-        issue, no higher limit, and once per window a nudge of the min SOC.
+        charge limit above 0 W is written. The SOC each limit should have
+        added is summed per observation, at the limit that stood since the
+        one before (Sourcery on #53). When the SOC has not risen by a quarter
+        of that within 20 minutes - and that is at least 2 % - the battery
+        does not charge: a warning, a repair issue, no higher limit, and once
+        per window a nudge of the min SOC. A falling SOC is no progress and
+        does not restart the clock (Codex on #53). Recovery is judged over the
+        latest interval only, not against the whole idle time (Codex on #53).
         """
-        written = self._planned_setpoint_written_w
         floor = self._last_soc_set
-        if (self.is_discharge_mode or self._auto_test_active or not self.is_active
-                or written is None or written <= 0 or floor is None
+        hold_only = self._adhoc_until is not None and not self._adhoc_allow_grid_charge
+        if (self.is_discharge_mode or not self.is_active or hold_only or floor is None
                 or floor <= current_soc + 1.0 or current_soc >= target_soc - 1.0):
-            # Not commanded to charge right now: nothing to measure against
-            self._progress_soc, self._progress_since = None, None
+            # Not commanded to charge: nothing to measure, and a stall is over
+            self._end_charge_stall("no longer has to charge")
+            self._reset_progress_interval()
             return
-        if self._progress_soc is None or self._progress_since is None or current_soc < self._progress_soc:
-            self._progress_soc, self._progress_since = current_soc, now
+        written = self._planned_setpoint_written_w
+        if (self._auto_test_active or written is None or written <= 0
+                or not self._battery_soc_fresh(now)):
+            # Paused (the 03:10 fault writes 0 W) or a stale reading: not judged,
+            # and a stall found before stays as it is
+            self._reset_progress_interval()
             return
-        elapsed_s = (now - self._progress_since).total_seconds()
-        expected = (written / 1000.0 * elapsed_s / 3600.0 * self._charge_efficiency(current_soc)
-                    / self._capacity_kwh() * 100.0)
+        if self._progress_soc is None or self._progress_since is None or self._progress_last is None:
+            self._progress_soc, self._progress_since, self._progress_last = current_soc, now, now
+            self._progress_expected = 0.0
+            return
+        # The limit read now is the one written after the last observation and
+        # in force since: the plan writes after this watch (Sourcery on #53)
+        step_s = max(0.0, (now - self._progress_last).total_seconds())
+        self._progress_expected += (written / 1000.0 * step_s / 3600.0
+                                    * self._charge_efficiency(current_soc) / self._capacity_kwh() * 100.0)
+        self._progress_last = now
+        if current_soc < self._progress_soc:
+            self._progress_soc = current_soc  # lower, and the clock runs on
+        expected = self._progress_expected
         rose = current_soc - self._progress_soc
-        if expected >= STALL_MIN_EXPECTED_SOC and rose >= STALL_PROGRESS_RATIO * expected:
-            if self._charge_stalled:
-                _LOGGER.info("The battery charges again: %.1f%% -> %.1f%%", self._progress_soc, current_soc)
-                self._charge_stalled = False
-                self._stall_hold_w = None
-                ir.async_delete_issue(self.hass, DOMAIN, self._charge_stall_issue_id)
-            self._progress_soc, self._progress_since = current_soc, now
+        elapsed_s = (now - self._progress_since).total_seconds()
+        if expected < STALL_MIN_EXPECTED_SOC:
+            return  # too little yet to tell either way
+        if rose >= STALL_PROGRESS_RATIO * expected:
+            self._end_charge_stall(f"charges again: {self._progress_soc:.1f}% -> {current_soc:.1f}%")
+            self._progress_soc, self._progress_since, self._progress_expected = current_soc, now, 0.0
             return
-        if elapsed_s < STALL_DETECT_S or expected < STALL_MIN_EXPECTED_SOC or self._charge_stalled:
+        if self._charge_stalled:
+            # Still stuck: the next interval is judged on its own
+            self._progress_soc, self._progress_since, self._progress_expected = current_soc, now, 0.0
+            return
+        if elapsed_s < STALL_DETECT_S:
             return
         self._charge_stalled = True
         self._stall_hold_w = written
@@ -3340,11 +3410,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "floor": f"{floor:.0f}", "minutes": f"{elapsed_s / 60:.0f}", "power": f"{written:.0f}",
             },
         )
+        self._progress_soc, self._progress_since, self._progress_expected = current_soc, now, 0.0
         if not self._stall_nudged:
             self._stall_nudged = True
+            self._persist_state()
             await self._nudge_min_soc(current_soc, floor)
-        # The next 20 minutes are measured from here
-        self._progress_soc, self._progress_since = current_soc, now
+        self._persist_state()
 
     async def _nudge_min_soc(self, current_soc: float, floor: float) -> None:
         """Take the min SOC down to the battery and raise it again, once per window.
@@ -3356,8 +3427,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         entity = self.config.get(CONF_MIN_SOC_ENTITY)
         if not entity:
             return
-        low = max(float(self.config.get(CONF_USER_MIN_SOC, 8.0)), float(math.floor(current_soc)))
-        if low >= floor:
+        wanted = max(float(self.config.get(CONF_USER_MIN_SOC, 8.0)), float(math.floor(current_soc)))
+        # At a step the entity takes, rounded down (Sourcery on #53)
+        low = self._representable_min_soc(wanted, round_up=False)
+        if low is None or low >= floor:
             return
         window_started_at = self._window_started_at
         self._nudging_min_soc = True
@@ -3396,13 +3469,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.planned_charge_power_w = None
         self.planned_power_is_applied = False
         if self.target_reached:
+            self._end_charge_stall("reached its target")
             self.planned_charge_power_w = 0.0
             return
         current_soc = self._current_battery_soc()
         if current_soc is None:
             return
         now = dt_util.now()
+        started, was_active = self._window_started_at, self.is_active
         await self._watch_charge_progress(current_soc, target_soc, now)
+        if (was_active and not self.is_active) or self._window_started_at != started:
+            # The nudge waits 12 s; the window may have ended meanwhile (Codex on #53)
+            return
         hours_remaining = max(0.0, elapsed_seconds(self._window_end_datetime(now), now) / 3600.0)
         if hours_remaining < MIN_PLAN_HOURS_REMAINING:
             # required_charge_power_w would return infinity and the setpoint

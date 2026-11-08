@@ -248,6 +248,7 @@ STALL_DETECT_S = 1200  # no rise after this long counts as not charging
 STALL_MIN_EXPECTED_SOC = 2.0  # % the written power should have added by then
 STALL_PROGRESS_RATIO = 0.25  # less than this share of it is no charging
 STALL_NUDGE_SETTLE_S = 12  # KostalKore publishes a min SOC write after its 10 s cooldown
+STALL_SOC_MAX_AGE_S = 600  # an older SOC reading is not judged
 # Trial starts whose setpoint the inverter did not take before the search
 # stops for the window: each further one is a Modbus write that changes nothing
 AUTO_TEST_MAX_START_FAILURES = 2

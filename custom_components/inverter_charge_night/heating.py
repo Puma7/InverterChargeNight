@@ -243,6 +243,17 @@ class TemperatureLog:
                     continue
                 if number is not None:
                     self.days[parsed] = number
+        # The day so far, so a restart does not forget its morning (Sourcery on #53)
+        today = raw.get("today")
+        if isinstance(today, Mapping):
+            total, count = _number(today.get("sum")), today.get("count")
+            try:
+                day = date.fromisoformat(str(today.get("day")))
+            except ValueError:
+                day = None
+            if (day is not None and total is not None and isinstance(count, int)
+                    and not isinstance(count, bool) and count > 0):
+                self._day, self._sum, self._count = day, total, count
 
     def observe(self, today: date, temperature_c: float | None) -> bool:
         """Add a sample; True when a finished day was added to the diary."""
@@ -272,4 +283,9 @@ class TemperatureLog:
         return self._sum / self._count
 
     def snapshot(self) -> dict[str, Any]:
-        return {"days": {day.isoformat(): round(mean, 2) for day, mean in sorted(self.days.items())}}
+        snapshot: dict[str, Any] = {
+            "days": {day.isoformat(): round(mean, 2) for day, mean in sorted(self.days.items())}
+        }
+        if self._day is not None and self._count > 0:
+            snapshot["today"] = {"day": self._day.isoformat(), "sum": round(self._sum, 3), "count": self._count}
+        return snapshot
