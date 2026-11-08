@@ -3319,14 +3319,19 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._progress_last = None
         self._progress_expected = 0.0
 
-    def _end_charge_stall(self, why: str) -> None:
-        """The battery charges again, or no longer has to: the hold and the notice go."""
+    def _end_charge_stall(self, why: str, *, keep_notice: bool = False) -> None:
+        """The battery charges again, or no longer has to: the hold and the notice go.
+
+        A window that ends stalled keeps its notice for the morning; the next
+        window start, a recovery or switching the integration off removes it.
+        """
         if not self._charge_stalled:
             return
         _LOGGER.info("The battery %s: no longer holding the charge power", why)
         self._charge_stalled = False
         self._stall_hold_w = None
-        ir.async_delete_issue(self.hass, DOMAIN, self._charge_stall_issue_id)
+        if not keep_notice:
+            ir.async_delete_issue(self.hass, DOMAIN, self._charge_stall_issue_id)
         self._persist_state()
 
     @property
@@ -3373,7 +3378,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         # The limit read now is the one written after the last observation and
         # in force since: the plan writes after this watch (Sourcery on #53)
-        step_s = max(0.0, (now - self._progress_last).total_seconds())
+        step_s = max(0.0, elapsed_seconds(now, self._progress_last))
         self._progress_expected += (written / 1000.0 * step_s / 3600.0
                                     * self._charge_efficiency(current_soc) / self._capacity_kwh() * 100.0)
         self._progress_last = now
@@ -3381,7 +3386,8 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._progress_soc = current_soc  # lower, and the clock runs on
         expected = self._progress_expected
         rose = current_soc - self._progress_soc
-        elapsed_s = (now - self._progress_since).total_seconds()
+        # Real seconds, the skipped spring hour included (Codex on #53)
+        elapsed_s = elapsed_seconds(now, self._progress_since)
         if expected < STALL_MIN_EXPECTED_SOC:
             return  # too little yet to tell either way
         if rose >= STALL_PROGRESS_RATIO * expected:
@@ -7390,6 +7396,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         _LOGGER.info("Disabling Inverter Charge Night")
         self.is_enabled = False
         self.is_active = False
+        # Switched off: no stall to hold, no notice left behind (Codex on #53)
+        self._end_charge_stall("is no longer watched: the integration is off")
+        ir.async_delete_issue(self.hass, DOMAIN, self._charge_stall_issue_id)
         self._ending = True
         try:
             self._remove_battery_soc_listener()
@@ -7468,6 +7477,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 _LOGGER.debug("Window end without an active window - nothing to reset")
             return
+        # The hold belongs to this window; its notice stays for the morning
+        # (Codex on #53)
+        self._end_charge_stall("is no longer charged: the window ended", keep_notice=True)
         mode_label = "Morning discharge" if self.is_discharge_mode else "Night charge"
         _LOGGER.info("%s window ended, resetting settings", mode_label)
         self._remember_forced_charge()
@@ -8186,6 +8198,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             else:
                                 await self._stop_grid_charging()
                             self.target_reached = True
+                            self._end_charge_stall("reached its target")
                         self.planned_charge_power_w = 0.0
                         return {
                             "calculated_soc": calculated_soc,
@@ -8253,6 +8266,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             else:
                                 await self._stop_grid_charging()
                             self.target_reached = True
+                            self._end_charge_stall("reached its target")
                 except (ValueError, TypeError):
                     pass
 
@@ -9140,10 +9154,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             else:
                                 await self._stop_grid_charging()
                             self.target_reached = True
+                            self._end_charge_stall("reached its target")
                             await self.async_request_refresh()
                         except Exception as e:
                             _LOGGER.error("Error stopping control in listener: %s", e, exc_info=True)
                             self.target_reached = True
+                            self._end_charge_stall("reached its target")
             except (ValueError, TypeError) as e:
                 _LOGGER.debug("Error parsing SOC in listener: %s", e)
             except Exception as e:
@@ -9711,6 +9727,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             else:
                                 await self._stop_grid_charging()
                             self.target_reached = True
+                            self._end_charge_stall("reached its target")
                     except (ValueError, TypeError):
                         pass
         except Exception as e:

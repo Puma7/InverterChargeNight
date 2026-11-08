@@ -340,3 +340,64 @@ async def test_the_nudge_writes_a_value_the_entity_takes(stuck):
         clock.now += timedelta(minutes=15)
         await _poll(hass, coordinator, clock, 17.0)
     assert _set_values(hass, MIN_SOC) == [15.0, 100.0]
+
+
+# --- second Codex round on #53 ---------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_reaching_the_target_between_polls_ends_the_stall(stuck):
+    """Codex: the at-target branch returns before the planner runs."""
+    hass, coordinator, clock = stuck
+    await _stall(hass, coordinator, clock)
+    hass.deleted_issue.reset_mock()
+    hass.states.async_set(BATTERY, "100")
+    hass.states.get(BATTERY).last_reported = clock.now
+    with patch.object(coordinator, "_plan_charge_power", AsyncMock()) as planner:
+        await coordinator._async_update_data()
+    planner.assert_not_awaited()
+    assert coordinator.target_reached is True
+    assert coordinator._charge_stalled is False and coordinator._stall_hold_w is None
+    hass.deleted_issue.assert_any_call(hass, "inverter_charge_night", ISSUE)
+
+
+@pytest.mark.asyncio
+async def test_the_window_end_drops_the_hold_and_keeps_the_notice(stuck):
+    hass, coordinator, clock = stuck
+    await _stall(hass, coordinator, clock)
+    hass.deleted_issue.reset_mock()
+    coordinator._reset_settings = AsyncMock(return_value=True)
+    await coordinator._on_window_end(clock.now, scheduled=True)
+    assert coordinator._charge_stalled is False and coordinator._stall_hold_w is None
+    assert ISSUE not in [c.args[2] for c in hass.deleted_issue.call_args_list]
+
+
+@pytest.mark.asyncio
+async def test_switching_off_removes_the_notice(stuck):
+    hass, coordinator, clock = stuck
+    await _stall(hass, coordinator, clock)
+    hass.deleted_issue.reset_mock()
+    coordinator._reset_settings = AsyncMock(return_value=True)
+    await coordinator.async_disable()
+    assert coordinator._charge_stalled is False
+    hass.deleted_issue.assert_any_call(hass, "inverter_charge_night", ISSUE)
+
+
+@pytest.mark.asyncio
+async def test_the_spring_hour_is_not_counted_as_charging_time(stuck):
+    """Codex: 01:45 to 03:00 on 29 March is 15 real minutes, not 75."""
+    from zoneinfo import ZoneInfo
+    hass, coordinator, clock = stuck
+    berlin = ZoneInfo("Europe/Berlin")
+    coordinator.is_active, coordinator._last_soc_set = True, 100.0
+    coordinator._planned_setpoint_written_w = 1000.0
+
+    async def observe(at: datetime, soc: float) -> None:
+        clock.now = at
+        hass.states.async_set(BATTERY, str(soc))
+        hass.states.get(BATTERY).last_reported = at
+        await coordinator._watch_charge_progress(soc, 100.0, at)
+
+    await observe(datetime(2026, 3, 29, 1, 30, tzinfo=berlin), 17.0)
+    await observe(datetime(2026, 3, 29, 1, 45, tzinfo=berlin), 19.25)  # 1 kW, 15 min, 0.9
+    await observe(datetime(2026, 3, 29, 3, 0, tzinfo=berlin), 21.5)  # 15 real minutes later
+    assert coordinator._charge_stalled is False

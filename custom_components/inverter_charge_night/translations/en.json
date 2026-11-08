@@ -1755,7 +1755,7 @@
     },
     "battery_not_charging": {
       "title": "{name}: the battery does not charge",
-      "description": "{name} raised the inverter's min SOC to {floor} % at a {power} W charge limit, but the battery stayed at {soc} % for {minutes} minutes. The charge power is not raised any further, and the min SOC was nudged once (taken down to the battery and raised again). Check whether the inverter charges from the grid under a raised min SOC; a Kostal sometimes starts only after its nightly internal error. The notice goes away when the battery charges again or the next window starts."
+      "description": "{name} raised the inverter's min SOC to {floor} % at a {power} W charge limit, but the battery stayed at {soc} % for {minutes} minutes. The charge power is not raised any further, and the min SOC was nudged once (taken down to the battery and raised again). Check whether the inverter charges from the grid under a raised min SOC; a Kostal sometimes starts only after its nightly internal error. The notice goes away when the battery charges again or reaches its target, when the next window starts or when the integration is switched off."
     },
     "reset_incomplete": {
       "title": "{name}: inverter settings not fully restored",

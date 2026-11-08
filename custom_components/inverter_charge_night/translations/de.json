@@ -1755,7 +1755,7 @@
     },
     "battery_not_charging": {
       "title": "{name}: Der Akku lädt nicht",
-      "description": "{name} hat den Min-SOC des Wechselrichters bei einem Ladelimit von {power} W auf {floor} % angehoben, aber der Akku blieb {minutes} Minuten lang bei {soc} %. Die Ladeleistung wird nicht weiter erhöht, und der Min-SOC wurde einmal angestoßen (auf den Akku gesenkt und wieder angehoben). Prüfe, ob der Wechselrichter unter einem angehobenen Min-SOC aus dem Netz lädt; ein Kostal startet manchmal erst nach seinem nächtlichen internen Fehler. Der Hinweis verschwindet, sobald der Akku wieder lädt oder das nächste Fenster beginnt."
+      "description": "{name} hat den Min-SOC des Wechselrichters bei einem Ladelimit von {power} W auf {floor} % angehoben, aber der Akku blieb {minutes} Minuten lang bei {soc} %. Die Ladeleistung wird nicht weiter erhöht, und der Min-SOC wurde einmal angestoßen (auf den Akku gesenkt und wieder angehoben). Prüfe, ob der Wechselrichter unter einem angehobenen Min-SOC aus dem Netz lädt; ein Kostal startet manchmal erst nach seinem nächtlichen internen Fehler. Der Hinweis verschwindet, sobald der Akku wieder lädt oder sein Ziel erreicht, das nächste Fenster beginnt oder die Integration ausgeschaltet wird."
     },
     "reset_incomplete": {
       "title": "{name}: Wechselrichter-Einstellungen nicht vollständig zurückgesetzt",

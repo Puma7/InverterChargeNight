@@ -56,6 +56,10 @@ was at 69 %.
   - Today's temperature samples survive a restart.
   - A dark day without a mean at sunset is confirmed when a later poll finds it cold.
   - A full charge armed by 3.14.6 on one dark day is judged again by the new rule.
+  - Reaching the target ends the stall wherever it is noticed, not only in the planner. The
+    window end drops the hold and keeps the notice for the morning; switching the integration
+    off or removing the entry removes it.
+  - The stall clock counts real seconds, so the skipped spring hour is no charging time.
 - Tests: Home Assistant 2026.11 made `DeviceInfo` a dataclass with a mapping view, and a test
   merged it with `|` like a dict. It compares the two as dicts now.
 
