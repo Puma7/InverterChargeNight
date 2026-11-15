@@ -31,10 +31,18 @@ A review of what 3.14.6 and 3.14.7 added, before a night finds it.
   later.
 - **The day so far is stored every hour.** Today's temperature samples reached storage only when a
   day was finished or something else stored the state. A restart in the afternoon lost the warm
-  midday hours and made the day look colder.
+  midday hours and made the day look colder. The hour is measured by the clock, so a longer update
+  interval loses no more, and a temperature outage stores nothing.
 - **The log names the armed day's figures after midnight.** A window starting after midnight, or a
   restart inside one, logged `None of None kWh`. The armed day's figures are kept with the
   decision. Figures in the log and the notices are rounded to one decimal.
+- **A nudge that broke off puts the floor back at once.** A low min SOC write that reached the
+  inverter but timed out, or a nudge cancelled between its two writes, left the low value until the
+  next verification. The verification now runs right away and writes only if the inverter shows a
+  difference.
+- **Stored state that cannot be read is ignored.** A stored number too large for a float no longer
+  stops the PV yield check from loading. A full charge armed by 3.14.7 keeps the armed day's
+  figures for the log after midnight.
 - The repair text for a battery that does not charge no longer claims a nudge that may not have
   been written.
 - The laboratory workflow passes `KOSTAL_REPO_PATH` to the steps that run as root explicitly.

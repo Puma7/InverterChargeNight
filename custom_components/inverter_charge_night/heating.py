@@ -43,6 +43,8 @@ TEMPERATURE_LOG_DAYS = 60
 MIN_SAMPLES_PER_DAY = 24
 # An hour of 15-minute polls: enough for "how cold was today so far" (3.14.7)
 TODAY_MIN_SAMPLES = 4
+# How often the day so far is stored, whatever the update interval (Sourcery on #54)
+TODAY_STORE_EVERY_S = 3600
 
 STATUS_OFF = "off"
 STATUS_LEARNING = "learning"
@@ -231,6 +233,9 @@ class TemperatureLog:
         self._day: date | None = None
         self._sum = 0.0
         self._count = 0
+        # The storage checkpoint: when it last fired and how many samples it held
+        self._checkpoint_at: datetime | None = None
+        self._stored_count = 0
         if not isinstance(raw, Mapping):
             return
         days = raw.get("days")
@@ -254,6 +259,7 @@ class TemperatureLog:
             if (day is not None and total is not None and isinstance(count, int)
                     and not isinstance(count, bool) and count > 0):
                 self._day, self._sum, self._count = day, total, count
+                self._stored_count = count
 
     def observe(self, today: date, temperature_c: float | None) -> bool:
         """Add a sample; True when a finished day was added to the diary."""
@@ -263,6 +269,7 @@ class TemperatureLog:
                 self.days[self._day] = self._sum / self._count
                 finished = True
             self._day, self._sum, self._count = None, 0.0, 0
+            self._stored_count = 0
         if temperature_c is not None and math.isfinite(temperature_c):
             if self._day is None:
                 self._day = today
@@ -273,14 +280,30 @@ class TemperatureLog:
                 del self.days[old]
         return finished
 
-    def samples_due_for_storage(self) -> bool:
-        """True every hour of samples (four 15-minute polls): time to store the day so far."""
-        return self._day is not None and self._count > 0 and self._count % TODAY_MIN_SAMPLES == 0
+    def take_storage_checkpoint(self, now: datetime) -> bool:
+        """True about once an hour while new samples came in: time to store the day so far.
+
+        By the clock, not by the number of polls, so a longer update interval
+        loses no more than an hour (Sourcery on #54). It fires once per
+        checkpoint: a sensor outage adds no samples and stores nothing. The
+        first sample after a start only sets the clock.
+        """
+        if self._day is None or self._count <= self._stored_count:
+            return False
+        if self._checkpoint_at is None:
+            self._checkpoint_at = now
+            return False
+        # Real seconds via the timestamps: a DST change is no extra hour
+        if now.timestamp() - self._checkpoint_at.timestamp() < TODAY_STORE_EVERY_S:
+            return False
+        self._checkpoint_at, self._stored_count = now, self._count
+        return True
 
     def today_mean(self, today: date) -> float | None:
         """The mean of the samples so far today; None with fewer than four.
 
-        Not persisted: after a restart it is the mean since the restart.
+        The day so far is stored about once an hour (take_storage_checkpoint),
+        so a restart loses at most the last hour of it.
         """
         if self._day != today or self._count < TODAY_MIN_SAMPLES:
             return None

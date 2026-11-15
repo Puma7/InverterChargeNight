@@ -2602,14 +2602,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Add this poll's outdoor temperature to the diary (plan 015 stage D).
 
         From the temperature sensor if one is set, otherwise from the weather
-        entity's current conditions. Persisted once a day is complete.
+        entity's current conditions. Persisted when a day is complete, and
+        the day so far about once an hour.
         """
         if not self._temperature_source():
             return
-        finished = self._temperature_log.observe(dt_util.now().date(), self._current_outdoor_c())
+        now = dt_util.now()
+        finished = self._temperature_log.observe(now.date(), self._current_outdoor_c())
         # The day so far is stored every hour, so a restart in the afternoon
-        # keeps the morning (review of 3.14.7)
-        if finished or self._temperature_log.samples_due_for_storage():
+        # keeps the morning (review of 3.14.7); by the clock, once per
+        # checkpoint (Sourcery on #54)
+        checkpoint = self._temperature_log.take_storage_checkpoint(now)
+        if finished or checkpoint:
             self._persist_state()
 
     def _temperature_source(self) -> bool:
@@ -3451,7 +3455,9 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         window_started_at = self._window_started_at
         self._nudging_min_soc = True
-        lowered = raised = False
+        # Tried, not confirmed: a write that timed out may still have gone
+        # through (Sourcery on #54)
+        lowered = raised = cancelled = False
         try:
             for value, settle in ((low, STALL_NUDGE_SETTLE_S), (floor, 0)):
                 async with self._min_soc_write_lock:
@@ -3461,6 +3467,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     released = self._floor_released_soc
                     if released is not None and value > released:
                         break  # taken down for the connection meanwhile
+                    lowered = lowered or value == low
                     try:
                         await self.hass.services.async_call(
                             "number", "set_value", {"entity_id": entity, "value": value}, blocking=True,
@@ -3472,15 +3479,25 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         break
                 # _last_soc_set stays the floor: the low value is the nudge's
                 # own, and the watcher reads the floor from it (review of 3.14.7)
-                lowered, raised = lowered or value == low, value == floor
+                raised = value == floor
                 _LOGGER.info("Nudged the inverter min SOC to %.1f%%", value)
                 if settle:
                     await asyncio.sleep(settle)
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
             self._nudging_min_soc = False
-        if lowered and not raised and self.is_active and not self._ending and not self._unloading:
-            # The floor did not go back up: put it back now, not at the next poll
-            await self._verify_and_restore_min_soc()
+            if lowered and not raised and self.is_active and not self._ending and not self._unloading:
+                # The floor did not go back up: put it back now, not at the next
+                # poll. A cancelled nudge hands it to a task of its own; the
+                # verification reads the entity and writes only on a difference
+                if cancelled:
+                    self.hass.async_create_task(
+                        self._verify_and_restore_min_soc(), name="inverter_charge_night_nudge_restore",
+                    )
+                else:
+                    await self._verify_and_restore_min_soc()
 
     async def _plan_charge_power(self, target_soc: float) -> None:
         """Prefer the measured optimum, then apply the connection budget.

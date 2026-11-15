@@ -16,6 +16,17 @@ COLD_DAY_C = 7.0
 STATUSES = {"learning", "normal", "low_yield", "low_yield_unconfirmed", "unavailable"}
 
 
+def _stored_number(value: Any) -> float | None:
+    """A finite stored number, or None; an integer too large for a float is malformed (Sourcery on #54)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
 class PVYieldMonitor:
     """Compare a morning full-day forecast with fresh energy after sunset.
 
@@ -50,20 +61,18 @@ class PVYieldMonitor:
             except ValueError:
                 pass
         for key in ("expected_kwh", "actual_kwh"):
-            value = raw.get(key)
-            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
-                setattr(self, key, float(value))
-        mean = raw.get("day_mean_c")
-        if isinstance(mean, (int, float)) and not isinstance(mean, bool) and math.isfinite(mean):
-            self.day_mean_c = float(mean)
+            value = _stored_number(raw.get(key))
+            if value is not None and value >= 0:
+                setattr(self, key, value)
+        self.day_mean_c = _stored_number(raw.get("day_mean_c"))
         trigger = raw.get("trigger")
         if trigger in ("cold", "second_day"):
             self.trigger = str(trigger)
         armed = raw.get("armed_kwh")
-        if (isinstance(armed, (list, tuple)) and len(armed) == 2
-                and all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
-                        for v in armed)):
-            self.armed_kwh = (float(armed[0]), float(armed[1]))
+        if isinstance(armed, (list, tuple)) and len(armed) == 2:
+            actual, expected = _stored_number(armed[0]), _stored_number(armed[1])
+            if actual is not None and expected is not None and actual >= 0 and expected >= 0:
+                self.armed_kwh = (actual, expected)
         status = raw.get("status")
         if isinstance(status, str) and status in STATUSES:
             self.status = status
@@ -78,6 +87,11 @@ class PVYieldMonitor:
                 self.status, self.low_day = "low_yield_unconfirmed", self.day
             else:
                 self.status = "normal"
+        elif (self.charge_day is not None and self.armed_kwh is None
+              and self.actual_kwh is not None and self.expected_kwh is not None):
+            # Armed by 3.14.7, which kept no figures of its own: the day's are
+            # still the armed day's until midnight (Sourcery on #54)
+            self.armed_kwh = (self.actual_kwh, self.expected_kwh)
 
     def snapshot(self) -> dict[str, Any]:
         """Small, JSON-safe state, also used for frontend explanations."""
