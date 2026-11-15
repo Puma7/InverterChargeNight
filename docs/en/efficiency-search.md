@@ -60,7 +60,9 @@ charge power* are disabled by default; enable them on the device page to follow 
 
 A six-hour window is usually enough. A trial only starts when the window has enough time and
 charge left to finish it, the 15 minutes of waiting for the battery included
-(`not_enough_charge_left` otherwise).
+(`not_enough_charge_left` otherwise). While the battery does not charge under the raised min SOC,
+no trial starts and no result is written (`battery_not_charging`): a trial at up to the maximum
+power would undo the held charge power.
 
 From then on, charging prefers the optimum and stops at the target, instead of spreading a less
 efficient trickle over the window. The deadline may need more power, and the maximum charge power

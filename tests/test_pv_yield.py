@@ -76,7 +76,7 @@ def test_next_night_only_and_persists_through_midnight():
 def test_restore_rejects_malformed_data(raw):
     monitor = PVYieldMonitor(raw)
     assert monitor.snapshot() == dict(day=None, expected_kwh=None, actual_kwh=None, charge_day=None, status="learning",
-                                      low_day=None, day_mean_c=None, trigger=None)
+                                      low_day=None, day_mean_c=None, trigger=None, armed_kwh=None)
 
 
 def make_co(hass):
@@ -294,7 +294,7 @@ async def test_the_log_names_the_dark_day_not_snow(mock_hass, caplog):
     with patch(NOW, return_value=SET.replace(hour=23, minute=1)), caplog.at_level(logging.INFO):
         await co._calculate_initial_soc()
     lines = [r.getMessage() for r in caplog.records]
-    assert "Very low PV yield on 2026-01-15 (1 of 20 kWh, the second dark day in a row): charging to 95%" in lines
+    assert "Very low PV yield on 2026-01-15 (1.0 of 20.0 kWh, the second dark day in a row): charging to 95%" in lines
     assert not any(line.startswith("Snow mode") for line in lines)
     assert co.calculated_soc == 95
 

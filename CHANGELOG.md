@@ -5,6 +5,39 @@ All notable changes to the **Inverter Charge Night** integration will be documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.8] - 2026-11-15
+
+A review of what 3.14.6 and 3.14.7 added, before a night finds it.
+
+### Fixed
+
+- **A short squeeze of the house connection no longer becomes the night's hold.** When the
+  battery was found not to charge just after the connection limit had cut the charge limit for a
+  wallbox (for example to 300 W), that cut was held for the rest of the stall. After the Kostal
+  started, the 300 W also slowed the recovery check by hours. The hold is now what the plan asked
+  for; the connection limit still applies on top of it.
+- **A failed raise after the nudge keeps the stall.** If the write back up to the floor failed (a
+  Modbus timeout), ICN took the nudge's low min SOC for the floor. It then ended the stall as "no
+  longer has to charge", deleted the notice and raised the power again. The floor now stays the
+  floor, and the verification puts it back on the inverter at once instead of at the next poll.
+- **No efficiency trial while the battery does not charge.** A trial, or the search's result
+  written at up to the maximum power, would have undone the hold. The search waits with
+  `battery_not_charging` and records a trial that already finished.
+- **A restart after the window end drops the hold.** When Home Assistant was down at the window
+  end, the reset at startup now ends the stall too, keeping the notice for the morning.
+- **A fog day judged at sunset stays a fog day.** A dark day with a mean of 7 °C or more at sunset
+  could still arm the full charge when a clear, cold evening pulled the day's mean below 7 °C,
+  possibly inside an already running window. Only a day that had no mean at sunset is confirmed
+  later.
+- **The day so far is stored every hour.** Today's temperature samples reached storage only when a
+  day was finished or something else stored the state. A restart in the afternoon lost the warm
+  midday hours and made the day look colder.
+- **The log names the armed day's figures after midnight.** A window starting after midnight, or a
+  restart inside one, logged `None of None kWh`. The armed day's figures are kept with the
+  decision. Figures in the log and the notices are rounded to one decimal.
+- The repair text for a battery that does not charge no longer claims a nudge that may not have
+  been written.
+
 ## [3.14.7] - 2026-11-08
 
 The night of 7/8 November 2026: a foggy 7 November delivered a tenth of its forecast. The automatic

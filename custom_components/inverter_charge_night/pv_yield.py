@@ -39,6 +39,9 @@ class PVYieldMonitor:
         self.day_mean_c: float | None = None
         # Why the full charge was armed: "cold" or "second_day"
         self.trigger: str | None = None
+        # The armed day's (actual, expected) kWh: the day's own figures are
+        # reset at midnight, before a window after it reports them
+        self.armed_kwh: tuple[float, float] | None = None
         if not isinstance(raw, Mapping):
             return
         for key in ("day", "charge_day", "low_day"):
@@ -56,6 +59,11 @@ class PVYieldMonitor:
         trigger = raw.get("trigger")
         if trigger in ("cold", "second_day"):
             self.trigger = str(trigger)
+        armed = raw.get("armed_kwh")
+        if (isinstance(armed, (list, tuple)) and len(armed) == 2
+                and all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
+                        for v in armed)):
+            self.armed_kwh = (float(armed[0]), float(armed[1]))
         status = raw.get("status")
         if isinstance(status, str) and status in STATUSES:
             self.status = status
@@ -82,6 +90,7 @@ class PVYieldMonitor:
             "low_day": self.low_day.isoformat() if self.low_day else None,
             "day_mean_c": self.day_mean_c,
             "trigger": self.trigger,
+            "armed_kwh": list(self.armed_kwh) if self.armed_kwh is not None else None,
         }
 
     def observe(
@@ -102,13 +111,16 @@ class PVYieldMonitor:
             if self.charge_day is not None and self.charge_day < today:
                 self.charge_day = None
                 self.trigger = None
+                self.armed_kwh = None
         if (self.status == "low_yield_unconfirmed" and self.charge_day is None
+                and self.day_mean_c is None  # only a day that had no mean at sunset
                 and day_mean_c is not None and math.isfinite(day_mean_c) and day_mean_c < COLD_DAY_C):
             # The first look after sunset knew no mean yet; a later poll does
             # (Sourcery on #53)
             self.day_mean_c = round(day_mean_c, 1)
             self.status, self.trigger = "low_yield", "cold"
             self.charge_day = today + timedelta(days=1)
+            self._arm_figures()
             return True
         if self.status in {"normal", "low_yield", "low_yield_unconfirmed"}:
             return False
@@ -139,9 +151,14 @@ class PVYieldMonitor:
             self.status = "low_yield"
             self.trigger = "cold" if cold else "second_day"
             self.charge_day = today + timedelta(days=1)
+            self._arm_figures()
             return True
         self.status = "normal"
         return False
+
+    def _arm_figures(self) -> None:
+        if self.actual_kwh is not None and self.expected_kwh is not None:
+            self.armed_kwh = (self.actual_kwh, self.expected_kwh)
 
     def active_for(self, solar_day: date) -> bool:
         """Whether this observation applies to that window's following day."""

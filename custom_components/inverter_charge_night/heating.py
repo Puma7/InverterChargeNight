@@ -273,6 +273,10 @@ class TemperatureLog:
                 del self.days[old]
         return finished
 
+    def samples_due_for_storage(self) -> bool:
+        """True every hour of samples (four 15-minute polls): time to store the day so far."""
+        return self._day is not None and self._count > 0 and self._count % TODAY_MIN_SAMPLES == 0
+
     def today_mean(self, today: date) -> float | None:
         """The mean of the samples so far today; None with fewer than four.
 

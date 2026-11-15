@@ -246,12 +246,14 @@ async def test_the_polls_keep_a_temperature_diary(mock_hass):
     with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 14, 12, 0)):
         for _ in range(MIN_SAMPLES_PER_DAY):
             coordinator._observe_outdoor_temperature()
-    coordinator._persist_state.assert_not_called()
+    # The day so far is stored once an hour of samples (3.14.8), not every poll
+    assert coordinator._persist_state.call_count == MIN_SAMPLES_PER_DAY // 4
+    coordinator._persist_state.reset_mock()
     mock_hass.states.async_set(OUTDOOR, "-3.5", {"unit_of_measurement": "°C"})
     coordinator.config = {**coordinator.config, CONF_OUTDOOR_TEMPERATURE_ENTITY: OUTDOOR}
     with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 15, 0, 5)):
         coordinator._observe_outdoor_temperature()
-    coordinator._persist_state.assert_called_once()
+    coordinator._persist_state.assert_called_once()  # the finished day
     assert coordinator._temperature_log.days == {date(2026, 1, 14): 4.0}
     assert coordinator._temperature_log._sum == -3.5  # the sensor wins once it is set
 
