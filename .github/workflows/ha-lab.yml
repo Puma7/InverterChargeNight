@@ -39,12 +39,12 @@ jobs:
       - run: python -m pytest
       - run: python lab/check_real_ha.py
       # The real Kostal REST client uses the inverter's standard port 80.
-      - run: sudo -E "$(command -v python)" lab/check_kostal.py
+      - run: sudo env "KOSTAL_REPO_PATH=$KOSTAL_REPO_PATH" "$(command -v python)" lab/check_kostal.py
       - run: python lab/install_evcc.py
         env:
           GH_TOKEN: ${{ github.token }}
-      - run: sudo -E "$(command -v python)" lab/check_grid.py
-      - run: sudo -E "$(command -v python)" lab/check_communication.py
+      - run: sudo env "KOSTAL_REPO_PATH=$KOSTAL_REPO_PATH" "$(command -v python)" lab/check_grid.py
+      - run: sudo env "KOSTAL_REPO_PATH=$KOSTAL_REPO_PATH" "$(command -v python)" lab/check_communication.py
       - run: python lab/check_recovery.py
       - run: python lab/check_edge_cases.py
       - uses: actions/upload-artifact@v4

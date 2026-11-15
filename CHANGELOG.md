@@ -37,6 +37,8 @@ A review of what 3.14.6 and 3.14.7 added, before a night finds it.
   decision. Figures in the log and the notices are rounded to one decimal.
 - The repair text for a battery that does not charge no longer claims a nudge that may not have
   been written.
+- The laboratory workflow passes `KOSTAL_REPO_PATH` to the steps that run as root explicitly.
+  The current GitHub runners ignore `sudo -E`, so the Kostal check looked for the wrong checkout.
 
 ## [3.14.7] - 2026-11-08
 
