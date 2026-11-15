@@ -63,7 +63,10 @@ die Suche zu verfolgen.
 
 Ein Fenster von sechs Stunden reicht meist. Ein Versuch beginnt nur, wenn das Fenster noch genug
 Zeit und genug zu ladende Energie übrig hat, um ihn abzuschließen, die 15 Minuten Warten auf den
-Akku eingerechnet (sonst `not_enough_charge_left`).
+Akku eingerechnet (sonst `not_enough_charge_left`). Solange der Akku unter dem angehobenen
+Min-SOC nicht lädt, beginnt kein Versuch und es wird kein Ergebnis geschrieben
+(`battery_not_charging`): Ein Versuch mit bis zur größten Leistung würde die gehaltene Ladeleistung
+aufheben.
 
 Von da an lädt ICN bevorzugt mit dem Optimum und hört beim Ziel auf, statt ein weniger effizientes
 Rinnsal über das Fenster zu verteilen. Die Frist kann mehr Leistung verlangen, und die größte

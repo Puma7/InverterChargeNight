@@ -11,7 +11,7 @@ import json
 import logging
 import math
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
@@ -382,6 +382,11 @@ def _as_float_strict(value: Any) -> float:
     if number is None:
         raise ValueError(f"not a usable number: {value!r}")
     return number
+
+
+def _kwh(value: float | None) -> str:
+    """An energy for a log line or a notice: one decimal, or a dash."""
+    return f"{value:.1f}" if isinstance(value, (int, float)) and math.isfinite(value) else "-"
 
 
 def _hours_in_local_day(day: date) -> int:
@@ -1261,15 +1266,15 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 is_fixable=False, severity=ir.IssueSeverity.WARNING,
                 translation_key="pv_yield_shortfall",
                 translation_placeholders={"name": self.entry.title,
-                    "expected": str(self._pv_yield.expected_kwh),
-                    "actual": str(self._pv_yield.actual_kwh)},
+                    "expected": _kwh(self._pv_yield.expected_kwh),
+                    "actual": _kwh(self._pv_yield.actual_kwh)},
             )
             if self._pv_yield_notice is not None:
                 from homeassistant.components import persistent_notification
                 title, description = self._pv_yield_notice
                 persistent_notification.async_create(
                     self.hass, description.format(name=self.entry.title,
-                        expected=self._pv_yield.expected_kwh, actual=self._pv_yield.actual_kwh),
+                        expected=_kwh(self._pv_yield.expected_kwh), actual=_kwh(self._pv_yield.actual_kwh)),
                     title=title, notification_id=f"icn_pv_yield_{self.entry.entry_id}",
                 )
         elif self._pv_yield.status == "normal":
@@ -2597,11 +2602,18 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Add this poll's outdoor temperature to the diary (plan 015 stage D).
 
         From the temperature sensor if one is set, otherwise from the weather
-        entity's current conditions. Persisted once a day is complete.
+        entity's current conditions. Persisted when a day is complete, and
+        the day so far about once an hour.
         """
         if not self._temperature_source():
             return
-        if self._temperature_log.observe(dt_util.now().date(), self._current_outdoor_c()):
+        now = dt_util.now()
+        finished = self._temperature_log.observe(now.date(), self._current_outdoor_c())
+        # The day so far is stored every hour, so a restart in the afternoon
+        # keeps the morning (review of 3.14.7); by the clock, once per
+        # checkpoint (Sourcery on #54)
+        checkpoint = self._temperature_log.take_storage_checkpoint(now)
+        if finished or checkpoint:
             self._persist_state()
 
     def _temperature_source(self) -> bool:
@@ -3401,7 +3413,10 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if elapsed_s < STALL_DETECT_S:
             return
         self._charge_stalled = True
-        self._stall_hold_w = written
+        # What the plan asked for, not what the connection limit let through
+        # just now: a wallbox's squeeze must not become the hold for the night
+        # (review of 3.14.7). The connection limit still applies after the hold.
+        self._stall_hold_w = max(written, self._grid_plan_request_w or 0.0)
         _LOGGER.warning(
             "The battery does not charge: %.1f%% for %.0f minutes under a min SOC of %.1f%% at a %.0f W "
             "limit (%.1f%% expected). Not raising the charge power any further",
@@ -3440,29 +3455,49 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         window_started_at = self._window_started_at
         self._nudging_min_soc = True
+        # Tried, not confirmed: a write that timed out may still have gone
+        # through (Sourcery on #54)
+        lowered = raised = cancelled = False
         try:
             for value, settle in ((low, STALL_NUDGE_SETTLE_S), (floor, 0)):
                 async with self._min_soc_write_lock:
                     if (not self.is_active or self._ending or self._unloading
                             or self._window_started_at != window_started_at):
-                        return
+                        break
                     released = self._floor_released_soc
                     if released is not None and value > released:
-                        return  # taken down for the connection meanwhile
+                        break  # taken down for the connection meanwhile
+                    lowered = lowered or value == low
                     try:
                         await self.hass.services.async_call(
                             "number", "set_value", {"entity_id": entity, "value": value}, blocking=True,
                         )
                     except Exception as err:  # pylint: disable=broad-except
-                        # The verification puts the floor back if the low write went through
+                        # The verification below puts the floor back if the low
+                        # write went through
                         _LOGGER.warning("Nudging the min SOC to %.1f%% failed: %s", value, err)
-                        return
-                self._last_soc_set = value
+                        break
+                # _last_soc_set stays the floor: the low value is the nudge's
+                # own, and the watcher reads the floor from it (review of 3.14.7)
+                raised = value == floor
                 _LOGGER.info("Nudged the inverter min SOC to %.1f%%", value)
                 if settle:
                     await asyncio.sleep(settle)
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
             self._nudging_min_soc = False
+            if lowered and not raised and self.is_active and not self._ending and not self._unloading:
+                # The floor did not go back up: put it back now, not at the next
+                # poll. A cancelled nudge hands it to a task of its own; the
+                # verification reads the entity and writes only on a difference
+                if cancelled:
+                    self.hass.async_create_task(
+                        self._verify_and_restore_min_soc(), name="inverter_charge_night_nudge_restore",
+                    )
+                else:
+                    await self._verify_and_restore_min_soc()
 
     async def _plan_charge_power(self, target_soc: float) -> None:
         """Prefer the measured optimum, then apply the connection budget.
@@ -3561,9 +3596,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # returns False when the service call failed or when the current limit
         # could not be read - and then the number on the sensor is a plan, not
         # an order, which is the whole point of the attribute.
-        if await self._set_ac_charge_limit_w(int(setpoint)):
+        # A trial that starts while this write waits for the lock owns the
+        # limit: the plan must not land on top of it (lab acceptance on #54)
+        if await self._set_ac_charge_limit_w(int(setpoint), unless=lambda: self._auto_test_active):
             self._planned_setpoint_written_w = setpoint
             self.planned_power_is_applied = True
+        elif self._auto_test_active:
+            return  # not a failed write: the trial's limit stands
         elif not self._ac_limit_not_held:
             # Refused on purpose once the inverter was found not to hold the
             # limit this window: the floor charges as before, not never
@@ -4649,13 +4688,20 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return (fresh() and reading is not None
                 and abs(reading - float(power_w)) <= PLANNED_POWER_WRITE_THRESHOLD_W)
 
-    async def _set_ac_charge_limit_w(self, power_w: int) -> bool:
-        """Serialize actuator writes and keep verification out of an in-flight command."""
+    async def _set_ac_charge_limit_w(self, power_w: int, *, unless: Callable[[], bool] | None = None) -> bool:
+        """Serialize actuator writes and keep verification out of an in-flight command.
+
+        ``unless`` is checked again once the lock is held: a writer that
+        decided before waiting for it can find that someone else now owns the
+        limit (a trial that started meanwhile).
+        """
         was_active, window_started_at = self.is_active, self._window_started_at
         async with self._ac_charge_limit_write_lock:
             if self._unloading or (was_active and (
                 not self.is_active or self._ending or self._window_started_at != window_started_at
             )):
+                return False
+            if unless is not None and unless():
                 return False
             return await self._set_ac_charge_limit_w_locked(power_w)
 
@@ -6339,6 +6385,12 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # usually finishes inside one window.
             self._finalize_auto_test()
 
+        if self._charge_stalled:
+            # A trial or the result written at up to the maximum power would undo
+            # the hold the stall keeps (review of 3.14.7)
+            self._set_auto_wait_reason("battery_not_charging")
+            return
+
         stopped = self._auto_search_stopped()
         if stopped is not None:
             self._set_auto_wait_reason(stopped)
@@ -6669,6 +6721,7 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "Settings from an earlier window are still on the inverter (Home Assistant "
                     "was not running at the window end) - resetting them now"
                 )
+                self._end_charge_stall("is no longer charged: the window ended", keep_notice=True)
                 await self._reset_settings()
             elif self.is_active:
                 # In the configured window, or in an ad-hoc one that is still
@@ -6806,10 +6859,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Its log line said "Snow mode" on 7/8 November 2026.
                 pv = self._pv_yield
                 why = {"cold": ", a cold day", "second_day": ", the second dark day in a row"}
+                # The armed day's own figures: after midnight the day's are gone
+                # (review of 3.14.7)
+                actual, expected = pv.armed_kwh if pv.armed_kwh is not None else (pv.actual_kwh, pv.expected_kwh)
                 _LOGGER.info(
                     "Very low PV yield on %s (%s of %s kWh%s): charging to %.0f%%",
                     pv.charge_day - timedelta(days=1) if pv.charge_day else pv.day,
-                    pv.actual_kwh, pv.expected_kwh, why.get(str(pv.trigger), ""), user_max_soc,
+                    _kwh(actual), _kwh(expected), why.get(str(pv.trigger), ""), user_max_soc,
                 )
             self._persist_state()
             return

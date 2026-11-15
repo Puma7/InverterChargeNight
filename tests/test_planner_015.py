@@ -7,7 +7,7 @@ plan the sensor shows.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -243,15 +243,19 @@ async def test_the_hourly_forecast_stands_in_and_fahrenheit_is_converted(mock_ha
 async def test_the_polls_keep_a_temperature_diary(mock_hass):
     coordinator = _weather_coordinator(mock_hass)
     coordinator._persist_state = MagicMock()
-    with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 14, 12, 0)):
-        for _ in range(MIN_SAMPLES_PER_DAY):
+    for i in range(MIN_SAMPLES_PER_DAY):  # 00:00 .. 05:45, every 15 minutes
+        at = datetime(2026, 1, 14, 0, 0) + timedelta(minutes=15 * i)
+        with patch(f"{COORDINATOR}.dt_util.now", return_value=at):
             coordinator._observe_outdoor_temperature()
-    coordinator._persist_state.assert_not_called()
+    # The day so far is stored about once an hour (3.14.8), not every poll:
+    # the first sample sets the clock, then 01:00 .. 05:00
+    assert coordinator._persist_state.call_count == MIN_SAMPLES_PER_DAY // 4 - 1
+    coordinator._persist_state.reset_mock()
     mock_hass.states.async_set(OUTDOOR, "-3.5", {"unit_of_measurement": "°C"})
     coordinator.config = {**coordinator.config, CONF_OUTDOOR_TEMPERATURE_ENTITY: OUTDOOR}
     with patch(f"{COORDINATOR}.dt_util.now", return_value=datetime(2026, 1, 15, 0, 5)):
         coordinator._observe_outdoor_temperature()
-    coordinator._persist_state.assert_called_once()
+    coordinator._persist_state.assert_called_once()  # the finished day
     assert coordinator._temperature_log.days == {date(2026, 1, 14): 4.0}
     assert coordinator._temperature_log._sum == -3.5  # the sensor wins once it is set
 
