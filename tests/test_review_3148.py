@@ -324,3 +324,27 @@ def test_a_decision_of_3_14_7_keeps_its_figures_after_midnight():
     })
     assert monitor.armed_kwh == (1.0, 20.6)
     assert PVYieldMonitor({"charge_day": DAY.isoformat(), "trigger": "cold"}).armed_kwh is None
+
+
+# --- lab acceptance on #54 --------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_trial_that_starts_while_the_plan_waits_keeps_its_limit(stuck):
+    """The plan decided to write, then waited for the lock; meanwhile a trial
+    started at 13 kW. The plan's 9 kW must not land on top of the trial."""
+    hass, coordinator, clock = stuck
+    await _start(hass, coordinator, clock)
+    before = len(_set_values(hass, AC_LIMIT))
+    coordinator._planned_setpoint_written_w = None  # the plan wants to write
+    lock = coordinator._ac_charge_limit_write_lock
+    await lock.acquire()
+    task = asyncio.ensure_future(coordinator._plan_charge_power(coordinator.calculated_soc))
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert not task.done()  # waiting for the lock
+    coordinator._auto_test_active = True  # the trial wrote its limit meanwhile
+    lock.release()
+    await task
+    assert len(_set_values(hass, AC_LIMIT)) == before
+    assert coordinator._plan_limit_write_failed is False
+    assert coordinator._planned_setpoint_written_w is None

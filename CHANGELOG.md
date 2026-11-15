@@ -40,6 +40,10 @@ A review of what 3.14.6 and 3.14.7 added, before a night finds it.
   inverter but timed out, or a nudge cancelled between its two writes, left the low value until the
   next verification. The verification now runs right away and writes only if the inverter shows a
   difference.
+- **The plan no longer lands on top of a trial that just started.** The plan decided to write its
+  limit, then waited for the write lock; a trial that started meanwhile at 13 kW got the plan's
+  9 kW written over it, was discarded and ended the search for the window. The plan now checks
+  again once it holds the lock, and leaves a trial's limit standing.
 - **Stored state that cannot be read is ignored.** A stored number too large for a float no longer
   stops the PV yield check from loading. A full charge armed by 3.14.7 keeps the armed day's
   figures for the log after midnight.

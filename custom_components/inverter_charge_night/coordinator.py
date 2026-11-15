@@ -11,7 +11,7 @@ import json
 import logging
 import math
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any
@@ -3596,9 +3596,13 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # returns False when the service call failed or when the current limit
         # could not be read - and then the number on the sensor is a plan, not
         # an order, which is the whole point of the attribute.
-        if await self._set_ac_charge_limit_w(int(setpoint)):
+        # A trial that starts while this write waits for the lock owns the
+        # limit: the plan must not land on top of it (lab acceptance on #54)
+        if await self._set_ac_charge_limit_w(int(setpoint), unless=lambda: self._auto_test_active):
             self._planned_setpoint_written_w = setpoint
             self.planned_power_is_applied = True
+        elif self._auto_test_active:
+            return  # not a failed write: the trial's limit stands
         elif not self._ac_limit_not_held:
             # Refused on purpose once the inverter was found not to hold the
             # limit this window: the floor charges as before, not never
@@ -4684,13 +4688,20 @@ class InverterChargeNightCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return (fresh() and reading is not None
                 and abs(reading - float(power_w)) <= PLANNED_POWER_WRITE_THRESHOLD_W)
 
-    async def _set_ac_charge_limit_w(self, power_w: int) -> bool:
-        """Serialize actuator writes and keep verification out of an in-flight command."""
+    async def _set_ac_charge_limit_w(self, power_w: int, *, unless: Callable[[], bool] | None = None) -> bool:
+        """Serialize actuator writes and keep verification out of an in-flight command.
+
+        ``unless`` is checked again once the lock is held: a writer that
+        decided before waiting for it can find that someone else now owns the
+        limit (a trial that started meanwhile).
+        """
         was_active, window_started_at = self.is_active, self._window_started_at
         async with self._ac_charge_limit_write_lock:
             if self._unloading or (was_active and (
                 not self.is_active or self._ending or self._window_started_at != window_started_at
             )):
+                return False
+            if unless is not None and unless():
                 return False
             return await self._set_ac_charge_limit_w_locked(power_w)
 
